@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -12,9 +13,7 @@ namespace DatumIngest.Ingestion;
 /// </summary>
 public class Ingester(
     FormatRegistry formatRegistry,
-    Pool pool,
-    //SchemaDetector schemaDetector,
-    StatisticsCollector statisticsCollector)
+    Pool pool)
 {
     /// <summary>
     /// Ingests a source file into a <c>.datum</c> file.
@@ -30,22 +29,53 @@ public class Ingester(
         Action<IngestionProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        // TODO: Phase 5 — wire the pipeline:
-        // 1. (DONE) Detect format → create IFormatDeserializer
-        // 2. (DONE) Create deserializer Arena + serializer Arena
-        // 3. Deserialize → SchemaDetector → (DONE) StatisticsCollector + SampleCollector → DatumSerializer
-        // 4. Dispose both Arenas
-        // 5. Return IngestionResult
+        // Per-ingestion state — scoped to this request.
+        SchemaDetector schemaDetector = new();
+        StatisticsCollector statisticsCollector = new();
 
-        await foreach (RowBatch rowBatch in formatRegistry
-            .CreateDeserializer(source)
-            .DeserializeAsync(new SerializationContext(pool), cancellationToken: cancellationToken))
+        // Open the destination once; DatumFileWriter owns the stream lifetime from here.
+        await using Stream outputStream = await destination.OpenAsync(cancellationToken);
+        using DatumFileWriter writer = new(outputStream);
+
+        SerializationContext sourceContext = new(pool);
+        IFormatDeserializer deserializer = formatRegistry.CreateDeserializer(source);
+
+        long rowCount = 0;
+
+        await foreach (RowBatch batch in deserializer.DeserializeAsync(sourceContext, cancellationToken))
         {
-            //schemaDetector.DetectAndPassthrough()
-            statisticsCollector.Collect(rowBatch);
+            // First non-empty batch infers the schema and initializes the writer.
+            if (!schemaDetector.IsDetected)
+            {
+                schemaDetector.Detect(batch);
+
+                if (schemaDetector.IsDetected)
+                {
+                    writer.Initialize(DatumFileSchema.FromSchema(schemaDetector.Schema));
+                }
+            }
+
+            statisticsCollector.Collect(batch);
+            writer.WriteRowBatch(batch);
+
+            rowCount += batch.Count;
+            pool.ReturnRowBatch(batch);
         }
 
-        
-        throw new NotImplementedException("Ingester.IngestAsync is not yet implemented.");
+        // Edge case: empty source (no non-empty batches) — initialize with an empty schema.
+        if (!schemaDetector.IsDetected)
+        {
+            writer.Initialize(DatumFileSchema.FromSchema(new Schema([])));
+        }
+
+        long bytesWritten = writer.Finalize();
+
+        return new IngestionResult(
+            OutputPath: destination.FilePath,
+            RowCount: rowCount,
+            BytesWritten: bytesWritten,
+            Schema: schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]),
+            Statistics: statisticsCollector.GetStatistics(),
+            Sample: null);
     }
 }

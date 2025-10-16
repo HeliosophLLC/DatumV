@@ -1,45 +1,42 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Model;
 
 namespace DatumIngest.Ingestion;
 
 /// <summary>
-/// Infers a <see cref="Schema"/> from the first non-empty <see cref="RowBatch"/> in a
-/// stream, then re-emits the full stream (including the peeked batch) for downstream
-/// consumption. Column kinds are determined from the first non-null value in each column.
+/// Infers a <see cref="Schema"/> from the first non-empty <see cref="RowBatch"/>.
+/// Column kinds are determined from the first non-null value in each column.
 /// </summary>
+/// <remarks>
+/// Scoped to a single ingestion. Call <see cref="Detect"/> for each incoming
+/// <see cref="RowBatch"/>; the detector short-circuits after the first non-empty
+/// batch has been consumed. Check <see cref="IsDetected"/> to avoid redundant calls,
+/// though invoking <see cref="Detect"/> after detection is a no-op.
+/// </remarks>
 public sealed class SchemaDetector
 {
     private Schema? _schema;
 
+    /// <summary>Whether a schema has been inferred.</summary>
+    public bool IsDetected => _schema is not null;
+
     /// <summary>
-    /// The inferred schema. Available after the first batch has been consumed from
-    /// <see cref="DetectAndPassthrough"/>.
+    /// The inferred schema. Available once <see cref="IsDetected"/> is <see langword="true"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Accessed before any batch has been consumed.</exception>
+    /// <exception cref="InvalidOperationException">Accessed before any batch has been inspected.</exception>
     public Schema Schema => _schema ?? throw new InvalidOperationException(
-        "Schema has not been detected yet. Consume at least one batch from DetectAndPassthrough first.");
+        "Schema has not been detected yet. Call Detect with a non-empty batch first.");
 
     /// <summary>
-    /// Consumes the input stream, infers the schema from the first non-empty batch,
-    /// then yields all batches (including the first) unchanged.
+    /// Inspects <paramref name="batch"/> to infer the schema on the first non-empty call.
+    /// Subsequent calls are no-ops.
     /// </summary>
-    /// <param name="source">The input batch stream from a deserializer.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The same batches, in order, with the schema available on <see cref="Schema"/>.</returns>
-    public async IAsyncEnumerable<RowBatch> DetectAndPassthrough(
-        IAsyncEnumerable<RowBatch> source,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    /// <param name="batch">A batch from the source stream.</param>
+    public void Detect(RowBatch batch)
     {
-        await foreach (RowBatch batch in source.WithCancellation(cancellationToken))
-        {
-            if (_schema is null && batch.Count > 0)
-            {
-                _schema = InferSchema(batch);
-            }
+        if (_schema is not null) return;
+        if (batch.Count == 0) return;
 
-            yield return batch;
-        }
+        _schema = InferSchema(batch);
     }
 
     private static Schema InferSchema(RowBatch batch)
