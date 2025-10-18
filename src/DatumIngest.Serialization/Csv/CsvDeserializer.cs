@@ -11,11 +11,24 @@ public sealed class CsvDeserializer : IFormatDeserializer
     private const int DefaultBatchSize = 1024;
 
     private readonly FileFormatDescriptor _descriptor;
+    private readonly CsvScanResult? _scanResult;
 
     /// <summary>Creates a deserializer for the given file descriptor.</summary>
     public CsvDeserializer(FileFormatDescriptor descriptor)
     {
         _descriptor = descriptor;
+    }
+
+    /// <summary>
+    /// Creates a deserializer that reuses a completed <see cref="CsvScanResult"/> from
+    /// <see cref="CsvTypeScanner"/>. Skips delimiter detection, header detection, and
+    /// sample-based type inference on pass 2 — column names, kinds, and the warmed
+    /// <see cref="TemporalFormatCache"/> are taken directly from the scan result.
+    /// </summary>
+    public CsvDeserializer(FileFormatDescriptor descriptor, CsvScanResult scanResult)
+    {
+        _descriptor = descriptor;
+        _scanResult = scanResult;
     }
 
     /// <inheritdoc/>
@@ -25,31 +38,47 @@ public sealed class CsvDeserializer : IFormatDeserializer
     {
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        // Detect delimiter from options/extension/content.
-        char delimiter = DelimiterDetector.Detect(stream, _descriptor.Options, _descriptor.FilePath);
+        string[] names;
+        DataKind[] kinds;
+        bool hasHeader;
+        char delimiter;
+        TemporalFormatCache temporalCache;
 
-        // Detect header and infer types.
-        bool? headerOverride = GetHeaderOverride(_descriptor.Options);
-        HeaderDetectionResult detection = HeaderDetector.Detect(stream, delimiter, headerOverride);
+        if (_scanResult is not null)
+        {
+            // Pass 2 of two-pass ingestion: reuse authoritative schema from the scanner.
+            if (_scanResult.ColumnNames.Length == 0) yield break;
+            names = _scanResult.ColumnNames;
+            kinds = _scanResult.Kinds;
+            hasHeader = _scanResult.HasHeader;
+            delimiter = _scanResult.Delimiter;
+            temporalCache = _scanResult.WarmedTemporalCache;
+        }
+        else
+        {
+            // Standalone / single-pass mode: sample-based inference via HeaderDetector.
+            delimiter = DelimiterDetector.Detect(stream, _descriptor.Options, _descriptor.FilePath);
 
-        if (detection.ColumnNames.Length == 0)
-            yield break;
+            bool? headerOverride = GetHeaderOverride(_descriptor.Options);
+            HeaderDetectionResult detection = HeaderDetector.Detect(stream, delimiter, headerOverride);
 
-        string[] names = detection.ColumnNames;
-        DataKind[] kinds = detection.ColumnKinds;
-        bool hasHeader = detection.HasHeader;
+            if (detection.ColumnNames.Length == 0) yield break;
+
+            names = detection.ColumnNames;
+            kinds = detection.ColumnKinds;
+            hasHeader = detection.HasHeader;
+            // Adaptive per-column cache for date/time formats. Populated on the first
+            // successful parse of each Date/DateTime column; subsequent rows use
+            // TryParseExact with the cached format, avoiding the BCL's flexible parser.
+            temporalCache = new(names.Length);
+        }
 
         // Build name index once (shared across all rows).
         Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < names.Length; i++)
             nameIndex[names[i]] = i;
 
-        // Adaptive per-column cache for date/time formats. Populated on the first
-        // successful parse of each Date/DateTime column; subsequent rows use
-        // TryParseExact with the cached format, avoiding the BCL's flexible parser.
-        TemporalFormatCache temporalCache = new(names.Length);
-
-        // Stream is at position 0 after detection. Create line reader.
+        // Stream is at position 0 after open. Create line reader.
         using LineReader lineReader = new(stream);
 
         // Skip header line if present.

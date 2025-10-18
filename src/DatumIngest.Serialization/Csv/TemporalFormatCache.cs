@@ -23,7 +23,7 @@ namespace DatumIngest.Serialization.Csv;
 /// at-worst the candidate-walk cost; no correctness regression versus the old path.
 /// </para>
 /// </remarks>
-internal sealed class TemporalFormatCache
+public sealed class TemporalFormatCache
 {
     /// <summary>
     /// Sentinel value for "no format has succeeded on this column yet". Used as the
@@ -72,6 +72,11 @@ internal sealed class TemporalFormatCache
     private readonly int[] _dateTimeCache;
     private readonly int[] _dateCache;
 
+    /// <summary>
+    /// Initializes a fresh cache with an "unset" slot for each of
+    /// <paramref name="columnCount"/> columns. The cache grows no further after
+    /// construction; callers specify the column count up front.
+    /// </summary>
     public TemporalFormatCache(int columnCount)
     {
         _dateTimeCache = new int[columnCount];

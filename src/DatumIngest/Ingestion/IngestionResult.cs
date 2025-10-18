@@ -11,10 +11,17 @@ namespace DatumIngest.Ingestion;
 /// <param name="Schema">The inferred schema of the source data.</param>
 /// <param name="Statistics">Per-column statistics accumulated during ingestion.</param>
 /// <param name="Sample">A preview of sampled rows for UI display, or <c>null</c> if sampling was disabled.</param>
+/// <param name="ScanPass">
+/// Metrics for the optional first-pass type scan. Null when the ingester ran in
+/// single-pass (sample-inference) mode or when the source format does not support scanning.
+/// </param>
+/// <param name="IngestPass">Metrics for the main ingestion pass (the write pass).</param>
 public sealed record IngestionResult(
     string OutputPath,
     long RowCount,
     long BytesWritten,
     Schema Schema,
     IReadOnlyDictionary<string, Statistics.ColumnStatistics> Statistics,
-    SamplePreview? Sample);
+    SamplePreview? Sample,
+    PassMetrics? ScanPass,
+    PassMetrics IngestPass);
