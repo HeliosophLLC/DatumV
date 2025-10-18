@@ -6,8 +6,6 @@ namespace DatumIngest.Tests.Ingestion;
 
 public sealed class SchemaDetectorTests
 {
-    // ───────────────────────── Helpers ─────────────────────────
-
     private static RowBatch MakeBatch(Pool pool, IReadOnlyList<string> names, params DataValue[][] rows)
     {
         Dictionary<string, int> nameIndex = new(names.Count, StringComparer.OrdinalIgnoreCase);
@@ -20,29 +18,8 @@ public sealed class SchemaDetectorTests
         return batch;
     }
 
-    private static async IAsyncEnumerable<RowBatch> SingleBatch(RowBatch batch)
-    {
-        yield return batch;
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<RowBatch> MultipleBatches(params RowBatch[] batches)
-    {
-        foreach (RowBatch batch in batches)
-            yield return batch;
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<RowBatch> EmptyStream()
-    {
-        await Task.CompletedTask;
-        yield break;
-    }
-
-    // ───────────────────────── Tests ─────────────────────────
-
     [Fact]
-    public async Task InfersTypesFromFirstBatch()
+    public void InfersTypesFromFirstBatch()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
@@ -53,15 +30,9 @@ public sealed class SchemaDetectorTests
             [DataValue.FromInt32(2), DataValue.FromFloat64(2.7)]);
 
         SchemaDetector detector = new();
-        int batchCount = 0;
+        detector.Detect(batch);
 
-        await foreach (RowBatch b in detector.DetectAndPassthrough(SingleBatch(batch)))
-        {
-            batchCount++;
-            Assert.Equal(2, b.Count);
-        }
-
-        Assert.Equal(1, batchCount);
+        Assert.True(detector.IsDetected);
         Assert.Equal(2, detector.Schema.Columns.Count);
         Assert.Equal("id", detector.Schema.Columns[0].Name);
         Assert.Equal(DataKind.Int32, detector.Schema.Columns[0].Kind);
@@ -70,7 +41,7 @@ public sealed class SchemaDetectorTests
     }
 
     [Fact]
-    public async Task HandlesNullInFirstRow()
+    public void HandlesNullInFirstRow()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
@@ -81,46 +52,45 @@ public sealed class SchemaDetectorTests
             [DataValue.FromInt32(2), DataValue.FromFloat64(3.14)]);
 
         SchemaDetector detector = new();
-        await foreach (RowBatch _ in detector.DetectAndPassthrough(SingleBatch(batch))) { }
+        detector.Detect(batch);
 
         Assert.Equal(DataKind.Float64, detector.Schema.Columns[1].Kind);
     }
 
     [Fact]
-    public async Task PassesThroughAllBatches()
+    public void ShortCircuitsAfterFirstDetection()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
         string[] names = ["v"];
 
-        RowBatch b1 = MakeBatch(pool, names, [DataValue.FromInt32(1)]);
-        RowBatch b2 = MakeBatch(pool, names, [DataValue.FromInt32(2)]);
-        RowBatch b3 = MakeBatch(pool, names, [DataValue.FromInt32(3)]);
+        RowBatch first = MakeBatch(pool, names, [DataValue.FromInt32(1)]);
+        RowBatch second = MakeBatch(pool, names, [DataValue.FromFloat64(2.0)]);
 
         SchemaDetector detector = new();
-        List<int> values = [];
+        detector.Detect(first);
+        detector.Detect(second);
 
-        await foreach (RowBatch b in detector.DetectAndPassthrough(MultipleBatches(b1, b2, b3)))
-        {
-            for (int i = 0; i < b.Count; i++)
-                values.Add(b[i][0].AsInt32());
-        }
-
-        Assert.Equal([1, 2, 3], values);
-        Assert.Equal("v", detector.Schema.Columns[0].Name);
+        // Kind stays from the first batch — the second Detect call is a no-op.
+        Assert.Equal(DataKind.Int32, detector.Schema.Columns[0].Kind);
     }
 
     [Fact]
-    public async Task EmptyStream_SchemaNotAvailable()
+    public void EmptyBatch_NoDetection()
     {
-        SchemaDetector detector = new();
-        await foreach (RowBatch _ in detector.DetectAndPassthrough(EmptyStream())) { }
+        PoolBacking backing = new();
+        Pool pool = new(backing);
+        RowBatch empty = pool.RentRowBatch(1024);
 
+        SchemaDetector detector = new();
+        detector.Detect(empty);
+
+        Assert.False(detector.IsDetected);
         Assert.Throws<InvalidOperationException>(() => _ = detector.Schema);
     }
 
     [Fact]
-    public async Task AllColumnsNullable()
+    public void AllColumnsNullable()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
@@ -130,7 +100,7 @@ public sealed class SchemaDetectorTests
             [DataValue.FromInt32(1), DataValue.FromBoolean(true)]);
 
         SchemaDetector detector = new();
-        await foreach (RowBatch _ in detector.DetectAndPassthrough(SingleBatch(batch))) { }
+        detector.Detect(batch);
 
         Assert.True(detector.Schema.Columns[0].Nullable);
         Assert.True(detector.Schema.Columns[1].Nullable);
