@@ -1,41 +1,98 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using DatumIngest.Ingestion;
 using DatumIngest.Model;
 
 namespace DatumIngest.Serialization.Csv;
 
 /// <summary>
-/// Deserializes CSV files into <see cref="RowBatch"/> streams.
+/// Deserializes CSV files into <see cref="RowBatch"/> streams with authoritative
+/// per-column type inference by default.
 /// </summary>
+/// <remarks>
+/// Unlike schema-driven formats (Parquet, HDF5) where types are fixed in the file,
+/// CSV requires inference. By default this deserializer runs a full-file scan
+/// (<see cref="CsvTypeScanner"/>) on the first call to <see cref="DeserializeAsync"/>
+/// so all downstream consumers see narrowed, correct types — Int64 narrowed to the
+/// smallest fitting width, zero-padded codes preserved as String, dates matched to
+/// a specific format, etc. This makes the ingest contract format-agnostic: regardless
+/// of source format, rows come in with strict types.
+///
+/// Callers that don't want the scan (e.g. streaming-only consumers with known schemas)
+/// can opt out by passing <c>strictTypes: false</c> to the constructor, which falls
+/// back to sample-based inference over the first 100 rows via
+/// <see cref="HeaderDetector"/>.
+/// </remarks>
 public sealed class CsvDeserializer : IFormatDeserializer
 {
     private const int DefaultBatchSize = 1024;
 
     private readonly FileFormatDescriptor _descriptor;
-    private readonly CsvScanResult? _scanResult;
+    private readonly bool _strictTypes;
+    private CsvScanResult? _scanResult;
+    private PassMetrics? _scanMetrics;
 
-    /// <summary>Creates a deserializer for the given file descriptor.</summary>
+    /// <summary>
+    /// Creates a strict-types CSV deserializer. On first enumeration the full file
+    /// is scanned to produce authoritative per-column types.
+    /// </summary>
     public CsvDeserializer(FileFormatDescriptor descriptor)
+        : this(descriptor, strictTypes: true) { }
+
+    /// <summary>
+    /// Creates a CSV deserializer, optionally opting out of the full-file strict-types
+    /// scan. When <paramref name="strictTypes"/> is <c>false</c>, column types are
+    /// inferred from a 100-row sample via <see cref="HeaderDetector"/> — fast to first
+    /// batch, but can misclassify columns where the sample doesn't represent later rows.
+    /// </summary>
+    public CsvDeserializer(FileFormatDescriptor descriptor, bool strictTypes)
     {
         _descriptor = descriptor;
+        _strictTypes = strictTypes;
     }
 
     /// <summary>
-    /// Creates a deserializer that reuses a completed <see cref="CsvScanResult"/> from
-    /// <see cref="CsvTypeScanner"/>. Skips delimiter detection, header detection, and
-    /// sample-based type inference on pass 2 — column names, kinds, and the warmed
-    /// <see cref="TemporalFormatCache"/> are taken directly from the scan result.
+    /// Creates a deserializer from a pre-computed <see cref="CsvScanResult"/>. Use
+    /// when the scan was performed separately (e.g. to inspect or log decisions
+    /// before ingestion).
     /// </summary>
     public CsvDeserializer(FileFormatDescriptor descriptor, CsvScanResult scanResult)
     {
         _descriptor = descriptor;
+        _strictTypes = true;
         _scanResult = scanResult;
     }
+
+    /// <inheritdoc/>
+    public PassMetrics? ScanMetrics => _scanMetrics;
+
+    /// <summary>
+    /// The scan result populated when <see cref="DeserializeAsync"/> runs in strict mode;
+    /// <c>null</c> for non-strict deserializers or before the first enumeration.
+    /// </summary>
+    public CsvScanResult? ScanResult => _scanResult;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> DeserializeAsync(
         SerializationContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        // Strict mode: run the full-file scan before opening a stream for enumeration.
+        // This is the default path; consumers that need time-to-first-batch latency
+        // can disable via the strictTypes ctor flag.
+        if (_strictTypes && _scanResult is null)
+        {
+            Stopwatch scanSw = Stopwatch.StartNew();
+            _scanResult = await CsvTypeScanner.ScanAsync(_descriptor, cancellationToken).ConfigureAwait(false);
+            scanSw.Stop();
+            _scanMetrics = new PassMetrics(
+                RowCount: _scanResult.RowCount,
+                BatchCount: 0,
+                BytesRead: _scanResult.BytesRead,
+                ArenaBytesWritten: 0,
+                Elapsed: _scanResult.Elapsed);
+        }
+
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         string[] names;
@@ -46,7 +103,6 @@ public sealed class CsvDeserializer : IFormatDeserializer
 
         if (_scanResult is not null)
         {
-            // Pass 2 of two-pass ingestion: reuse authoritative schema from the scanner.
             if (_scanResult.ColumnNames.Length == 0) yield break;
             names = _scanResult.ColumnNames;
             kinds = _scanResult.Kinds;
@@ -56,7 +112,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
         }
         else
         {
-            // Standalone / single-pass mode: sample-based inference via HeaderDetector.
+            // Opt-out path: sample-based inference via HeaderDetector.
             delimiter = DelimiterDetector.Detect(stream, _descriptor.Options, _descriptor.FilePath);
 
             bool? headerOverride = GetHeaderOverride(_descriptor.Options);
@@ -67,9 +123,6 @@ public sealed class CsvDeserializer : IFormatDeserializer
             names = detection.ColumnNames;
             kinds = detection.ColumnKinds;
             hasHeader = detection.HasHeader;
-            // Adaptive per-column cache for date/time formats. Populated on the first
-            // successful parse of each Date/DateTime column; subsequent rows use
-            // TryParseExact with the cached format, avoiding the BCL's flexible parser.
             temporalCache = new(names.Length);
         }
 

@@ -8,27 +8,35 @@ using DatumIngest.Statistics;
 namespace DatumIngest.Ingestion;
 
 /// <summary>
-/// Ingests source files into the <c>.datum</c> column-store format.
-/// Each call to <c>IngestAsync</c> converts a single source file into a single
-/// <c>.datum</c> file, collecting schema, statistics, and a sample preview along the way.
+/// Ingests source files into the <c>.datum</c> column-store format. Each call to
+/// <c>IngestAsync</c> converts a single source file into a single <c>.datum</c> file,
+/// collecting schema, statistics, and a sample preview along the way.
 /// </summary>
 /// <remarks>
-/// The core ingester handles the write pass only. Two-pass ingestion (full-file
-/// scan + narrowed-type write) is composed by the caller: scan with the appropriate
-/// format's scanner, build a pre-configured deserializer from the scan result, and
-/// pass it to the deserializer-accepting <c>IngestAsync</c> overload. This keeps
-/// the core project independent of format-specific scanner types (e.g.
-/// <c>CsvScanResult</c>) that live in the serialization project.
+/// <para>
+/// The ingester is format-agnostic: it reads whatever <see cref="IFormatDeserializer"/>
+/// the <see cref="FormatRegistry"/> hands it and writes the result. Format-specific
+/// preprocessing (e.g. the CSV full-file type scan) happens inside the deserializer
+/// for that format — the CSV deserializer scans the file on first enumeration by
+/// default so types are strict without the caller needing to opt in. Schema-driven
+/// formats (Parquet, HDF5) skip scanning because their types are already authoritative.
+/// </para>
+/// <para>
+/// Any scan metrics produced by a deserializer are surfaced through
+/// <see cref="IFormatDeserializer.ScanMetrics"/> and included on the returned
+/// <see cref="IngestionResult"/> so downstream consumers (dashboards, audit logs,
+/// regression tests) see the full pass-level cost breakdown without the ingester
+/// having to know which formats do what.
+/// </para>
 /// </remarks>
 public class Ingester(
     FormatRegistry formatRegistry,
     Pool pool)
 {
     /// <summary>
-    /// Ingests a source file into a <c>.datum</c> file using sample-based type inference.
-    /// Suitable for single-pass use; for strict-types two-pass ingestion, build a
-    /// pre-configured deserializer via the source format's scanner and call the
-    /// deserializer-accepting overload.
+    /// Ingests a source file into a <c>.datum</c> file. The source format's
+    /// deserializer is resolved via <see cref="FormatRegistry"/> and may perform
+    /// format-specific preprocessing (e.g. a full-file type scan for CSV).
     /// </summary>
     public Task<IngestionResult> IngestAsync(
         FileFormatDescriptor source,
@@ -36,30 +44,22 @@ public class Ingester(
         CancellationToken cancellationToken = default)
     {
         IFormatDeserializer deserializer = formatRegistry.CreateDeserializer(source);
-        return IngestAsync(source, destination, deserializer, scanMetrics: null, cancellationToken);
+        return IngestAsync(source, destination, deserializer, cancellationToken);
     }
 
     /// <summary>
-    /// Ingests a source file using a caller-provided deserializer. Used by two-pass
-    /// flows to feed a pre-configured deserializer (e.g. a <c>CsvDeserializer</c>
-    /// initialised from a <c>CsvScanResult</c>) so the write pass skips sample-based
-    /// inference.
+    /// Ingests a source file using a caller-provided deserializer. Useful when the
+    /// caller wants to pre-configure the deserializer (e.g. opt out of strict types
+    /// or inject a pre-computed scan result).
     /// </summary>
-    /// <param name="source">Descriptor for the source file.</param>
-    /// <param name="destination">Descriptor for the output <c>.datum</c> file.</param>
-    /// <param name="deserializer">Pre-built deserializer to use for the write pass.</param>
-    /// <param name="scanMetrics">Metrics captured for the optional preceding scan pass, or null.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<IngestionResult> IngestAsync(
         FileFormatDescriptor source,
         OutputDescriptor destination,
         IFormatDeserializer deserializer,
-        PassMetrics? scanMetrics,
         CancellationToken cancellationToken = default)
     {
         Stopwatch sw = Stopwatch.StartNew();
 
-        // Per-ingestion state — scoped to this request.
         SchemaDetector schemaDetector = new();
         StatisticsCollector statisticsCollector = new();
 
@@ -125,7 +125,7 @@ public class Ingester(
             Schema: schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]),
             Statistics: statisticsCollector.GetStatistics(),
             Sample: null,
-            ScanPass: scanMetrics,
+            ScanPass: deserializer.ScanMetrics,
             IngestPass: ingestMetrics);
     }
 }

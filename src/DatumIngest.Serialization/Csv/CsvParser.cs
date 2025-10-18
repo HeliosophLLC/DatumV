@@ -119,6 +119,18 @@ internal static class CsvParser
                     return DataValue.FromInt64(i64);
                 return double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double floatEncoded)
                     ? DataValue.FromInt64((long)floatEncoded) : DataValue.Null(DataKind.Int64);
+            case DataKind.UInt8:
+                return byte.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out byte u8)
+                    ? DataValue.FromUInt8(u8) : DataValue.Null(DataKind.UInt8);
+            case DataKind.UInt16:
+                return ushort.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out ushort u16)
+                    ? DataValue.FromUInt16(u16) : DataValue.Null(DataKind.UInt16);
+            case DataKind.UInt32:
+                return uint.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint u32)
+                    ? DataValue.FromUInt32(u32) : DataValue.Null(DataKind.UInt32);
+            case DataKind.UInt64:
+                return ulong.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong u64)
+                    ? DataValue.FromUInt64(u64) : DataValue.Null(DataKind.UInt64);
             case DataKind.Boolean:
                 if (field.Length == 1)
                 {

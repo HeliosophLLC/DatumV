@@ -49,11 +49,28 @@ long deltaAllocated = GC.GetTotalAllocatedBytes(precise: false) - beforeAllocate
 double elapsedSeconds = sw.Elapsed.TotalSeconds;
 double mbPerSec = sourceSize / (1024.0 * 1024.0) / elapsedSeconds;
 
-Console.WriteLine($"Rows:        {result.RowCount:N0}");
-Console.WriteLine($"Bytes out:   {result.BytesWritten:N0} ({result.BytesWritten / (1024.0 * 1024.0):F1} MB)");
-Console.WriteLine($"Time:        {elapsedSeconds:F1}s");
-Console.WriteLine($"Row rate:    {result.RowCount / elapsedSeconds:N0} rows/s");
-Console.WriteLine($"Read rate:   {mbPerSec:F1} MB/s");
+if (result.ScanPass is { } scan)
+{
+    Console.WriteLine("Scan pass:");
+    Console.WriteLine($"  Rows:      {scan.RowCount:N0}");
+    Console.WriteLine($"  Time:      {scan.Elapsed.TotalSeconds:F2}s");
+    Console.WriteLine($"  Read rate: {scan.BytesRead / (1024.0 * 1024.0) / scan.Elapsed.TotalSeconds:F1} MB/s");
+    Console.WriteLine();
+}
+
+Console.WriteLine("Ingest pass:");
+Console.WriteLine($"  Rows:       {result.IngestPass.RowCount:N0}");
+Console.WriteLine($"  Batches:    {result.IngestPass.BatchCount:N0}");
+Console.WriteLine($"  Arena:      {result.IngestPass.ArenaBytesWritten / (1024.0 * 1024.0):F1} MB");
+Console.WriteLine($"  Time:       {result.IngestPass.Elapsed.TotalSeconds:F2}s");
+Console.WriteLine();
+
+Console.WriteLine("Totals:");
+Console.WriteLine($"  Rows:       {result.RowCount:N0}");
+Console.WriteLine($"  Bytes out:  {result.BytesWritten:N0} ({result.BytesWritten / (1024.0 * 1024.0):F1} MB)");
+Console.WriteLine($"  Time:       {elapsedSeconds:F1}s");
+Console.WriteLine($"  Row rate:   {result.RowCount / elapsedSeconds:N0} rows/s");
+Console.WriteLine($"  Read rate:  {mbPerSec:F1} MB/s");
 Console.WriteLine();
 Console.WriteLine($"Allocated:   {deltaAllocated / (1024.0 * 1024.0):F1} MB");
 Console.WriteLine($"  per row:   {deltaAllocated / (double)result.RowCount:F1} bytes");
