@@ -1,16 +1,18 @@
 param(
+    [ValidateSet("IngestOnce", "ReadCsv")]
+    [string]$Tool = "IngestOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     [string]$Profile = "gc-collect",
-    [string]$Source = "E:\Datasets\Chicago Crimes Dataset\Crimes_-_2001_to_Present_20260331.csv",
+    [string]$Source = "E:\Datasets\Open Payments\OP_DTL_GNRL_PGYR2024_P01232026_01102026.csv",
     [string]$Dest = "",
-    [string]$Duration = "00:00:30",
+    [string]$Duration = "00:05:30",
     [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
 
 $timestamp = Get-Date -Format "yyyy-MM-dd-HH-mm"
-$outPath = "traces\$timestamp.nettrace"
+$outPath = "traces\$timestamp-$Tool.nettrace"
 
 if (-not (Test-Path "traces")) {
     New-Item -ItemType Directory -Path "traces" | Out-Null
@@ -19,39 +21,56 @@ if (-not (Test-Path "traces")) {
 # Disable ReadyToRun so the SampleProfiler can resolve BCL method names.
 $env:DOTNET_ReadyToRun = "0"
 
-# Derive a default destination path alongside the source if not provided.
-if ([string]::IsNullOrWhiteSpace($Dest)) {
+# Per-tool config: project path, exe name, and whether the tool accepts a dest arg.
+switch ($Tool) {
+    "IngestOnce" {
+        $project = "tools\IngestOnce\IngestOnce.csproj"
+        $exeName = "ingest-once.exe"
+        $needsDest = $true
+    }
+    "ReadCsv" {
+        $project = "tools\ReadCsv\ReadCsv.csproj"
+        $exeName = "read-csv.exe"
+        $needsDest = $false
+    }
+}
+
+# Derive a default destination path alongside the source if IngestOnce and none provided.
+if ($needsDest -and [string]::IsNullOrWhiteSpace($Dest)) {
     $Dest = [System.IO.Path]::ChangeExtension($Source, ".datum")
 }
 
-# Build the ingest harness first. dotnet-trace attaches reliably to a built
-# executable but NOT to `dotnet run` — `dotnet run` spawns the real app in a
-# child process that the trace never sees.
-$project = "tools\IngestOnce\IngestOnce.csproj"
+# Build the chosen harness. dotnet-trace attaches reliably to a built executable
+# but NOT to `dotnet run` — that spawns the real app in a child process the trace
+# never sees.
 Write-Host "Building $project ($Configuration)..."
 & dotnet build $project -c $Configuration --nologo -v minimal
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
-# Resolve the produced exe. The AssemblyName is 'ingest-once'.
-$exe = "tools\IngestOnce\bin\$Configuration\net10.0\ingest-once.exe"
+$exeDir = Split-Path $project -Parent
+$exe = "$exeDir\bin\$Configuration\net10.0\$exeName"
 if (-not (Test-Path $exe)) {
     throw "Built exe not found at $exe"
 }
 
+# Build process-arg list: source always, dest only for IngestOnce.
+$procArgs = @($Source)
+if ($needsDest) { $procArgs += $Dest }
+
 Write-Host ""
-Write-Host "Tracing ingestion -> $outPath"
+Write-Host "Tracing $Tool -> $outPath"
 Write-Host "  Source: $Source"
-Write-Host "  Dest:   $Dest"
+if ($needsDest) { Write-Host "  Dest:   $Dest" }
 Write-Host "  Profile: $Profile (duration $Duration)"
 Write-Host "  Exe:    $exe"
 Write-Host ""
 
 # Trace the built exe directly. `--` separates dotnet-trace args from the launched
 # process's args. dotnet-trace sets the eventpipe env var on THIS process so all
-# events from ingest-once.exe and the Ingester code show up in the trace.
+# events from the target exe show up in the trace.
 & dotnet-trace collect `
     --profile $Profile `
     --providers $Providers `
     --duration $Duration `
     -o $outPath `
-    -- $exe $Source $Dest
+    -- $exe @procArgs
