@@ -104,6 +104,7 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(QueryAnnotation))]
 [JsonSerializable(typeof(InsightThresholds))]
 [JsonSerializable(typeof(QuerySynthesisOptions))]
+[JsonSerializable(typeof(SchemaInferenceDecision))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

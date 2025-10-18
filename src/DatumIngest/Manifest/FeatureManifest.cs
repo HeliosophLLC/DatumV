@@ -80,6 +80,19 @@ public abstract class FeatureManifest
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter<ColumnRole>))]
     public ColumnRole? Role { get; set; }
+
+    /// <summary>
+    /// Record of how this column's <see cref="Kind"/> was decided during schema inference.
+    /// Populated when full-file scan inference runs; null when the ingester used
+    /// sample-based inference or accepted an externally-declared schema.
+    /// </summary>
+    /// <remarks>
+    /// Columns whose source data had leading-zero numerics (e.g. <c>"02931"</c>) are
+    /// kept as <see cref="DataKind.String"/> by design — querying them numerically
+    /// remains possible via <c>CAST(column AS Int32)</c>, but the stored form preserves
+    /// original text exactly. See <see cref="SchemaInferenceReason.KeptAsStringLeadingZeros"/>.
+    /// </remarks>
+    public SchemaInferenceDecision? SchemaInference { get; init; }
 }
 
 /// <summary>
