@@ -68,8 +68,12 @@ public sealed class DatumOutputWriter : IOutputWriter
         // is primarily used by the query-output pipeline where rows are inline-typed.
         RowBatch batch = RowBatch.Rent(1);
         batch.Add(row);
-        _fileWriter.WriteRowBatch(batch);
+        WriteHandle handle = _fileWriter.WriteRowBatch(batch);
         batch.Return();
+        if (handle.RequiresFlush)
+        {
+            _fileWriter.FlushRowGroup();
+        }
         _rowsWritten++;
         return Task.CompletedTask;
     }

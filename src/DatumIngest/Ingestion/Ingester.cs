@@ -56,10 +56,15 @@ public class Ingester(
             }
 
             statisticsCollector.Collect(batch);
-            writer.WriteRowBatch(batch);
+            WriteHandle handle = writer.WriteRowBatch(batch);
 
             rowCount += batch.Count;
             pool.ReturnRowBatch(batch);
+
+            if (handle.RequiresFlush)
+            {
+                writer.FlushRowGroup();
+            }
         }
 
         // Edge case: empty source (no non-empty batches) — initialize with an empty schema.

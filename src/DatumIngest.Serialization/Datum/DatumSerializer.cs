@@ -45,7 +45,11 @@ public sealed class DatumSerializer : IFormatSerializer
                     writer.Initialize(datumSchema);
                 }
 
-                writer.WriteRowBatch(batch);
+                WriteHandle handle = writer.WriteRowBatch(batch);
+                if (handle.RequiresFlush)
+                {
+                    writer.FlushRowGroup();
+                }
             }
 
             writer?.Finalize();

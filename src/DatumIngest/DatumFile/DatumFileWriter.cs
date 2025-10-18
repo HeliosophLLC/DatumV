@@ -48,6 +48,13 @@ public sealed class DatumFileWriter : IDisposable
     private readonly List<PageSpan> _pages = new();
 
     /// <summary>
+    /// Set when <see cref="WriteRowBatch"/> has driven the column buffers to the
+    /// row group target size. The next <see cref="WriteRowBatch"/> call throws
+    /// until <see cref="FlushRowGroup"/> resets this flag.
+    /// </summary>
+    private bool _pendingFlush;
+
+    /// <summary>
     /// Initializes a <see cref="DatumFileWriter"/> that writes to an existing seekable stream.
     /// The caller retains ownership of the stream and is responsible for disposing it.
     /// </summary>
@@ -144,11 +151,28 @@ public sealed class DatumFileWriter : IDisposable
     /// reference to its arena.
     /// </summary>
     /// <param name="batch">The batch of rows to append.</param>
-    public void WriteRowBatch(RowBatch batch)
+    /// <returns>
+    /// A <see cref="WriteHandle"/> exposing a read-only <see cref="ArenaSlice"/>
+    /// over the just-copied page (for post-write consumers like statistics collectors)
+    /// and a <see cref="WriteHandle.RequiresFlush"/> flag. When the flag is <c>true</c>
+    /// the caller must call <see cref="FlushRowGroup"/> before the next
+    /// <see cref="WriteRowBatch"/> — otherwise that call throws.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a previous call returned <see cref="WriteHandle.RequiresFlush"/>
+    /// = <c>true</c> and <see cref="FlushRowGroup"/> has not yet been called.
+    /// </exception>
+    public WriteHandle WriteRowBatch(RowBatch batch)
     {
         ThrowIfNotReady();
 
-        if (batch.Count == 0) return;
+        if (_pendingFlush)
+        {
+            throw new InvalidOperationException(
+                "The previous WriteRowBatch filled the row group. Call FlushRowGroup() before writing again.");
+        }
+
+        if (batch.Count == 0) return new WriteHandle(null, requiresFlush: false);
 
         // Copy the batch's arena bytes into the writer's arena as a page. If the
         // batch never wrote any reference data, pageLength is zero and the encoders'
@@ -168,10 +192,9 @@ public sealed class DatumFileWriter : IDisposable
             }
         }
 
-        if (_columnBuffers[0].Count >= _rowGroupSize)
-        {
-            FlushRowGroup();
-        }
+        ArenaSlice? pageStore = pageLength > 0 ? _writerArena.Slice(pageBase, pageLength) : null;
+        _pendingFlush = _columnBuffers[0].Count >= _rowGroupSize;
+        return new WriteHandle(pageStore, _pendingFlush);
     }
 
     /// <summary>
@@ -183,12 +206,13 @@ public sealed class DatumFileWriter : IDisposable
     public long Finalize()
     {
         ThrowIfNotReady();
-        _finalized = true;
 
         if (_columnBuffers![0].Count > 0)
         {
             FlushRowGroup();
         }
+
+        _finalized = true;
 
         WriteFooter();
         PatchHeader();
@@ -225,9 +249,23 @@ public sealed class DatumFileWriter : IDisposable
 
     // ──────────────────── Row group flush ────────────────────
 
-    private void FlushRowGroup()
+    /// <summary>
+    /// Encodes and writes the currently buffered rows as a row group, then resets
+    /// the column buffers and writer arena so subsequent batches can be appended.
+    /// Safe to call with a non-full buffer; callers typically invoke it in response
+    /// to <see cref="WriteHandle.RequiresFlush"/>.
+    /// </summary>
+    public void FlushRowGroup()
     {
+        ThrowIfNotReady();
+
         int rowCount = _columnBuffers![0].Count;
+        if (rowCount == 0)
+        {
+            _pendingFlush = false;
+            return;
+        }
+
         int columnCount = _descriptors!.Length;
 
         FreezeFixedShapes();
@@ -282,6 +320,7 @@ public sealed class DatumFileWriter : IDisposable
         // managed primitives on each row group descriptor, so nothing in the arena
         // needs to survive the flush.
         _writerArena.Reset();
+        _pendingFlush = false;
 
         CheckAutoTune(chunks);
     }
