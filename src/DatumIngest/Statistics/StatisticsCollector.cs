@@ -30,11 +30,19 @@ public sealed class StatisticsCollector
     /// Adds a batch of rows to the statistics collector. Each row is processed sequentially.
     /// </summary>
     /// <param name="rowBatch">The row batch to process.</param>
-    public void Collect(RowBatch rowBatch)
+    /// <param name="store">
+    /// Optional override store used to resolve DataValue offsets. When provided, the
+    /// caller guarantees this store outlives the current row group — accumulators that
+    /// retain DataValues (e.g. <see cref="Accumulators.SpaceSavingAccumulator"/>) use
+    /// it to materialize strings at merge time. When <c>null</c>, falls back to the
+    /// batch's own arena (which is reset when the batch returns to the pool).
+    /// </param>
+    public void Collect(RowBatch rowBatch, IValueStore? store = null)
     {
+        IValueStore resolvedStore = store ?? rowBatch.Arena;
         for (int i = 0; i < rowBatch.Count; i++)
         {
-            AddRow(rowBatch[i], rowBatch.Arena);
+            AddRow(rowBatch[i], resolvedStore);
         }
     }
 
@@ -101,14 +109,34 @@ public sealed class StatisticsCollector
 
             foreach (IStatisticAccumulator accumulator in entry.Value)
             {
-                StatisticResult statisticResult = accumulator.GetResult();
-                results[statisticResult.Name] = statisticResult;
+                foreach (StatisticResult statisticResult in accumulator.GetResults())
+                {
+                    results[statisticResult.Name] = statisticResult;
+                }
             }
 
             result[entry.Key] = new ColumnStatistics(entry.Key, results);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Notifies every accumulator that the writer is about to flush a row group
+    /// and reset its arena. Accumulators that hold arena-relative references
+    /// must materialize them here. Must be called before each
+    /// <see cref="DatumFile.DatumFileWriter.FlushRowGroup"/>.
+    /// </summary>
+    /// <param name="writerArenaStore">Read-only view over the row group's page of the writer's arena.</param>
+    public void FlushRowGroup(IValueStore writerArenaStore)
+    {
+        foreach (List<IStatisticAccumulator> accumulators in _columnAccumulators.Values)
+        {
+            foreach (IStatisticAccumulator accumulator in accumulators)
+            {
+                accumulator.BeforeRowGroupFlush(writerArenaStore);
+            }
+        }
     }
 
     private List<IStatisticAccumulator> CreateAccumulators(DataKind kind)
@@ -120,12 +148,11 @@ public sealed class StatisticsCollector
             new MissingRunsAccumulator()
         ];
 
-        // TopK is only meaningful for discrete, representable values.
-        // Binary blobs (Image, UInt8Array) and multi-dimensional data (Vector, Matrix, Tensor)
-        // have no useful string representation for frequency counting.
+        // One sketch-backed accumulator emits top_k + entropy + categorical_diagnostics.
+        // Skipped for binary/multi-dim kinds that have no useful frequency semantics.
         if (kind is not (DataKind.Image or DataKind.UInt8Array or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
         {
-            accumulators.Add(new TopKAccumulator(_topK, kind));
+            accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
         }
 
         if (DataValueComparer.IsNumericScalar(kind))
@@ -165,27 +192,6 @@ public sealed class StatisticsCollector
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());
             accumulators.Add(new QuantileAccumulator());
-        }
-
-        if (kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String or DataKind.JsonValue
-            or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean
-            or DataKind.Time or DataKind.Duration
-            or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32
-            or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
-        {
-            accumulators.Add(new EntropyAccumulator(kind));
-            accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK, kind));
-        }
-
-        // Vocabulary collection for potential identifier/foreign-key columns.
-        // Only integer and string types can serve as join keys.
-        if (kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32
-            or DataKind.Int64 or DataKind.UInt64
-            or DataKind.UInt8 or DataKind.String or DataKind.Uuid)
-        {
-            accumulators.Add(new VocabularyAccumulator(kind));
         }
 
         return accumulators;

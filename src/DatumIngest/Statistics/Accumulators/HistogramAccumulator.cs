@@ -5,7 +5,7 @@ using DatumIngest.Model;
 /// <summary>
 /// Builds an approximate histogram for numeric columns using reservoir sampling.
 /// Collects up to <see cref="MaxSamples"/> values; once exceeded, uses Algorithm R
-/// reservoir sampling. On <see cref="GetResult"/> the samples are binned using
+/// reservoir sampling. On <see cref="GetResults"/> the samples are binned using
 /// integer-aligned edges when all values are integral (producing human-readable bins
 /// like [17, 18), [18, 19)...) or equal-width bins for continuous data.
 /// </summary>
@@ -18,7 +18,9 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     public const int DefaultBinCount = 50;
 
     private readonly int _binCount;
-    private readonly List<double> _samples = new();
+    // Pre-sized to MaxSamples so the reservoir never triggers List<T>.AddWithResize
+    // on the hot Add path. The ~800 KB backing array lives for the column's lifetime.
+    private readonly List<double> _samples = new(MaxSamples);
     private readonly Random _random = new(42); // deterministic seed for reproducibility
     private long _totalCount;
 
@@ -73,11 +75,12 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         if (_samples.Count == 0)
         {
-            return new StatisticResult("histogram", new HistogramResult([], [], false));
+            yield return new StatisticResult("histogram", new HistogramResult([], [], false));
+            yield break;
         }
 
         _samples.Sort();
@@ -89,10 +92,11 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
         {
             // All values are the same — single bin
             bool singleValueInteger = min == Math.Floor(min);
-            return new StatisticResult("histogram", new HistogramResult(
+            yield return new StatisticResult("histogram", new HistogramResult(
                 [min, max],
                 [_samples.Count],
                 singleValueInteger));
+            yield break;
         }
 
         bool isIntegerData = IsIntegerData(_samples);
@@ -110,7 +114,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
             BuildEqualWidthBins(min, max, effectiveBinCount, out binEdges, out counts);
         }
 
-        return new StatisticResult("histogram", new HistogramResult(binEdges, counts, isIntegerData));
+        yield return new StatisticResult("histogram", new HistogramResult(binEdges, counts, isIntegerData));
     }
 
     /// <summary>

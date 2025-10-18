@@ -34,9 +34,9 @@ public sealed class CountAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
-        return new StatisticResult("count", new CountResult(_nonNullCount, _nullOrEmptyCount));
+        yield return new StatisticResult("count", new CountResult(_nonNullCount, _nullOrEmptyCount));
     }
 }
 

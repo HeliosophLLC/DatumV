@@ -49,11 +49,11 @@ public sealed class BinarySizeAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         double variance = _count > 1 ? _m2 / _count : 0.0;
 
-        return new StatisticResult("binary_size", new BinarySizeResult(
+        yield return new StatisticResult("binary_size", new BinarySizeResult(
             new NumericSummary(
                 _count,
                 _count > 0 ? _min : double.NaN,

@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -17,7 +18,7 @@ public sealed class NumericAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.Count);
         Assert.Equal(5.0, result.Min);
         Assert.Equal(5.0, result.Max);
@@ -35,7 +36,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(6.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(8.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(4, result.Count);
         Assert.Equal(2.0, result.Min);
         Assert.Equal(8.0, result.Max);
@@ -52,7 +53,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromUInt8(20), _arena);
         accumulator.Add(DataValue.FromUInt8(30), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.Count);
         Assert.Equal(10.0, result.Min);
         Assert.Equal(30.0, result.Max);
@@ -68,7 +69,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.Count);
         Assert.Equal(5.0, result.Mean);
     }
@@ -81,7 +82,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromString("hello", _arena), _arena);
         accumulator.Add(DataValue.FromFloat32(10.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.Count);
         Assert.Equal(10.0, result.Mean);
     }
@@ -91,7 +92,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     {
         NumericAccumulator accumulator = new();
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.Count);
         Assert.True(double.IsNaN(result.Min));
         Assert.True(double.IsNaN(result.Max));
@@ -125,7 +126,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         }
         double naiveVariance = sumSquaredDiff / values.Length;
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(naiveMean, result.Mean, 1e-6);
         Assert.Equal(naiveVariance, result.Variance, 1e-4);
     }
@@ -144,7 +145,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(7.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(9.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2.0, result.StandardDeviation, 1e-10);
     }
 
@@ -152,7 +153,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         NumericAccumulator accumulator = new();
-        Assert.Equal("numeric", accumulator.GetResult().Name);
+        Assert.Equal("numeric", accumulator.GetResults().Single().Name);
     }
 
     [Fact]
@@ -165,7 +166,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.ZeroCount);
         Assert.Equal(0.5, result.ZeroRatio, 1e-10);
     }
@@ -179,7 +180,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.ZeroCount);
         Assert.Equal(1.0, result.ZeroRatio, 1e-10);
     }
@@ -193,7 +194,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.ZeroCount);
         Assert.Equal(0.0, result.ZeroRatio, 1e-10);
     }
@@ -203,7 +204,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     {
         NumericAccumulator accumulator = new();
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.ZeroCount);
         Assert.Equal(0.0, result.ZeroRatio, 1e-10);
     }
@@ -222,7 +223,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         // Add a value far from the mean
         accumulator.Add(DataValue.FromFloat32(500.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.True(result.OutlierCount > 0, "Expected at least one outlier detected");
         Assert.True(result.OutlierRatio > 0.0);
     }
@@ -239,7 +240,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(9.9f), _arena);
         accumulator.Add(DataValue.FromFloat32(9.8f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.OutlierCount);
         Assert.Equal(0.0, result.OutlierRatio, 1e-10);
     }
@@ -251,7 +252,7 @@ public sealed class NumericAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.OutlierCount);
         Assert.Equal(0.0, result.OutlierRatio, 1e-10);
     }
@@ -266,7 +267,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.OutlierCount);
         Assert.Equal(0.0, result.OutlierRatio, 1e-10);
     }
@@ -276,7 +277,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     {
         NumericAccumulator accumulator = new();
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.OutlierCount);
         Assert.Equal(0.0, result.OutlierRatio, 1e-10);
     }
@@ -292,7 +293,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Skewness, 1e-10);
     }
 
@@ -312,7 +313,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(100.0f), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.True(result.Skewness > 0, $"Expected positive skewness for right-skewed data, got {result.Skewness}");
     }
 
@@ -332,7 +333,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(100.0f), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.True(result.Skewness < 0, $"Expected negative skewness for left-skewed data, got {result.Skewness}");
     }
 
@@ -347,7 +348,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.True(result.Kurtosis < 3.0, $"Expected kurtosis < 3 for uniform data, got {result.Kurtosis}");
         Assert.True(result.Kurtosis > 1.0, $"Expected kurtosis > 1 for uniform data, got {result.Kurtosis}");
     }
@@ -370,7 +371,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(600.0f), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.True(result.Kurtosis > 3.0, $"Expected kurtosis > 3 for heavy-tailed data, got {result.Kurtosis}");
     }
 
@@ -381,7 +382,7 @@ public sealed class NumericAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Skewness);
     }
 
@@ -393,7 +394,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Kurtosis);
     }
 
@@ -407,7 +408,7 @@ public sealed class NumericAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(7.0f), _arena);
         }
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Skewness);
         Assert.Equal(0.0, result.Kurtosis);
     }
@@ -417,7 +418,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     {
         NumericAccumulator accumulator = new();
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Skewness);
         Assert.Equal(0.0, result.Kurtosis);
     }
@@ -435,7 +436,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(4.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.Skewness, 1e-10);
     }
 
@@ -452,7 +453,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(4.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1.7, result.Kurtosis, 1e-10);
     }
 
@@ -467,7 +468,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(4.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(6.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.NonzeroCount);
         Assert.Equal(4.0, result.NonzeroMean, 1e-10);
 
@@ -486,7 +487,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(result.Count, result.NonzeroCount);
         Assert.Equal(result.Mean, result.NonzeroMean, 1e-10);
         Assert.Equal(result.Variance, result.NonzeroVariance, 1e-10);
@@ -500,7 +501,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.NonzeroCount);
         Assert.True(double.IsNaN(result.NonzeroMean));
         Assert.True(double.IsNaN(result.NonzeroVariance));
@@ -512,7 +513,7 @@ public sealed class NumericAccumulatorTests : IDisposable
     {
         NumericAccumulator accumulator = new();
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.NonzeroCount);
         Assert.True(double.IsNaN(result.NonzeroMean));
     }
@@ -526,7 +527,7 @@ public sealed class NumericAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(7.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(0.0f), _arena);
 
-        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        NumericResult result = (NumericResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.NonzeroCount);
         Assert.Equal(7.0, result.NonzeroMean, 1e-10);
         Assert.Equal(0.0, result.NonzeroVariance, 1e-10);

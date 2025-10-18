@@ -130,6 +130,20 @@ internal static class CsvParser
                 else if (field.Equals("false", StringComparison.OrdinalIgnoreCase))
                     return DataValue.FromBoolean(false);
                 return DataValue.Null(DataKind.Boolean);
+            case DataKind.Date:
+                if (DateOnly.TryParse(field, CultureInfo.InvariantCulture, out DateOnly d))
+                    return DataValue.FromDate(d);
+                if (DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset ddt))
+                    return DataValue.FromDate(DateOnly.FromDateTime(ddt.DateTime));
+                return DataValue.Null(DataKind.Date);
+            case DataKind.DateTime:
+                return DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dt)
+                    ? DataValue.FromDateTime(dt)
+                    : DataValue.Null(DataKind.DateTime);
+            case DataKind.Uuid:
+                return Guid.TryParse(field, out Guid guid)
+                    ? DataValue.FromUuid(guid)
+                    : DataValue.Null(DataKind.Uuid);
             default:
                 return ParseFieldString(field.ToString(), kind);
         }

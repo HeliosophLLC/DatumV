@@ -119,13 +119,13 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         double zeroRatio = _count > 0 ? (double)_zeroCount / _count : 0.0;
         double outlierRatio = _count > 0 ? (double)_outlierCount / _count : 0.0;
         double nonzeroVariance = _nonzeroCount > 1 ? _nonzeroM2 / _nonzeroCount :
             _nonzeroCount == 1 ? 0.0 : double.NaN;
-        return new StatisticResult("numeric", new NumericResult(
+        yield return new StatisticResult("numeric", new NumericResult(
             _count, Min, Max, Mean, Variance, StandardDeviation, Skewness, Kurtosis,
             _zeroCount, zeroRatio, _outlierCount, outlierRatio,
             _nonzeroCount,

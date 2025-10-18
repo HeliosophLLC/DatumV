@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -17,7 +18,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(42.0, result.P01);
         Assert.Equal(42.0, result.P25);
         Assert.Equal(42.0, result.P50);
@@ -41,7 +42,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
 
         // Linear interpolation: index = p * (n-1)
         // P25: 0.25 * 99 = 24.75 → lerp(25, 26, 0.75) = 25.75
@@ -73,7 +74,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(20.0f), _arena);
 
         Assert.Equal(2, accumulator.SampleCount);
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         // P01 with 2 samples: 0.01 * 1 = 0.01 → lerp(10, 20, 0.01) = 10.1
         Assert.Equal(10.1, result.P01, 1e-6);
         // P99 with 2 samples: 0.99 * 1 = 0.99 → lerp(10, 20, 0.99) = 19.9
@@ -89,7 +90,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
         Assert.Equal(1, accumulator.SampleCount);
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(5.0, result.P50);
     }
 
@@ -98,7 +99,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
     {
         QuantileAccumulator accumulator = new();
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         Assert.True(double.IsNaN(result.P01));
         Assert.True(double.IsNaN(result.P25));
         Assert.True(double.IsNaN(result.P50));
@@ -122,7 +123,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromUInt8(200), _arena);
         accumulator.Add(DataValue.FromUInt8(255), _arena);
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         // P01 with 5 samples: 0.01 * 4 = 0.04 → lerp(0, 50, 0.04) = 2.0
         Assert.Equal(2.0, result.P01, 1e-6);
         // P50: 0.50 * 4 = 2.0 → exact index 2 → value 100
@@ -135,7 +136,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         QuantileAccumulator accumulator = new();
-        Assert.Equal("quantile", accumulator.GetResult().Name);
+        Assert.Equal("quantile", accumulator.GetResults().Single().Name);
     }
 
     [Fact]
@@ -147,7 +148,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         string formatted = result.ToString();
 
         Assert.Contains("P50=", formatted);
@@ -162,7 +163,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(7.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(7.0f), _arena);
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(7.0, result.P01);
         Assert.Equal(7.0, result.P50);
         Assert.Equal(7.0, result.P99);
@@ -185,7 +186,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(-500.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(600.0f), _arena);
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
 
         Assert.True(result.Iqr > 0);
         Assert.True(result.LowerFence < 10);
@@ -206,7 +207,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(75.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(100.0f), _arena);
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
 
         // P25 and P75 computed via interpolation on 5 samples:
         // P25: 0.25 * 4 = 1.0 → index 1 → 25.0
@@ -226,7 +227,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
         }
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
 
         Assert.Equal(0.0, result.Iqr);
         Assert.Equal(42.0, result.LowerFence);
@@ -244,7 +245,7 @@ public sealed class QuantileAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
+        QuantileResult result = (QuantileResult)accumulator.GetResults().Single().Value!;
         string formatted = result.ToString();
 
         Assert.Contains("IQR=", formatted);

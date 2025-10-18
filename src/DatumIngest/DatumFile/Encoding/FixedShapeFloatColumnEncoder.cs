@@ -91,9 +91,9 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
                 floatData.AsSpan(0, totalFloats),
                 raw.AsSpan(bitmapLength, shuffledLength));
 
-            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+            (byte[] compressed, int compressedLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-            return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat, DatumCompression.Zstd, rawLength, zoneMap);
+            return new DatumEncodedPage(compressed, compressedLength, DatumEncoding.FixedFloat, DatumCompression.Zstd, rawLength, zoneMap);
         }
         finally
         {

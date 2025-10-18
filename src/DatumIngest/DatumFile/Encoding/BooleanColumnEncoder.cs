@@ -62,9 +62,9 @@ internal sealed class BooleanColumnEncoder : DatumColumnEncoder
         bitmapBytes.CopyTo(raw, 0);
         valueBits.CopyTo(raw, bitmapBytes.Length);
 
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
+        (byte[] compressed, int compressedLength) = DatumCompressor.Compress(raw, DatumCompression.Zstd);
 
-        return new DatumEncodedPage(compressed, DatumEncoding.BitPacked, DatumCompression.Zstd, raw.Length, zoneMap);
+        return new DatumEncodedPage(compressed, compressedLength, DatumEncoding.BitPacked, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 
     private static DatumZoneMap BuildZoneMap(uint nullCount, int rowCount, bool hasTrue, bool hasFalse)

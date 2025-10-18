@@ -136,16 +136,19 @@ public static class DatumFileEditor
 
             DatumEncodedPage page = replacement.Page;
             long pageOffset = stream.Position;
+            int payloadLength = page.PayloadLength;
             stream.Write(page.Payload);
 
             allRowGroups[replacement.RowGroupIndex].ColumnChunks[replacement.ColumnIndex] =
                 new DatumColumnChunkDescriptor(
                     pageOffset,
-                    (uint)page.Payload.Length,
+                    (uint)payloadLength,
                     (uint)page.UncompressedByteLength,
                     page.Encoding,
                     page.Compression,
                     page.ZoneMap);
+
+            page.ReturnBuffer();
         }
 
         long newFooterOffset = stream.Position;
@@ -202,19 +205,22 @@ public static class DatumFileEditor
             DatumEncodedPage page = pagesPerRowGroup[rowGroupIndex];
 
             long pageOffset = stream.Position;
+            int payloadLength = page.PayloadLength;
             stream.Write(page.Payload);
 
             DatumColumnChunkDescriptor[] widerChunks = new DatumColumnChunkDescriptor[schema.ColumnCount + 1];
             Array.Copy(oldRowGroup.ColumnChunks, widerChunks, schema.ColumnCount);
             widerChunks[schema.ColumnCount] = new DatumColumnChunkDescriptor(
                 pageOffset,
-                (uint)page.Payload.Length,
+                (uint)payloadLength,
                 (uint)page.UncompressedByteLength,
                 page.Encoding,
                 page.Compression,
                 page.ZoneMap);
 
             allRowGroups.Add(new DatumRowGroupDescriptor(oldRowGroup.RowCount, widerChunks));
+
+            page.ReturnBuffer();
         }
 
         long newFooterOffset = stream.Position;
@@ -368,15 +374,18 @@ public static class DatumFileEditor
         {
             DatumEncodedPage page = pages[columnIndex];
             long pageOffset = stream.Position;
+            int payloadLength = page.PayloadLength;
             stream.Write(page.Payload);
 
             chunks[columnIndex] = new DatumColumnChunkDescriptor(
                 pageOffset,
-                (uint)page.Payload.Length,
+                (uint)payloadLength,
                 (uint)page.UncompressedByteLength,
                 page.Encoding,
                 page.Compression,
                 page.ZoneMap);
+
+            page.ReturnBuffer();
         }
 
         return chunks;

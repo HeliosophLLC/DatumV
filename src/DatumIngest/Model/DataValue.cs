@@ -1060,6 +1060,43 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int RawCharCount => _charCount;
 
     /// <summary>
+    /// Returns the UTF-8 byte length of a <see cref="DataKind.String"/> or
+    /// <see cref="DataKind.JsonValue"/> payload without accessing the store.
+    /// </summary>
+    /// <remarks>
+    /// Pairs with <see cref="StringCharCount(IValueStore)"/>: that returns the decoded
+    /// character count (possibly via a UTF-8 decode), this returns the encoded byte
+    /// count which is always cached in the payload word. Zero-allocation hot-path reader
+    /// for column encoders that need per-row byte sizes upfront.
+    /// </remarks>
+    public int StringByteLength
+    {
+        get
+        {
+            if (_kind is not (DataKind.String or DataKind.JsonValue))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot read StringByteLength on a {_kind} value.");
+            }
+            return _p1;
+        }
+    }
+
+    /// <summary>
+    /// Returns the cached XxHash64 of the string's UTF-8 bytes as a single ulong,
+    /// or <c>0</c> for values with no cached hash (e.g. arena-slice strings built
+    /// via <see cref="FromStringSlice"/>).
+    /// </summary>
+    /// <remarks>
+    /// Zero-allocation hot-path reader for frequency-sketch accumulators that need
+    /// a content-addressed hash key without materializing the string. When the
+    /// cached hash is absent, callers must fall back to hashing the UTF-8 bytes
+    /// through an <see cref="IValueStore"/>.
+    /// </remarks>
+    public ulong RawContentHash =>
+        (uint)_p2 | ((ulong)(uint)_p3 << 32);
+
+    /// <summary>
     /// Returns the element count for collection-type values without accessing the store.
     /// <list type="bullet">
     /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>

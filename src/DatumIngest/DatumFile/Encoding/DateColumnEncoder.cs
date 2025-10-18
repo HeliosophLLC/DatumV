@@ -83,9 +83,9 @@ internal sealed class DateColumnEncoder : DatumColumnEncoder
             Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
             BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(bitmapLength), baseline);
 
-            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+            (byte[] compressed, int compressedLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-            return new DatumEncodedPage(compressed, DatumEncoding.DeltaInt32, DatumCompression.Zstd, rawLength, zoneMap);
+            return new DatumEncodedPage(compressed, compressedLength, DatumEncoding.DeltaInt32, DatumCompression.Zstd, rawLength, zoneMap);
         }
         finally
         {

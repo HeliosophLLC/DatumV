@@ -70,9 +70,9 @@ internal sealed class IntegerColumnEncoder : DatumColumnEncoder
 
             Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
 
-            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+            (byte[] compressed, int compressedLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-            return new DatumEncodedPage(compressed, DatumEncoding.Raw, DatumCompression.Zstd, rawLength, zoneMap);
+            return new DatumEncodedPage(compressed, compressedLength, DatumEncoding.Raw, DatumCompression.Zstd, rawLength, zoneMap);
         }
         finally
         {

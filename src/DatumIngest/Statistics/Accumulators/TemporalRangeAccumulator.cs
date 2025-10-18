@@ -75,28 +75,31 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         if (_count == 0)
         {
-            return new StatisticResult("temporal_range", new TemporalRangeResult(null, null));
+            yield return new StatisticResult("temporal_range", new TemporalRangeResult(null, null));
+            yield break;
         }
 
         if (_observedKind == DataKind.Date)
         {
-            return new StatisticResult("temporal_range", new TemporalRangeResult(
+            yield return new StatisticResult("temporal_range", new TemporalRangeResult(
                 _minDate.ToString("O"),
                 _maxDate.ToString("O")));
+            yield break;
         }
 
         if (_observedKind == DataKind.Time)
         {
-            return new StatisticResult("temporal_range", new TemporalRangeResult(
+            yield return new StatisticResult("temporal_range", new TemporalRangeResult(
                 _minTime.ToString("HH:mm:ss.FFFFFFF"),
                 _maxTime.ToString("HH:mm:ss.FFFFFFF")));
+            yield break;
         }
 
-        return new StatisticResult("temporal_range", new TemporalRangeResult(
+        yield return new StatisticResult("temporal_range", new TemporalRangeResult(
             _minDateTime.ToString("O"),
             _maxDateTime.ToString("O")));
     }

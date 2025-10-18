@@ -24,18 +24,27 @@ public static class DatumCompressor
     /// </summary>
     [ThreadStatic]
     private static Decompressor? _threadDecompressor;
+
     /// <summary>
-    /// Compresses <paramref name="source"/> using the specified codec.
-    /// Returns the unmodified source bytes when <paramref name="kind"/> is <see cref="DatumCompression.None"/>.
+    /// Compresses <paramref name="source"/> using the specified codec, returning a pooled
+    /// buffer from <see cref="ArrayPool{T}.Shared"/> along with the number of compressed
+    /// bytes written into it. The caller <em>must</em> return the buffer to the pool via
+    /// <see cref="ArrayPool{T}.Return"/> after the bytes have been consumed (typically via
+    /// <see cref="DatumIngest.DatumFile.Encoding.DatumEncodedPage.ReturnBuffer"/>).
     /// </summary>
     /// <param name="source">Raw bytes to compress.</param>
     /// <param name="kind">Codec to apply.</param>
     /// <param name="zstdLevel">Zstd compression level (1–22). Only used when <paramref name="kind"/> is Zstd.</param>
-    public static byte[] Compress(ReadOnlySpan<byte> source, DatumCompression kind, int zstdLevel = DatumFileConstants.DefaultZstdCompressionLevel)
+    /// <returns>
+    /// A tuple of <c>(Buffer, Length)</c>: <c>Buffer</c> is a rented array whose first
+    /// <c>Length</c> bytes contain the compressed output. Bytes beyond <c>Length</c> are
+    /// unspecified.
+    /// </returns>
+    public static (byte[] Buffer, int Length) Compress(ReadOnlySpan<byte> source, DatumCompression kind, int zstdLevel = DatumFileConstants.DefaultZstdCompressionLevel)
     {
         return kind switch
         {
-            DatumCompression.None => source.ToArray(),
+            DatumCompression.None => RentAndCopy(source),
             DatumCompression.Zstd => CompressZstd(source, zstdLevel),
             DatumCompression.Zlib => CompressZlib(source),
             DatumCompression.Brotli => CompressBrotli(source),
@@ -88,25 +97,15 @@ public static class DatumCompressor
 
     // ──────────────────── Zstd ────────────────────
 
-    private static byte[] CompressZstd(ReadOnlySpan<byte> source, int level)
+    private static (byte[] Buffer, int Length) CompressZstd(ReadOnlySpan<byte> source, int level)
     {
         Compressor compressor = (_threadCompressor ??= new Compressor(level));
         compressor.Level = level;
 
         int bound = Compressor.GetCompressBound(source.Length);
-        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(bound);
-
-        try
-        {
-            int compressedLength = compressor.Wrap(source, rentedBuffer);
-            byte[] result = new byte[compressedLength];
-            Buffer.BlockCopy(rentedBuffer, 0, result, 0, compressedLength);
-            return result;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rentedBuffer);
-        }
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(bound);
+        int compressedLength = compressor.Wrap(source, buffer);
+        return (buffer, compressedLength);
     }
 
     /// <summary>
@@ -146,7 +145,7 @@ public static class DatumCompressor
 
     // ──────────────────── Zlib (Deflate) ────────────────────
 
-    private static byte[] CompressZlib(ReadOnlySpan<byte> source)
+    private static (byte[] Buffer, int Length) CompressZlib(ReadOnlySpan<byte> source)
     {
         using MemoryStream outputStream = new();
         using (DeflateStream deflate = new(outputStream, CompressionLevel.Optimal, leaveOpen: true))
@@ -154,7 +153,7 @@ public static class DatumCompressor
             deflate.Write(source);
         }
 
-        return outputStream.ToArray();
+        return RentAndCopy(outputStream.GetBuffer().AsSpan(0, (int)outputStream.Length));
     }
 
     private static byte[] DecompressZlib(ReadOnlySpan<byte> source, int uncompressedLength)
@@ -176,7 +175,7 @@ public static class DatumCompressor
 
     // ──────────────────── Brotli ────────────────────
 
-    private static byte[] CompressBrotli(ReadOnlySpan<byte> source)
+    private static (byte[] Buffer, int Length) CompressBrotli(ReadOnlySpan<byte> source)
     {
         using MemoryStream outputStream = new();
         using (BrotliStream brotli = new(outputStream, CompressionLevel.Optimal, leaveOpen: true))
@@ -184,7 +183,7 @@ public static class DatumCompressor
             brotli.Write(source);
         }
 
-        return outputStream.ToArray();
+        return RentAndCopy(outputStream.GetBuffer().AsSpan(0, (int)outputStream.Length));
     }
 
     private static byte[] DecompressBrotli(ReadOnlySpan<byte> source, int uncompressedLength)
@@ -208,5 +207,17 @@ public static class DatumCompressor
     {
         source.CopyTo(destination);
         return source.Length;
+    }
+
+    /// <summary>
+    /// Rents a pooled buffer sized to <paramref name="source"/> and copies the bytes into it.
+    /// Used by the <see cref="DatumCompression.None"/> path and by the Zlib/Brotli paths that
+    /// go through a <see cref="MemoryStream"/> before surfacing to the pool-aware API.
+    /// </summary>
+    private static (byte[] Buffer, int Length) RentAndCopy(ReadOnlySpan<byte> source)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(source.Length);
+        source.CopyTo(buffer);
+        return (buffer, source.Length);
     }
 }

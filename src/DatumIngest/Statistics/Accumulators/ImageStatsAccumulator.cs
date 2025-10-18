@@ -221,14 +221,14 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         double sizeVariance = _sizeCount > 1 ? _sizeM2 / _sizeCount : 0.0;
         double megapixelVariance = _megapixelCount > 1 ? _megapixelM2 / _megapixelCount : 0.0;
         double aspectVariance = _aspectCount > 1 ? _aspectM2 / _aspectCount : 0.0;
         long decodedCount = _count - _undecodableCount;
 
-        return new StatisticResult("image_stats", new ImageStatsResult(
+        yield return new StatisticResult("image_stats", new ImageStatsResult(
             _count,
             decodedCount > 0 ? _minWidth : 0,
             decodedCount > 0 ? _maxWidth : 0,

@@ -146,12 +146,12 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         double variance = _elementCount > 1 ? _elementM2 / _elementCount : 0.0;
         double zeroElementRatio = _elementCount > 0 ? (double)_zeroElementCount / _elementCount : 0.0;
 
-        return new StatisticResult("vector_stats", new VectorStatsResult(
+        yield return new StatisticResult("vector_stats", new VectorStatsResult(
             _count,
             _count > 0 ? _minElementCount : 0,
             _count > 0 ? _maxElementCount : 0,

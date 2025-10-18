@@ -42,6 +42,15 @@ public sealed class DatumFileWriter : IDisposable
     private readonly Arena _writerArena;
 
     /// <summary>
+    /// Read access to the writer's arena for consumers that need to resolve
+    /// offsets copied into it (e.g. statistics accumulators whose local sketches
+    /// retained DataValues from earlier batches in the current row group).
+    /// Only valid between row-group resets — do not retain references past a
+    /// <see cref="FlushRowGroup"/> call.
+    /// </summary>
+    public Arena WriterArena => _writerArena;
+
+    /// <summary>
     /// Per-page layout of the current row group's column buffers. Cleared on
     /// row group flush. One entry per appended <see cref="RowBatch"/>.
     /// </summary>
@@ -294,15 +303,19 @@ public sealed class DatumFileWriter : IDisposable
         {
             DatumEncodedPage page = pages[columnIndex];
             long pageOffset = _stream.Position;
+            int payloadLength = page.PayloadLength;
             _stream.Write(page.Payload);
 
             chunks[columnIndex] = new DatumColumnChunkDescriptor(
                 pageOffset,
-                (uint)page.Payload.Length,
+                (uint)payloadLength,
                 (uint)page.UncompressedByteLength,
                 page.Encoding,
                 page.Compression,
                 page.ZoneMap);
+
+            // Return the pooled payload buffer now that the bytes are safely on the stream.
+            page.ReturnBuffer();
         }
 
         DatumRowGroupDescriptor rowGroupDescriptor = new((uint)rowCount, chunks);
@@ -406,10 +419,11 @@ public sealed class DatumFileWriter : IDisposable
             {
                 _rowGroupSize = Math.Max(DatumFileConstants.MinimumRowGroupSize, _rowGroupSize / 2);
 
-                foreach (List<DataValue> buffer in _columnBuffers!)
-                {
-                    buffer.Capacity = _rowGroupSize;
-                }
+                // Leave column-buffer capacity untouched — shrinking via
+                // List<T>.Capacity = smaller forces a reallocation of the backing array
+                // per column, which dominates allocations when auto-tune fires. The
+                // over-sized buffers retain their initial allocation and will be reused
+                // at the new (smaller) row-group size without further allocation.
 
                 return;
             }

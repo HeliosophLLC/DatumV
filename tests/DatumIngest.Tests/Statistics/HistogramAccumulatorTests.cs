@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -17,7 +18,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
         Assert.Single(result.Counts);
         Assert.Equal(1, result.Counts[0]);
     }
@@ -32,7 +33,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         // Integer data (0–100) with 101 distinct values and 10 bins →
         // binWidth rounds up to 11, giving 10 bins with integer-aligned edges.
@@ -59,7 +60,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromUInt8(200), _arena);
         accumulator.Add(DataValue.FromUInt8(255), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(5, result.Counts.Count);
         Assert.Equal(0.0, result.BinEdges[0]);
 
@@ -81,7 +82,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
             accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
         }
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
         Assert.Single(result.Counts);
         Assert.Equal(100, result.Counts[0]);
     }
@@ -94,7 +95,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
         accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, accumulator.TotalCount);
     }
 
@@ -103,7 +104,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
     {
         HistogramAccumulator accumulator = new();
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
         Assert.Empty(result.BinEdges);
         Assert.Empty(result.Counts);
     }
@@ -112,7 +113,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         HistogramAccumulator accumulator = new();
-        Assert.Equal("histogram", accumulator.GetResult().Name);
+        Assert.Equal("histogram", accumulator.GetResults().Single().Name);
     }
 
     [Fact]
@@ -129,7 +130,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
             }
         }
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         // All edges must be integers — no fractional bin boundaries.
         foreach (double edge in result.BinEdges)
@@ -159,7 +160,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
             }
         }
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         // Range is 10–50 = 41 distinct integers, which is < 50 bins → one bin per integer.
         Assert.Equal(41, result.Counts.Count);
@@ -187,7 +188,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(3.14f), _arena);
         accumulator.Add(DataValue.FromFloat32(9.99f), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         // Continuous data — edges need not be integers.
         Assert.Equal(5, result.Counts.Count);
@@ -209,7 +210,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(4.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         // One fractional value breaks integer detection → continuous binning.
         double lastEdge = result.BinEdges[^1];
@@ -240,7 +241,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         }
 
         // Must not throw IndexOutOfRangeException.
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         Assert.True(result.BinEdges.Count >= 2, "Should have at least 2 bin edges.");
         Assert.True(result.Counts.Count >= 1, "Should have at least 1 bin.");
@@ -271,7 +272,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         }
 
         // Must not throw IndexOutOfRangeException.
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         Assert.True(result.BinEdges.Count >= 2);
         Assert.Equal(500, result.Counts.Sum());
@@ -294,7 +295,7 @@ public sealed class HistogramAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat64(5_000_000_000.0), _arena);
         accumulator.Add(DataValue.FromFloat64(10_000_000_000.0), _arena);
 
-        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+        HistogramResult result = (HistogramResult)accumulator.GetResults().Single().Value!;
 
         Assert.True(result.BinEdges.Count >= 2);
         Assert.Equal(4, result.Counts.Sum());

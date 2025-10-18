@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -19,7 +20,7 @@ public sealed class CountAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
         accumulator.Add(DataValue.FromString("hello", _arena), _arena);
 
-        CountResult result = (CountResult)accumulator.GetResult().Value!;
+        CountResult result = (CountResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.NonNull);
         Assert.Equal(0, result.NullOrEmpty);
     }
@@ -33,7 +34,7 @@ public sealed class CountAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.String), _arena);
         accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
 
-        CountResult result = (CountResult)accumulator.GetResult().Value!;
+        CountResult result = (CountResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.NonNull);
         Assert.Equal(2, result.NullOrEmpty);
     }
@@ -47,7 +48,7 @@ public sealed class CountAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromString("hello", _arena), _arena);
         accumulator.Add(DataValue.FromString("", _arena), _arena);
 
-        CountResult result = (CountResult)accumulator.GetResult().Value!;
+        CountResult result = (CountResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.NonNull);
         Assert.Equal(2, result.NullOrEmpty);
     }
@@ -57,7 +58,7 @@ public sealed class CountAccumulatorTests : IDisposable
     {
         CountAccumulator accumulator = new();
 
-        CountResult result = (CountResult)accumulator.GetResult().Value!;
+        CountResult result = (CountResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.NonNull);
         Assert.Equal(0, result.NullOrEmpty);
     }
@@ -66,6 +67,6 @@ public sealed class CountAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         CountAccumulator accumulator = new();
-        Assert.Equal("count", accumulator.GetResult().Name);
+        Assert.Equal("count", accumulator.GetResults().Single().Name);
     }
 }

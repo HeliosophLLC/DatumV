@@ -81,9 +81,9 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
-        return new StatisticResult("cardinality", new CardinalityResult(EstimatedCardinality));
+        yield return new StatisticResult("cardinality", new CardinalityResult(EstimatedCardinality));
     }
 }
 

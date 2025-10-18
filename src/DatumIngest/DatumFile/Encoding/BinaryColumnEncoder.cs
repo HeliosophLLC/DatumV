@@ -133,9 +133,9 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
                 }
             }
 
-            byte[] payload = DatumCompressor.Compress(raw.AsSpan(0, rawLength), compression);
+            (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), compression);
 
-            return new DatumEncodedPage(payload, DatumEncoding.VariableBytes, compression, rawLength, zoneMap);
+            return new DatumEncodedPage(payload, payloadLength, DatumEncoding.VariableBytes, compression, rawLength, zoneMap);
         }
         finally
         {
@@ -218,9 +218,9 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
                 }
 
                 // Externalized pages store paths (ASCII/UTF-8), which compress well.
-                byte[] payload = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+                (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-                return new DatumEncodedPage(payload, DatumEncoding.ExternalBytes, DatumCompression.Zstd, rawLength, zoneMap);
+                return new DatumEncodedPage(payload, payloadLength, DatumEncoding.ExternalBytes, DatumCompression.Zstd, rawLength, zoneMap);
             }
             finally
             {

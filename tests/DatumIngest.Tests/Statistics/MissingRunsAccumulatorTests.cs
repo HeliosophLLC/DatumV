@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -15,7 +16,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
     {
         MissingRunsAccumulator accumulator = new();
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.RunCount);
     }
 
@@ -28,7 +29,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
         accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.RunCount);
     }
 
@@ -41,7 +42,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
         accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.RunCount);
     }
 
@@ -56,7 +57,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
         accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.RunCount);
     }
 
@@ -70,7 +71,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.RunCount);
     }
 
@@ -83,7 +84,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.RunCount);
     }
 
@@ -98,7 +99,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromString("world", _arena), _arena);
         accumulator.Add(DataValue.FromString("", _arena), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.RunCount);
     }
 
@@ -116,7 +117,7 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
         // Run 3: trailing null
         accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
-        MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
+        MissingRunsResult result = (MissingRunsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.RunCount);
     }
 
@@ -124,6 +125,6 @@ public sealed class MissingRunsAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         MissingRunsAccumulator accumulator = new();
-        Assert.Equal("missing_runs", accumulator.GetResult().Name);
+        Assert.Equal("missing_runs", accumulator.GetResults().Single().Name);
     }
 }

@@ -4,7 +4,7 @@ using DatumIngest.Model;
 
 /// <summary>
 /// Computes approximate percentiles (P1, P5, P25, P50, P75, P95, P99) for numeric columns
-/// using reservoir sampling. On <see cref="GetResult"/> the retained samples are sorted and
+/// using reservoir sampling. On <see cref="GetResults"/> the retained samples are sorted and
 /// percentiles are computed via linear interpolation (matching NumPy's default method).
 /// </summary>
 public sealed class QuantileAccumulator : IStatisticAccumulator
@@ -12,7 +12,9 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     /// <summary>Maximum samples retained in the reservoir.</summary>
     public const int MaxSamples = 100_000;
 
-    private readonly List<double> _samples = new();
+    // Pre-sized to MaxSamples so the reservoir never triggers List<T>.AddWithResize
+    // on the hot Add path. The ~800 KB backing array lives for the column's lifetime.
+    private readonly List<double> _samples = new(MaxSamples);
     private readonly Random _random = new(42);
     private long _totalCount;
 
@@ -58,13 +60,14 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
         if (_samples.Count == 0)
         {
-            return new StatisticResult("quantile", new QuantileResult(
+            yield return new StatisticResult("quantile", new QuantileResult(
                 double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN,
                 double.NaN, double.NaN, double.NaN, 0, 0.0));
+            yield break;
         }
 
         _samples.Sort();
@@ -81,7 +84,7 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
         long outlierCount = belowCount + aboveCount;
         double outlierRatio = (double)outlierCount / _samples.Count;
 
-        return new StatisticResult("quantile", new QuantileResult(
+        yield return new StatisticResult("quantile", new QuantileResult(
             P01: Percentile(0.01),
             P05: Percentile(0.05),
             P25: p25,

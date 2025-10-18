@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -17,7 +18,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.ValueCount);
         Assert.Equal(3, result.MinElementCount);
         Assert.Equal(3, result.MaxElementCount);
@@ -37,7 +38,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromVector([1.0f, 2.0f], _arena), _arena);
         accumulator.Add(DataValue.FromVector([10.0f, 20.0f, 30.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.ValueCount);
         Assert.Equal(2, result.MinElementCount);
         Assert.Equal(3, result.MaxElementCount);
@@ -53,7 +54,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.ValueCount);
         Assert.Equal(2, result.MinRank);
         Assert.Equal(2, result.MaxRank);
@@ -72,7 +73,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f], [2, 2, 2], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.MinRank);
         Assert.Equal(3, result.MaxRank);
         Assert.Equal(8, result.ElementStats.Count);
@@ -86,7 +87,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromVector([1.0f, 2.0f], _arena), _arena);
         accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.MinRank);
         Assert.Equal(2, result.MaxRank);
     }
@@ -99,7 +100,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.Vector), _arena);
         accumulator.Add(DataValue.FromVector([5.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.ValueCount);
     }
 
@@ -108,7 +109,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
     {
         VectorStatsAccumulator accumulator = new();
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.ValueCount);
         Assert.Equal(0, result.MinElementCount);
         Assert.Equal(0, result.MaxElementCount);
@@ -118,7 +119,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         VectorStatsAccumulator accumulator = new();
-        Assert.Equal("vector_stats", accumulator.GetResult().Name);
+        Assert.Equal("vector_stats", accumulator.GetResults().Single().Name);
     }
 
     [Fact]
@@ -128,7 +129,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromVector([0.0f, 1.0f, 0.0f, 2.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.ZeroElementCount);
         Assert.Equal(0.5, result.ZeroElementRatio, 1e-10);
         Assert.Equal(0, result.ZeroVectorCount);
@@ -141,7 +142,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.ZeroElementCount);
         Assert.Equal(1.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(1, result.ZeroVectorCount);
@@ -156,7 +157,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromVector([0.0f, 0.2f, 0.0f], _arena), _arena);
         accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(8, result.ZeroElementCount);
         Assert.Equal(8.0 / 9.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(2, result.ZeroVectorCount);
@@ -169,7 +170,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.ZeroElementCount);
         Assert.Equal(0.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(0, result.ZeroVectorCount);
@@ -180,7 +181,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
     {
         VectorStatsAccumulator accumulator = new();
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.ZeroElementCount);
         Assert.Equal(0.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(0, result.ZeroVectorCount);
@@ -193,7 +194,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromMatrix([0.0f, 0.0f, 0.0f, 0.0f], 2, 2, _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(4, result.ZeroElementCount);
         Assert.Equal(1.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(1, result.ZeroVectorCount);
@@ -209,7 +210,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         // ||[3, 4]||₂ = 5.0
         accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(5.0, result.NormMin, 1e-10);
         Assert.Equal(5.0, result.NormMax, 1e-10);
         Assert.Equal(5.0, result.NormMean, 1e-10);
@@ -225,7 +226,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         // ||[3, 4]||₂ = 5.0
         accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1.0, result.NormMin, 1e-10);
         Assert.Equal(5.0, result.NormMax, 1e-10);
         Assert.Equal(3.0, result.NormMean, 1e-10);
@@ -238,7 +239,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0.0, result.NormMin, 1e-10);
         Assert.Equal(0.0, result.NormMax, 1e-10);
         Assert.Equal(0.0, result.NormMean, 1e-10);
@@ -249,7 +250,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
     {
         VectorStatsAccumulator accumulator = new();
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.True(double.IsNaN(result.NormMin));
         Assert.True(double.IsNaN(result.NormMax));
         Assert.True(double.IsNaN(result.NormMean));
@@ -264,7 +265,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         // ||[3, 4]||₂ = 5.0
         accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(5.0, result.NormMin, 1e-10);
         Assert.Equal(5.0, result.NormMax, 1e-10);
         Assert.Equal(5.0, result.NormMean, 1e-10);
@@ -278,7 +279,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         // ||[1, 2, 3, 4]||₂ = sqrt(1+4+9+16) = sqrt(30)
         accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(Math.Sqrt(30.0), result.NormMin, 1e-10);
         Assert.Equal(Math.Sqrt(30.0), result.NormMax, 1e-10);
         Assert.Equal(Math.Sqrt(30.0), result.NormMean, 1e-10);
@@ -292,7 +293,7 @@ public sealed class VectorStatsAccumulatorTests : IDisposable
         // ||[1, 1, 1, 1, 1, 1, 1, 1]||₂ = sqrt(8)
         accumulator.Add(DataValue.FromTensor([1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f], [2, 2, 2], _arena), _arena);
 
-        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(Math.Sqrt(8.0), result.NormMin, 1e-10);
         Assert.Equal(Math.Sqrt(8.0), result.NormMax, 1e-10);
         Assert.Equal(Math.Sqrt(8.0), result.NormMean, 1e-10);

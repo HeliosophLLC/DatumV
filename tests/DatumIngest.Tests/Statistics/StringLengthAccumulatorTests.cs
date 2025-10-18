@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests.Statistics;
 
+using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -19,7 +20,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromString("hello", _arena), _arena);
         accumulator.Add(DataValue.FromString("greetings", _arena), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(3, result.Count);
         Assert.Equal(2, result.MinLength);
         Assert.Equal(9, result.MaxLength);
@@ -32,7 +33,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
 
         accumulator.Add(DataValue.FromString("test", _arena), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.Count);
         Assert.Equal(4, result.MinLength);
         Assert.Equal(4, result.MaxLength);
@@ -46,7 +47,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromString("", _arena), _arena);
         accumulator.Add(DataValue.FromString("abc", _arena), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.Count);
         Assert.Equal(0, result.MinLength);
         Assert.Equal(3, result.MaxLength);
@@ -60,7 +61,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
         accumulator.Add(DataValue.Null(DataKind.String), _arena);
         accumulator.Add(DataValue.FromString("hello", _arena), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(1, result.Count);
         Assert.Equal(5, result.MinLength);
     }
@@ -73,7 +74,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
         accumulator.Add(DataValue.FromUInt8(42), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.Count);
         Assert.Equal(0, result.MinLength);
         Assert.Equal(0, result.MaxLength);
@@ -87,7 +88,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
         accumulator.Add(DataValue.FromJsonValue("{\"a\":1}", _arena), _arena);
         accumulator.Add(DataValue.FromJsonValue("[1,2,3,4,5]", _arena), _arena);
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(2, result.Count);
         Assert.Equal(7, result.MinLength);
         Assert.Equal(11, result.MaxLength);
@@ -98,7 +99,7 @@ public sealed class StringLengthAccumulatorTests : IDisposable
     {
         StringLengthAccumulator accumulator = new();
 
-        StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
+        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
         Assert.Equal(0, result.Count);
         Assert.Equal(0, result.MinLength);
         Assert.Equal(0, result.MaxLength);
@@ -108,6 +109,6 @@ public sealed class StringLengthAccumulatorTests : IDisposable
     public void GetResult_HasCorrectName()
     {
         StringLengthAccumulator accumulator = new();
-        Assert.Equal("string_length", accumulator.GetResult().Name);
+        Assert.Equal("string_length", accumulator.GetResults().Single().Name);
     }
 }

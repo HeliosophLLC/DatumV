@@ -55,14 +55,18 @@ public class Ingester(
                 }
             }
 
-            statisticsCollector.Collect(batch);
+            // WriteRowBatch first so stats can resolve offsets through the writer's
+            // page slice — the slice survives the batch returning to the pool.
             WriteHandle handle = writer.WriteRowBatch(batch);
+            statisticsCollector.Collect(batch, handle.PageStore);
 
             rowCount += batch.Count;
             pool.ReturnRowBatch(batch);
 
             if (handle.RequiresFlush)
             {
+                // Merge stats' per-row-group state before the writer resets its arena.
+                statisticsCollector.FlushRowGroup(writer.WriterArena);
                 writer.FlushRowGroup();
             }
         }
@@ -73,6 +77,9 @@ public class Ingester(
             writer.Initialize(DatumFileSchema.FromSchema(new Schema([])));
         }
 
+        // Flush any pending stats state before Finalize internally flushes the last
+        // row group and disposes the writer's arena.
+        statisticsCollector.FlushRowGroup(writer.WriterArena);
         long bytesWritten = writer.Finalize();
 
         return new IngestionResult(

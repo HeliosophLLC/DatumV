@@ -124,9 +124,9 @@ internal sealed class FloatColumnEncoder : DatumColumnEncoder
             raw.AsSpan(bitmapLength, dataLength),
             bytesPerElement);
 
-        byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+        (byte[] compressed, int compressedLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-        return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat, DatumCompression.Zstd, rawLength, zoneMap);
+        return new DatumEncodedPage(compressed, compressedLength, DatumEncoding.FixedFloat, DatumCompression.Zstd, rawLength, zoneMap);
     }
 
     private static DatumZoneMap BuildFloat32ZoneMap(uint nullCount, int rowCount, float minimum, float maximum)

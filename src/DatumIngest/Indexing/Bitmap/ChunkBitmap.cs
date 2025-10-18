@@ -86,7 +86,17 @@ internal readonly struct ChunkBitmap
     /// <returns>The Zstd-compressed bitset bytes.</returns>
     internal byte[] Compress()
     {
-        return DatumCompressor.Compress(_bits, DatumFile.DatumCompression.Zstd);
+        (byte[] pooled, int length) = DatumCompressor.Compress(_bits, DatumFile.DatumCompression.Zstd);
+        try
+        {
+            byte[] result = new byte[length];
+            Buffer.BlockCopy(pooled, 0, result, 0, length);
+            return result;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(pooled);
+        }
     }
 
     /// <summary>

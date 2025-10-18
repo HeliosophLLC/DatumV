@@ -43,9 +43,9 @@ public sealed class MissingRunsAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
-        return new StatisticResult("missing_runs", new MissingRunsResult(_runCount));
+        yield return new StatisticResult("missing_runs", new MissingRunsResult(_runCount));
     }
 }
 
