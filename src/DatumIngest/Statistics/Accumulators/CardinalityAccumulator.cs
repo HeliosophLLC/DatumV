@@ -1,5 +1,6 @@
 namespace DatumIngest.Statistics.Accumulators;
 
+using System.IO.Hashing;
 using DatumIngest.Model;
 using CardinalityEstimation;
 
@@ -66,13 +67,23 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
                 _estimator.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
             case DataKind.String:
-                _estimator.Add(value.AsString(store));
+            case DataKind.JsonValue:
+                // Feed HLL the cached 64-bit XxHash of the UTF-8 bytes instead of
+                // materializing a managed string. HLL is hash-agnostic — distinct
+                // hashes still produce distinct bucket positions. Arena-slice values
+                // without a cached hash (RawContentHash == 0) fall back to hashing
+                // the UTF-8 bytes on the fly, zero-allocation.
+                {
+                    ulong stringHash = value.RawContentHash;
+                    if (stringHash == 0)
+                        stringHash = XxHash64.HashToUInt64(value.AsUtf8Span(store));
+                    _estimator.Add(unchecked((long)stringHash));
+                }
                 break;
             case DataKind.Uuid:
-                _estimator.Add(value.AsUuid().ToString());
-                break;
-            case DataKind.JsonValue:
-                _estimator.Add(value.AsJsonValue(store));
+                // Guid.GetHashCode combines all 128 bits into a 32-bit int — good enough
+                // for HLL bucketing. No string materialisation.
+                _estimator.Add(value.AsUuid().GetHashCode());
                 break;
             default:
                 _estimator.Add(value.GetHashCode());
