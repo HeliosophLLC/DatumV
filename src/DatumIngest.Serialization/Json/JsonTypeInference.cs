@@ -6,7 +6,6 @@ namespace DatumIngest.Serialization.Json;
 
 /// <summary>
 /// Shared type inference and conversion logic for JSON-based deserializers.
-/// Used by <see cref="JsonDeserializer"/> and <see cref="Jsonl.JsonlDeserializer"/>.
 /// </summary>
 internal static class JsonTypeInference
 {

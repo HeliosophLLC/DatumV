@@ -23,30 +23,17 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
     /// <inheritdoc />
     public void Add(DataValue value, IValueStore store)
     {
-        if (value.IsNull)
-        {
-            return;
-        }
+        if (value.IsNull) return;
+        if (value.Kind is not DataKind.String and not DataKind.JsonValue) return;
 
-        if (value.Kind is not DataKind.String and not DataKind.JsonValue)
-        {
-            return;
-        }
-
-        string stringValue = value.Kind == DataKind.JsonValue ? value.AsJsonValue(store) : value.AsString(store);
-        int length = stringValue.Length;
+        // Cached char count read directly from the DataValue — no UTF-8 decode, no allocation.
+        // Strings >= 65535 chars saturate to ushort.MaxValue; that's the right signal for any
+        // downstream "is this column small enough to index" decision.
+        int length = value.RawCharCount;
 
         _count++;
-
-        if (length < _minLength)
-        {
-            _minLength = length;
-        }
-
-        if (length > _maxLength)
-        {
-            _maxLength = length;
-        }
+        if (length < _minLength) _minLength = length;
+        if (length > _maxLength) _maxLength = length;
     }
 
     /// <inheritdoc />

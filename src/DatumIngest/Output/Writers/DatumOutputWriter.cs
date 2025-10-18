@@ -61,7 +61,15 @@ public sealed class DatumOutputWriter : IOutputWriter
             throw new InvalidOperationException("Writer not initialized. Call InitializeAsync first.");
         }
 
-        _fileWriter.WriteRow(row);
+        // Wrap the single row in a RowBatch since DatumFileWriter only exposes a batch API.
+        // The batch owns a lazy Arena which stays empty for rows with inline-only values;
+        // rows with reference-type values rely on the caller having populated the row's
+        // source arena, which DatumFileWriter cannot resolve here. This row-at-a-time path
+        // is primarily used by the query-output pipeline where rows are inline-typed.
+        RowBatch batch = RowBatch.Rent(1);
+        batch.Add(row);
+        _fileWriter.WriteRowBatch(batch);
+        batch.Return();
         _rowsWritten++;
         return Task.CompletedTask;
     }

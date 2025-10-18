@@ -588,117 +588,21 @@ static async Task<int> RunIngestAsync(TableCatalog catalog, CliOptions options)
     return 0;
 }
 
-static async Task IngestTableAsync(
+static Task IngestTableAsync(
     TableDescriptor descriptor,
     TableCatalog catalog,
     SourceIndexBuilder? indexBuilder,
     CliOptions options)
 {
-    ITableProvider provider = catalog.CreateProvider(descriptor);
-    StatisticsCollector statisticsCollector = new();
-    ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
-
-    // Compute fingerprint from source file.
-    DatumIngest.Indexing.SourceFingerprint fingerprint;
-    if (File.Exists(descriptor.FilePath))
-    {
-        await using FileStream sourceStream = File.OpenRead(descriptor.FilePath);
-        fingerprint = await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
-            sourceStream, CancellationToken.None).ConfigureAwait(false);
-    }
-    else
-    {
-        fingerprint = new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
-    }
-
-    IncrementalIndexBuilder? incrementalBuilder = indexBuilder?.CreateIncrementalBuilder(fingerprint);
-
-    // Determine output path.
-    string outputDirectory = options.OutputDirectory
-        ?? Path.GetDirectoryName(descriptor.FilePath)
-        ?? Directory.GetCurrentDirectory();
-    Directory.CreateDirectory(outputDirectory);
-
-    string tableName = GetSidecarTableName(descriptor);
-    string datumPath = Path.Combine(outputDirectory, tableName + ".datum");
-
-    Console.WriteLine($"Ingesting '{descriptor.Name}' → {datumPath}");
-
-    FusedDatumPipelineWriter datumWriter = new(datumPath, incrementalBuilder, statisticsCollector);
-
-    Dictionary<string, DataKind> columnKinds = new(StringComparer.OrdinalIgnoreCase);
-    ProgressReporter progress = new();
-    long rowCount = 0;
-
-    await foreach (RowBatch batch in provider.OpenAsync(
-        descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
-    {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            Row row = batch[i];
-            if (rowCount == 0)
-            {
-                // Initialize the writer with the inferred schema from the first row.
-                Schema schema = InferSchema(row);
-                await datumWriter.InitializeAsync(schema).ConfigureAwait(false);
-
-                foreach (string columnName in row.ColumnNames)
-                {
-                    columnKinds[columnName] = row[columnName].Kind;
-                }
-            }
-
-            datumWriter.WriteRow(row);
-            interactionCollector?.AddRow(row);
-            rowCount++;
-            progress.ReportRow();
-        }
-        batch.Return();
-    }
-
-    if (rowCount == 0)
-    {
-        Console.WriteLine($"  No rows — skipping.");
-        await datumWriter.DisposeAsync().ConfigureAwait(false);
-        return;
-    }
-
-    OutputSummary summary = await datumWriter.FinalizeAsync().ConfigureAwait(false);
-    progress.WriteSummary();
-
-    Console.WriteLine($"  {rowCount:N0} rows, {summary.BytesWritten:N0} bytes");
-
-    foreach (string file in summary.FilesCreated)
-    {
-        Console.WriteLine($"  Created: {file}");
-    }
-
-    // Build and write manifest sidecar.
-    IReadOnlyDictionary<string, ColumnStatistics> statistics = datumWriter.Statistics
-        ?? statisticsCollector.GetStatistics();
-    IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
-    QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-    SourceManifest sourceManifest = SourceManifest.Create(tableName, manifest);
-    string manifestPath = Path.Combine(outputDirectory, tableName + ".datum-manifest");
-    await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
-    Console.WriteLine($"  Manifest: {manifestPath}");
-
-    if (interactions is { Count: > 0 })
-    {
-        Console.WriteLine($"    Interactions: {interactions.Count} pairs");
-    }
-
-    // Write vocabulary sidecar when any columns have attached vocabularies.
-    SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(sourceManifest);
-    if (vocabularySet is not null)
-    {
-        string vocabularyPath = Path.Combine(outputDirectory, tableName + ".datum-vocabulary");
-        await ManifestSerializer.WriteVocabularyToFileAsync(vocabularySet, vocabularyPath).ConfigureAwait(false);
-        int columnCount = vocabularySet.Tables.Values.Sum(table => table.Columns.Count);
-        Console.WriteLine($"  Vocabulary: {vocabularyPath} ({columnCount} column(s))");
-    }
-
-    await datumWriter.DisposeAsync().ConfigureAwait(false);
+    // TODO: rewrite to use DatumIngest.Ingestion.Ingester. The old pipeline
+    // relied on per-format ITableProviders and FusedDatumPipelineWriter,
+    // both of which have been removed.
+    _ = descriptor;
+    _ = catalog;
+    _ = indexBuilder;
+    _ = options;
+    throw new NotImplementedException(
+        "The CLI 'ingest' command is being rewritten to use the new Ingester pipeline.");
 }
 
 static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions options)

@@ -1048,6 +1048,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Returns the cached char count as-is, without falling back to a UTF-8 decode.
+    /// Returns <c>0</c> for values that never cached the count (e.g. <see cref="FromStringSlice"/>),
+    /// and <c>65535</c> for strings that overflowed the 16-bit cache.
+    /// </summary>
+    /// <remarks>
+    /// Zero-allocation hot-path reader for callers that only need a coarse "how big is this string"
+    /// signal (e.g. the auto-indexing size threshold). Callers that need exact lengths for strings
+    /// near or above 65535 chars should use <see cref="StringCharCount(IValueStore)"/> instead.
+    /// </remarks>
+    public int RawCharCount => _charCount;
+
+    /// <summary>
     /// Returns the element count for collection-type values without accessing the store.
     /// <list type="bullet">
     /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>
