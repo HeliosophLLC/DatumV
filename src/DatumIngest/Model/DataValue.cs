@@ -275,6 +275,26 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
+    /// <summary>
+    /// Creates an <see cref="DataKind.Image"/> value that references bytes already
+    /// written to an <see cref="IValueStore"/> at the given <paramref name="offset"/>
+    /// and <paramref name="length"/>. Use when the bytes were streamed directly into
+    /// an arena (e.g. via <see cref="Arena.AppendFromStream"/>) to avoid the managed
+    /// <c>byte[]</c> allocation that <see cref="FromImage(byte[], IValueStore)"/>
+    /// would otherwise force.
+    /// </summary>
+    public static DataValue FromImageAtOffset(int offset, int length) =>
+        new(DataKind.Image, flags: FlagHasReference, p0: offset, p1: length);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.UInt8Array"/> value that references bytes
+    /// already written to an <see cref="IValueStore"/> at the given offset and
+    /// length. Parallel to <see cref="FromImageAtOffset"/>, for generic binary
+    /// payloads where the bytes are already arena-resident.
+    /// </summary>
+    public static DataValue FromUInt8ArrayAtOffset(int offset, int length) =>
+        new(DataKind.UInt8Array, flags: FlagHasReference, p0: offset, p1: length);
+
     /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
     internal static DataValue FromImageHandle(ImageHandle handle) =>
@@ -1013,6 +1033,26 @@ public readonly struct DataValue : IEquatable<DataValue>
         return store.RetrieveBytes(_p0, _p1);
     }
 
+    /// <summary>
+    /// Returns the byte payload for a <see cref="DataKind.UInt8Array"/> or
+    /// <see cref="DataKind.Image"/> value as a <see cref="ReadOnlySpan{T}"/> backed
+    /// by the arena, without materializing a managed <c>byte[]</c>. Zero-allocation
+    /// hot-path reader for encoders that just need to copy the bytes somewhere.
+    /// </summary>
+    /// <remarks>
+    /// The returned span is valid only while <paramref name="store"/>'s backing
+    /// arena is alive; callers must consume it before the arena resets (e.g.
+    /// before a row-group flush).
+    /// </remarks>
+    public ReadOnlySpan<byte> AsByteSpan(IValueStore store)
+    {
+        if (_kind is not (DataKind.UInt8Array or DataKind.Image))
+        {
+            throw new InvalidOperationException($"AsByteSpan is only valid for UInt8Array and Image; got {_kind}.");
+        }
+        return store.RetrieveUtf8Span(_p0, _p1);
+    }
+
     /// <summary>Returns the text string payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsString(IValueStore)"/> or <see cref="AsString(Arena)"/> instead.</remarks>
@@ -1077,6 +1117,25 @@ public readonly struct DataValue : IEquatable<DataValue>
             {
                 throw new InvalidOperationException(
                     $"Cannot read StringByteLength on a {_kind} value.");
+            }
+            return _p1;
+        }
+    }
+
+    /// <summary>
+    /// Returns the byte length of a binary payload for
+    /// <see cref="DataKind.UInt8Array"/> or <see cref="DataKind.Image"/>. Parallel
+    /// to <see cref="StringByteLength"/> for binary kinds, enabling two-pass encoders
+    /// to size the pooled output buffer before copying bytes.
+    /// </summary>
+    public int StringOrBinaryByteLength
+    {
+        get
+        {
+            if (_kind is not (DataKind.String or DataKind.JsonValue or DataKind.UInt8Array or DataKind.Image))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot read StringOrBinaryByteLength on a {_kind} value.");
             }
             return _p1;
         }

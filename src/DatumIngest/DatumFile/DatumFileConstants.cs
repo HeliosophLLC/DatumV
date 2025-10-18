@@ -40,6 +40,17 @@ public static class DatumFileConstants
     public const int DefaultRowGroupSize = 65_536;
 
     /// <summary>
+    /// Soft cap on writer-arena bytes before a row group is flushed, even if the row
+    /// count hasn't reached <see cref="DefaultRowGroupSize"/>. Protects ingestion of
+    /// heavy per-row payloads (images, large binary blobs) where 64k rows would hold
+    /// multi-gigabyte arenas before a natural flush. 128 MB is a pragmatic middle
+    /// ground — small enough to flush within seconds on an image workload, large
+    /// enough that per-row-group overhead (descriptor + zone map + page directory)
+    /// stays amortised.
+    /// </summary>
+    public const int RowGroupArenaByteThreshold = 128 * 1024 * 1024;
+
+    /// <summary>
     /// The writer will not reduce the row group size below this floor even when
     /// the auto-tuner detects oversized float pages.
     /// </summary>

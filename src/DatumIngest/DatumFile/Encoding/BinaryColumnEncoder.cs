@@ -43,12 +43,69 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
 
         int rowCount = values.Count;
         DatumNullBitmap nullBitmap = new(rowCount);
-        byte[][] blobs = ArrayPool<byte[]>.Shared.Rent(rowCount);
+
+        // Pass 1: sum per-row byte lengths and mark nulls. Read _p1 directly via the
+        // new per-value byte-span accessor — no managed byte[] allocation per row.
+        // For image columns (JPEGs averaging ≫85KB) this eliminates a large-object-heap
+        // allocation per entry.
+        int totalPoolBytes = 0;
         uint nullCount = 0;
         long maxBlobSize = 0;
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            DataValue value = values[rowIndex];
+            if (value.IsNull)
+            {
+                nullBitmap.SetNull(rowIndex);
+                nullCount++;
+                continue;
+            }
+
+            // _p1 holds the byte length for UInt8Array and Image payloads.
+            int blobLength = value.StringOrBinaryByteLength;
+            totalPoolBytes += blobLength;
+            if (blobLength > maxBlobSize) maxBlobSize = blobLength;
+        }
+
+        DatumZoneMap zoneMap = new(nullCount);
+        bool externalize = descriptor.ExternalizesBlobs && maxBlobSize > descriptor.ExternalizationThresholdBytes;
+
+        if (externalize)
+        {
+            return EncodeExternalized(values, descriptor, context, nullBitmap, rowCount, nullCount, zoneMap, isImage, compression);
+        }
+
+        return EncodeInline(values, context, nullBitmap, rowCount, nullCount, totalPoolBytes, zoneMap, compression);
+    }
+
+    private static DatumEncodedPage EncodeInline(
+        IReadOnlyList<DataValue> values,
+        DatumEncoderContext context,
+        DatumNullBitmap nullBitmap,
+        int rowCount,
+        uint nullCount,
+        int totalPoolBytes,
+        DatumZoneMap zoneMap,
+        DatumCompression compression)
+    {
+        byte[] bitmapBytes = nullBitmap.ToBytes();
+        int offsetsSize = (rowCount + 1) * 4;
+        int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
         try
         {
+            Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
+
+            int offsetWrite = bitmapBytes.Length;
+            int poolWrite = offsetWrite + offsetsSize;
+            uint runningOffset = 0;
+
+            BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+            offsetWrite += 4;
+
+            // Pass 2: copy bytes directly from each page's store into the pooled raw
+            // buffer. No per-row byte[] materialization.
             foreach (PageSpan page in context.Pages)
             {
                 IValueStore pageStore = page.ArenaLength > 0
@@ -60,76 +117,16 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
                 {
                     DataValue value = values[rowIndex];
 
-                    if (value.IsNull)
+                    if (!value.IsNull)
                     {
-                        nullBitmap.SetNull(rowIndex);
-                        blobs[rowIndex] = [];
-                        nullCount++;
+                        ReadOnlySpan<byte> bytes = value.AsByteSpan(pageStore);
+                        bytes.CopyTo(raw.AsSpan(poolWrite, bytes.Length));
+                        poolWrite += bytes.Length;
+                        runningOffset += (uint)bytes.Length;
                     }
-                    else
-                    {
-                        byte[] blob = isImage ? value.AsImage(pageStore) : value.AsUInt8Array(pageStore);
-                        blobs[rowIndex] = blob;
-                        if (blob.Length > maxBlobSize) maxBlobSize = blob.Length;
-                    }
-                }
-            }
 
-            DatumZoneMap zoneMap = new(nullCount);
-
-            bool externalize = descriptor.ExternalizesBlobs && maxBlobSize > descriptor.ExternalizationThresholdBytes;
-
-            if (externalize)
-            {
-                return EncodeExternalized(values, descriptor, context, nullBitmap, blobs, rowCount, nullCount, zoneMap, isImage, compression);
-            }
-
-            return EncodeInline(nullBitmap, blobs, rowCount, nullCount, zoneMap, compression);
-        }
-        finally
-        {
-            ArrayPool<byte[]>.Shared.Return(blobs, clearArray: true);
-        }
-    }
-
-    private static DatumEncodedPage EncodeInline(
-        DatumNullBitmap nullBitmap,
-        byte[][] blobs,
-        int rowCount,
-        uint nullCount,
-        DatumZoneMap zoneMap,
-        DatumCompression compression)
-    {
-        int totalPoolBytes = 0;
-        for (int i = 0; i < rowCount; i++) totalPoolBytes += blobs[i].Length;
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        int offsetsSize = (rowCount + 1) * 4;
-        int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
-        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
-
-        try
-        {
-            Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
-
-            int offsetWrite = bitmapBytes.Length;
-            int poolWrite = bitmapBytes.Length + offsetsSize;
-            uint runningOffset = 0;
-
-            BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-            offsetWrite += 4;
-
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
-            {
-                byte[] blob = blobs[rowIndex];
-                runningOffset += (uint)blob.Length;
-                BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-                offsetWrite += 4;
-
-                if (blob.Length > 0)
-                {
-                    Buffer.BlockCopy(blob, 0, raw, poolWrite, blob.Length);
-                    poolWrite += blob.Length;
+                    BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+                    offsetWrite += 4;
                 }
             }
 
@@ -148,7 +145,6 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         DatumColumnDescriptor descriptor,
         DatumEncoderContext context,
         DatumNullBitmap nullBitmap,
-        byte[][] blobs,
         int rowCount,
         uint nullCount,
         DatumZoneMap zoneMap,
@@ -166,22 +162,36 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
 
         try
         {
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            // Walk pages once: for each non-null entry, stream its bytes straight to the
+            // sidecar file via FileStream.Write(span) — no managed byte[] materialization
+            // of the blob itself. Only the path is materialized (UTF-8 encoded) for
+            // inclusion in the column-page pool.
+            foreach (PageSpan page in context.Pages)
             {
-                if (nullBitmap.IsNull(rowIndex))
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                    : context.Store;
+
+                int endRow = page.RowStart + page.RowCount;
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
                 {
-                    pathBytes[rowIndex] = [];
-                    continue;
+                    if (nullBitmap.IsNull(rowIndex))
+                    {
+                        pathBytes[rowIndex] = [];
+                        continue;
+                    }
+
+                    ReadOnlySpan<byte> blob = values[rowIndex].AsByteSpan(pageStore);
+                    string fileName = $"{context.RowGroupIndex}_{blobIndex++}{ImageExtension}";
+                    string absolutePath = Path.Combine(columnSidecarDir, fileName);
+                    using (FileStream sidecarStream = File.Create(absolutePath))
+                    {
+                        sidecarStream.Write(blob);
+                    }
+
+                    string relativePath = Path.GetRelativePath(datumFileDir, absolutePath);
+                    pathBytes[rowIndex] = System.Text.Encoding.UTF8.GetBytes(relativePath);
                 }
-
-                byte[] blob = blobs[rowIndex];
-                string fileName = $"{context.RowGroupIndex}_{blobIndex++}{ImageExtension}";
-                string absolutePath = Path.Combine(columnSidecarDir, fileName);
-                File.WriteAllBytes(absolutePath, blob);
-
-                // Store a path relative to the datum file's directory so the file set is portable.
-                string relativePath = Path.GetRelativePath(datumFileDir, absolutePath);
-                pathBytes[rowIndex] = System.Text.Encoding.UTF8.GetBytes(relativePath);
             }
 
             int totalPoolBytes = 0;

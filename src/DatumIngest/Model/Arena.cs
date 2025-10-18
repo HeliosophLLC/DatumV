@@ -310,6 +310,43 @@ public sealed class Arena : IValueStore, IDisposable
     public (int Offset, int Length) AppendBytes(ReadOnlySpan<byte> bytes)
         => WriteBytes(bytes);
 
+    /// <summary>
+    /// Reads exactly <paramref name="length"/> bytes from <paramref name="source"/> directly
+    /// into the arena's backing memory, avoiding an intermediate managed <c>byte[]</c>.
+    /// Returns <c>(Offset, bytesRead)</c> — if the stream ends early, <c>bytesRead</c>
+    /// reflects the actual number of bytes written and the arena position is advanced
+    /// accordingly.
+    /// </summary>
+    /// <remarks>
+    /// Motivation: decompressed ZIP entries and other large binary sources average well
+    /// above the 85 KB Large Object Heap threshold. Allocating a fresh <c>byte[]</c> per
+    /// source entry forces Gen2 collections. Writing directly into the arena's memory-mapped
+    /// storage avoids the managed heap entirely. The write is performed under the same lock
+    /// as <see cref="AppendBytes"/>, so single-writer callers (e.g. a deserializer) can
+    /// stream many entries back-to-back without GC pressure.
+    /// </remarks>
+    /// <param name="source">Source stream. Read synchronously; the caller's lock is held for the duration of the read.</param>
+    /// <param name="length">Expected byte count. Capacity is pre-grown by this amount.</param>
+    public (int Offset, int Length) AppendFromStream(Stream source, int length)
+    {
+        ThrowIfPooled();
+        lock (_writeLock)
+        {
+            EnsureCapacity(length);
+            int offset = _position;
+            Span<byte> destination = GetSpanForWrite(offset, length);
+            int total = 0;
+            while (total < length)
+            {
+                int read = source.Read(destination.Slice(total, length - total));
+                if (read == 0) break;
+                total += read;
+            }
+            _position += total;
+            return (offset, total);
+        }
+    }
+
     /// <summary>Returns raw bytes previously appended.</summary>
     /// <param name="offset">Byte offset returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>

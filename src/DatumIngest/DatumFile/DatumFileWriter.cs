@@ -202,7 +202,13 @@ public sealed class DatumFileWriter : IDisposable
         }
 
         ArenaSlice? pageStore = pageLength > 0 ? _writerArena.Slice(pageBase, pageLength) : null;
-        _pendingFlush = _columnBuffers[0].Count >= _rowGroupSize;
+
+        // Flush when either (a) the row count reaches the target row-group size, or
+        // (b) the writer's arena bytes exceed a byte-based soft cap. The byte cap
+        // protects image and large-blob ingestion, where 64k rows of ~150 KB payload
+        // each would hold ~9 GB in memory before a row-count-only trigger fires.
+        _pendingFlush = _columnBuffers[0].Count >= _rowGroupSize
+            || _writerArena.BytesWritten >= DatumFileConstants.RowGroupArenaByteThreshold;
         return new WriteHandle(pageStore, _pendingFlush);
     }
 

@@ -3,6 +3,7 @@ using DatumIngest.Ingestion;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
+using DatumIngest.Serialization.Zip;
 
 string sourcePath = args.Length > 0
     ? args[0]
@@ -11,6 +12,10 @@ string sourcePath = args.Length > 0
 string destPath = args.Length > 1
     ? args[1]
     : Path.ChangeExtension(sourcePath, ".datum");
+
+// Optional: third CLI arg = max wall-clock seconds before cancelling.
+// Useful for profiling large sources without committing to a full ingest.
+int? timeoutSeconds = args.Length > 2 && int.TryParse(args[2], out int t) ? t : null;
 
 if (!File.Exists(sourcePath))
 {
@@ -22,9 +27,10 @@ long sourceSize = new FileInfo(sourcePath).Length;
 Console.WriteLine($"Source:      {sourcePath}");
 Console.WriteLine($"Dest:        {destPath}");
 Console.WriteLine($"Source size: {sourceSize:N0} bytes ({sourceSize / (1024.0 * 1024.0):F1} MB)");
+if (timeoutSeconds is int sec) Console.WriteLine($"Timeout:     {sec}s");
 Console.WriteLine();
 
-FormatRegistry registry = new([new CsvFileFormat()]);
+FormatRegistry registry = new([new CsvFileFormat(), new ZipFileFormat()]);
 PoolBacking backing = new();
 Pool pool = new(backing);
 Ingester ingester = new(registry, pool);
@@ -32,13 +38,26 @@ Ingester ingester = new(registry, pool);
 FileFormatDescriptor source = new(sourcePath);
 OutputDescriptor dest = new(destPath);
 
+using CancellationTokenSource cts = timeoutSeconds is int seconds
+    ? new CancellationTokenSource(TimeSpan.FromSeconds(seconds))
+    : new CancellationTokenSource();
+
 Stopwatch sw = Stopwatch.StartNew();
 long beforeGen0 = GC.CollectionCount(0);
 long beforeGen1 = GC.CollectionCount(1);
 long beforeGen2 = GC.CollectionCount(2);
 long beforeAllocated = GC.GetTotalAllocatedBytes(precise: false);
 
-IngestionResult result = await ingester.IngestAsync(source, dest);
+IngestionResult? result = null;
+try
+{
+    result = await ingester.IngestAsync(source, dest, cts.Token);
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine($"Cancelled after {sw.Elapsed.TotalSeconds:F1}s (timeout reached).");
+    Console.WriteLine();
+}
 
 sw.Stop();
 long deltaGen0 = GC.CollectionCount(0) - beforeGen0;
@@ -49,31 +68,47 @@ long deltaAllocated = GC.GetTotalAllocatedBytes(precise: false) - beforeAllocate
 double elapsedSeconds = sw.Elapsed.TotalSeconds;
 double mbPerSec = sourceSize / (1024.0 * 1024.0) / elapsedSeconds;
 
-if (result.ScanPass is { } scan)
+if (result is not null)
 {
-    Console.WriteLine("Scan pass:");
-    Console.WriteLine($"  Rows:      {scan.RowCount:N0}");
-    Console.WriteLine($"  Time:      {scan.Elapsed.TotalSeconds:F2}s");
-    Console.WriteLine($"  Read rate: {scan.BytesRead / (1024.0 * 1024.0) / scan.Elapsed.TotalSeconds:F1} MB/s");
+    if (result.ScanPass is { } scan)
+    {
+        Console.WriteLine("Scan pass:");
+        Console.WriteLine($"  Rows:      {scan.RowCount:N0}");
+        Console.WriteLine($"  Time:      {scan.Elapsed.TotalSeconds:F2}s");
+        Console.WriteLine($"  Read rate: {scan.BytesRead / (1024.0 * 1024.0) / scan.Elapsed.TotalSeconds:F1} MB/s");
+        Console.WriteLine();
+    }
+
+    Console.WriteLine("Ingest pass:");
+    Console.WriteLine($"  Rows:       {result.IngestPass.RowCount:N0}");
+    Console.WriteLine($"  Batches:    {result.IngestPass.BatchCount:N0}");
+    Console.WriteLine($"  Arena:      {result.IngestPass.ArenaBytesWritten / (1024.0 * 1024.0):F1} MB");
+    Console.WriteLine($"  Time:       {result.IngestPass.Elapsed.TotalSeconds:F2}s");
+    Console.WriteLine();
+
+    Console.WriteLine("Totals:");
+    Console.WriteLine($"  Rows:       {result.RowCount:N0}");
+    Console.WriteLine($"  Bytes out:  {result.BytesWritten:N0} ({result.BytesWritten / (1024.0 * 1024.0):F1} MB)");
+    Console.WriteLine($"  Time:       {elapsedSeconds:F1}s");
+    Console.WriteLine($"  Row rate:   {result.RowCount / elapsedSeconds:N0} rows/s");
+    Console.WriteLine($"  Read rate:  {mbPerSec:F1} MB/s");
+    Console.WriteLine();
+}
+else
+{
+    Console.WriteLine("Partial run — ingest was cancelled before completion.");
+    Console.WriteLine($"  Elapsed:  {elapsedSeconds:F1}s");
+    if (File.Exists(destPath))
+    {
+        long partialOutput = new FileInfo(destPath).Length;
+        Console.WriteLine($"  Partial output: {partialOutput:N0} bytes ({partialOutput / (1024.0 * 1024.0):F1} MB)");
+    }
     Console.WriteLine();
 }
 
-Console.WriteLine("Ingest pass:");
-Console.WriteLine($"  Rows:       {result.IngestPass.RowCount:N0}");
-Console.WriteLine($"  Batches:    {result.IngestPass.BatchCount:N0}");
-Console.WriteLine($"  Arena:      {result.IngestPass.ArenaBytesWritten / (1024.0 * 1024.0):F1} MB");
-Console.WriteLine($"  Time:       {result.IngestPass.Elapsed.TotalSeconds:F2}s");
-Console.WriteLine();
-
-Console.WriteLine("Totals:");
-Console.WriteLine($"  Rows:       {result.RowCount:N0}");
-Console.WriteLine($"  Bytes out:  {result.BytesWritten:N0} ({result.BytesWritten / (1024.0 * 1024.0):F1} MB)");
-Console.WriteLine($"  Time:       {elapsedSeconds:F1}s");
-Console.WriteLine($"  Row rate:   {result.RowCount / elapsedSeconds:N0} rows/s");
-Console.WriteLine($"  Read rate:  {mbPerSec:F1} MB/s");
-Console.WriteLine();
 Console.WriteLine($"Allocated:   {deltaAllocated / (1024.0 * 1024.0):F1} MB");
-Console.WriteLine($"  per row:   {deltaAllocated / (double)result.RowCount:F1} bytes");
+if (result?.RowCount > 0)
+    Console.WriteLine($"  per row:   {deltaAllocated / (double)result.RowCount:F1} bytes");
 Console.WriteLine($"GC gen0:     {deltaGen0}");
 Console.WriteLine($"GC gen1:     {deltaGen1}");
 Console.WriteLine($"GC gen2:     {deltaGen2}");
