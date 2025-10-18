@@ -140,9 +140,6 @@ public enum InsightKind
     /// <summary>Multiple tables share overlapping columns with high value overlap, suggesting denormalized data.</summary>
     DenormalizationHint,
 
-    /// <summary>A central table has many one-to-many relationships to dimension tables, forming a star schema.</summary>
-    StarSchema,
-
     /// <summary>
     /// Two or more tables share identical schemas and connect to the same hub tables,
     /// indicating partitions of the same entity (e.g., train/test splits).

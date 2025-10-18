@@ -1,5 +1,4 @@
 using DatumIngest.Manifest;
-using DatumIngest.Manifest.SchemaMatching;
 
 namespace DatumIngest.Tests.Manifest;
 
@@ -10,8 +9,6 @@ namespace DatumIngest.Tests.Manifest;
 /// </summary>
 public sealed class ManifestSerializerCorruptionTests
 {
-    // ───────────── Manifest deserialization ─────────────
-
     [Fact]
     public void Deserialize_EmptyString_Throws()
     {
@@ -58,55 +55,5 @@ public sealed class ManifestSerializerCorruptionTests
         {
             // Clean exception — acceptable.
         }
-    }
-
-    // ───────────── Vocabulary deserialization ─────────────
-
-    [Fact]
-    public void DeserializeVocabulary_EmptyString_Throws()
-    {
-        Assert.ThrowsAny<Exception>(() => ManifestSerializer.DeserializeVocabulary(""));
-    }
-
-    [Fact]
-    public void DeserializeVocabulary_GarbageText_Throws()
-    {
-        Assert.ThrowsAny<Exception>(() => ManifestSerializer.DeserializeVocabulary("not json at all"));
-    }
-
-    [Fact]
-    public void DeserializeVocabulary_TruncatedJson_Throws()
-    {
-        Assert.ThrowsAny<Exception>(() => ManifestSerializer.DeserializeVocabulary("{\"vocabs\": ["));
-    }
-
-    [Fact]
-    public void DeserializeVocabulary_NullLiteral_ReturnsNull()
-    {
-        SourceVocabularySet? result = ManifestSerializer.DeserializeVocabulary("null");
-
-        Assert.Null(result);
-    }
-
-    // ───────────── Star schema deserialization ─────────────
-
-    [Fact]
-    public void DeserializeStarSchema_EmptyString_Throws()
-    {
-        Assert.ThrowsAny<Exception>(() => ManifestSerializer.DeserializeStarSchema(""));
-    }
-
-    [Fact]
-    public void DeserializeStarSchema_GarbageText_Throws()
-    {
-        Assert.ThrowsAny<Exception>(() => ManifestSerializer.DeserializeStarSchema("!!!"));
-    }
-
-    [Fact]
-    public void DeserializeStarSchema_NullLiteral_ReturnsNull()
-    {
-        StarSchemaResult? result = ManifestSerializer.DeserializeStarSchema("null");
-
-        Assert.Null(result);
     }
 }

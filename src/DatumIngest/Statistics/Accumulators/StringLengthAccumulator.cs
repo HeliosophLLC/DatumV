@@ -37,9 +37,9 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public StatisticResult GetResult()
+    public IEnumerable<StatisticResult> GetResults()
     {
-        return new StatisticResult("string_length", new StringLengthResult(_count, MinLength, MaxLength));
+        yield return new StatisticResult("string_length", new StringLengthResult(_count, MinLength, MaxLength));
     }
 }
 

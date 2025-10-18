@@ -533,7 +533,6 @@ public sealed class TableCatalog : IDisposable
     {
         HashSet<string> loadedIndexPaths = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> loadedManifestPaths = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> loadedVocabularyPaths = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> loadedSchemaPaths = new(StringComparer.OrdinalIgnoreCase);
 
         // Snapshot table names to avoid issues if the set is mutated.
@@ -545,7 +544,6 @@ public sealed class TableCatalog : IDisposable
 
             DiscoverSidecarIndex(descriptor, tableNames, loadedIndexPaths);
             DiscoverSidecarManifest(descriptor, tableNames, loadedManifestPaths);
-            DiscoverSidecarVocabulary(descriptor, tableNames, loadedVocabularyPaths);
             DiscoverSidecarSchema(descriptor, tableNames, loadedSchemaPaths);
         }
     }
@@ -653,68 +651,6 @@ public sealed class TableCatalog : IDisposable
             descriptor.FilePath,
             tableNames,
             (name, manifest) => { if (!_manifests.ContainsKey(name)) RegisterManifest(name, manifest); });
-    }
-
-    private void DiscoverSidecarVocabulary(
-        TableDescriptor descriptor,
-        List<string> tableNames,
-        HashSet<string> loadedPaths)
-    {
-        string sidecarPath = FileFormatDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-vocabulary";
-
-        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
-        {
-            return;
-        }
-
-        string json = File.ReadAllText(sidecarPath);
-        SourceVocabularySet? vocabularySet = ManifestSerializer.DeserializeVocabulary(json);
-
-        if (vocabularySet is null)
-        {
-            return;
-        }
-
-        // Attach vocabularies to already-registered manifests rather than registering
-        // a separate artifact. Each table's vocabulary set is applied to its manifest,
-        // enabling exact Jaccard/containment scoring during schema matching analysis.
-        foreach (string name in tableNames)
-        {
-            if (!_descriptors.TryGetValue(name, out TableDescriptor? d)
-                || !string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string? resolvedName = ResolveVocabularyTableName(vocabularySet, name, d.FilePath);
-
-            if (resolvedName is not null
-                && vocabularySet.Tables.TryGetValue(resolvedName, out TableVocabularySet? tableVocabularySet)
-                && _manifests.TryGetValue(name, out QueryResultsManifest? manifest))
-            {
-                tableVocabularySet.ApplyTo(manifest);
-            }
-        }
-    }
-
-    private static string? ResolveVocabularyTableName(
-        SourceVocabularySet vocabularySet,
-        string tableName,
-        string sourceFilePath)
-    {
-        if (vocabularySet.Tables.ContainsKey(tableName))
-        {
-            return tableName;
-        }
-
-        string derivedTableName = FileFormatDetector.DeriveTableName(sourceFilePath);
-
-        if (vocabularySet.Tables.ContainsKey(derivedTableName))
-        {
-            return derivedTableName;
-        }
-
-        return null;
     }
 
     private void DiscoverSidecarSchema(

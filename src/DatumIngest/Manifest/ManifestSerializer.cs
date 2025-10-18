@@ -3,7 +3,6 @@ namespace DatumIngest.Manifest;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DatumIngest.Manifest.Insights;
-using DatumIngest.Manifest.SchemaMatching;
 
 /// <summary>
 /// Serializes and deserializes <see cref="SourceManifest"/> using System.Text.Json
@@ -78,55 +77,6 @@ public static class ManifestSerializer
         await WriteToFileAsync(SourceManifest.Create(tableName, manifest), path);
     }
 
-    /// <summary>
-    /// Serializes a <see cref="SourceVocabularySet"/> to a JSON string.
-    /// </summary>
-    public static string SerializeVocabulary(SourceVocabularySet vocabularySet)
-    {
-        return JsonSerializer.Serialize(vocabularySet, ManifestJsonContext.Default.SourceVocabularySet);
-    }
-
-    /// <summary>
-    /// Deserializes a <see cref="SourceVocabularySet"/> from a JSON string.
-    /// </summary>
-    public static SourceVocabularySet? DeserializeVocabulary(string json)
-    {
-        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.SourceVocabularySet);
-    }
-
-    /// <summary>
-    /// Writes a <see cref="SourceVocabularySet"/> to a file as formatted JSON.
-    /// </summary>
-    public static async Task WriteVocabularyToFileAsync(SourceVocabularySet vocabularySet, string path)
-    {
-        string json = SerializeVocabulary(vocabularySet);
-        await File.WriteAllTextAsync(path, json);
-    }
-
-    /// <summary>
-    /// Serializes a <see cref="StarSchemaResult"/> to a JSON string.
-    /// </summary>
-    public static string SerializeStarSchema(StarSchemaResult starSchema)
-    {
-        return JsonSerializer.Serialize(starSchema, ManifestJsonContext.Default.StarSchemaResult);
-    }
-
-    /// <summary>
-    /// Deserializes a <see cref="StarSchemaResult"/> from a JSON string.
-    /// </summary>
-    public static StarSchemaResult? DeserializeStarSchema(string json)
-    {
-        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.StarSchemaResult);
-    }
-
-    /// <summary>
-    /// Writes a <see cref="StarSchemaResult"/> to a file as formatted JSON.
-    /// </summary>
-    public static async Task WriteStarSchemaToFileAsync(StarSchemaResult starSchema, string path)
-    {
-        string json = SerializeStarSchema(starSchema);
-        await File.WriteAllTextAsync(path, json);
-    }
 }
 
 /// <summary>
@@ -154,12 +104,6 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(QueryAnnotation))]
 [JsonSerializable(typeof(InsightThresholds))]
 [JsonSerializable(typeof(QuerySynthesisOptions))]
-[JsonSerializable(typeof(SourceVocabularySet))]
-[JsonSerializable(typeof(TableVocabularySet))]
-[JsonSerializable(typeof(StarSchemaResult))]
-[JsonSerializable(typeof(HubTable))]
-[JsonSerializable(typeof(SpokeTable))]
-[JsonSerializable(typeof(JoinClassification))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

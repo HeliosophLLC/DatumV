@@ -15,7 +15,6 @@ using DatumIngest.Output;
 using DatumIngest.Output.Checkpoint;
 using CheckpointFingerprint = DatumIngest.Output.Checkpoint.SourceFingerprint;
 using DatumIngest.Manifest;
-using DatumIngest.Manifest.SchemaMatching;
 using DatumIngest.Output.Writers;
 using DatumIngest.Cli.Shell;
 using DatumIngest.Parsing;
@@ -57,11 +56,6 @@ try
     if (options.Command == "manifest-schema")
     {
         return await RunManifestSchemaAsync(catalog, options.OutputPath);
-    }
-
-    if (options.Command == "star-schema")
-    {
-        return await RunStarSchemaAsync(catalog, options);
     }
 
     // schema is purely compile-time resolution — no execution needed, no gRPC.
@@ -136,7 +130,7 @@ try
         "stats" => await RunStatsViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, grpcParameters),
         "explain" => await RunExplainViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.Analyze),
         "manifest" => await RunManifestViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.OutputPath, grpcParameters),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', 'ingest', or 'star-schema'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'ingest'.")
     };
 }
 catch (ArgumentException ex)
@@ -516,18 +510,6 @@ static async Task BuildGroupedIndexAndManifestAsync(
         await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
 
         Console.WriteLine($"Manifest created: {manifestPath}");
-
-        // Write grouped vocabulary sidecar when any columns have attached vocabularies.
-        SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(sourceManifest);
-
-        if (vocabularySet is not null)
-        {
-            string vocabularyPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-vocabulary";
-            await ManifestSerializer.WriteVocabularyToFileAsync(vocabularySet, vocabularyPath).ConfigureAwait(false);
-
-            int columnCount = vocabularySet.Tables.Values.Sum(table => table.Columns.Count);
-            Console.WriteLine($"Vocabulary created: {vocabularyPath} ({columnCount} column(s))");
-        }
     }
     finally
     {
@@ -603,95 +585,6 @@ static Task IngestTableAsync(
     _ = options;
     throw new NotImplementedException(
         "The CLI 'ingest' command is being rewritten to use the new Ingester pipeline.");
-}
-
-static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions options)
-{
-    List<TableDescriptor> descriptors = new();
-
-    foreach (string source in options.Sources)
-    {
-        if (Directory.Exists(source))
-        {
-            continue;
-        }
-
-        TableDescriptor descriptor = ParseSourceDefinition(source);
-
-        if (!catalog.TryResolve(descriptor.Name, out _))
-        {
-            catalog.Register(descriptor);
-        }
-
-        descriptors.Add(descriptor);
-    }
-
-    if (descriptors.Count == 0)
-    {
-        foreach (string tableName in catalog.TableNames)
-        {
-            descriptors.Add(catalog.Resolve(tableName));
-        }
-    }
-
-    if (descriptors.Count == 0)
-    {
-        throw new ArgumentException("The 'star-schema' command requires at least one --source definition or a --catalog with tables.");
-    }
-
-    List<ManifestWithName> manifests = new();
-
-    foreach (TableDescriptor descriptor in descriptors)
-    {
-        ITableProvider provider = catalog.CreateProvider(descriptor);
-        StatisticsCollector statisticsCollector = new();
-        using Arena statisticsArena2 = new(); // TODO: remove when star-schema is refactored
-        Dictionary<string, DataKind> columnKinds = new();
-        long rowCount = 0;
-
-        await foreach (RowBatch batch in provider.OpenAsync(
-            descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row row = batch[i];
-                if (rowCount == 0)
-                {
-                    foreach (string columnName in row.ColumnNames)
-                    {
-                        columnKinds[columnName] = row[columnName].Kind;
-                    }
-                }
-
-                statisticsCollector.AddRow(row, statisticsArena2);
-                rowCount++;
-            }
-            batch.Return();
-        }
-
-        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
-        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
-        string tableName = GetSidecarTableName(descriptor);
-        manifests.Add(new ManifestWithName(tableName, manifest));
-
-        Console.WriteLine($"  {tableName}: {rowCount:N0} rows, {columnKinds.Count} columns");
-    }
-
-    StarSchemaResult result = StarSchemaDetector.Detect(manifests);
-
-    string json = ManifestSerializer.SerializeStarSchema(result);
-
-    if (options.OutputPath is not null)
-    {
-        await File.WriteAllTextAsync(options.OutputPath, json).ConfigureAwait(false);
-        Console.WriteLine($"Star schema written: {options.OutputPath}");
-    }
-    else
-    {
-        Console.WriteLine(json);
-    }
-
-    return 0;
 }
 
 static string GetSidecarTableName(TableDescriptor descriptor)
