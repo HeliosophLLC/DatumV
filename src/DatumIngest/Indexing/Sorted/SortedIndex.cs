@@ -3,7 +3,7 @@ using System.IO.MemoryMappedFiles;
 using System.Text;
 using DatumIngest.Model;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.Indexing.Sorted;
 
 /// <summary>
 /// A memory-mapped <see cref="IColumnIndex"/> for a single column, backed by a fixed-width
@@ -26,7 +26,7 @@ namespace DatumIngest.Indexing;
 /// fixed 12-byte layout, parallel to the keys array.
 /// </para>
 /// </remarks>
-internal sealed class MappedSortedIndex : IColumnIndex
+internal sealed class SortedIndex : IColumnIndex
 {
     /// <summary>Fixed size of each locator entry: 4-byte chunk index + 8-byte row offset.</summary>
     internal const int LocatorWidth = 12;
@@ -50,7 +50,7 @@ internal sealed class MappedSortedIndex : IColumnIndex
     /// <param name="locatorsOffset">Byte offset of the locators array within the mapped region.</param>
     /// <param name="stringTableOffset">Byte offset of the string table (0 for non-string columns).</param>
     /// <param name="stringTableLength">Byte length of the string table (0 for non-string columns).</param>
-    public MappedSortedIndex(
+    public SortedIndex(
         MemoryMappedViewAccessor accessor,
         DataKind kind,
         long entryCount,
@@ -412,21 +412,6 @@ internal sealed class MappedSortedIndex : IColumnIndex
     }
 }
 
-/// <summary>
-/// Extension methods for <see cref="MemoryMappedViewAccessor"/> to read into spans.
-/// </summary>
-internal static class MemoryMappedViewAccessorExtensions
-{
-    /// <summary>
-    /// Reads a sequence of bytes from the accessor into the destination span
-    /// using the bounds-checked <see cref="System.Runtime.InteropServices.SafeBuffer.ReadSpan{T}"/> API.
-    /// </summary>
-    /// <param name="accessor">The view accessor to read from.</param>
-    /// <param name="position">The byte position in the accessor to start reading.</param>
-    /// <param name="destination">The span to fill with bytes from the accessor.</param>
-    public static void ReadArray(this MemoryMappedViewAccessor accessor, long position, Span<byte> destination)
-    {
-        accessor.SafeMemoryMappedViewHandle.ReadSpan(
-            (ulong)(accessor.PointerOffset + position), destination);
-    }
-}
+// MemoryMappedViewAccessorExtensions.ReadArray has moved to the parent
+// DatumIngest.Indexing namespace so every mmap-backed index reader can use it
+// without pulling in the Sorted namespace.

@@ -1,11 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Indexing.BTree;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
 /// Collection of <see cref="BPlusTreeColumnIndex"/> instances keyed by column name.
-/// Analogous to <see cref="SortedValueIndexSet"/> but for B+Tree-backed indexes
+/// Analogous to <see cref="SortedIndex"/> but for B+Tree-backed indexes
 /// that provide demand-paged, compressed leaf access.
 /// </summary>
 internal sealed class BPlusTreeIndexSet

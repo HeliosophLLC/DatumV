@@ -7,6 +7,7 @@ using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Execution.Operators;
 

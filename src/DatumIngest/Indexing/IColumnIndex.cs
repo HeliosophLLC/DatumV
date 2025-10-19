@@ -1,11 +1,12 @@
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
 /// Unified interface for column-level index lookup. Operators and the query planner
 /// consume indexes through this interface rather than concrete types, allowing
-/// transparent substitution of <see cref="SortedValueIndex"/> (in-memory flat array)
+/// transparent substitution of <see cref="SortedIndex"/> (in-memory flat array)
 /// and future B+Tree (disk-resident, demand-paged) implementations.
 /// </summary>
 /// <remarks>
@@ -88,7 +89,7 @@ public interface IColumnIndex
     IReadOnlySet<int> FindChunksGreaterThanOrEqual(DataValue bound);
 
     /// <summary>
-    /// Enumerates all entries in ascending key order. For <see cref="SortedValueIndex"/>,
+    /// Enumerates all entries in ascending key order. For <see cref="SortedIndex"/>,
     /// this iterates the in-memory array. For B+Tree, this walks the leaf chain
     /// page-by-page without materializing the full index.
     /// </summary>
@@ -96,7 +97,7 @@ public interface IColumnIndex
     IEnumerable<ValueIndexEntry> TraverseForward();
 
     /// <summary>
-    /// Enumerates all entries in descending key order. For <see cref="SortedValueIndex"/>,
+    /// Enumerates all entries in descending key order. For <see cref="SortedIndex"/>,
     /// this reverse-iterates the in-memory array. For B+Tree, this walks the leaf chain
     /// backward page-by-page.
     /// </summary>

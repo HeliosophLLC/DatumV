@@ -4,6 +4,8 @@ using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Indexing;
 
@@ -410,22 +412,21 @@ public sealed class SourceIndexBuilder
                 }
             }
 
-            SortedValueIndexSet? sortedIndexSet = spillWriter?.BuildSortedValueIndexSet();
-
-            // Second pass: rebuild indexes for columns whose hints failed during the primary scan.
+            // Second pass: rebuild indexes for columns whose hints failed during the
+            // primary scan. Sorted-index entries remain inside the spill writer until
+            // UnifiedIndexWriter streams them; we only merge bitmap sets here.
             if (deferredReindexColumns is { Count: > 0 })
             {
-                (BitmapIndexSet? deferredBitmaps, SortedValueIndexSet? deferredSorted) =
+                BitmapIndexSet? deferredBitmaps =
                     await RebuildDeferredColumnsAsync(
                         deferredReindexColumns, descriptor, provider, schema, cancellationToken)
                         .ConfigureAwait(false);
 
                 bitmapIndexSet = MergeBitmapIndexSets(bitmapIndexSet, deferredBitmaps);
-                sortedIndexSet = MergeSortedValueIndexSets(sortedIndexSet, deferredSorted);
             }
 
             IndexSchema indexSchema = new(schema, totalRowCount);
-            return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet,
+            return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet,
                 bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
         }
         finally
@@ -830,16 +831,20 @@ public sealed class SourceIndexBuilder
     /// Uses auto-cascade (both bitmap + sorted accumulators) for the deferred columns, then
     /// deduplicates at the end. Requires a re-openable provider.
     /// </summary>
-    private async Task<(BitmapIndexSet? Bitmaps, SortedValueIndexSet? Sorted)> RebuildDeferredColumnsAsync(
+    private async Task<BitmapIndexSet?> RebuildDeferredColumnsAsync(
         IReadOnlyList<string> deferredColumns,
         TableDescriptor descriptor,
         ITableProvider provider,
         Schema schema,
         CancellationToken cancellationToken)
     {
+        // Deferred rebuild covers bitmap-eligible columns only after the heap-backed
+        // sorted-index set was removed. Sorted coverage for columns that were dropped
+        // mid-scan is a follow-up: the primary spill writer is already in read-only
+        // state by the time we get here, so adding deferred entries to it requires a
+        // writer-reopen API that doesn't exist yet.
         HashSet<string> deferredSet = new(deferredColumns, StringComparer.OrdinalIgnoreCase);
 
-        // Create bitmap accumulators for all deferred columns (auto-eligible kinds only, no hints).
         Dictionary<string, BitmapChunkAccumulator> bitmapAccumulators = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (ColumnInfo column in schema.Columns)
@@ -850,9 +855,10 @@ public sealed class SourceIndexBuilder
             }
         }
 
-        // Create a spill writer for sorted index entries on deferred columns.
-        SortedIndexSpillWriter deferredSpillWriter = new();
-        deferredSpillWriter.Initialize(deferredSet);
+        if (bitmapAccumulators.Count == 0)
+        {
+            return null;
+        }
 
         foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
         {
@@ -860,92 +866,54 @@ public sealed class SourceIndexBuilder
         }
 
         int rowsInChunk = 0;
-        int chunkIndex = 0;
 
-        try
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+            .ConfigureAwait(false))
         {
-            await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
-                .ConfigureAwait(false))
+            for (int batchRow = 0; batchRow < batch.Count; batchRow++)
             {
-                for (int batchRow = 0; batchRow < batch.Count; batchRow++)
+                Row row = batch[batchRow];
+
+                foreach (string column in deferredColumns)
                 {
-                    Row row = batch[batchRow];
-
-                    foreach (string column in deferredColumns)
+                    if (!row.TryGetValue(column, out DataValue value))
                     {
-                        if (!row.TryGetValue(column, out DataValue value))
-                        {
-                            continue;
-                        }
-
-                        if (bitmapAccumulators.TryGetValue(column, out BitmapChunkAccumulator? bitmapAccumulator)
-                            && !bitmapAccumulator.IsAbandoned)
-                        {
-                            bitmapAccumulator.Add(value, rowsInChunk);
-                        }
-
-                        if (!value.IsNull)
-                        {
-                            if (value.Kind == DataKind.String
-                                && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
-                            {
-                                deferredSpillWriter.DropColumn(column);
-                            }
-                            else
-                            {
-                                deferredSpillWriter.AddEntry(column, new ValueIndexEntry(value, chunkIndex, rowsInChunk));
-                            }
-                        }
+                        continue;
                     }
 
-                    rowsInChunk++;
-
-                    if (rowsInChunk >= _chunkSize)
+                    if (bitmapAccumulators.TryGetValue(column, out BitmapChunkAccumulator? bitmapAccumulator)
+                        && !bitmapAccumulator.IsAbandoned)
                     {
-                        deferredSpillWriter.FlushChunk();
-
-                        foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
-                        {
-                            accumulator.FinalizeChunk(rowsInChunk);
-                            accumulator.BeginChunk(_chunkSize);
-                        }
-
-                        rowsInChunk = 0;
-                        chunkIndex++;
+                        bitmapAccumulator.Add(value, rowsInChunk);
                     }
                 }
 
-                batch.Return();
-            }
+                rowsInChunk++;
 
-            // Finalize the last partial chunk.
-            if (rowsInChunk > 0)
-            {
-                foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+                if (rowsInChunk >= _chunkSize)
                 {
-                    accumulator.FinalizeChunk(rowsInChunk);
+                    foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+                    {
+                        accumulator.FinalizeChunk(rowsInChunk);
+                        accumulator.BeginChunk(_chunkSize);
+                    }
+
+                    rowsInChunk = 0;
                 }
             }
 
-            BitmapIndexSet? bitmapResult = BuildBitmapIndexSet(bitmapAccumulators);
-
-            // Exclude successful bitmap columns from sorted to avoid dual coverage.
-            if (bitmapResult is not null)
-            {
-                foreach (string column in bitmapResult.ColumnNames)
-                {
-                    deferredSpillWriter.DropColumn(column);
-                }
-            }
-
-            SortedValueIndexSet? sortedResult = deferredSpillWriter.BuildSortedValueIndexSet();
-
-            return (bitmapResult, sortedResult);
+            batch.Return();
         }
-        finally
+
+        if (rowsInChunk > 0)
         {
-            deferredSpillWriter.Dispose();
+            foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+            {
+                accumulator.FinalizeChunk(rowsInChunk);
+            }
         }
+
+        return BuildBitmapIndexSet(bitmapAccumulators);
     }
 
     /// <summary>
@@ -983,38 +951,6 @@ public sealed class SourceIndexBuilder
         }
 
         return new BitmapIndexSet(merged);
-    }
-
-    /// <summary>
-    /// Merges two <see cref="SortedValueIndexSet"/> instances into one. Returns <c>null</c>
-    /// if both inputs are <c>null</c>.
-    /// </summary>
-    private static SortedValueIndexSet? MergeSortedValueIndexSets(
-        SortedValueIndexSet? primary, SortedValueIndexSet? deferred)
-    {
-        if (deferred is null)
-        {
-            return primary;
-        }
-
-        if (primary is null)
-        {
-            return deferred;
-        }
-
-        Dictionary<string, SortedValueIndex> merged = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (KeyValuePair<string, SortedValueIndex> entry in primary.Indexes)
-        {
-            merged[entry.Key] = entry.Value;
-        }
-
-        foreach (KeyValuePair<string, SortedValueIndex> entry in deferred.Indexes)
-        {
-            merged[entry.Key] = entry.Value;
-        }
-
-        return new SortedValueIndexSet(merged);
     }
 
     /// <summary>
@@ -1515,8 +1451,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// to <see cref="UnifiedIndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter)"/>.
     /// The spill writer is cleaned up when this builder is disposed.
     /// </summary>
-    /// <returns>The completed source index (with <see cref="SourceIndex.SortedIndexes"/>
-    /// set to <c>null</c>; sorted index data remains on disk in the spill writer).</returns>
+    /// <returns>The completed source index. Sorted index data remains on disk in the
+    /// spill writer and is serialized later by <see cref="UnifiedIndexWriter"/>.</returns>
     public SourceIndex Finalize()
     {
         if (_rowsInCurrentChunk > 0)
@@ -1553,7 +1489,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         _spillWriter?.PrepareForReading();
 
         IndexSchema indexSchema = new(schema, _totalRowCount);
-        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, sortedIndexes: null,
+        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet,
             bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
     }
 

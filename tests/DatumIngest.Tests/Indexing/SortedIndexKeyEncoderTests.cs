@@ -1,5 +1,6 @@
 using DatumIngest.Indexing;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Tests.Indexing;
 

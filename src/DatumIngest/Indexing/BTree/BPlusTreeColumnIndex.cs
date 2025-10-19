@@ -1,12 +1,13 @@
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Indexing.BTree;
 
 /// <summary>
 /// Implements <see cref="IColumnIndex"/> by delegating to a <see cref="BPlusTreeReader"/>.
 /// This adapter allows query operators and the planner to consume B+Tree indexes
-/// through the same interface as <see cref="SortedValueIndex"/>.
+/// through the same interface as <see cref="SortedIndex"/>.
 /// </summary>
 internal sealed class BPlusTreeColumnIndex : IColumnIndex
 {

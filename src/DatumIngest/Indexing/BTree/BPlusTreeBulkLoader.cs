@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Indexing.BTree;
 
@@ -15,7 +16,7 @@ namespace DatumIngest.Indexing.BTree;
 /// Memory discipline: the bulk loader holds at most one leaf page worth of
 /// entries plus the separator key list for internal node construction. For 32M
 /// rows with ~22K leaves, the separator list is a few MB — negligible compared
-/// to the hundreds of MB a <see cref="SortedValueIndex"/> would consume.
+/// to the hundreds of MB a <see cref="SortedIndex"/> would consume.
 /// </para>
 /// <para>
 /// The on-disk section layout produced by this builder:

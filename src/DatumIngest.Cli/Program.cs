@@ -476,9 +476,9 @@ static async Task BuildGroupedIndexAndManifestAsync(
                 Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
             }
 
-            if (index.SortedIndexes is not null)
+            if (index.MappedSortedIndexes is { Count: > 0 })
             {
-                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.MappedSortedIndexes.Keys)}");
             }
 
             IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();

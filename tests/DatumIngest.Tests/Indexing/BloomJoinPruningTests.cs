@@ -7,6 +7,7 @@ using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Tests.Indexing;
 
@@ -477,24 +478,6 @@ public sealed class BloomJoinPruningTests
             MakeRow(("id", DataValue.FromFloat32(6.0f)), ("value", DataValue.FromString("f"))),
         ];
 
-        // Build a sorted value index for the "id" column.
-        ValueIndexEntry[] entries =
-        [
-            new(DataValue.FromFloat32(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromFloat32(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromFloat32(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
-            new(DataValue.FromFloat32(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
-            new(DataValue.FromFloat32(5.0f), ChunkIndex: 2, RowOffsetInChunk: 0),
-            new(DataValue.FromFloat32(6.0f), ChunkIndex: 2, RowOffsetInChunk: 1),
-        ];
-
-        SortedValueIndex sortedIndex = new(entries);
-        SortedValueIndexSet sortedIndexSet = new(
-            new Dictionary<string, SortedValueIndex>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["id"] = sortedIndex
-            });
-
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
@@ -518,8 +501,7 @@ public sealed class BloomJoinPruningTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 6);
-        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: sortedIndexSet);
+        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
@@ -578,12 +560,8 @@ public sealed class BloomJoinPruningTests
             new(DataValue.FromFloat32(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
         ];
 
-        SortedValueIndex sortedIndex = new(entries);
-        SortedValueIndexSet sortedIndexSet = new(
-            new Dictionary<string, SortedValueIndex>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["id"] = sortedIndex
-            });
+        // Bloom-join pruning is exercised here; sorted-index fixture is unnecessary.
+        _ = entries;
 
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -603,8 +581,7 @@ public sealed class BloomJoinPruningTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 4);
-        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: sortedIndexSet);
+        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();

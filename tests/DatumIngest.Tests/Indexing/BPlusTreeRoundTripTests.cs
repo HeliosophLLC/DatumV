@@ -172,41 +172,16 @@ public sealed class BPlusTreeRoundTripTests
         };
 
         BPlusTreeIndexSet bTreeSet = new(bTreeIndexes);
-
-        // Build a sorted index for another column.
-        ValueIndexEntry[] sortedEntries =
-        [
-            new(DataValue.FromFloat32(1.0f), 0, 0L),
-            new(DataValue.FromFloat32(2.0f), 0, 1L),
-        ];
-
-        SortedValueIndex sortedIndex = SortedValueIndex.BuildFromUnsorted(sortedEntries);
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["small_column"] = sortedIndex,
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new(
-        [
-            new ColumnInfo("big_column", DataKind.Float32, nullable: false),
-            new ColumnInfo("small_column", DataKind.Float32, nullable: false),
-        ]);
+        Schema schema = new([new ColumnInfo("big_column", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>(),
-            bloomFilters: null, sortedIndexes: sortedSet, bPlusTreeIndexes: bTreeSet);
+            bloomFilters: null, bPlusTreeIndexes: bTreeSet);
 
         WithRoundTrip(original, restored =>
         {
-            // B+Tree column should be accessible via TryGetColumnIndex.
             Assert.True(restored.TryGetColumnIndex("big_column", out IColumnIndex? bigIndex));
             Assert.Equal(2, bigIndex.EntryCount);
-
-            // Sorted column should also be accessible.
-            Assert.True(restored.TryGetColumnIndex("small_column", out IColumnIndex? smallIndex));
-            Assert.Equal(2, smallIndex.EntryCount);
         });
     }
 
@@ -334,7 +309,7 @@ public sealed class BPlusTreeRoundTripTests
         IndexSchema indexSchema = new(schema, 100);
 
         return new SourceIndex(fingerprint, indexSchema, Array.Empty<IndexChunk>(),
-            bloomFilters: null, sortedIndexes: null, bPlusTreeIndexes: bTreeSet);
+            bloomFilters: null, bPlusTreeIndexes: bTreeSet);
     }
 
     private static void WithRoundTrip(SourceIndex index, Action<SourceIndex> test)

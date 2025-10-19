@@ -4,6 +4,7 @@ using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
 
 namespace DatumIngest.Catalog.VirtualSchemas;
 
@@ -453,16 +454,12 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
                 int chunkCount = sourceIndex.Chunks.Count;
                 long totalRowCount = sourceIndex.Schema.TotalRowCount;
 
-                // Sorted indexes.
-                if (sourceIndex.SortedIndexes is not null)
+                // Sorted indexes (memory-mapped).
+                if (sourceIndex.MappedSortedIndexes is not null)
                 {
-                    foreach (string columnName in sourceIndex.SortedIndexes.ColumnNames)
+                    foreach (KeyValuePair<string, SortedIndex> entry in sourceIndex.MappedSortedIndexes)
                     {
-                        long? entryCount = sourceIndex.SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex)
-                            ? sortedIndex.EntryCount
-                            : null;
-
-                        AddRow(batch, tableName, columnName, "SORTED", entryCount, chunkCount, totalRowCount);
+                        AddRow(batch, tableName, entry.Key, "SORTED", entry.Value.EntryCount, chunkCount, totalRowCount);
                         if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
                     }
                 }
@@ -504,7 +501,7 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
                 // Memory-mapped sorted indexes.
                 if (sourceIndex.MappedSortedIndexes is not null)
                 {
-                    foreach ((string columnName, MappedSortedIndex mappedIndex) in sourceIndex.MappedSortedIndexes)
+                    foreach ((string columnName, SortedIndex mappedIndex) in sourceIndex.MappedSortedIndexes)
                     {
                         AddRow(batch, tableName, columnName, "MAPPED_SORTED", mappedIndex.EntryCount, chunkCount, totalRowCount);
                         if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }

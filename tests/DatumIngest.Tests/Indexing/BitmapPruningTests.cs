@@ -333,23 +333,6 @@ public sealed class BitmapPruningTests
 
         InMemoryProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildMultiColumnBitmapIndex(["color"], rows, chunkSize: 3);
-
-        // Build sorted index on "value" with 2 chunks.
-        List<ValueIndexEntry> entries = new();
-        for (int i = 0; i < rows.Length; i++)
-        {
-            int chunkIndex = i / 3;
-            int rowInChunk = i % 3;
-            entries.Add(new ValueIndexEntry(rows[i]["value"], chunkIndex, rowInChunk));
-        }
-
-        SortedValueIndex sortedIndex = SortedValueIndex.BuildFromUnsorted(entries.ToArray());
-        Dictionary<string, SortedValueIndex> sortedDict = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["value"] = sortedIndex
-        };
-        SortedValueIndexSet sortedSet = new(sortedDict);
-
         List<IndexChunk> chunks = new();
         for (int c = 0; c < 2; c++)
         {
@@ -372,7 +355,6 @@ public sealed class BitmapPruningTests
                 rows.Length),
             chunks,
             bloomFilters: null,
-            sortedIndexes: sortedSet,
             bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
 
@@ -613,7 +595,6 @@ public sealed class BitmapPruningTests
             new IndexSchema(new Schema(columns), rows.Length),
             chunks,
             bloomFilters: null,
-            sortedIndexes: null,
             bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
     }

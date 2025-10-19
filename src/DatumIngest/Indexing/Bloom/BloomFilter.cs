@@ -4,7 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using DatumIngest.Model;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.Indexing.Bloom;
 
 /// <summary>
 /// Probabilistic membership filter using double hashing. Tests whether a value

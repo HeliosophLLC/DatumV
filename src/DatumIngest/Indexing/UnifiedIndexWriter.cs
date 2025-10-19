@@ -3,6 +3,8 @@ using System.Text;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Indexing;
 
@@ -67,8 +69,8 @@ internal static class UnifiedIndexWriter
     /// <param name="output">Writable, seekable output stream.</param>
     /// <param name="sortedIndexSpillWriter">
     /// Optional spill writer holding sorted index runs on disk. When non-null and containing
-    /// data, its entries are used instead of <see cref="SourceIndex.SortedIndexes"/> and
-    /// <see cref="SourceIndex.BPlusTreeIndexes"/>.
+    /// data, its entries are streamed directly into the output; otherwise the writer falls
+    /// back to <see cref="SourceIndex.BPlusTreeIndexes"/> when present.
     /// </param>
     internal static void Write(
         SourceIndexSet indexSet,
@@ -207,24 +209,12 @@ internal static class UnifiedIndexWriter
                         w => WriteStreamedBTreePages(w, spillCapture, schema, bTreeColumns)));
                 }
             }
-            else
+            else if (index.BPlusTreeIndexes is not null)
             {
-                if (index.SortedIndexes is not null)
-                {
-                    SortedValueIndexSet sortedIndexes = index.SortedIndexes;
-                    Schema schema = index.Schema.Schema;
-                    sections.Add(new PlannedSection(
-                        UnifiedIndexSectionType.SortedIndexes, tableIndexByte,
-                        w => WriteSortedIndexes(w, sortedIndexes, schema)));
-                }
-
-                if (index.BPlusTreeIndexes is not null)
-                {
-                    BPlusTreeIndexSet bPlusTreeIndexes = index.BPlusTreeIndexes;
-                    sections.Add(new PlannedSection(
-                        UnifiedIndexSectionType.BTreePages, tableIndexByte,
-                        w => WriteBTreePages(w, bPlusTreeIndexes)));
-                }
+                BPlusTreeIndexSet bPlusTreeIndexes = index.BPlusTreeIndexes;
+                sections.Add(new PlannedSection(
+                    UnifiedIndexSectionType.BTreePages, tableIndexByte,
+                    w => WriteBTreePages(w, bPlusTreeIndexes)));
             }
 
             if (index.BitmapIndexes is not null)
@@ -514,144 +504,6 @@ internal static class UnifiedIndexWriter
                         remaining -= chunk;
                     }
                 }
-            }
-        }
-    }
-
-    // ───────────────────────── Sorted indexes ─────────────────────────
-
-    /// <summary>
-    /// Writes sorted indexes in the v4 fixed-width memory-mapped format.
-    /// Reuses <see cref="SortedIndexKeyEncoder"/> for key encoding and writes
-    /// 12-byte locators (chunkIndex i32 + rowOffsetInChunk i64).
-    /// </summary>
-    private static void WriteSortedIndexes(
-        BinaryWriter writer,
-        SortedValueIndexSet sortedIndexes,
-        Schema schema)
-    {
-        IReadOnlyDictionary<string, SortedValueIndex> indexes = sortedIndexes.Indexes;
-        writer.Write(indexes.Count);
-
-        // Maximum key width across all DataKinds (Uuid = 16 bytes).
-        Span<byte> sortedKeyBuffer = stackalloc byte[16];
-
-        foreach (KeyValuePair<string, SortedValueIndex> column in indexes)
-        {
-            string columnName = column.Key;
-            ReadOnlySpan<ValueIndexEntry> entries = column.Value.Entries;
-
-            // Find the DataKind for this column.
-            DataKind kind = DataKind.String;
-
-            foreach (ColumnInfo columnInfo in schema.Columns)
-            {
-                if (string.Equals(columnInfo.Name, columnName, StringComparison.OrdinalIgnoreCase))
-                {
-                    kind = columnInfo.Kind;
-                    break;
-                }
-            }
-
-            int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
-
-            writer.Write(columnName);
-            writer.Write((byte)kind);
-            writer.Write((long)entries.Length);
-
-            // Placeholder offsets for keys, locators, string table — backpatched below.
-            long directoryPosition = writer.BaseStream.Position;
-            writer.Write(0L); // keysOffset
-            writer.Write(0L); // locatorsOffset
-            writer.Write(0L); // stringTableOffset
-            writer.Write(0L); // stringTableLength
-
-            // Write keys.
-            long keysOffset = writer.BaseStream.Position;
-
-            if (kind is DataKind.String or DataKind.JsonValue)
-            {
-                // String keys: build a string table and write references.
-                List<byte[]> stringTable = new();
-                Dictionary<string, (int Offset, int Length)> stringDedup = new(StringComparer.Ordinal);
-                int currentStringOffset = 0;
-                Span<byte> referenceSlice = sortedKeyBuffer[..keyWidth];
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    string stringValue = kind == DataKind.String
-                        ? entry.Key.AsString()
-                        : entry.Key.AsJsonValue();
-
-                    if (!stringDedup.TryGetValue(stringValue, out (int Offset, int Length) reference))
-                    {
-                        byte[] utf8Bytes = Encoding.UTF8.GetBytes(stringValue);
-                        reference = (currentStringOffset, utf8Bytes.Length);
-                        stringDedup[stringValue] = reference;
-                        stringTable.Add(utf8Bytes);
-                        currentStringOffset += utf8Bytes.Length;
-                    }
-
-                    SortedIndexKeyEncoder.EncodeStringReference(reference.Offset, reference.Length, referenceSlice);
-                    writer.Write(referenceSlice);
-                }
-
-                // Write locators.
-                long locatorsOffset = writer.BaseStream.Position;
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    writer.Write(entry.ChunkIndex);
-                    writer.Write(entry.RowOffsetInChunk);
-                }
-
-                // Write string table.
-                long stringTableOffset = writer.BaseStream.Position;
-
-                foreach (byte[] utf8Bytes in stringTable)
-                {
-                    writer.Write(utf8Bytes);
-                }
-
-                long stringTableLength = writer.BaseStream.Position - stringTableOffset;
-
-                // Backpatch offsets.
-                long savedPosition = writer.BaseStream.Position;
-                writer.BaseStream.Position = directoryPosition;
-                writer.Write(keysOffset);
-                writer.Write(locatorsOffset);
-                writer.Write(stringTableOffset);
-                writer.Write(stringTableLength);
-                writer.BaseStream.Position = savedPosition;
-            }
-            else
-            {
-                // Numeric/temporal keys: encode directly.
-                Span<byte> keySlice = sortedKeyBuffer[..keyWidth];
-
-                foreach (ref readonly ValueIndexEntry entry in entries)
-                {
-                    SortedIndexKeyEncoder.Encode(entry.Key, keySlice);
-                    writer.Write(keySlice);
-                }
-
-                // Write locators.
-                long locatorsOffset = writer.BaseStream.Position;
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    writer.Write(entry.ChunkIndex);
-                    writer.Write(entry.RowOffsetInChunk);
-                }
-
-                // Backpatch offsets (no string table for numeric columns).
-                long savedPosition = writer.BaseStream.Position;
-                writer.BaseStream.Position = directoryPosition;
-                writer.Write(keysOffset);
-                writer.Write(locatorsOffset);
-                writer.Write(0L); // stringTableOffset = 0
-                writer.Write(0L); // stringTableLength = 0
-                writer.BaseStream.Position = savedPosition;
             }
         }
     }

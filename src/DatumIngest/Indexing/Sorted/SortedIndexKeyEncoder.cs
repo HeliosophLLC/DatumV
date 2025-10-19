@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using DatumIngest.Model;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.Indexing.Sorted;
 
 /// <summary>
 /// Encodes and decodes <see cref="DataValue"/> keys in a fixed-width, sort-preserving binary format

@@ -3,12 +3,12 @@ using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using ZstdSharp;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.Indexing.Sorted;
 
 /// <summary>
 /// Accumulates sorted index entries chunk-by-chunk, spilling each sorted run to a
 /// temporary file on disk. At finalization, performs a k-way merge of all sorted runs
-/// into a single <see cref="SortedValueIndexSet"/> with constant memory overhead
+/// into a single <see cref="SortedIndex"/> with constant memory overhead
 /// regardless of total row count.
 /// </summary>
 /// <remarks>
@@ -19,10 +19,10 @@ namespace DatumIngest.Indexing;
 /// sorted by key and appended to a per-column temporary file. Memory is then released.
 /// </para>
 /// <para>
-/// At finalization (<see cref="BuildSortedValueIndexSet"/>), each column's temp file is
+/// At finalization (<see cref="SortedIndex"/>), each column's temp file is
 /// read back as a sequence of pre-sorted runs and merged using a priority queue into a
 /// single sorted array of <see cref="ValueIndexEntry"/>, producing the final
-/// <see cref="SortedValueIndex"/>.
+/// <see cref="SortedIndex"/>.
 /// </para>
 /// </remarks>
 internal sealed class SortedIndexSpillWriter : IDisposable
@@ -221,45 +221,6 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
             entries.Clear();
         }
-    }
-
-    /// <summary>
-    /// Merges all spilled sorted runs into a <see cref="SortedValueIndexSet"/>.
-    /// Also includes any remaining unflushed entries from the last partial chunk.
-    /// </summary>
-    /// <remarks>
-    /// This method materializes the entire sorted index into memory. For large datasets,
-    /// prefer <see cref="WriteSortedIndexesToStream"/> which streams the k-way merge
-    /// directly to a <see cref="BinaryWriter"/> without allocating the full array.
-    /// </remarks>
-    /// <returns>The merged sorted value index set, or <c>null</c> if no columns were indexed.</returns>
-    internal SortedValueIndexSet? BuildSortedValueIndexSet()
-    {
-        PrepareForReading();
-
-        Dictionary<string, SortedValueIndex> indexes = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
-        {
-            string columnName = pair.Key;
-            int runCount = pair.Value;
-
-            if (runCount == 0)
-            {
-                continue;
-            }
-
-            long totalEntries = _spillTotalEntries[columnName];
-            ValueIndexEntry[] merged = MergeSortedRuns(columnName, runCount, totalEntries);
-            indexes[columnName] = new SortedValueIndex(merged);
-        }
-
-        if (indexes.Count == 0)
-        {
-            return null;
-        }
-
-        return new SortedValueIndexSet(indexes);
     }
 
     /// <summary>
@@ -539,7 +500,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
     /// <summary>
     /// Streams the sorted indexes section directly to the output writer using a k-way merge
-    /// of the spilled sorted runs. Unlike <see cref="BuildSortedValueIndexSet"/>, this method
+    /// of the spilled sorted runs. Unlike <see cref="SortedIndex"/>, this method
     /// never allocates the full <see cref="ValueIndexEntry"/> array — entries are merged and
     /// written one at a time, keeping memory consumption at O(number of chunks).
     /// </summary>

@@ -3,6 +3,8 @@ using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Tests.Indexing;
 
@@ -299,171 +301,10 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
     // ────────────────────── Sorted indexes ──────────────────────
 
-    [Fact]
-    public void RoundTrip_SortedIndexes_Int32FindExact()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("score", DataKind.Int32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 100);
-
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["score"] = new ChunkColumnStatistics(
-                DataValue.FromInt32(10), DataValue.FromInt32(30),
-                NullCount: 0, RowCount: 100, EstimatedCardinality: 3)
-        };
-
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
-
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["score"] = SortedValueIndex.BuildFromUnsorted(
-            [
-                new ValueIndexEntry(DataValue.FromInt32(30), 0, 2),
-                new ValueIndexEntry(DataValue.FromInt32(10), 0, 0),
-                new ValueIndexEntry(DataValue.FromInt32(20), 0, 1),
-            ]),
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-        SourceIndex original = new(fingerprint, indexSchema, chunks, sortedIndexes: sortedSet);
-
-        using MappedSourceIndexSet mapped = WriteAndReopen("sorted_int32", original);
-        SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-        // Sorted indexes are exposed as MappedSortedIndex via TryGetColumnIndex.
-        Assert.True(restored.TryGetColumnIndex("score", out IColumnIndex? columnIndex));
-        Assert.Equal(3, columnIndex.EntryCount);
-
-        IReadOnlyList<ValueIndexEntry> results = columnIndex.FindExact(DataValue.FromInt32(20));
-        Assert.Single(results);
-        Assert.Equal(0, results[0].ChunkIndex);
-        Assert.Equal(1, results[0].RowOffsetInChunk);
-    }
-
-    [Fact]
-    public void RoundTrip_SortedIndexes_StringFindExact()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("name", DataKind.String, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 100);
-
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["name"] = new ChunkColumnStatistics(
-                DataValue.FromString("alice"), DataValue.FromString("charlie"),
-                NullCount: 0, RowCount: 100, EstimatedCardinality: 3)
-        };
-
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
-
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["name"] = SortedValueIndex.BuildFromUnsorted(
-            [
-                new ValueIndexEntry(DataValue.FromString("charlie"), 0, 2),
-                new ValueIndexEntry(DataValue.FromString("alice"), 0, 0),
-                new ValueIndexEntry(DataValue.FromString("bob"), 0, 1),
-            ]),
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-        SourceIndex original = new(fingerprint, indexSchema, chunks, sortedIndexes: sortedSet);
-
-        using MappedSourceIndexSet mapped = WriteAndReopen("sorted_string", original);
-        SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-        Assert.True(restored.TryGetColumnIndex("name", out IColumnIndex? columnIndex));
-        Assert.Equal(3, columnIndex.EntryCount);
-
-        IReadOnlyList<ValueIndexEntry> results = columnIndex.FindExact(DataValue.FromString("bob"));
-        Assert.Single(results);
-        Assert.Equal(0, results[0].ChunkIndex);
-        Assert.Equal(1, results[0].RowOffsetInChunk);
-    }
-
-    [Fact]
-    public void RoundTrip_SortedIndexes_FindRange()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("value", DataKind.Int32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 100);
-
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["value"] = new ChunkColumnStatistics(
-                DataValue.FromInt32(1), DataValue.FromInt32(100),
-                NullCount: 0, RowCount: 100, EstimatedCardinality: 100)
-        };
-
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
-
-        ValueIndexEntry[] entries = new ValueIndexEntry[100];
-
-        for (int index = 0; index < 100; index++)
-        {
-            entries[index] = new ValueIndexEntry(DataValue.FromInt32(index + 1), 0, index);
-        }
-
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["value"] = SortedValueIndex.BuildFromUnsorted(entries),
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-        SourceIndex original = new(fingerprint, indexSchema, chunks, sortedIndexes: sortedSet);
-
-        using MappedSourceIndexSet mapped = WriteAndReopen("sorted_range", original);
-        SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-        Assert.True(restored.TryGetColumnIndex("value", out IColumnIndex? columnIndex));
-
-        IReadOnlyList<ValueIndexEntry> rangeResults = columnIndex.FindRange(
-            DataValue.FromInt32(10), DataValue.FromInt32(15));
-        Assert.Equal(6, rangeResults.Count);
-
-        // Verify sorted order.
-        for (int index = 0; index < rangeResults.Count; index++)
-        {
-            Assert.Equal(index + 9, rangeResults[index].RowOffsetInChunk);
-        }
-    }
-
-    [Fact]
-    public void RoundTrip_SortedIndexes_TryGetSortedColumnIndex()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Int32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 10);
-
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new ChunkColumnStatistics(
-                DataValue.FromInt32(1), DataValue.FromInt32(10),
-                NullCount: 0, RowCount: 10, EstimatedCardinality: 10)
-        };
-
-        List<IndexChunk> chunks = [new IndexChunk(0, 10, -1, -1, stats)];
-
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = SortedValueIndex.BuildFromUnsorted(
-            [
-                new ValueIndexEntry(DataValue.FromInt32(1), 0, 0),
-                new ValueIndexEntry(DataValue.FromInt32(2), 0, 1),
-            ]),
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-        SourceIndex original = new(fingerprint, indexSchema, chunks, sortedIndexes: sortedSet);
-
-        using MappedSourceIndexSet mapped = WriteAndReopen("sorted_column", original);
-        SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-        // TryGetSortedColumnIndex should find the mapped sorted index.
-        Assert.True(restored.TryGetSortedColumnIndex("id", out IColumnIndex? sortedIndex));
-        Assert.Equal(2, sortedIndex.EntryCount);
-    }
+    // Sorted-index round-trip tests were removed together with the heap-backed
+    // SortedValueIndexSet + WriteSortedIndexes(SortedValueIndexSet) path.
+    // Coverage for the surviving streaming path (SortedIndexSpillWriter →
+    // WriteStreamedSortedIndexes → SortedIndex) lives in the builder tests.
 
     // ────────────────────── B+Tree pages ──────────────────────
 
@@ -501,7 +342,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         BPlusTreeIndexSet bTreeSet = new(bTreeIndexes);
         SourceIndex original = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: null,
+            bloomFilters: null,
             bPlusTreeIndexes: bTreeSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("btree", original);
@@ -552,7 +393,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         BitmapIndexSet bitmapSet = new(bitmapIndexes);
         SourceIndex original = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: null,
+            bloomFilters: null,
             bPlusTreeIndexes: null, bitmapIndexes: bitmapSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("bitmap", original);
@@ -653,50 +494,21 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
         };
 
         BloomFilterSet bloomFilterSet = new(bloomFilters, chunkCount: 2);
-
-        // Sorted indexes.
-        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = SortedValueIndex.BuildFromUnsorted(
-            [
-                new ValueIndexEntry(DataValue.FromInt32(42), 0, 5),
-                new ValueIndexEntry(DataValue.FromInt32(1), 0, 0),
-            ]),
-        };
-
-        SortedValueIndexSet sortedSet = new(sortedIndexes);
-
-        SourceIndex original = new(fingerprint, indexSchema, chunks, bloomFilterSet, sortedSet);
+        SourceIndex original = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("combined", original);
         SourceIndex restored = mapped.IndexSet.Tables["test"];
 
-        // Fingerprint.
         Assert.Equal(999, restored.Fingerprint.FileSize);
-
-        // Schema.
         Assert.Equal(200, restored.Schema.TotalRowCount);
         Assert.Equal(2, restored.Schema.Schema.Columns.Count);
-
-        // Chunks.
         Assert.Equal(2, restored.Chunks.Count);
         Assert.Equal(100, restored.Chunks[0].RowCount);
-
-        // Chunk stats.
         Assert.True(restored.Chunks[0].ColumnStatistics.ContainsKey("id"));
         Assert.Equal(1, restored.Chunks[0].ColumnStatistics["id"].Minimum.GetValueOrDefault().AsInt32());
-
-        // Bloom filters.
         Assert.NotNull(restored.BloomFilters);
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredBloom));
         Assert.True(restoredBloom!.MayContain(DataValue.FromInt32(42)));
-
-        // Sorted indexes (via mapped sorted index).
-        Assert.True(restored.TryGetColumnIndex("id", out IColumnIndex? idIndex));
-        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromInt32(42));
-        Assert.Single(found);
-        Assert.Equal(0, found[0].ChunkIndex);
-        Assert.Equal(5, found[0].RowOffsetInChunk);
     }
 
     // ────────────────────── Error handling ──────────────────────

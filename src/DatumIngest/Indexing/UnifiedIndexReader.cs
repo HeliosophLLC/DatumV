@@ -4,6 +4,8 @@ using System.Text;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
+using DatumIngest.Indexing.Sorted;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Indexing;
 
@@ -11,7 +13,7 @@ namespace DatumIngest.Indexing;
 /// Opens a v5 unified <c>.datum-index</c> file as a memory-mapped file,
 /// parses the section directory, and reconstructs <see cref="SourceIndex"/> instances
 /// for each table. All data that supports mmap-backed access (sorted indexes)
-/// is exposed through <see cref="MappedSortedIndex"/> instances that read from the
+/// is exposed through <see cref="SortedIndex"/> instances that read from the
 /// shared <see cref="MemoryMappedViewAccessor"/> without heap allocation.
 /// </summary>
 internal static class UnifiedIndexReader
@@ -190,8 +192,7 @@ internal static class UnifiedIndexReader
                 ? ReadBloomFilters(memoryMappedFile, sharedAccessor, bloomEntry)
                 : null;
 
-            SortedValueIndexSet? sortedIndexes = null;
-            Dictionary<string, MappedSortedIndex>? mappedSortedIndexes = null;
+            Dictionary<string, SortedIndex>? mappedSortedIndexes = null;
 
             if (sectionMap.TryGetValue(
                 UnifiedIndexSectionType.SortedIndexes, out SectionDirectoryEntry sortedEntry))
@@ -211,7 +212,7 @@ internal static class UnifiedIndexReader
                 : null;
 
             tables[tableNames[tableIndex]] = new SourceIndex(
-                fingerprint, schema, chunks, bloomFilters, sortedIndexes,
+                fingerprint, schema, chunks, bloomFilters,
                 bPlusTreeIndexes, bitmapIndexes, mappedSortedIndexes);
         }
 
@@ -345,10 +346,10 @@ internal static class UnifiedIndexReader
     // ───────────────────────── Sorted indexes ─────────────────────────
 
     /// <summary>
-    /// Reads sorted indexes, creating <see cref="MappedSortedIndex"/> instances that
+    /// Reads sorted indexes, creating <see cref="SortedIndex"/> instances that
     /// operate directly on the shared <see cref="MemoryMappedViewAccessor"/>.
     /// </summary>
-    private static Dictionary<string, MappedSortedIndex>? ReadSortedIndexes(
+    private static Dictionary<string, SortedIndex>? ReadSortedIndexes(
         MemoryMappedFile memoryMappedFile,
         MemoryMappedViewAccessor sharedAccessor,
         SectionDirectoryEntry entry)
@@ -364,7 +365,7 @@ internal static class UnifiedIndexReader
             return null;
         }
 
-        Dictionary<string, MappedSortedIndex> mappedIndexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SortedIndex> mappedIndexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
 
         for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
         {
@@ -376,7 +377,7 @@ internal static class UnifiedIndexReader
             long stringTableOffset = reader.ReadInt64();
             long stringTableLength = reader.ReadInt64();
 
-            mappedIndexes[columnName] = new MappedSortedIndex(
+            mappedIndexes[columnName] = new SortedIndex(
                 sharedAccessor, kind, entryCount,
                 keysOffset, locatorsOffset, stringTableOffset, stringTableLength);
 
@@ -384,7 +385,7 @@ internal static class UnifiedIndexReader
             // the stream is positioned at the next column's header.
             int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
             long dataBytes = entryCount * keyWidth
-                + entryCount * MappedSortedIndex.LocatorWidth
+                + entryCount * SortedIndex.LocatorWidth
                 + stringTableLength;
             stream.Seek(dataBytes, SeekOrigin.Current);
         }

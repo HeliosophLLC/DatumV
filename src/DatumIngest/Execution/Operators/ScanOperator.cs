@@ -8,6 +8,7 @@ using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -213,9 +214,8 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
-    /// Collects sorted index column names from both the v3 in-memory
-    /// <see cref="Indexing.SortedValueIndexSet"/> and the v5 memory-mapped
-    /// <see cref="Indexing.MappedSortedIndex"/> stores, returning a unified list.
+    /// Collects the memory-mapped sorted-index column names available on the given
+    /// source index. Returns <c>null</c> when no sorted indexes exist.
     /// </summary>
     /// <param name="sourceIndex">The source index, or <c>null</c>.</param>
     /// <returns>A list of column names, or <c>null</c> if no sorted indexes exist.</returns>
@@ -226,23 +226,12 @@ public sealed class ScanOperator : IQueryOperator
             return null;
         }
 
-        HashSet<string>? columns = null;
-
-        if (sourceIndex.SortedIndexes is { Count: > 0 } sortedIndexes)
+        if (sourceIndex.MappedSortedIndexes is not { Count: > 0 } mappedSortedIndexes)
         {
-            columns = new(sortedIndexes.ColumnNames, StringComparer.OrdinalIgnoreCase);
+            return null;
         }
 
-        if (sourceIndex.MappedSortedIndexes is { Count: > 0 } mappedSortedIndexes)
-        {
-            columns ??= new(StringComparer.OrdinalIgnoreCase);
-            foreach (string columnName in mappedSortedIndexes.Keys)
-            {
-                columns.Add(columnName);
-            }
-        }
-
-        return columns is { Count: > 0 } ? [.. columns] : null;
+        return [.. mappedSortedIndexes.Keys];
     }
 
     /// <inheritdoc/>
@@ -264,7 +253,6 @@ public sealed class ScanOperator : IQueryOperator
         bool hasIndexPruning = _sourceIndex is not null
             && (_filterHint is not null || _bloomPruningKeys is not null
                 || _sortedIndexPruningKeys is not null
-                || _sourceIndex.SortedIndexes is not null
                 || _sourceIndex.MappedSortedIndexes is not null
                 || _sourceIndex.BPlusTreeIndexes is not null
                 || _sourceIndex.BitmapIndexes is not null);
