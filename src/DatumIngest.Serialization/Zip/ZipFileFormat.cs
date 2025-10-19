@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using DatumIngest.Catalog;
 
 namespace DatumIngest.Serialization.Zip;
 
@@ -16,14 +17,18 @@ public sealed class ZipFileFormat : IFileFormat
         FileFormatDescriptor descriptor,
         [NotNullWhen(true)] out IFormatDeserializer? deserializer)
     {
-        string ext = Path.GetExtension(descriptor.FilePath);
+        string ext = descriptor.LogicalExtension;
         if (ext.Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
             deserializer = new ZipDeserializer(descriptor);
             return true;
         }
 
-        if (File.Exists(descriptor.FilePath) && HasZipMagic(descriptor.FilePath))
+        // Magic byte detection — only sensible for uncompressed inputs. Gzipping
+        // a ZIP is nonsense anyway (ZIP has its own internal compression).
+        if (descriptor.Compression == CompressionKind.None
+            && File.Exists(descriptor.FilePath)
+            && HasZipMagic(descriptor.FilePath))
         {
             deserializer = new ZipDeserializer(descriptor);
             return true;

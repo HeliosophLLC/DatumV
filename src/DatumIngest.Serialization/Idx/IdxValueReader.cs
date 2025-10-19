@@ -22,7 +22,7 @@ internal static class IdxValueReader
             {
                 0 => DataValue.FromUInt8(itemBuffer[0]),
                 1 => DataValue.FromUInt8Array(itemBuffer.ToArray(), store),
-                _ => CreateImageFromUInt8(header, itemBuffer),
+                _ => CreateImageFromUInt8(header, itemBuffer, store),
             };
         }
 
@@ -80,9 +80,13 @@ internal static class IdxValueReader
     }
 
     /// <summary>
-    /// Creates an RGBA8888 <see cref="ImageHandle"/> from uint8 pixel data.
+    /// Encodes uint8 pixel data as a PNG and stores the bytes in the arena so the
+    /// image flows through the same byte-span accessor path as ZIP/CSV image columns.
+    /// IDX pixels are never the target storage format on disk — the datum writer needs
+    /// encoded bytes regardless, so we pay the encode cost once here rather than
+    /// holding an <see cref="ImageHandle"/> and re-encoding at flush time.
     /// </summary>
-    private static DataValue CreateImageFromUInt8(IdxHeader header, byte[] pixelData)
+    private static DataValue CreateImageFromUInt8(IdxHeader header, byte[] pixelData, IValueStore store)
     {
         ReadOnlySpan<int> shape = header.ItemShape;
         int height = shape[0];
@@ -92,7 +96,7 @@ internal static class IdxValueReader
         for (int d = 3; d < shape.Length; d++)
             channels *= shape[d];
 
-        SKBitmap bitmap = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using SKBitmap bitmap = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         IntPtr pixelPointer = bitmap.GetPixels();
 
         unsafe
@@ -141,7 +145,7 @@ internal static class IdxValueReader
             }
         }
 
-        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
-        return DataValue.FromImageHandle(handle);
+        byte[] pngBytes = ImageEncoder.Encode(bitmap, SKEncodedImageFormat.Png);
+        return DataValue.FromImage(pngBytes, store);
     }
 }

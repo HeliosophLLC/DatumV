@@ -3,9 +3,9 @@ param(
     [string]$Tool = "IngestOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     [string]$Profile = "gc-collect",
-    [string]$Source = "E:\Datasets\Open Payments\OP_DTL_GNRL_PGYR2024_P01232026_01102026.csv",
+    [string]$Source = "E:\Datasets\COCO2017\test2017.zip",
     [string]$Dest = "",
-    [string]$Duration = "00:05:30",
+    [string]$Duration = "00:01:30",
     [string]$Configuration = "Release"
 )
 

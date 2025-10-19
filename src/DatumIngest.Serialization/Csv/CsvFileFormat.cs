@@ -15,7 +15,7 @@ public sealed class CsvFileFormat : IFileFormat
         FileFormatDescriptor descriptor,
         [NotNullWhen(true)] out IFormatDeserializer? deserializer)
     {
-        string ext = Path.GetExtension(descriptor.FilePath);
+        string ext = descriptor.LogicalExtension;
         if (ext.Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
             ext.Equals(".tsv", StringComparison.OrdinalIgnoreCase))
         {

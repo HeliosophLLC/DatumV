@@ -3,6 +3,7 @@ using DatumIngest.Ingestion;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
+using DatumIngest.Serialization.Idx;
 using DatumIngest.Serialization.Zip;
 
 string sourcePath = args.Length > 0
@@ -42,12 +43,12 @@ Console.WriteLine(
     $"batch {ingestionOptions.BatchByteTarget / (1024 * 1024)} MB");
 Console.WriteLine();
 
-FormatRegistry registry = new([new CsvFileFormat(), new ZipFileFormat()]);
+FormatRegistry registry = new([new CsvFileFormat(), new IdxFileFormat(), new ZipFileFormat()]);
 PoolBacking backing = new();
 Pool pool = new(backing);
 Ingester ingester = new(registry, pool);
 
-FileFormatDescriptor source = new(sourcePath);
+using FileFormatDescriptor source = new(sourcePath);
 OutputDescriptor dest = new(destPath);
 
 using CancellationTokenSource cts = timeoutSeconds is int seconds

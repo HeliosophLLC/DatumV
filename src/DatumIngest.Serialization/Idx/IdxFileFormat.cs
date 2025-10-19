@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using DatumIngest.Catalog;
 
 namespace DatumIngest.Serialization.Idx;
 
@@ -18,7 +19,7 @@ public sealed class IdxFileFormat : IFileFormat
         FileFormatDescriptor descriptor,
         [NotNullWhen(true)] out IFormatDeserializer? deserializer)
     {
-        string ext = Path.GetExtension(descriptor.FilePath);
+        string ext = descriptor.LogicalExtension;
         if (ext.Equals(".idx", StringComparison.OrdinalIgnoreCase))
         {
             deserializer = new IdxDeserializer(descriptor);
@@ -26,15 +27,20 @@ public sealed class IdxFileFormat : IFileFormat
         }
 
         // MNIST-style filenames: train-images-idx3-ubyte, t10k-labels.idx1-ubyte, etc.
-        string fileName = Path.GetFileName(descriptor.FilePath);
-        if (IsIdxFilenamePattern(fileName))
+        // LogicalFileName strips a .gz wrapper so compressed MNIST files match the
+        // same patterns as the uncompressed originals.
+        if (IsIdxFilenamePattern(descriptor.LogicalFileName))
         {
             deserializer = new IdxDeserializer(descriptor);
             return true;
         }
 
-        // Magic byte detection.
-        if (File.Exists(descriptor.FilePath) && HasIdxMagic(descriptor.FilePath))
+        // Magic byte detection. Only sensible for uncompressed inputs — peeking a .gz
+        // source would see gzip magic, not the inner format's. Gzipped inputs are
+        // expected to be identified by extension or filename pattern above.
+        if (descriptor.Compression == CompressionKind.None
+            && File.Exists(descriptor.FilePath)
+            && HasIdxMagic(descriptor.FilePath))
         {
             deserializer = new IdxDeserializer(descriptor);
             return true;
