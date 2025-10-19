@@ -91,8 +91,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         return Task.FromResult(new ProviderCapabilities(
             rowCount,
             EstimatedRowSizeBytes: null,
-            SupportsSeek: true,
-            ColumnCosts: new Dictionary<string, ColumnCost>()));
+            SupportsSeek: true));
     }
 
     private async IAsyncEnumerable<RowBatch> OpenCoreAsync(

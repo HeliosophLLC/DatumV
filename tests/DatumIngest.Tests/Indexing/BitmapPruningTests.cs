@@ -653,8 +653,7 @@ public sealed class BitmapPruningTests
             return Task.FromResult(new ProviderCapabilities(
                 EstimatedRowCount: _rows.Length,
                 EstimatedRowSizeBytes: null,
-                SupportsSeek: false,
-                ColumnCosts: new Dictionary<string, ColumnCost>()));
+                SupportsSeek: false));
         }
 
         public async IAsyncEnumerable<RowBatch> OpenAsync(

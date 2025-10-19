@@ -387,8 +387,7 @@ public sealed class BitmapBuildPipelineTests
             return Task.FromResult(new ProviderCapabilities(
                 EstimatedRowCount: null,
                 EstimatedRowSizeBytes: null,
-                SupportsSeek: false,
-                ColumnCosts: new Dictionary<string, ColumnCost>()));
+                SupportsSeek: false));
         }
 
         public async IAsyncEnumerable<RowBatch> OpenAsync(

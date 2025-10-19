@@ -23,14 +23,7 @@ public enum ColumnCost
 /// <param name="EstimatedRowCount">Estimated number of rows, or null if unknown.</param>
 /// <param name="EstimatedRowSizeBytes">Estimated average row size in bytes, or null if unknown.</param>
 /// <param name="SupportsSeek">Whether the provider can seek to arbitrary row offsets.</param>
-/// <param name="ColumnCosts">Per-column cost classification; columns not listed are assumed <see cref="ColumnCost.Cheap"/>.</param>
-/// <param name="KeyColumn">
-/// The column name that <see cref="IKeyedTableProvider"/> uses for random access,
-/// or null if the provider does not support keyed fetch.
-/// </param>
 public sealed record ProviderCapabilities(
     long? EstimatedRowCount,
     long? EstimatedRowSizeBytes,
-    bool SupportsSeek,
-    IReadOnlyDictionary<string, ColumnCost> ColumnCosts,
-    string? KeyColumn = null);
+    bool SupportsSeek);

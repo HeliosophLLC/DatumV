@@ -41,7 +41,6 @@ public static class QueryExplainer
             LimitOperator limit => BuildLimitNode(limit, stats),
             AliasOperator alias => BuildAliasNode(alias, stats),
             SubqueryOperator subquery => BuildSubqueryNode(subquery, stats),
-            LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat, stats),
             GroupByOperator groupBy => BuildGroupByNode(groupBy, stats),
             CommonTableExpressionOperator cte => BuildCommonTableExpressionNode(cte, stats),
             RecursiveCommonTableExpressionOperator recursiveCte => BuildRecursiveCommonTableExpressionNode(recursiveCte, stats),
@@ -431,24 +430,6 @@ public static class QueryExplainer
             Details = $"name: {recursiveCommonTableExpression.Name}",
             Children = { anchorChild },
             EstimatedRows = anchorChild.EstimatedRows,
-        };
-    }
-
-    private static ExplainPlanNode BuildLateMaterializationNode(LateMaterializationOperator lateMat, IReadOnlyDictionary<string, FeatureManifest>? stats)
-    {
-        string columns = string.Join(", ", lateMat.DeferredColumns);
-        string source = lateMat.Alias is not null
-            ? $"{lateMat.Alias} ({lateMat.Descriptor.Provider})"
-            : lateMat.Descriptor.Name;
-
-        ExplainPlanNode child = BuildNode(lateMat.Child, stats);
-
-        return new ExplainPlanNode
-        {
-            OperatorName = "Late Materialize",
-            Details = $"source: {source}, key: {lateMat.KeyColumn}, fetch: [{columns}]",
-            Children = { child },
-            EstimatedRows = child.EstimatedRows,
         };
     }
 
@@ -856,10 +837,6 @@ public static class QueryExplainer
 
             case SubqueryOperator subquery:
                 CollectColumnStatisticsCore(subquery.InnerOperator, alias, ref result);
-                break;
-
-            case LateMaterializationOperator lateMaterialization:
-                CollectColumnStatisticsCore(lateMaterialization.Child, alias, ref result);
                 break;
 
             case CommonTableExpressionOperator commonTableExpression:

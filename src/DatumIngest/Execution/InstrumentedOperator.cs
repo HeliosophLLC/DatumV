@@ -115,12 +115,6 @@ public sealed class InstrumentedOperator : IQueryOperator
                 InstrumentRecursive(alias.Source), alias.Alias),
             Operators.SubqueryOperator subquery => new Operators.SubqueryOperator(
                 InstrumentRecursive(subquery.InnerOperator), subquery.Alias),
-            Operators.LateMaterializationOperator lateMat => new Operators.LateMaterializationOperator(
-                InstrumentRecursive(lateMat.Child),
-                lateMat.Descriptor,
-                lateMat.KeyColumn,
-                lateMat.DeferredColumns,
-                lateMat.Alias),
             // ScanOperator and unknown operators: wrap directly, no children to instrument.
             _ => op,
         };

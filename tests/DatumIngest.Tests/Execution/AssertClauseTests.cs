@@ -627,8 +627,7 @@ public sealed class AssertClauseTests
             return Task.FromResult(new ProviderCapabilities(
                 EstimatedRowCount: _rows.Length,
                 EstimatedRowSizeBytes: null,
-                SupportsSeek: false,
-                ColumnCosts: new Dictionary<string, ColumnCost>()));
+                SupportsSeek: false));
         }
 
         /// <inheritdoc/>

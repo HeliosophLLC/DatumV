@@ -63,7 +63,7 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(SelectStatement statement)
     {
-        return PlanCore(statement, deferredColumns: null);
+        return PlanCore(statement);
     }
 
     /// <summary>
@@ -80,32 +80,10 @@ public sealed class QueryPlanner
     {
         return query switch
         {
-            SelectQueryExpression select => await PlanAsync(select.Statement, cancellationToken).ConfigureAwait(false),
+            SelectQueryExpression select => PlanCore(select.Statement),
             CompoundQueryExpression compound => await PlanCompoundAsync(compound, cancellationToken).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
-    }
-
-    /// <summary>
-    /// Plans the given statement with cost-based late materialization of expensive columns.
-    /// When a source has expensive columns (e.g. <c>file_bytes</c> in ZIP) that are only
-    /// referenced in SELECT (not in JOIN ON or WHERE), those columns are excluded from the
-    /// scan and fetched only for surviving rows via <see cref="IKeyedTableProvider"/>.
-    /// </summary>
-    /// <param name="statement">The parsed SELECT statement.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The root operator of the execution plan.</returns>
-    public async Task<IQueryOperator> PlanAsync(
-        SelectStatement statement,
-        CancellationToken cancellationToken)
-    {
-        Dictionary<string, DeferredTableColumns>? deferredColumns =
-            await AnalyzeDeferredColumnsAsync(statement, cancellationToken)
-                .ConfigureAwait(false);
-
-        IQueryOperator plan = PlanCore(statement, deferredColumns);
-
-        return plan;
     }
 
     /// <summary>
@@ -124,37 +102,12 @@ public sealed class QueryPlanner
     {
         return query switch
         {
-            SelectQueryExpression select =>
-                await PlanWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
+            SelectQueryExpression select => 
+                await PlanCoreWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
             CompoundQueryExpression compound =>
                 await PlanCompoundWithSubqueriesAsync(compound, context, cancellationToken).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
-    }
-
-    /// <summary>
-    /// Plans the given statement with cost-based late materialization and scalar subquery
-    /// rewriting. Requires an <see cref="ExecutionContext"/> to execute uncorrelated subqueries
-    /// at plan time (constant folding).
-    /// </summary>
-    /// <param name="statement">The parsed SELECT statement.</param>
-    /// <param name="context">Execution context for running uncorrelated scalar subqueries at plan time.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The root operator of the execution plan.</returns>
-    public async Task<IQueryOperator> PlanWithSubqueriesAsync(
-        SelectStatement statement,
-        ExecutionContext context,
-        CancellationToken cancellationToken)
-    {
-        Dictionary<string, DeferredTableColumns>? deferredColumns =
-            await AnalyzeDeferredColumnsAsync(statement, cancellationToken)
-                .ConfigureAwait(false);
-
-        IQueryOperator plan = await PlanCoreWithSubqueriesAsync(
-            statement, deferredColumns, context, cancellationToken)
-            .ConfigureAwait(false);
-
-        return plan;
     }
 
     /// <summary>
@@ -185,7 +138,6 @@ public sealed class QueryPlanner
         {
             SelectQueryExpression select => PlanCore(
                 select.Statement,
-                deferredColumns: null,
                 externalCommonTableExpressionOperators: siblingOperators),
             CompoundQueryExpression compound => PlanCompoundWithSiblingCommonTableExpressions(compound, siblingOperators),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
@@ -260,12 +212,9 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Core planning logic shared by <see cref="Plan(SelectStatement)"/> and <see cref="PlanAsync(SelectStatement, CancellationToken)"/>.
-    /// When <paramref name="deferredColumns"/> is provided, expensive columns are excluded
-    /// from scans and a <see cref="LateMaterializationOperator"/> is injected before projection.
+    /// Core planning logic shared by <see cref="Plan(SelectStatement)"/> and <see cref="PlanCore(SelectStatement, Func{IQueryOperator, IQueryOperator}?, IReadOnlyDictionary{string, CommonTableExpressionOperator}?)"/>.
     /// </summary>
     /// <param name="statement">The parsed SELECT statement.</param>
-    /// <param name="deferredColumns">Columns to defer for late materialization, or <see langword="null"/>.</param>
     /// <param name="sourceTransform">
     /// Optional transform applied to the source operator after joins and predicate pushdown
     /// but before the remaining WHERE filter. Used to inject <see cref="Operators.ScalarSubqueryOperator"/>
@@ -286,7 +235,6 @@ public sealed class QueryPlanner
     /// <param name="result">The columnar plan if successful, or <c>null</c>.</param>
     private bool TryPlanColumnar(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         Func<IQueryOperator, IQueryOperator>? sourceTransform,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators,
         out IQueryOperator? result)
@@ -313,7 +261,6 @@ public sealed class QueryPlanner
         if (statement.Qualify is not null) return false;
         if (statement.Assertions is { Count: > 0 }) return false;
         if (sourceTransform is not null) return false;
-        if (deferredColumns is { Count: > 0 }) return false;
 
         // Guard: must be a concrete table (not a CTE name).
         if (!_catalog.TryResolve(tableRef.Name, out TableDescriptor? descriptor) || descriptor is null) return false;
@@ -399,14 +346,13 @@ public sealed class QueryPlanner
 
     private IQueryOperator PlanCore(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         Func<IQueryOperator, IQueryOperator>? sourceTransform = null,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null)
     {
         // Fast path: for simple queries on columnar-capable providers (no joins,
         // no groupby, no window, no CTE, etc.), build a fully columnar pipeline
         // that avoids per-row array allocations entirely.
-        if (TryPlanColumnar(statement, deferredColumns, sourceTransform,
+        if (TryPlanColumnar(statement, sourceTransform,
             externalCommonTableExpressionOperators, out IQueryOperator? columnarPlan)
             && columnarPlan is not null)
         {
@@ -434,7 +380,7 @@ public sealed class QueryPlanner
         // 1. Build the source operator (FROM clause) with projection pushdown.
         bool hasJoins = statement.Joins is not null && statement.Joins.Count > 0;
         IQueryOperator source = statement.From is not null
-            ? PlanSource(statement.From.Source, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators)
+            ? PlanSource(statement.From.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators)
             : new SingleEmptyRowOperator();
 
         // Track which table aliases are available on the current (left) side.
@@ -460,7 +406,7 @@ public sealed class QueryPlanner
 
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators);
+                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
                 plannedJoins.Add((join, rightSide, rightAliases));
@@ -611,23 +557,7 @@ public sealed class QueryPlanner
             source = new FilterOperator(source, remaining);
         }
 
-        // 3b. Late materialization: fetch expensive output-only columns for surviving rows.
-        // When GROUP BY is present, late materialization must happen before aggregation
-        // so the aggregate functions see fully materialized column values.
-        if (deferredColumns is not null)
-        {
-            foreach (KeyValuePair<string, DeferredTableColumns> entry in deferredColumns)
-            {
-                source = new LateMaterializationOperator(
-                    source,
-                    entry.Value.Descriptor,
-                    entry.Value.KeyColumn,
-                    entry.Value.ColumnNames,
-                    entry.Key);
-            }
-        }
-
-        // 3c. GROUP BY / aggregation.
+        // 3b. GROUP BY / aggregation.
         // Desugar CROSS VALIDATE into a synthetic LET binding before any rewriting pass.
         // The fold expression is: CAST(FLOOR(hash_split(key, seed) * k) AS Int32)
         IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
@@ -816,7 +746,7 @@ public sealed class QueryPlanner
             projectionColumns = rewrittenColumns;
         }
 
-        // 3d. Window functions — insert WindowOperator after GROUP BY
+        // 3c. Window functions — insert WindowOperator after GROUP BY
         // (which may reference aggregate output columns) but before projection.
         // QUALIFY may also contain inline window function calls that must be
         // lifted into the same WindowOperator.
@@ -891,7 +821,7 @@ public sealed class QueryPlanner
             projectionColumns = windowRewrittenColumns;
         }
 
-        // 3d'. SCAN fold expressions — insert FoldScanOperator after WindowOperator
+        // 3d. SCAN fold expressions — insert FoldScanOperator after WindowOperator
         // but before projection. SCAN expressions produce running accumulators
         // where output[i] = f(output[i-1], input[i]).
         bool hasScanExpressions = HasScanExpression(projectionColumns)
@@ -1154,14 +1084,13 @@ public sealed class QueryPlanner
     /// </summary>
     private async Task<IQueryOperator> PlanCoreWithSubqueriesAsync(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
         // Determine if the statement contains any SubqueryExpressions.
         if (!ContainsSubqueryExpression(statement))
         {
-            return PlanCore(statement, deferredColumns);
+            return PlanCore(statement);
         }
 
         // Collect outer-scope table aliases for correlation detection.
@@ -1320,7 +1249,7 @@ public sealed class QueryPlanner
         }
 
         // Plan the rewritten statement through the standard pipeline with the source transform.
-        return PlanCore(rewrittenStatement, deferredColumns, sourceTransform);
+        return PlanCore(rewrittenStatement, sourceTransform);
     }
 
     /// <summary>
@@ -4142,13 +4071,12 @@ public sealed class QueryPlanner
     private IQueryOperator PlanSource(
         TableSource source,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         bool hasJoins,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
         return source switch
         {
-            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators),
+            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, hasJoins, commonTableExpressionOperators),
             SubquerySource subquery => PlanSubquery(subquery),
             FunctionSource functionSource => PlanFunctionSource(functionSource, hasJoins),
             _ => throw new InvalidOperationException(
@@ -4159,7 +4087,6 @@ public sealed class QueryPlanner
     private IQueryOperator PlanTableReference(
         TableReference tableRef,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         bool hasJoins,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
@@ -4188,23 +4115,6 @@ public sealed class QueryPlanner
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;
         IReadOnlySet<string>? requiredColumns =
             ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
-
-        // Late materialization: exclude deferred columns from the scan so the
-        // provider does not materialize expensive data for every row.
-        if (deferredColumns is not null &&
-            deferredColumns.TryGetValue(effectiveAlias, out DeferredTableColumns? deferred))
-        {
-            if (requiredColumns is not null)
-            {
-                HashSet<string> filtered = new(requiredColumns, StringComparer.OrdinalIgnoreCase);
-                foreach (string column in deferred.ColumnNames)
-                {
-                    filtered.Remove(column);
-                }
-
-                requiredColumns = filtered;
-            }
-        }
 
         IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
 
@@ -4351,143 +4261,6 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Analyzes all table sources to find expensive columns that are referenced only
-    /// in the SELECT projection (not in WHERE, JOIN ON, or ORDER BY). These columns
-    /// can be deferred and fetched via <see cref="IKeyedTableProvider"/> after joins and
-    /// filters have eliminated non-matching rows.
-    /// </summary>
-    private async Task<Dictionary<string, DeferredTableColumns>?> AnalyzeDeferredColumnsAsync(
-        SelectStatement statement,
-        CancellationToken cancellationToken)
-    {
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
-            CollectAllReferencedColumns(statement);
-
-        // SELECT * prevents determining which columns are output-only.
-        if (allReferencedColumns.Count == 0)
-        {
-            return null;
-        }
-
-        HashSet<(string? TableName, string ColumnName)> pipelineColumns =
-            CollectPipelineColumns(statement);
-
-        Dictionary<string, DeferredTableColumns>? result = null;
-
-        // Analyze FROM source.
-        if (statement.From is not null)
-        {
-            AnalyzeTableSource(
-                statement.From.Source, allReferencedColumns, pipelineColumns,
-                cancellationToken, ref result);
-        }
-
-        // Analyze JOIN sources.
-        if (statement.Joins is not null)
-        {
-            foreach (JoinClause join in statement.Joins)
-            {
-                AnalyzeTableSource(
-                    join.Source, allReferencedColumns, pipelineColumns,
-                    cancellationToken, ref result);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Checks a single table source for deferrable expensive columns and adds
-    /// entries to the result dictionary if applicable.
-    /// </summary>
-    private void AnalyzeTableSource(
-        TableSource source,
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        HashSet<(string? TableName, string ColumnName)> pipelineColumns,
-        CancellationToken cancellationToken,
-        ref Dictionary<string, DeferredTableColumns>? result)
-    {
-        if (source is not TableReference tableRef)
-        {
-            return;
-        }
-
-        if (!_catalog.TryResolve(tableRef.Name, out TableDescriptor? descriptor) || descriptor is null)
-        {
-            return;
-        }
-
-        ITableProvider provider = _catalog.CreateProvider(descriptor);
-        if (provider is not IKeyedTableProvider)
-        {
-            return;
-        }
-
-        // GetCapabilitiesAsync returns Task.FromResult for most providers
-        // (ZIP, JSON, CSV, HDF5). Parquet opens a file but is fast.
-        ProviderCapabilities capabilities =
-            provider.GetCapabilitiesAsync(descriptor, cancellationToken)
-                .ConfigureAwait(false)
-                .GetAwaiter()
-                .GetResult();
-
-        if (capabilities.KeyColumn is null || capabilities.ColumnCosts.Count == 0)
-        {
-            return;
-        }
-
-        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
-
-        // Find expensive columns referenced only in SELECT/output (not in pipeline).
-        IReadOnlySet<string>? allRequired =
-            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
-        IReadOnlySet<string>? pipelineRequired =
-            ComputeRequiredColumns(effectiveAlias, pipelineColumns);
-
-        if (allRequired is null)
-        {
-            return;
-        }
-
-        HashSet<string> deferrable = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string columnName in allRequired)
-        {
-            if (capabilities.ColumnCosts.TryGetValue(columnName, out ColumnCost cost) &&
-                cost == ColumnCost.Expensive)
-            {
-                // Column is expensive. Check it's not needed by pipeline operators.
-                bool neededInPipeline = pipelineRequired is not null &&
-                    pipelineRequired.Contains(columnName);
-
-                if (!neededInPipeline)
-                {
-                    deferrable.Add(columnName);
-                }
-            }
-        }
-
-        if (deferrable.Count == 0)
-        {
-            return;
-        }
-
-        // Verify the key column is available in pipeline rows (needed for lookup).
-        bool keyInPipeline = pipelineRequired is not null &&
-            pipelineRequired.Contains(capabilities.KeyColumn);
-        bool keyInAll = allRequired.Contains(capabilities.KeyColumn);
-
-        if (!keyInPipeline && !keyInAll)
-        {
-            return;
-        }
-
-        result ??= new Dictionary<string, DeferredTableColumns>(StringComparer.OrdinalIgnoreCase);
-        result[effectiveAlias] = new DeferredTableColumns(
-            descriptor, capabilities.KeyColumn, deferrable);
-    }
-
-    /// <summary>
     /// Collects column references from WHERE, JOIN ON, and ORDER BY — the places
     /// where column values are needed by intermediate pipeline operators (filter,
     /// join, sort). Columns referenced only in SELECT are output-only.
@@ -4608,7 +4381,6 @@ public sealed class QueryPlanner
 
                 IQueryOperator anchorPlan = PlanCore(
                     anchorStatement,
-                    deferredColumns: null,
                     externalCommonTableExpressionOperators: operators);
 
                 // Capture for the closure. The factory is called at execution time,
@@ -4641,7 +4413,6 @@ public sealed class QueryPlanner
 
                         return capturedPlanner.PlanCore(
                             capturedDefinition.RecursiveQuery,
-                            deferredColumns: null,
                             externalCommonTableExpressionOperators: selfReferenceOperators);
                     },
                     commonTableExpression.Name,
