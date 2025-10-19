@@ -33,8 +33,9 @@ public sealed class AssertClauseTests
     }
 
     /// <summary>
-    /// Creates a catalog whose providers implement <see cref="IColumnBatchProvider"/>,
-    /// triggering the columnar fast path in <see cref="QueryPlanner"/>.
+    /// Creates a catalog using <see cref="InMemoryTableProvider"/>. Historically this
+    /// routed through a columnar fast path; the path has been removed and this helper
+    /// is retained only because several tests still reference it by name.
     /// </summary>
     private static TableCatalog CreateColumnarCatalog(params (string Name, Row[] Rows)[] tables)
     {
@@ -431,11 +432,9 @@ public sealed class AssertClauseTests
 
     /// <summary>
     /// ASSERT ON FAIL WARN fires for a boolean column via a DEFINE-block LET alias when
-    /// the provider implements <see cref="IColumnBatchProvider"/> and the plan is built
-    /// via <see cref="QueryPlanner.PlanWithSubqueriesAsync"/> — the exact code path used
-    /// by <c>CommandDispatcher</c> for every interactive REPL query.
-    /// Regression test: ensures the CLI code path (columnar scan + async planner) does
-    /// not silently drop assertions.
+    /// the plan is built via <see cref="QueryPlanner.PlanWithSubqueriesAsync"/> — the exact
+    /// code path used by <c>CommandDispatcher</c> for every interactive REPL query.
+    /// Regression test: ensures the CLI code path (async planner) does not silently drop assertions.
     /// </summary>
     [Fact]
     public async Task Execute_WarnMode_DefineBlockLet_ColumnarProvider_CliPath_RecordsDiagnostics()
@@ -521,11 +520,10 @@ public sealed class AssertClauseTests
     }
 
     /// <summary>
-    /// ASSERT ON FAIL ABORT fires when the provider implements
-    /// <see cref="IColumnBatchProvider"/> (the columnar fast path).
-    /// Regression test: <see cref="QueryPlanner.TryPlanColumnar"/> previously
-    /// routed queries with ASSERT into the columnar pipeline, which has no
-    /// assertion evaluation, silently ignoring all ASSERT clauses.
+    /// ASSERT ON FAIL ABORT fires for queries built against an in-memory provider.
+    /// Regression test: the former columnar fast path used to silently drop ASSERT
+    /// clauses; this test keeps that coverage in place even though the fast path
+    /// has been removed.
     /// </summary>
     [Fact]
     public async Task Execute_AbortMode_ColumnarProvider_Fires()
@@ -562,8 +560,8 @@ public sealed class AssertClauseTests
         Assert.Equal("amount must be positive", exception.Message);
     }
 
-    /// <summary>    /// ASSERT ON FAIL SKIP fires when the provider implements
-    /// <see cref="IColumnBatchProvider"/> (the columnar fast path).
+    /// <summary>
+    /// ASSERT ON FAIL SKIP fires for queries built against an in-memory provider.
     /// </summary>
     [Fact]
     public async Task Execute_SkipMode_ColumnarProvider_Fires()

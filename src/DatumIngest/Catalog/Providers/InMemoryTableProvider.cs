@@ -74,12 +74,6 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<ColumnBatch> OpenColumnBatchAsync(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, Expression? filterHint, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-    }
-
-    /// <inheritdoc/>
     public IAsyncEnumerable<RowBatch> ReadRowRangeAsync(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, long startRow, int count, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();

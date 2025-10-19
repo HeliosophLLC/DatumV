@@ -255,12 +255,15 @@ public sealed class ScanOperator : IQueryOperator
             }
             else
             {
-                await foreach (RowBatch batch in ExecuteViaColumnBatchAsync(provider, context).ConfigureAwait(false))
+                IAsyncEnumerable<RowBatch> rows = _filterHint is not null
+                    ? provider.OpenAsync(_descriptor, _requiredColumns, _filterHint, cancellationToken)
+                    : provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
+
+                await foreach (RowBatch batch in rows.ConfigureAwait(false))
                 {
                     yield return batch;
                 }
             }
-
         }
         finally
         {
@@ -1319,34 +1322,4 @@ public sealed class ScanOperator : IQueryOperator
         }
     }
 
-    /// <summary>
-    /// Decodes data via <see cref="ITableProvider"/> and converts each
-    /// <see cref="ColumnBatch"/> to a <see cref="RowBatch"/> using pooled buffers.
-    /// This path uses the same column decoder pipeline as the fully columnar
-    /// operators, including arena-backed string storage during decode.
-    /// </summary>
-    private async IAsyncEnumerable<RowBatch> ExecuteViaColumnBatchAsync(
-        ITableProvider provider,
-        ExecutionContext context)
-    {
-        CancellationToken cancellationToken = context.CancellationToken;
-        LocalBufferPool pool = context.LocalBufferPool;
-
-        await foreach (ColumnBatch columnBatch in provider.OpenColumnBatchAsync(
-            _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
-        {
-            int rowCount = columnBatch.RowCount;
-            int columnCount = columnBatch.ColumnCount;
-            RowBatch rowBatch = pool.RentBatch(rowCount);
-
-            for (int row = 0; row < rowCount; row++)
-            {
-                DataValue[] buffer = pool.Rent(columnCount);
-                rowBatch.Add(columnBatch.GetRow(row, buffer));
-            }
-
-            columnBatch.Dispose();
-            yield return rowBatch;
-        }
-    }
 }
