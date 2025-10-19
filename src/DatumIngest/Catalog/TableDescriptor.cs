@@ -1,3 +1,5 @@
+using DatumIngest.Serialization;
+
 namespace DatumIngest.Catalog;
 
 /// <summary>

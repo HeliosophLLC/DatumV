@@ -64,29 +64,6 @@ public class DatumFileBenchmarks
     }
 
     /// <summary>
-    /// Fused pipeline: write rows to <c>.datum</c> while simultaneously accumulating
-    /// a source index and column statistics in the same streaming pass.
-    /// </summary>
-    [Benchmark(Description = "Write datum fused (index + stats)")]
-    public async Task WriteDatumFused()
-    {
-        string path = Path.Combine(_tempDirectory, $"fused_{Guid.NewGuid():N}.datum");
-        SourceIndexBuilder builder = new();
-        IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(
-            new SourceFingerprint(0, Array.Empty<byte>()));
-        StatisticsCollector statisticsCollector = new();
-
-        FusedDatumPipelineWriter writer = new(path, indexBuilder, statisticsCollector);
-        await writer.InitializeAsync(_schema).ConfigureAwait(false);
-        foreach (Row row in _rows)
-        {
-            await writer.WriteRowAsync(row).ConfigureAwait(false);
-        }
-        await writer.FinalizeAsync().ConfigureAwait(false);
-        await writer.DisposeAsync().ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Parallel column decode: reads all five columns from every row group using
     /// <see cref="DatumMemoryMappedReader.ReadColumnsParallel"/>.
     /// </summary>

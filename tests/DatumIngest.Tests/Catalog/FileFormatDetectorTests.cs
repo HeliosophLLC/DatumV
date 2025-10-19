@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Serialization;
 
 namespace DatumIngest.Tests.Catalog;
 

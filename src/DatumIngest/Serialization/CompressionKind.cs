@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace DatumIngest.Serialization;
 
 /// <summary>
 /// Identifies the compression applied to a data source file.

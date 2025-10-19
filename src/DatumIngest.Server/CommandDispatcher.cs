@@ -8,6 +8,7 @@ using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using DatumIngest.Serialization;
 
 namespace DatumIngest.Server;
 

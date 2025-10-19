@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using DatumIngest.Catalog;
 using DatumIngest.Ingestion;
 using DatumIngest.Manifest;
 using DatumIngest.Pooling;
@@ -113,7 +112,7 @@ if (result is not null)
     // Matches the convention used by the server's INSERT path and the catalog's
     // sidecar resolver so downstream tools pick it up automatically.
     string manifestPath = Path.ChangeExtension(destPath, ".datum-manifest");
-    string tableName = FileFormatDetector.DeriveTableName(sourcePath);
+    string tableName = PathDetector.DeriveTableName(sourcePath);
     await ManifestSerializer.WriteToFileAsync(tableName, result.Manifest, manifestPath);
     long manifestBytes = new FileInfo(manifestPath).Length;
     Console.WriteLine($"Manifest:    {manifestPath} ({manifestBytes:N0} bytes)");

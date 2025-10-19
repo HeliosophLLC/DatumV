@@ -3,6 +3,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Serialization;
 
 namespace DatumIngest.Catalog;
 
