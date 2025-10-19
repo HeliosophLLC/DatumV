@@ -48,11 +48,17 @@ internal sealed class SamplePreviewCollector
     /// of stream length.
     /// </summary>
     /// <param name="row">The row to consider.</param>
-    public void Consider(Row row)
+    /// <param name="store">
+    /// The <see cref="IValueStore"/> backing the row's reference-type payloads (strings,
+    /// vectors, images, arrays, structs). Reference values are materialized eagerly
+    /// into CLR primitives here so the reservoir survives the batch returning to the
+    /// pool and its arena being reset.
+    /// </param>
+    public void Consider(Row row, IValueStore store)
     {
         if (_reservoirCount < _sampleSize)
         {
-            _reservoir[_reservoirCount] = ConvertRow(row);
+            _reservoir[_reservoirCount] = ConvertRow(row, store);
             _reservoirCount++;
         }
         else
@@ -61,11 +67,24 @@ internal sealed class SamplePreviewCollector
 
             if (j < _sampleSize)
             {
-                _reservoir[j] = ConvertRow(row);
+                _reservoir[j] = ConvertRow(row, store);
             }
         }
 
         _rowsConsidered++;
+    }
+
+    /// <summary>
+    /// Considers every row in <paramref name="batch"/> for the reservoir, resolving
+    /// reference-type payloads through <paramref name="store"/>. Keeps the ingest
+    /// loop batch-oriented instead of leaking the per-row iteration into the caller.
+    /// </summary>
+    public void Consider(RowBatch batch, IValueStore store)
+    {
+        for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+        {
+            Consider(batch[rowIndex], store);
+        }
     }
 
     /// <summary>
@@ -95,21 +114,22 @@ internal sealed class SamplePreviewCollector
     /// <summary>
     /// Converts a <see cref="Row"/> into an array of JSON-friendly objects.
     /// </summary>
-    private static object?[] ConvertRow(Row row)
+    private static object?[] ConvertRow(Row row, IValueStore store)
     {
         object?[] values = new object?[row.FieldCount];
         for (int i = 0; i < row.FieldCount; i++)
         {
-            values[i] = ConvertValue(row[i]);
+            values[i] = ConvertValue(row[i], store);
         }
 
         return values;
     }
 
     /// <summary>
-    /// Converts a single <see cref="DataValue"/> to a JSON-serialisable representation.
+    /// Converts a single <see cref="DataValue"/> to a JSON-serialisable representation,
+    /// resolving reference-type payloads through <paramref name="store"/>.
     /// </summary>
-    internal static object? ConvertValue(DataValue value)
+    internal static object? ConvertValue(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -119,20 +139,23 @@ internal sealed class SamplePreviewCollector
         return value.Kind switch
         {
             // Composite types need recursive conversion for JSON nesting.
-            DataKind.Vector => ConvertVector(value.AsVector()),
-            DataKind.Matrix => ConvertMatrix(value),
-            DataKind.Tensor => ConvertTensor(value),
-            DataKind.Image => ConvertImage(value),
+            DataKind.Vector => ConvertVector(value.AsVector(store)),
+            DataKind.Matrix => ConvertMatrix(value, store),
+            DataKind.Tensor => ConvertTensor(value, store),
+            DataKind.Image => ConvertImage(value, store),
             DataKind.UInt8Array => BinarySentinel,
-            DataKind.Array => ConvertArray(value),
-            DataKind.Struct => ConvertStruct(value),
+            DataKind.Array => ConvertArray(value, store),
+            DataKind.Struct => ConvertStruct(value, store),
+            // Strings need the store to resolve arena- or handle-backed content.
+            DataKind.String => value.AsString(store),
+            DataKind.JsonValue => value.AsJsonValue(store),
             // Date/time types: ISO string for JSON (DateOnly/DateTimeOffset don't serialize well).
             DataKind.Date => value.AsDate().ToString("O"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),
             DataKind.Time => value.AsTime().ToString("O"),
             DataKind.Duration => value.AsDuration().ToString(),
             DataKind.Uuid => value.AsUuid().ToString(),
-            // Everything else: boxed CLR type (float, int, bool, string, etc.).
+            // Everything else: scalar boxed CLR types (float, int, bool, etc.).
             _ => value.ToObject(),
         };
     }
@@ -150,9 +173,9 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>Converts a matrix to a nested array of arrays.</summary>
-    private static object ConvertMatrix(DataValue value)
+    private static object ConvertMatrix(DataValue value, IValueStore store)
     {
-        float[] data = value.AsMatrix(out int rows, out int columns);
+        float[] data = value.AsMatrix(store, out int rows, out int columns);
         object[][] result = new object[rows][];
         for (int r = 0; r < rows; r++)
         {
@@ -169,9 +192,9 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>Converts an arbitrary-rank tensor to recursively nested arrays.</summary>
-    private static object ConvertTensor(DataValue value)
+    private static object ConvertTensor(DataValue value, IValueStore store)
     {
-        float[] data = value.AsTensor(out int[] shape);
+        float[] data = value.AsTensor(store, out int[] shape);
         return BuildNestedArray(data, shape, offset: 0, dimension: 0);
     }
 
@@ -209,9 +232,9 @@ internal sealed class SamplePreviewCollector
     /// Converts an image to a base64 string prefixed with <c>base64://</c>.
     /// The image is resized to fit within 64×64 pixels, preserving aspect ratio.
     /// </summary>
-    private static object ConvertImage(DataValue value)
+    private static object ConvertImage(DataValue value, IValueStore store)
     {
-        byte[] imageBytes = value.AsImage();
+        byte[] imageBytes = value.AsImage(store);
         byte[] thumbnailBytes = CreateThumbnail(imageBytes);
         return "base64://" + Convert.ToBase64String(thumbnailBytes);
     }
@@ -258,26 +281,26 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>Converts a struct into a JSON-serialisable array of field values.</summary>
-    private static object?[] ConvertStruct(DataValue value)
+    private static object?[] ConvertStruct(DataValue value, IValueStore store)
     {
-        DataValue[] fields = value.AsStruct();
+        DataValue[] fields = value.AsStruct(store);
         object?[] result = new object?[fields.Length];
         for (int i = 0; i < fields.Length; i++)
         {
-            result[i] = ConvertValue(fields[i]);
+            result[i] = ConvertValue(fields[i], store);
         }
 
         return result;
     }
 
     /// <summary>Converts a typed array into a JSON-serialisable array.</summary>
-    private static object?[] ConvertArray(DataValue value)
+    private static object?[] ConvertArray(DataValue value, IValueStore store)
     {
-        DataValue[] elements = value.AsArray();
+        DataValue[] elements = value.AsArray(store);
         object?[] result = new object?[elements.Length];
         for (int i = 0; i < elements.Length; i++)
         {
-            result[i] = ConvertValue(elements[i]);
+            result[i] = ConvertValue(elements[i], store);
         }
 
         return result;

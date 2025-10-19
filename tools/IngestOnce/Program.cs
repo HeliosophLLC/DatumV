@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using DatumIngest.Catalog;
 using DatumIngest.Ingestion;
+using DatumIngest.Manifest;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
@@ -105,6 +107,16 @@ if (result is not null)
     Console.WriteLine($"  Time:       {elapsedSeconds:F1}s");
     Console.WriteLine($"  Row rate:   {result.RowCount / elapsedSeconds:N0} rows/s");
     Console.WriteLine($"  Read rate:  {mbPerSec:F1} MB/s");
+    Console.WriteLine();
+
+    // Sidecar manifest: same stem as the .datum output, `.datum-manifest` extension.
+    // Matches the convention used by the server's INSERT path and the catalog's
+    // sidecar resolver so downstream tools pick it up automatically.
+    string manifestPath = Path.ChangeExtension(destPath, ".datum-manifest");
+    string tableName = FileFormatDetector.DeriveTableName(sourcePath);
+    await ManifestSerializer.WriteToFileAsync(tableName, result.Manifest, manifestPath);
+    long manifestBytes = new FileInfo(manifestPath).Length;
+    Console.WriteLine($"Manifest:    {manifestPath} ({manifestBytes:N0} bytes)");
     Console.WriteLine();
 }
 else

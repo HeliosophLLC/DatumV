@@ -14,6 +14,13 @@ public sealed class SamplePreviewCollectorTests
         ["value"] = 0,
     };
 
+    /// <summary>
+    /// A fresh arena per test method, used as the <see cref="IValueStore"/> for
+    /// reference-type payloads (strings, vectors, images, arrays, structs). Disposed
+    /// by xUnit when the test class instance is GC'd.
+    /// </summary>
+    private readonly Arena _arena = new();
+
     private static Row SingleValueRow(DataValue value)
     {
         return new Row(SingleColumnNames, [value], SingleColumnIndex);
@@ -21,9 +28,6 @@ public sealed class SamplePreviewCollectorTests
 
     // ──────────────────── Reservoir sizing ────────────────────
 
-    /// <summary>
-    /// When fewer rows than the sample size are provided, all rows are retained.
-    /// </summary>
     [Fact]
     public void Build_FewerRowsThanSampleSize_RetainsAllRows()
     {
@@ -32,7 +36,7 @@ public sealed class SamplePreviewCollectorTests
 
         for (int i = 0; i < 10; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)));
+            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)), _arena);
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -43,9 +47,6 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal("float32", preview.Features[0].Kind);
     }
 
-    /// <summary>
-    /// When more rows than the sample size are provided, exactly sampleSize rows are retained.
-    /// </summary>
     [Fact]
     public void Build_MoreRowsThanSampleSize_RetainsExactlySampleSize()
     {
@@ -54,7 +55,7 @@ public sealed class SamplePreviewCollectorTests
 
         for (int i = 0; i < 100; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)));
+            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)), _arena);
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -64,68 +65,50 @@ public sealed class SamplePreviewCollectorTests
 
     // ──────────────────── Value conversion ────────────────────
 
-    /// <summary>
-    /// Scalar values are preserved as floats.
-    /// </summary>
     [Fact]
     public void ConvertValue_Scalar_ReturnsFloat()
     {
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromFloat32(42.5f));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromFloat32(42.5f), _arena);
 
         Assert.Equal(42.5f, result);
     }
 
-    /// <summary>
-    /// UInt8 values are preserved as bytes.
-    /// </summary>
     [Fact]
     public void ConvertValue_UInt8_ReturnsByte()
     {
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromUInt8(200));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromUInt8(200), _arena);
 
         Assert.Equal((byte)200, result);
     }
 
-    /// <summary>
-    /// Boolean values are preserved.
-    /// </summary>
     [Fact]
     public void ConvertValue_Boolean_ReturnsBool()
     {
-        Assert.Equal(true, SamplePreviewCollector.ConvertValue(DataValue.FromBoolean(true)));
-        Assert.Equal(false, SamplePreviewCollector.ConvertValue(DataValue.FromBoolean(false)));
+        Assert.Equal(true, SamplePreviewCollector.ConvertValue(DataValue.FromBoolean(true), _arena));
+        Assert.Equal(false, SamplePreviewCollector.ConvertValue(DataValue.FromBoolean(false), _arena));
     }
 
-    /// <summary>
-    /// String values are preserved.
-    /// </summary>
     [Fact]
     public void ConvertValue_String_ReturnsString()
     {
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromString("hello"));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromString("hello", _arena), _arena);
 
         Assert.Equal("hello", result);
     }
 
-    /// <summary>
-    /// Null values return null.
-    /// </summary>
     [Fact]
     public void ConvertValue_Null_ReturnsNull()
     {
-        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Float32)));
-        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.String)));
-        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Image)));
+        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Float32), _arena));
+        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.String), _arena));
+        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Image), _arena));
     }
 
-    /// <summary>
-    /// Vector values are converted to flat object arrays of floats.
-    /// </summary>
     [Fact]
     public void ConvertValue_Vector_ReturnsObjectArray()
     {
         float[] vector = [1.0f, 2.0f, 3.0f];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromVector(vector));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromVector(vector, _arena), _arena);
 
         object[] array = Assert.IsType<object[]>(result);
         Assert.Equal(3, array.Length);
@@ -134,14 +117,11 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal(3.0f, array[2]);
     }
 
-    /// <summary>
-    /// Matrix values are converted to nested arrays shaped [rows][columns].
-    /// </summary>
     [Fact]
     public void ConvertValue_Matrix_ReturnsNestedArrays()
     {
         float[] data = [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromMatrix(data, 2, 3));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromMatrix(data, 2, 3, _arena), _arena);
 
         object[][] matrix = Assert.IsType<object[][]>(result);
         Assert.Equal(2, matrix.Length);
@@ -151,15 +131,12 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal(6.0f, matrix[1][2]);
     }
 
-    /// <summary>
-    /// Tensor values are converted to recursively nested arrays following shape dimensions.
-    /// </summary>
     [Fact]
     public void ConvertValue_Tensor_ReturnsNestedArrays()
     {
         float[] data = [1, 2, 3, 4, 5, 6, 7, 8];
         int[] shape = [2, 2, 2];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromTensor(data, shape));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromTensor(data, shape, _arena), _arena);
 
         object[] outer = Assert.IsType<object[]>(result);
         Assert.Equal(2, outer.Length);
@@ -171,63 +148,49 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal(2.0f, inner[1]);
     }
 
-    /// <summary>
-    /// UInt8Array (binary) values are replaced with a sentinel string.
-    /// </summary>
     [Fact]
     public void ConvertValue_UInt8Array_ReturnsSentinel()
     {
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromUInt8Array([0x00, 0xFF]));
+        object? result = SamplePreviewCollector.ConvertValue(
+            DataValue.FromUInt8Array([0x00, 0xFF], _arena), _arena);
 
         Assert.Equal("[binary data]", result);
     }
 
-    /// <summary>
-    /// Date values are formatted as ISO 8601 strings.
-    /// </summary>
     [Fact]
     public void ConvertValue_Date_ReturnsIso8601String()
     {
         DateOnly date = new(2025, 3, 15);
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromDate(date));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromDate(date), _arena);
 
         Assert.Equal("2025-03-15", result);
     }
 
-    /// <summary>
-    /// DateTime values are formatted as ISO 8601 strings.
-    /// </summary>
     [Fact]
     public void ConvertValue_DateTime_ReturnsIso8601String()
     {
         DateTimeOffset dateTime = new(2025, 3, 15, 14, 30, 0, TimeSpan.Zero);
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromDateTime(dateTime));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromDateTime(dateTime), _arena);
 
         string resultString = Assert.IsType<string>(result);
         Assert.Contains("2025-03-15", resultString);
     }
 
-    /// <summary>
-    /// UUID values are formatted as strings.
-    /// </summary>
     [Fact]
     public void ConvertValue_Uuid_ReturnsString()
     {
         Guid uuid = Guid.NewGuid();
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromUuid(uuid));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromUuid(uuid), _arena);
 
         Assert.Equal(uuid.ToString(), result);
     }
 
-    /// <summary>
-    /// Array values are recursively converted.
-    /// </summary>
     [Fact]
     public void ConvertValue_Array_ReturnsConvertedElements()
     {
         DataValue[] elements = [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)];
-        DataValue array = DataValue.FromArray(DataKind.Float32, elements);
-        object? result = SamplePreviewCollector.ConvertValue(array);
+        DataValue array = DataValue.FromArray(DataKind.Float32, elements, _arena);
+        object? result = SamplePreviewCollector.ConvertValue(array, _arena);
 
         object?[] converted = Assert.IsType<object?[]>(result);
         Assert.Equal(2, converted.Length);
@@ -237,9 +200,6 @@ public sealed class SamplePreviewCollectorTests
 
     // ──────────────────── Feature list ────────────────────
 
-    /// <summary>
-    /// Features reflect the schema columns with lowercased kind names.
-    /// </summary>
     [Fact]
     public void Build_MultipleColumns_FeaturesMatchSchema()
     {
@@ -259,10 +219,10 @@ public sealed class SamplePreviewCollectorTests
 
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(new Row(names, [
-            DataValue.FromString("Alice"),
+            DataValue.FromString("Alice", _arena),
             DataValue.FromFloat32(95.5f),
             DataValue.FromBoolean(true),
-        ], index));
+        ], index), _arena);
 
         SamplePreview preview = collector.Build(schema);
 
@@ -282,9 +242,6 @@ public sealed class SamplePreviewCollectorTests
 
     // ──────────────────── Serialisation round-trip ────────────────────
 
-    /// <summary>
-    /// A sample preview survives a serialize→deserialize round-trip with values intact.
-    /// </summary>
     [Fact]
     public void Serialize_Deserialize_RoundTrip_PreservesValues()
     {
@@ -304,15 +261,15 @@ public sealed class SamplePreviewCollectorTests
 
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(new Row(names, [
-            DataValue.FromString("test"),
+            DataValue.FromString("test", _arena),
             DataValue.FromFloat32(1.5f),
             DataValue.FromBoolean(true),
-        ], index));
+        ], index), _arena);
         collector.Consider(new Row(names, [
-            DataValue.FromString("other"),
+            DataValue.FromString("other", _arena),
             DataValue.FromFloat32(2.0f),
             DataValue.Null(DataKind.Boolean),
-        ], index));
+        ], index), _arena);
 
         SamplePreview original = collector.Build(schema);
         string json = SamplePreviewSerializer.Serialize(original);
@@ -328,26 +285,23 @@ public sealed class SamplePreviewCollectorTests
             Assert.Equal(original.Features[i].Kind, deserialized.Features[i].Kind);
         }
 
-        // First row
         Assert.Equal("test", deserialized.Samples[0][0]);
         Assert.Equal(1.5f, deserialized.Samples[0][1]);
         Assert.Equal(true, deserialized.Samples[0][2]);
 
-        // Second row — null boolean
         Assert.Equal("other", deserialized.Samples[1][0]);
         Assert.Equal(2.0f, deserialized.Samples[1][1]);
         Assert.Null(deserialized.Samples[1][2]);
     }
 
-    /// <summary>
-    /// Vectors survive a serialisation round-trip as nested arrays.
-    /// </summary>
     [Fact]
     public void Serialize_Deserialize_Vector_PreservesStructure()
     {
         Schema schema = new([new ColumnInfo("embedding", DataKind.Vector, nullable: false)]);
         SamplePreviewCollector collector = new(sampleSize: 25);
-        collector.Consider(SingleValueRow(DataValue.FromVector([1.0f, 2.0f, 3.0f])));
+        collector.Consider(
+            SingleValueRow(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)),
+            _arena);
 
         SamplePreview original = collector.Build(schema);
         string json = SamplePreviewSerializer.Serialize(original);

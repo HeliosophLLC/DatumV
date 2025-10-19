@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DatumIngest.DatumFile;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -85,6 +86,7 @@ public class Ingester(
 
         SchemaDetector schemaDetector = new();
         StatisticsCollector statisticsCollector = new();
+        SamplePreviewCollector sampleCollector = new();
 
         await using Stream outputStream = await destination.OpenAsync(cancellationToken);
         using DatumFileWriter writer = new(outputStream);
@@ -108,10 +110,13 @@ public class Ingester(
                 }
             }
 
-            // WriteRowBatch first so stats can resolve offsets through the writer's
-            // page slice — the slice survives the batch returning to the pool.
+            // WriteRowBatch first so stats and samples can resolve offsets through
+            // the writer's page slice — the slice survives the batch returning to
+            // the pool, whereas the batch's own arena is reset on return.
             WriteHandle handle = writer.WriteRowBatch(batch);
+            IValueStore resolutionStore = (IValueStore?)handle.PageStore ?? batch.Arena;
             statisticsCollector.Collect(batch, handle.PageStore);
+            sampleCollector.Consider(batch, resolutionStore);
 
             rowCount += batch.Count;
             batchCount++;
@@ -142,13 +147,25 @@ public class Ingester(
             ArenaBytesWritten: totalArenaBytes,
             Elapsed: sw.Elapsed);
 
+        Schema finalSchema = schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]);
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+
+        Dictionary<string, DataKind> columnKinds = new(finalSchema.Columns.Count);
+        foreach (ColumnInfo column in finalSchema.Columns)
+        {
+            columnKinds[column.Name] = column.Kind;
+        }
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        SamplePreview sample = sampleCollector.Build(finalSchema);
+
         return new IngestionResult(
             OutputPath: destination.FilePath,
             RowCount: rowCount,
             BytesWritten: bytesWritten,
-            Schema: schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]),
-            Statistics: statisticsCollector.GetStatistics(),
-            Sample: null,
+            Schema: finalSchema,
+            Manifest: manifest,
+            Sample: sample,
             ScanPass: deserializer.ScanMetrics,
             IngestPass: ingestMetrics);
     }

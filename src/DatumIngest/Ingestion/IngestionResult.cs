@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Ingestion;
@@ -9,7 +10,12 @@ namespace DatumIngest.Ingestion;
 /// <param name="RowCount">Total number of rows written.</param>
 /// <param name="BytesWritten">Total bytes written to the output file.</param>
 /// <param name="Schema">The inferred schema of the source data.</param>
-/// <param name="Statistics">Per-column statistics accumulated during ingestion.</param>
+/// <param name="Manifest">
+/// The feature-level manifest built from per-column statistics: distribution shape,
+/// top-K values, temporal ranges, image stats, etc. Replaces the raw <c>ColumnStatistics</c>
+/// map with the analysis-ready view downstream consumers (dashboards, insight engine,
+/// query planner) actually use.
+/// </param>
 /// <param name="Sample">A preview of sampled rows for UI display, or <c>null</c> if sampling was disabled.</param>
 /// <param name="ScanPass">
 /// Metrics for the optional first-pass type scan. Null when the ingester ran in
@@ -21,7 +27,7 @@ public sealed record IngestionResult(
     long RowCount,
     long BytesWritten,
     Schema Schema,
-    IReadOnlyDictionary<string, Statistics.ColumnStatistics> Statistics,
+    QueryResultsManifest Manifest,
     SamplePreview? Sample,
     PassMetrics? ScanPass,
     PassMetrics IngestPass);
