@@ -271,7 +271,6 @@ public sealed class TableCatalog : IDisposable
         CancellationToken cancellationToken)
     {
         Register(name, filePath, options);
-        await ExpandTableAsync(name, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -283,7 +282,6 @@ public sealed class TableCatalog : IDisposable
     public async Task RegisterAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
     {
         Register(descriptor);
-        await ExpandTableAsync(descriptor.Name, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -730,78 +728,6 @@ public sealed class TableCatalog : IDisposable
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Expands multi-table sources by discovering sub-tables for providers that implement
-    /// <see cref="IMultiTableSource"/>. Each discovered sub-table replaces the original
-    /// registration with a qualified name (<c>{baseName}.{subTableName}</c>).
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task ExpandMultiTableSourcesAsync(CancellationToken cancellationToken)
-    {
-        // Snapshot keys to allow mutation during iteration.
-        List<string> tableNames = new(_descriptors.Keys);
-
-        foreach (string tableName in tableNames)
-        {
-            await ExpandTableAsync(tableName, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Expands a single table registration if its provider implements
-    /// <see cref="IMultiTableSource"/>, replacing it with one entry per discovered sub-table.
-    /// Does nothing when the provider is not a multi-table source or discovery returns no results.
-    /// </summary>
-    /// <param name="tableName">Logical table name to attempt expansion on.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    private async Task ExpandTableAsync(string tableName, CancellationToken cancellationToken)
-    {
-        if (!_descriptors.TryGetValue(tableName, out TableDescriptor? descriptor))
-        {
-            return;
-        }
-
-        ITableProvider provider = CreateProvider(descriptor);
-
-        if (provider is not IMultiTableSource multiTableSource)
-        {
-            return;
-        }
-
-        IReadOnlyList<DiscoveredTable>? discovered = await multiTableSource
-            .DiscoverTablesAsync(descriptor, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (discovered is null || discovered.Count == 0)
-        {
-            return;
-        }
-
-        // Remove the original single-table registration.
-        _descriptors.Remove(tableName);
-
-        // Register each discovered sub-table with a qualified name.
-        foreach (DiscoveredTable subTable in discovered)
-        {
-            string qualifiedName = $"{tableName}_{subTable.Name}";
-
-            // Merge sub-table options with the table-key marker.
-            Dictionary<string, string> mergedOptions = new(subTable.Options)
-            {
-                [SubTableKeyOption] = subTable.Name
-            };
-
-            TableDescriptor subDescriptor = new(
-                descriptor.Provider,
-                qualifiedName,
-                descriptor.FilePath,
-                mergedOptions,
-                descriptor.Compression);
-
-            _descriptors[qualifiedName] = subDescriptor;
-        }
     }
 
     /// <summary>

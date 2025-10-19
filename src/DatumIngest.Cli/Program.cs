@@ -28,9 +28,6 @@ try
     CliOptions options = CliOptions.Parse(args);
     TableCatalog catalog = BuildCatalog(options);
 
-    // Expand multi-table sources (e.g. JSON files with multiple array properties).
-    await catalog.ExpandMultiTableSourcesAsync(CancellationToken.None);
-
     // Load any pre-built indexes from explicit --index paths.
     LoadIndexes(catalog, options);
 

@@ -34,8 +34,6 @@ internal static class DatasetCatalogFactory
             }
         }
 
-        await catalog.ExpandMultiTableSourcesAsync(CancellationToken.None).ConfigureAwait(false);
-
         catalog.DiscoverSidecars();
 
         return catalog;
