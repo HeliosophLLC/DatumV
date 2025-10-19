@@ -342,7 +342,7 @@ public sealed class BitmapPruningTests
                 ["value"] = new ChunkColumnStatistics(
                     rows[start]["value"], rows[start + 2]["value"], 0, 3, 3)
             };
-            chunks.Add(new IndexChunk(start, 3, -1, -1, stats));
+            chunks.Add(new IndexChunk(start, 3, stats));
         }
 
         SourceIndex sourceIndex = new(
@@ -579,8 +579,7 @@ public sealed class BitmapPruningTests
         {
             int start = c * chunkSize;
             int count = Math.Min(chunkSize, rows.Length - start);
-            chunks.Add(new IndexChunk(start, count, -1, -1,
-                new Dictionary<string, ChunkColumnStatistics>()));
+            chunks.Add(new IndexChunk(start, count, new Dictionary<string, ChunkColumnStatistics>()));
         }
 
         IReadOnlyList<string> columnNames = rows[0].ColumnNames;

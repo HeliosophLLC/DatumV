@@ -260,8 +260,6 @@ See [indexes.md](indexes.md) for the full binary specification of both sidecar f
          └─ Yield DataValue[] for this column
 ```
 
-When `ISeekableTableProvider` is available and the sidecar index records `sourceByteOffset` per chunk, the reader can skip directly to the first relevant row group without scanning past irrelevant data.
-
 ## Write flow
 
 ```

@@ -194,12 +194,10 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
 
         long rowOffset = _accessor.ReadInt64(offset);
         long rowCount = _accessor.ReadInt64(offset + 8);
-        long sourceByteOffset = _accessor.ReadInt64(offset + 16);
-        long sourceByteLength = _accessor.ReadInt64(offset + 24);
 
         MappedChunkStatisticsDictionary statistics = new(this, chunkIndex);
 
-        return new IndexChunk(rowOffset, rowCount, sourceByteOffset, sourceByteLength, statistics);
+        return new IndexChunk(rowOffset, rowCount, statistics);
     }
 
     /// <summary>

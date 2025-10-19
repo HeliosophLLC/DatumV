@@ -70,9 +70,9 @@ public sealed class BloomJoinPruningTests
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 2, -1, -1, chunk0Stats),
-            new IndexChunk(2, 2, -1, -1, chunk1Stats),
-            new IndexChunk(4, 2, -1, -1, chunk2Stats),
+            new IndexChunk(0, 2, chunk0Stats),
+            new IndexChunk(2, 2, chunk1Stats),
+            new IndexChunk(4, 2, chunk2Stats),
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
@@ -144,7 +144,7 @@ public sealed class BloomJoinPruningTests
             ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 2, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 2, stats)];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
@@ -196,7 +196,7 @@ public sealed class BloomJoinPruningTests
             ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 2, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 2, stats)];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
@@ -271,8 +271,8 @@ public sealed class BloomJoinPruningTests
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 2, -1, -1, chunk0Stats),
-            new IndexChunk(2, 2, -1, -1, chunk1Stats),
+            new IndexChunk(0, 2, chunk0Stats),
+            new IndexChunk(2, 2, chunk1Stats),
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
@@ -360,8 +360,8 @@ public sealed class BloomJoinPruningTests
 
         List<IndexChunk> orderChunks =
         [
-            new IndexChunk(0, 2, -1, -1, orderChunk0Stats),
-            new IndexChunk(2, 2, -1, -1, orderChunk1Stats),
+            new IndexChunk(0, 2, orderChunk0Stats),
+            new IndexChunk(2, 2, orderChunk1Stats),
         ];
 
         SourceFingerprint orderFingerprint = new(0, new byte[32]);
@@ -493,9 +493,9 @@ public sealed class BloomJoinPruningTests
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 2, -1, -1, chunk0Stats),
-            new IndexChunk(2, 2, -1, -1, chunk1Stats),
-            new IndexChunk(4, 2, -1, -1, chunk2Stats),
+            new IndexChunk(0, 2, chunk0Stats),
+            new IndexChunk(2, 2, chunk1Stats),
+            new IndexChunk(4, 2, chunk2Stats),
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
@@ -574,8 +574,8 @@ public sealed class BloomJoinPruningTests
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 2, -1, -1, chunk0Stats),
-            new IndexChunk(2, 2, -1, -1, chunk1Stats),
+            new IndexChunk(0, 2, chunk0Stats),
+            new IndexChunk(2, 2, chunk1Stats),
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);

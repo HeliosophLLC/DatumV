@@ -280,7 +280,7 @@ internal static class UnifiedIndexWriter
     /// <code>
     /// [ChunkCount: i32] [ColumnCount: i32]
     /// Per-column header: [Name: length-prefixed UTF-8] [DataKind: 1B] [KeyWidth: i32]
-    /// Chunk fixed fields: ChunkCount × 32B (rowOffset, rowCount, sourceByteOffset, sourceByteLength)
+    /// Chunk fixed fields: ChunkCount × 32B (rowOffset, rowCount)
     /// Per-column zone maps: ChunkCount × (2×KeyWidth + 24) per column
     ///   encodedMin(KeyWidth) + encodedMax(KeyWidth) + nullCount(i64) + rowCount(i64) + estCardinality(i64)
     /// Zone map string table: for string/json min/max values
@@ -314,13 +314,11 @@ internal static class UnifiedIndexWriter
             writer.Write(keyWidth);
         }
 
-        // Write chunk fixed fields (rowOffset, rowCount, sourceByteOffset, sourceByteLength).
+        // Write chunk fixed fields (rowOffset, rowCount).
         foreach (IndexChunk chunk in chunks)
         {
             writer.Write(chunk.RowOffset);
             writer.Write(chunk.RowCount);
-            writer.Write(chunk.SourceByteOffset);
-            writer.Write(chunk.SourceByteLength);
         }
 
         // Collect string table entries for string/JSON min/max values.

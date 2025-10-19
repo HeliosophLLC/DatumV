@@ -129,8 +129,8 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 10_000, 1024, 8192, chunk1Stats),
-            new IndexChunk(10_000, 10_000, 9216, 8192, chunk2Stats),
+            new IndexChunk(0, 10_000, chunk1Stats),
+            new IndexChunk(10_000, 10_000, chunk2Stats),
         ];
 
         SourceIndex original = new(fingerprint, indexSchema, chunks);
@@ -142,8 +142,6 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         Assert.Equal(0, restored.Chunks[0].RowOffset);
         Assert.Equal(10_000, restored.Chunks[0].RowCount);
-        Assert.Equal(1024, restored.Chunks[0].SourceByteOffset);
-        Assert.Equal(8192, restored.Chunks[0].SourceByteLength);
 
         Assert.Equal(10_000, restored.Chunks[1].RowOffset);
         Assert.Equal(10_000, restored.Chunks[1].RowCount);
@@ -234,7 +232,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 50)
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 100, stats)];
         SourceIndex original = new(fingerprint, indexSchema, chunks);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("stats_string", original);
@@ -263,8 +261,8 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 100, -1, -1, stats),
-            new IndexChunk(100, 100, -1, -1, stats),
+            new IndexChunk(0, 100, stats),
+            new IndexChunk(100, 100, stats),
         ];
 
         BloomFilter filter0 = new(expectedElements: 100);
@@ -322,7 +320,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
                 NullCount: 0, RowCount: 1000, EstimatedCardinality: 1000)
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 1000, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 1000, stats)];
 
         // Build a B+Tree with enough entries to create at least one internal page.
         ValueIndexEntry[] entries = new ValueIndexEntry[500];
@@ -373,7 +371,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 2)
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 100, stats)];
 
         // Create simple compressed bitmaps (just raw bytes for testing).
         byte[] redBitmap = [0xFF, 0x00, 0xFF];
@@ -479,8 +477,8 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         List<IndexChunk> chunks =
         [
-            new IndexChunk(0, 100, -1, -1, stats),
-            new IndexChunk(100, 100, -1, -1, stats),
+            new IndexChunk(0, 100, stats),
+            new IndexChunk(100, 100, stats),
         ];
 
         // Bloom filters.
@@ -566,7 +564,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
             ["value"] = statistics
         };
 
-        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
+        List<IndexChunk> chunks = [new IndexChunk(0, 100, stats)];
         return new SourceIndex(fingerprint, indexSchema, chunks);
     }
 

@@ -76,8 +76,6 @@ The source is logically divided into fixed-size row chunks (default: 10,000 rows
 |-------|------|-------------|
 | RowOffset | int64 | Zero-based starting row index in the source |
 | RowCount | int64 | Number of rows in this chunk |
-| SourceByteOffset | int64 | Byte position of the chunk's first row in the source file (−1 if unavailable) |
-| SourceByteLength | int64 | Byte span of the chunk in the source file (−1 if unavailable) |
 | ColumnStatistics | dictionary | Per-column minimum, maximum, null count, row count, and HyperLogLog cardinality estimate |
 
 Byte offsets are populated when the provider implements `IChunkMeasuringProvider` (see [Byte-range measurement](#byte-range-measurement) below). Otherwise they default to −1, and the engine falls back to row-counting during execution.
