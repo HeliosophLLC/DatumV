@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests;
 
+using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Model;
 
 /// <summary>

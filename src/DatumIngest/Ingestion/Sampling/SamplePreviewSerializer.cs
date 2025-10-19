@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DatumIngest;
+namespace DatumIngest.Ingestion.Sampling;
 
 /// <summary>
 /// Serializes and deserializes <see cref="SamplePreview"/> instances to and from JSON.

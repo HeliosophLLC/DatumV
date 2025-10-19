@@ -1,3 +1,4 @@
+using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 

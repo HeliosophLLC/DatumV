@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DatumIngest.DatumFile;
+using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Pooling;

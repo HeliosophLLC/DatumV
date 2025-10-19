@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest;
+namespace DatumIngest.Ingestion.Sampling;
 
 /// <summary>
 /// Collects a representative sample of rows during ingestion using reservoir sampling
