@@ -866,7 +866,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             switch (current)
             {
                 case ScanOperator scan:
-                    return scan.EstimatedRowCount;
+                    return scan.TableRowCount;
                 case AliasOperator alias:
                     current = alias.Source;
                     break;

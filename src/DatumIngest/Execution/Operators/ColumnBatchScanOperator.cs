@@ -25,10 +25,12 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
     /// </summary>
     /// <param name="descriptor">Table descriptor identifying the data source.</param>
     /// <param name="requiredColumns">Columns needed downstream; null means all columns.</param>
-    public ColumnBatchScanOperator(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns)
+    /// <param name="tableRowCount">The row count for the table.</param>
+    public ColumnBatchScanOperator(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, long tableRowCount)
     {
         _descriptor = descriptor;
         _requiredColumns = requiredColumns;
+        TableRowCount = tableRowCount;
     }
 
     /// <summary>The table descriptor this operator scans.</summary>
@@ -41,9 +43,9 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
     public Expression? FilterHint => _filterHint;
 
     /// <summary>
-    /// Estimated row count from provider capabilities or manifest, set at plan time.
+    /// Total row count from provider, set at plan time.
     /// </summary>
-    public long? EstimatedRowCount { get; set; }
+    public long TableRowCount { get; }
 
     /// <summary>
     /// Per-column statistics from a <see cref="QueryResultsManifest"/>, set at plan time.
@@ -135,7 +137,7 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
         return new OperatorPlanDescription("Scan")
         {
             Properties = properties,
-            EstimatedRows = EstimatedRowCount,
+            EstimatedRows = TableRowCount,
             AccessStrategy = accessStrategy,
         };
     }

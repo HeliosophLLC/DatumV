@@ -33,13 +33,9 @@ public interface ITableProvider
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Returns the operational capabilities of this provider for the given descriptor,
-    /// enabling cost-based query planning decisions.
+    /// Returns the row count for the table described by the given descriptor.
     /// </summary>
     /// <param name="descriptor">Table descriptor with file path and provider options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Provider capabilities for query planning.</returns>
-    Task<ProviderCapabilities> GetCapabilitiesAsync(
-        TableDescriptor descriptor,
-        CancellationToken cancellationToken);
+    /// <returns>The row count for the table.</returns>
+    long GetRowCount(TableDescriptor descriptor);
 }

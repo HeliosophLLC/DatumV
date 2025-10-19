@@ -381,13 +381,9 @@ public sealed class BitmapBuildPipelineTests
             return Task.FromResult(new Schema(columns));
         }
 
-        public Task<ProviderCapabilities> GetCapabilitiesAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
+        public long GetRowCount(TableDescriptor descriptor)
         {
-            return Task.FromResult(new ProviderCapabilities(
-                EstimatedRowCount: null,
-                EstimatedRowSizeBytes: null,
-                SupportsSeek: false));
+            return _rows.Count();
         }
 
         public async IAsyncEnumerable<RowBatch> OpenAsync(

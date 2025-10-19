@@ -84,7 +84,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Right (build) side: only has key value 3.0 — should match chunk 1 only.
@@ -154,7 +154,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
@@ -206,7 +206,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
@@ -283,7 +283,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Wrap in alias to test traversal.
@@ -372,7 +372,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor orderDescriptor = new("test", "orders", "orders.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(orderRows));
-        ScanOperator orderScan = new(orderDescriptor, requiredColumns: null);
+        ScanOperator orderScan = new(orderDescriptor, null, orderRows.Length);
         orderScan.SetSourceIndex(orderSourceIndex);
 
         // Inner right: "customers" table — simple, no bloom needed.
@@ -430,9 +430,9 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor2 = new("test", "t2", "t2.test", new Dictionary<string, string>());
         TableDescriptor descriptor3 = new("test", "t3", "t3.test", new Dictionary<string, string>());
 
-        ScanOperator scan1 = new(descriptor1, requiredColumns: null);
-        ScanOperator scan2 = new(descriptor2, requiredColumns: null);
-        ScanOperator scan3 = new(descriptor3, requiredColumns: null);
+        ScanOperator scan1 = new(descriptor1, null, 123);
+        ScanOperator scan2 = new(descriptor2, null, 234);
+        ScanOperator scan3 = new(descriptor3, null, 345);
 
         // Wrap scan2 in AliasOperator.
         AliasOperator aliased2 = new(scan2, "a2");
@@ -506,7 +506,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side: only key 4.0 — should match chunk 1 only.
@@ -586,7 +586,7 @@ public sealed class BloomJoinPruningTests
         TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side has keys from both chunks.

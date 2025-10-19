@@ -620,14 +620,9 @@ public sealed class AssertClauseTests
             return Task.FromResult(new Schema(columns));
         }
 
-        /// <inheritdoc/>
-        public Task<ProviderCapabilities> GetCapabilitiesAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
+        public long GetRowCount(TableDescriptor descriptor)
         {
-            return Task.FromResult(new ProviderCapabilities(
-                EstimatedRowCount: _rows.Length,
-                EstimatedRowSizeBytes: null,
-                SupportsSeek: false));
+            return _rows.Length;
         }
 
         /// <inheritdoc/>

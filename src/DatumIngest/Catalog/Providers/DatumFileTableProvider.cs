@@ -68,15 +68,12 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         => OpenCoreAsync(descriptor, requiredColumns, filterHint, cancellationToken);
 
     /// <inheritdoc/>
-    public Task<ProviderCapabilities> GetCapabilitiesAsync(
-        TableDescriptor descriptor,
-        CancellationToken cancellationToken)
+    public long GetRowCount(TableDescriptor descriptor)
     {
         using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
 
         // When tombstones are present, report the active (non-deleted) row count
         // so the query planner sees the true logical size.
-        long rowCount = reader.TotalRowCount;
         if (reader.Flags.HasFlag(DatumFileFlags.HasTombstones))
         {
             long activeCount = 0;
@@ -85,13 +82,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                 activeCount += reader.GetRowGroupDescriptor(rowGroupIndex).ActiveRowCount;
             }
 
-            rowCount = activeCount;
+            return activeCount;
         }
 
-        return Task.FromResult(new ProviderCapabilities(
-            rowCount,
-            EstimatedRowSizeBytes: null,
-            SupportsSeek: true));
+        return reader.TotalRowCount;
     }
 
     private async IAsyncEnumerable<RowBatch> OpenCoreAsync(

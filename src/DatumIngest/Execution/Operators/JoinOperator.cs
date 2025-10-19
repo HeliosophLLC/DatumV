@@ -976,7 +976,7 @@ public sealed class JoinOperator : IQueryOperator
             switch (current)
             {
                 case ScanOperator scan:
-                    return scan.EstimatedRowCount;
+                    return scan.TableRowCount;
                 case AliasOperator alias:
                     current = alias.Source;
                     break;

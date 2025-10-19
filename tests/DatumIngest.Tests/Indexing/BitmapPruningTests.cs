@@ -457,7 +457,7 @@ public sealed class BitmapPruningTests
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 2);
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
 
-        ScanOperator scan = new(CreateDescriptor("test"), null);
+        ScanOperator scan = new(CreateDescriptor("test"), null, rows.Length);
         scan.SetSourceIndex(sourceIndex);
 
         OperatorPlanDescription plan = scan.DescribeForExplain();
@@ -612,7 +612,7 @@ public sealed class BitmapPruningTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(descriptor);
 
-        ScanOperator scan = new(descriptor, null);
+        ScanOperator scan = new(descriptor, null, provider.GetRowCount(descriptor));
         scan.SetSourceIndex(sourceIndex);
         scan.AddFilterHint(filterHint);
         return (scan, catalog);
@@ -646,13 +646,9 @@ public sealed class BitmapPruningTests
             return Task.FromResult(new Schema(columns));
         }
 
-        public Task<ProviderCapabilities> GetCapabilitiesAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
+        public long GetRowCount(TableDescriptor descriptor)
         {
-            return Task.FromResult(new ProviderCapabilities(
-                EstimatedRowCount: _rows.Length,
-                EstimatedRowSizeBytes: null,
-                SupportsSeek: false));
+            return _rows.Length;
         }
 
         public async IAsyncEnumerable<RowBatch> OpenAsync(

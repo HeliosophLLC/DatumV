@@ -8,11 +8,6 @@ namespace DatumIngest.Catalog;
 /// the execution engine can skip directly to specific row ranges instead of streaming
 /// and discarding rows from pruned chunks.
 /// </summary>
-/// <remarks>
-/// Providers that declare <see cref="ProviderCapabilities.SupportsSeek"/> as <c>true</c>
-/// should implement this interface. Fixed-record-size formats (e.g. IDX) and internally
-/// indexed formats (e.g. Parquet row groups) are natural candidates.
-/// </remarks>
 public interface ISeekableTableProvider : ITableProvider
 {
     /// <summary>

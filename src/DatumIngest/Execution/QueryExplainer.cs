@@ -75,7 +75,7 @@ public static class QueryExplainer
                 _ => "Scan",
             },
             Details = details,
-            EstimatedRows = scan.EstimatedRowCount,
+            EstimatedRows = scan.TableRowCount,
             AccessStrategyMethod = description.AccessStrategy?.Method,
             Properties = description.Properties,
         };
@@ -534,7 +534,7 @@ public static class QueryExplainer
         {
             OperatorName = "Scan",
             Details = details,
-            EstimatedRows = scan.EstimatedRowCount,
+            EstimatedRows = scan.TableRowCount,
             AccessStrategyMethod = description.AccessStrategy?.Method,
             Properties = description.Properties,
         };

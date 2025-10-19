@@ -276,20 +276,14 @@ public sealed class QueryPlanner
         IReadOnlySet<string>? requiredColumns =
             ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
 
-        // Build columnar scan.
-        Operators.ColumnBatchScanOperator scan = new(descriptor, requiredColumns);
+        long tableRowCount = provider.GetRowCount(descriptor);
 
-        ProviderCapabilities capabilities = provider
-            .GetCapabilitiesAsync(descriptor, CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        scan.EstimatedRowCount = capabilities.EstimatedRowCount;
+        // Build columnar scan.
+        Operators.ColumnBatchScanOperator scan = new(descriptor, requiredColumns, tableRowCount);
 
         if (_catalog.TryGetManifest(descriptor.Name, out Manifest.QueryResultsManifest? manifest)
             && manifest is not null)
         {
-            scan.EstimatedRowCount = manifest.RowCount;
-
             Dictionary<string, Manifest.FeatureManifest> columnStatistics =
                 new(StringComparer.OrdinalIgnoreCase);
             foreach (Manifest.FeatureManifest feature in manifest.Features)
@@ -1970,7 +1964,7 @@ public sealed class QueryPlanner
             switch (current)
             {
                 case ScanOperator scan:
-                    return scan.EstimatedRowCount;
+                    return scan.TableRowCount;
                 case AliasOperator alias:
                     current = alias.Source;
                     break;
@@ -4116,24 +4110,13 @@ public sealed class QueryPlanner
         IReadOnlySet<string>? requiredColumns =
             ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
 
-        IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
-
-        // Populate estimated row count from provider capabilities for cost annotations.
-        // GetCapabilitiesAsync returns Task.FromResult for most providers.
         ITableProvider provider = _catalog.CreateProvider(descriptor);
-        ProviderCapabilities capabilities = provider
-            .GetCapabilitiesAsync(descriptor, CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-        ((ScanOperator)scanOperator).EstimatedRowCount = capabilities.EstimatedRowCount;
+        long rowCount = provider.GetRowCount(descriptor);
+        ScanOperator scanOperator = new(descriptor, requiredColumns, rowCount);
 
-        // Override row count and attach per-column statistics from manifest if available.
+        // Attach per-column statistics from manifest if available.
         if (_catalog.TryGetManifest(descriptor.Name, out Manifest.QueryResultsManifest? manifest) && manifest is not null)
         {
-            // Manifest row count is authoritative — it comes from a full-data scan
-            // and is available even for providers that cannot report row counts.
-            ((ScanOperator)scanOperator).EstimatedRowCount = manifest.RowCount;
-
             // Build column-name → FeatureManifest lookup for selectivity estimation.
             Dictionary<string, Manifest.FeatureManifest> columnStatistics = new(StringComparer.OrdinalIgnoreCase);
             foreach (Manifest.FeatureManifest feature in manifest.Features)
@@ -4141,14 +4124,16 @@ public sealed class QueryPlanner
                 columnStatistics[feature.Name] = feature;
             }
 
-            ((ScanOperator)scanOperator).ColumnStatistics = columnStatistics;
+            scanOperator.ColumnStatistics = columnStatistics;
         }
 
         // Attach source index for chunk-based pruning if one is registered.
         if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
         {
-            ((ScanOperator)scanOperator).SetSourceIndex(sourceIndex!);
+            scanOperator.SetSourceIndex(sourceIndex!);
         }
+
+        IQueryOperator outOperator = scanOperator;
 
         // Apply TABLESAMPLE row/chunk sampling if the table reference includes a sampling clause.
         if (tableRef.Tablesample is TablesampleClause tablesampleClause)
@@ -4158,17 +4143,17 @@ public sealed class QueryPlanner
                 ? (int)EvaluateConstantDouble(tablesampleClause.Seed)
                 : null;
 
-            scanOperator = tablesampleClause.Method switch
+            outOperator = tablesampleClause.Method switch
             {
                 TablesampleMethod.Bernoulli or TablesampleMethod.System =>
-                    new SampleScanOperator(scanOperator, tablesampleClause.Method, argument, seed),
+                    new SampleScanOperator(outOperator, tablesampleClause.Method, argument, seed),
                 TablesampleMethod.Stratified =>
                     new StratifiedSampleOperator(
-                        scanOperator, argument,
+                        outOperator, argument,
                         tablesampleClause.StratifyColumns!.Select(c => c.ColumnName).ToArray(), seed),
                 TablesampleMethod.Balanced =>
                     new BalancedSampleOperator(
-                        scanOperator, (int)argument,
+                        outOperator, (int)argument,
                         tablesampleClause.StratifyColumns!.Select(c => c.ColumnName).ToArray(), seed),
                 _ => throw new InvalidOperationException(
                     $"Unknown TABLESAMPLE method: {tablesampleClause.Method}"),
@@ -4180,10 +4165,10 @@ public sealed class QueryPlanner
         // column name collisions in the combined row schema.
         if (tableRef.Alias is not null || hasJoins)
         {
-            scanOperator = new AliasOperator(scanOperator, tableRef.Alias ?? tableRef.Name);
+            outOperator = new AliasOperator(outOperator, tableRef.Alias ?? tableRef.Name);
         }
 
-        return scanOperator;
+        return outOperator;
     }
 
     /// <summary>

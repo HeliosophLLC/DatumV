@@ -40,10 +40,12 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     /// <param name="descriptor">Table descriptor identifying the data source.</param>
     /// <param name="requiredColumns">Columns needed downstream; null means all columns.</param>
-    public ScanOperator(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns)
+    /// <param name="tableRowCount">The row count for the table.</param>
+    public ScanOperator(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, long tableRowCount)
     {
         _descriptor = descriptor;
         _requiredColumns = requiredColumns;
+        TableRowCount = tableRowCount;
     }
 
     /// <summary>The table descriptor this operator scans.</summary>
@@ -56,14 +58,13 @@ public sealed class ScanOperator : IQueryOperator
     public Expression? FilterHint => _filterHint;
 
     /// <summary>
-    /// Estimated row count from <see cref="ProviderCapabilities"/>, set at plan time.
+    /// Estimated row count, set at plan time.
     /// <c>null</c> when the provider cannot report a row count.
     /// </summary>
-    public long? EstimatedRowCount { get; set; }
+    public long TableRowCount { get; }
 
     /// <summary>
     /// Per-column statistics from a <see cref="QueryResultsManifest"/>, set at plan time.
-    /// <c>null</c> when no manifest is available for this table.
     /// </summary>
     public IReadOnlyDictionary<string, FeatureManifest>? ColumnStatistics { get; set; }
 
@@ -202,7 +203,7 @@ public sealed class ScanOperator : IQueryOperator
         return new OperatorPlanDescription("Scan")
         {
             Properties = properties,
-            EstimatedRows = EstimatedRowCount,
+            EstimatedRows = TableRowCount,
             AccessStrategy = accessStrategy,
         };
     }
@@ -236,7 +237,7 @@ public sealed class ScanOperator : IQueryOperator
         if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
             datumProvider.Store = context.Store;
 
-        ExecutionTracer.Write($"SCAN start  table={_descriptor.Name}  provider={provider.GetType().Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  estimated={EstimatedRowCount}");
+        ExecutionTracer.Write($"SCAN start  table={_descriptor.Name}  provider={provider.GetType().Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
 
         try
         {
