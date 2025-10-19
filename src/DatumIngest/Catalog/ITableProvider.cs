@@ -41,24 +41,20 @@ public interface ITableProvider : IDisposable
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reads a contiguous range of rows starting at <paramref name="startRow"/>. Requires
-    /// <see cref="Seekable"/> to be <c>true</c>. Used by the index-scan and index-NLJ paths
-    /// to fetch specific physical rows identified by a prior index lookup.
+    /// Opens a caller-owned session for repeated seeks into this table. The session holds
+    /// the reader, decode buffers, and projection metadata for its lifetime — dispose it
+    /// when done to release those resources. Requires <see cref="Seekable"/> to be
+    /// <c>true</c>.
     /// </summary>
     /// <param name="descriptor">Table descriptor identifying the source file.</param>
     /// <param name="requiredColumns">
-    /// Columns needed downstream. When <c>null</c>, all columns are returned.
+    /// Columns needed downstream. When <c>null</c>, all columns are returned. Cannot be
+    /// changed after the session is opened — open a new session for a different projection.
     /// </param>
-    /// <param name="startRow">Zero-based index of the first row to read.</param>
-    /// <param name="count">Maximum number of rows to read. The stream may yield fewer rows if the source is exhausted.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of row batches from the specified range.</returns>
-    IAsyncEnumerable<RowBatch> SeekAsync(
+    /// <returns>A seek session bound to <paramref name="descriptor"/> and <paramref name="requiredColumns"/>.</returns>
+    ISeekSession OpenSeekSession(
         TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        long startRow,
-        int count,
-        CancellationToken cancellationToken);
+        IReadOnlySet<string>? requiredColumns);
 
     /// <summary>
     /// Returns the row count for the table described by the given descriptor.
@@ -69,8 +65,8 @@ public interface ITableProvider : IDisposable
 
     /// <summary>
     /// Returns true if the provider supports seeking to specific row positions via
-    /// <see cref="SeekAsync"/>, enabling operators like <c>ScanOperator</c> to perform
-    /// index seeks for equality predicates.
+    /// <see cref="OpenSeekSession"/>, enabling operators like <c>ScanOperator</c> to
+    /// perform index seeks for equality predicates.
     /// </summary>
     bool Seekable { get; }
 }

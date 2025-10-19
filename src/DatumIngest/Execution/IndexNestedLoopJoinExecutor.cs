@@ -140,9 +140,13 @@ internal sealed class IndexNestedLoopJoinExecutor
 
         ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildDescriptor.Name}  buildAlias={_buildAlias}  joinType={_joinType}");
 
-        // Wrap the entire execution in try/finally so the provider is always disposed.
-        // Without this, DatumFileTableProvider's cached column buffers (LOH DataValue[]
-        // arrays) and rented byte buffers accumulate in Gen2 across repeated executions.
+        // Open a seek session once for the lifetime of this executor — it owns the
+        // reader, decode buffers, and projection metadata for every build-side fetch.
+        ISeekSession seekSession = provider.OpenSeekSession(_buildDescriptor, requiredColumns: null);
+
+        // Wrap the entire execution in try/finally so the session and provider are
+        // always disposed. Without this, the session's rented buffers and the provider
+        // itself accumulate across repeated executions.
         try
         {
 
@@ -202,7 +206,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     foreach (ValueIndexEntry entry in matches)
                     {
-                        Row? rawBuildRow = await FetchBuildRowAsync(provider, entry, bufferPool, cancellationToken)
+                        Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, cancellationToken)
                             .ConfigureAwait(false);
 
                         if (rawBuildRow is null)
@@ -242,7 +246,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? rawBuildRow = await FetchBuildRowAsync(provider, entry, bufferPool, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (rawBuildRow is null)
@@ -300,6 +304,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         } // end try
         finally
         {
+            seekSession.Dispose();
             (provider as IDisposable)?.Dispose();
         }
     }
@@ -309,15 +314,15 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// derived from the index entry's chunk and offset.
     /// </summary>
     private async Task<Row?> FetchBuildRowAsync(
-        ITableProvider provider,
+        ISeekSession seekSession,
         ValueIndexEntry entry,
         LocalBufferPool bufferPool,
         CancellationToken cancellationToken)
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-        await foreach (RowBatch batch in provider.SeekAsync(
-            _buildDescriptor, requiredColumns: null, absoluteRow, 1, cancellationToken)
+        await foreach (RowBatch batch in seekSession
+            .SeekAsync(absoluteRow, 1, cancellationToken)
             .ConfigureAwait(false))
         {
             if (batch.Count > 0)

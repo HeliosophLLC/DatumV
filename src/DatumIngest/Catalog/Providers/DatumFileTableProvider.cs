@@ -17,22 +17,6 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
 {
     private const int DefaultBatchSize = 1024;
 
-    // Reused across multiple SeekAsync calls within the same scan session.
-    // Opening a DatumFileReader re-reads and decompresses all row-group metadata;
-    // amortising that cost over the full index traversal is critical for B+Tree scans.
-    private DatumFileReader? _cachedReader;
-    private string? _cachedReaderPath;
-
-    // Pre-allocated column buffers for SeekAsync — mirrors the optimization
-    // in OpenCoreAsync that eliminates LOH DataValue[] allocations per row group.
-    // Rebuilt when the file or projected column set changes.
-    private DataValue[][]? _seekColumnBuffers;
-    private byte[]? _seekCompressedBuffer;
-    private byte[]? _seekDecompressedBuffer;
-    private int[]? _seekProjectedIndices;
-    private string[]? _seekProjectedNames;
-    private Dictionary<string, int>? _seekNameIndex;
-
     /// <summary>
     /// Optional value store for decoding string columns into Arena-backed values.
     /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>.
@@ -204,214 +188,72 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
     }
     
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> SeekAsync(
+    public ISeekSession OpenSeekSession(
         TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        long startRow,
-        int count,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        IReadOnlySet<string>? requiredColumns)
     {
-        if (_cachedReader is null || _cachedReaderPath != descriptor.FilePath)
+        // Snapshot the value store at open time so concurrent Store mutations from other
+        // callers don't affect this session. The session is self-contained from here on.
+        IValueStore storeSnapshot = Store;
+
+        DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        try
         {
-            _cachedReader?.Dispose();
-            _cachedReader = DatumFileReader.Open(descriptor.FilePath);
-            _cachedReader.Store = Store;
-            _cachedReaderPath = descriptor.FilePath;
-            // Invalidate seek buffers — they are sized to the previous file's row groups.
-            InvalidateSeekBuffers();
-        }
+            reader.Store = storeSnapshot;
+            Schema schema = reader.Schema;
 
-        DatumFileReader reader = _cachedReader;
-        Schema schema = reader.Schema;
+            int[] projectedIndices = ResolveProjection(schema, requiredColumns);
+            string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
+            Dictionary<string, int> nameIndex = BuildNameIndex(projectedNames);
 
-        int[] projectedIndices = ResolveProjection(schema, requiredColumns);
-
-        // Rebuild seek buffers when the projected column set changes.
-        // In the common case (INLJ probes the same join column each call) the
-        // projection is stable and the buffers are reused across all seeks.
-        if (!IndicesEqual(projectedIndices, _seekProjectedIndices))
-        {
-            RebuildSeekBuffers(reader, projectedIndices, schema);
-        }
-
-        string[] projectedNames = _seekProjectedNames!;
-        Dictionary<string, int> nameIndex = _seekNameIndex!;
-        DataValue[][] columns = _seekColumnBuffers!;
-        byte[] compressedBuffer = _seekCompressedBuffer!;
-        byte[] decompressedBuffer = _seekDecompressedBuffer!;
-
-        long endRow = startRow + count;
-        long cumulativeRow = 0;
-        int emitted = 0;
-
-        RowBatch? batch = null;
-
-        for (int rgIndex = 0; rgIndex < reader.RowGroupCount && emitted < count; rgIndex++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rgIndex);
-            long rgRowCount = rowGroupDescriptor.RowCount;
-            long rgEnd = cumulativeRow + rgRowCount;
-
-            // Skip row groups entirely before the requested range.
-            if (rgEnd <= startRow)
+            // Size scratch buffers to the largest row group / page in the file.
+            int maxRowGroupSize = 0;
+            int maxCompressed = 0;
+            int maxUncompressed = 0;
+            for (int rg = 0; rg < reader.RowGroupCount; rg++)
             {
-                cumulativeRow = rgEnd;
-                continue;
-            }
+                DatumRowGroupDescriptor rgd = reader.GetRowGroupDescriptor(rg);
+                int rgRows = (int)rgd.RowCount;
+                if (rgRows > maxRowGroupSize) maxRowGroupSize = rgRows;
 
-            // Stop once we've passed the requested range.
-            if (cumulativeRow >= endRow)
-            {
-                break;
-            }
-
-            // Decode directly into pre-allocated column buffers — no LOH allocation.
-            reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
-
-            // Calculate the slice within this row group.
-            int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
-            int sliceEnd = (int)Math.Min(endRow - cumulativeRow, rgRowCount);
-
-            for (int rowIndex = sliceStart; rowIndex < sliceEnd && emitted < count; rowIndex++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Skip tombstoned rows.
-                if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                for (int ci = 0; ci < projectedIndices.Length; ci++)
                 {
-                    continue;
-                }
-
-                DataValue[] values = pool.RentDataValues(projectedIndices.Length);
-                for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
-                {
-                    values[colPos] = columns[colPos][rowIndex];
-                }
-
-                batch ??= pool.RentRowBatch(Math.Min(count, DefaultBatchSize));
-                batch.Add(new Row(projectedNames, values, nameIndex));
-                emitted++;
-
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = null;
+                    DatumColumnChunkDescriptor chunk = rgd.ColumnChunks[projectedIndices[ci]];
+                    int c = (int)chunk.CompressedByteLength;
+                    int u = (int)chunk.UncompressedByteLength;
+                    if (c > maxCompressed) maxCompressed = c;
+                    if (u > maxUncompressed) maxUncompressed = u;
                 }
             }
 
-            cumulativeRow = rgEnd;
-        }
-
-        if (batch is not null && batch.Count > 0)
-        {
-            yield return batch;
-        }
-
-        await Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Allocates the per-call-reusable buffers for <see cref="SeekAsync"/>:
-    /// one <see cref="DataValue"/> array per projected column (sized to the largest
-    /// row group), plus byte buffers for compressed/decompressed page data.
-    /// These replace the per-call <c>ReadColumns</c> allocations that previously
-    /// produced LOH objects (~1.57 MB each) on every INLJ point-seek.
-    /// </summary>
-    private void RebuildSeekBuffers(DatumFileReader reader, int[] projectedIndices, Schema schema)
-    {
-        InvalidateSeekBuffers();
-
-        int maxRowGroupSize = 0;
-        int maxCompressed = 0;
-        int maxUncompressed = 0;
-
-        for (int rg = 0; rg < reader.RowGroupCount; rg++)
-        {
-            DatumRowGroupDescriptor rgd = reader.GetRowGroupDescriptor(rg);
-            int rgRows = (int)rgd.RowCount;
-            if (rgRows > maxRowGroupSize) maxRowGroupSize = rgRows;
-
+            DataValue[][] columnBuffers = new DataValue[projectedIndices.Length][];
             for (int ci = 0; ci < projectedIndices.Length; ci++)
             {
-                DatumColumnChunkDescriptor chunk = rgd.ColumnChunks[projectedIndices[ci]];
-                int compressed = (int)chunk.CompressedByteLength;
-                int uncompressed = (int)chunk.UncompressedByteLength;
-                if (compressed > maxCompressed) maxCompressed = compressed;
-                if (uncompressed > maxUncompressed) maxUncompressed = uncompressed;
+                columnBuffers[ci] = maxRowGroupSize > 0
+                    ? pool.RentDataValues(maxRowGroupSize)
+                    : [];
             }
-        }
 
-        // Rent from GlobalBufferPool so these LOH arrays survive across executions
-        // without triggering repeated Gen2 collections. Returned in InvalidateSeekBuffers.
-        DataValue[][] columnBuffers = new DataValue[projectedIndices.Length][];
-        for (int ci = 0; ci < projectedIndices.Length; ci++)
-        {
-            columnBuffers[ci] = maxRowGroupSize > 0
-                ? DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(maxRowGroupSize)
+            byte[] compressedBuffer = maxCompressed > 0
+                ? ArrayPool<byte>.Shared.Rent(maxCompressed)
                 : [];
+            byte[] decompressedBuffer = maxUncompressed > 0
+                ? ArrayPool<byte>.Shared.Rent(maxUncompressed)
+                : [];
+
+            return new DatumFileSeekSession(
+                pool, reader, projectedIndices, projectedNames, nameIndex,
+                columnBuffers, compressedBuffer, decompressedBuffer);
         }
-
-        string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
-
-        _seekProjectedIndices = projectedIndices;
-        _seekProjectedNames = projectedNames;
-        _seekNameIndex = BuildNameIndex(projectedNames);
-        _seekColumnBuffers = columnBuffers;
-        _seekCompressedBuffer = maxCompressed > 0
-            ? ArrayPool<byte>.Shared.Rent(maxCompressed)
-            : [];
-        _seekDecompressedBuffer = maxUncompressed > 0
-            ? ArrayPool<byte>.Shared.Rent(maxUncompressed)
-            : [];
-    }
-
-    private void InvalidateSeekBuffers()
-    {
-        if (_seekColumnBuffers is not null)
+        catch
         {
-            foreach (DataValue[] buffer in _seekColumnBuffers)
-            {
-                if (buffer.Length > 0) DatumIngest.Pooling.GlobalPool.Backing.Return(buffer);
-            }
+            reader.Dispose();
+            throw;
         }
-
-        if (_seekCompressedBuffer is { Length: > 0 })
-        {
-            ArrayPool<byte>.Shared.Return(_seekCompressedBuffer);
-        }
-
-        if (_seekDecompressedBuffer is { Length: > 0 })
-        {
-            ArrayPool<byte>.Shared.Return(_seekDecompressedBuffer);
-        }
-
-        _seekColumnBuffers = null;
-        _seekCompressedBuffer = null;
-        _seekDecompressedBuffer = null;
-        _seekProjectedIndices = null;
-        _seekProjectedNames = null;
-        _seekNameIndex = null;
-    }
-
-    private static bool IndicesEqual(int[] a, int[]? b)
-    {
-        if (b is null || a.Length != b.Length) return false;
-        for (int i = 0; i < a.Length; i++)
-        {
-            if (a[i] != b[i]) return false;
-        }
-        return true;
     }
 
     /// <inheritdoc/>
-    public void Dispose()
-    {
-        _cachedReader?.Dispose();
-        _cachedReader = null;
-        InvalidateSeekBuffers();
-    }
+    public void Dispose() { }
 
     private static int[] ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)
     {

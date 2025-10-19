@@ -76,26 +76,41 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> SeekAsync(
+    public ISeekSession OpenSeekSession(
         TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        long startRow,
-        int count,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        IReadOnlySet<string>? requiredColumns)
+        => new InMemorySeekSession(_rows);
+
+    private sealed class InMemorySeekSession : ISeekSession
     {
-        if (startRow >= _rows.Length || count <= 0)
+        private readonly Row[] _rows;
+
+        internal InMemorySeekSession(Row[] rows)
         {
-            yield break;
+            _rows = rows;
         }
 
-        int start = (int)Math.Min(startRow, int.MaxValue);
-        int available = Math.Min(count, _rows.Length - start);
-        ArraySegment<Row> slice = new(_rows, start, available);
-
-        await foreach (RowBatch batch in EmitRows(slice, cancellationToken).ConfigureAwait(false))
+        public async IAsyncEnumerable<RowBatch> SeekAsync(
+            long startRow,
+            int count,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            yield return batch;
+            if (startRow >= _rows.Length || count <= 0)
+            {
+                yield break;
+            }
+
+            int start = (int)Math.Min(startRow, int.MaxValue);
+            int available = Math.Min(count, _rows.Length - start);
+            ArraySegment<Row> slice = new(_rows, start, available);
+
+            await foreach (RowBatch batch in EmitRows(slice, cancellationToken).ConfigureAwait(false))
+            {
+                yield return batch;
+            }
         }
+
+        public void Dispose() { }
     }
 
     private static async IAsyncEnumerable<RowBatch> EmitRows(

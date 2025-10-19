@@ -415,11 +415,12 @@ public sealed class ScanOperator : IQueryOperator
                 ExecutionTracer.Write($"SCAN exact seek  table={_descriptor.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
 
+                using ISeekSession seekSession = provider.OpenSeekSession(_descriptor, _requiredColumns);
+
                 foreach (long rowPosition in exactPositions)
                 {
-                    await foreach (RowBatch inputBatch in provider.SeekAsync(
-                        _descriptor, _requiredColumns, rowPosition, 1,
-                        cancellationToken).ConfigureAwait(false))
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                        rowPosition, 1, cancellationToken).ConfigureAwait(false))
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
@@ -471,6 +472,8 @@ public sealed class ScanOperator : IQueryOperator
 
         if (provider.Seekable == true)
         {
+            using ISeekSession seekSession = provider.OpenSeekSession(_descriptor, _requiredColumns);
+
             foreach ((long start, long end, int activeChunkIndex) in activeRanges)
             {
                 int count = (int)(end - start);
@@ -481,9 +484,8 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     int rowInChunk = 0;
 
-                    await foreach (RowBatch inputBatch in provider.SeekAsync(
-                        _descriptor, _requiredColumns, start, count,
-                        cancellationToken).ConfigureAwait(false))
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                        start, count, cancellationToken).ConfigureAwait(false))
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
@@ -507,9 +509,8 @@ public sealed class ScanOperator : IQueryOperator
                 }
                 else
                 {
-                    await foreach (RowBatch inputBatch in provider.SeekAsync(
-                        _descriptor, _requiredColumns, start, count,
-                        cancellationToken).ConfigureAwait(false))
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                        start, count, cancellationToken).ConfigureAwait(false))
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
