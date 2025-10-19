@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -29,7 +30,7 @@ public sealed class BitmapPruningTests
         // 5 rows in 1 chunk: color = [red, red, blue, blue, red].
         // WHERE color = 'green' → value absent from chunk → prune entire chunk.
         Row[] rows = CreateStringRows("color", "red", "red", "blue", "blue", "red");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 5);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 5);
@@ -54,7 +55,7 @@ public sealed class BitmapPruningTests
         // Chunk 0: [red, blue, red]   Chunk 1: [green, green, green]
         // WHERE color = 'red' → chunk 1 has no 'red' → pruned.
         Row[] rows = CreateStringRows("color", "red", "blue", "red", "green", "green", "green");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 3);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 3);
@@ -94,7 +95,7 @@ public sealed class BitmapPruningTests
             new(["color", "size"], [DataValue.FromString("red"),   DataValue.FromString("L")]),
         ];
 
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildMultiColumnBitmapIndex(
             ["color", "size"], rows, chunkSize: 3);
 
@@ -126,7 +127,7 @@ public sealed class BitmapPruningTests
         // Chunk 0: [red, blue, red]   Chunk 1: [green, green, green]
         // WHERE color IN ('red', 'blue') → chunk 1 has neither → pruned.
         Row[] rows = CreateStringRows("color", "red", "blue", "red", "green", "green", "green");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 3);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 3);
@@ -152,7 +153,7 @@ public sealed class BitmapPruningTests
         // 5 rows in 1 chunk: color = [red, blue, red, green, red].
         // WHERE color = 'red' → bitmap filter yields rows 0, 2, 4.
         Row[] rows = CreateStringRows("color", "red", "blue", "red", "green", "red");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 5);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 5);
@@ -175,7 +176,7 @@ public sealed class BitmapPruningTests
         // 5 rows: color = [red, blue, red, green, red].
         // WHERE color != 'red' → bitmap NOT yields rows 1, 3.
         Row[] rows = CreateStringRows("color", "red", "blue", "red", "green", "red");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 5);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 5);
@@ -208,7 +209,7 @@ public sealed class BitmapPruningTests
             new(["color", "size"], [DataValue.FromString("B"), DataValue.FromString("M")]),
         ];
 
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildMultiColumnBitmapIndex(
             ["color", "size"], rows, chunkSize: 6);
 
@@ -242,7 +243,7 @@ public sealed class BitmapPruningTests
         // 5 rows: color = [red, blue, green, blue, red].
         // WHERE color = 'red' OR color = 'green' → rows 0, 2, 4.
         Row[] rows = CreateStringRows("color", "red", "blue", "green", "blue", "red");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 5);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 5);
@@ -271,7 +272,7 @@ public sealed class BitmapPruningTests
         // 5 rows: color = [red, blue, green, blue, red].
         // WHERE color IN ('red', 'green') → rows 0, 2, 4.
         Row[] rows = CreateStringRows("color", "red", "blue", "green", "blue", "red");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 5);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 5);
@@ -295,7 +296,7 @@ public sealed class BitmapPruningTests
         // Chunk 0: [red, blue, red]   Chunk 1: [red, green, blue]
         // WHERE color = 'red' → chunk 0 rows 0,2; chunk 1 row 0.
         Row[] rows = CreateStringRows("color", "red", "blue", "red", "red", "green", "blue");
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("color", rows, chunkSize: 3);
 
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 3);
@@ -331,7 +332,7 @@ public sealed class BitmapPruningTests
             new(["value", "color"], [DataValue.FromFloat32(13f), DataValue.FromString("red")]),
         ];
 
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildMultiColumnBitmapIndex(["color"], rows, chunkSize: 3);
         List<IndexChunk> chunks = new();
         for (int c = 0; c < 2; c++)
@@ -397,7 +398,7 @@ public sealed class BitmapPruningTests
         // Chunk 0: [false, false]   Chunk 1: [true, true]
         // WHERE flag = TRUE → chunk 0 has no true entries → should be pruned.
         Row[] rows = CreateBooleanRows("flag", false, false, true, true);
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("flag", rows, chunkSize: 2);
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
 
@@ -430,7 +431,7 @@ public sealed class BitmapPruningTests
         // Chunk 0: [10, 20]   Chunk 1: [30, 40]
         // WHERE quantity = 30.0 (double) → only chunk 1 should match.
         Row[] rows = CreateInt32Rows("quantity", 10, 20, 30, 40);
-        InMemoryProvider provider = new(rows);
+        InMemoryTableProvider provider = new(rows);
         BitmapIndexSet bitmapIndexes = BuildBitmapIndex("quantity", rows, chunkSize: 2);
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
 
@@ -599,13 +600,13 @@ public sealed class BitmapPruningTests
     }
 
     private static (ScanOperator Scan, TableCatalog Catalog) CreateScanWithBitmaps(
-        InMemoryProvider provider, SourceIndex sourceIndex, Expression filterHint)
+        InMemoryTableProvider provider, SourceIndex sourceIndex, Expression filterHint)
     {
         return CreateScanWithIndex(provider, sourceIndex, filterHint);
     }
 
     private static (ScanOperator Scan, TableCatalog Catalog) CreateScanWithIndex(
-        InMemoryProvider provider, SourceIndex sourceIndex, Expression filterHint)
+        InMemoryTableProvider provider, SourceIndex sourceIndex, Expression filterHint)
     {
         TableDescriptor descriptor = CreateDescriptor("data");
         TableCatalog catalog = new();
@@ -623,58 +624,5 @@ public sealed class BitmapPruningTests
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         return await scan.CollectRowsAsync(context);
-    }
-
-    /// <summary>
-    /// Non-seekable in-memory provider for testing fallback streaming paths.
-    /// </summary>
-    private sealed class InMemoryProvider : ITableProvider
-    {
-        private readonly Row[] _rows;
-
-        internal InMemoryProvider(Row[] rows)
-        {
-            _rows = rows;
-        }
-
-        public Task<Schema> GetSchemaAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            ColumnInfo[] columns = _rows[0].ColumnNames
-                .Select(name => new ColumnInfo(name, DataKind.String, false))
-                .ToArray();
-            return Task.FromResult(new Schema(columns));
-        }
-
-        public long GetRowCount(TableDescriptor descriptor)
-        {
-            return _rows.Length;
-        }
-
-        public async IAsyncEnumerable<RowBatch> OpenAsync(
-            TableDescriptor descriptor,
-            IReadOnlySet<string>? requiredColumns,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            RowBatch batch = RowBatch.Rent(64);
-
-            foreach (Row row in _rows)
-            {
-                batch.Add(row);
-
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = RowBatch.Rent(64);
-                }
-            }
-
-            if (batch.Count > 0)
-            {
-                yield return batch;
-            }
-
-            await Task.CompletedTask;
-        }
     }
 }

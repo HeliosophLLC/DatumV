@@ -339,11 +339,11 @@ public sealed class JoinOperator : IQueryOperator
         if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
             datumProvider.Store = context.Store;
 
-        if (provider is not ISeekableTableProvider)
+        if (!provider.Seekable)
         {
             return null;
         }
-
+        
         // Extract the build-side alias so the executor can re-qualify rows
         // fetched directly from the seekable provider (which bypasses AliasOperator).
         string? buildAlias = FindBuildAlias(_right);

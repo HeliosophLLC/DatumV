@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;

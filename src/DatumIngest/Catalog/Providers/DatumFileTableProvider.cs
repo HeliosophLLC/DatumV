@@ -12,7 +12,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider, IColumnBatchProvider, IDisposable
+public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
@@ -34,16 +34,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
 
     /// <summary>
     /// Optional value store for decoding string columns into Arena-backed values.
-    /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>
-    /// before calling <see cref="ITableProvider.OpenAsync"/>.
+    /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>.
     /// </summary>
     public IValueStore Store { get; set; } = new Arena();
 
-    /// <summary>Total number of row groups examined in the most recent read.</summary>
-    public int TotalRowGroups { get; private set; }
-
-    /// <summary>Number of row groups skipped by zone-map pruning in the most recent read.</summary>
-    public int PrunedRowGroups { get; private set; }
 
     /// <inheritdoc/>
     public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
@@ -88,6 +82,9 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         return reader.TotalRowCount;
     }
 
+    /// <inheritdoc/>
+    public bool Seekable => throw new Exception("TODO: Need to check if index side-cars are present for this file.");
+
     private async IAsyncEnumerable<RowBatch> OpenCoreAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
@@ -114,9 +111,6 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                 filterColumnNames.Add(columnName);
             }
         }
-
-        TotalRowGroups = reader.RowGroupCount;
-        PrunedRowGroups = 0;
 
         // Pre-allocate column buffers for the maximum row group size so that
         // DecodeInto writes directly into reused arrays, eliminating ~1,980
@@ -154,65 +148,64 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
 
         try
         {
-        for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rgIndex);
-
-            // Zone map pruning: only attempted when a filter hint was provided.
-            if (filterHint is not null && filterColumnNames is not null)
-            {
-                Dictionary<string, ColumnStatisticsRange> statistics =
-                    BuildStatistics(schema, rowGroupDescriptor, filterColumnNames);
-
-                if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics))
-                {
-                    PrunedRowGroups++;
-                    continue;
-                }
-            }
-
-            int rowCount = (int)rowGroupDescriptor.RowCount;
-            reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
-
-            // Skip fully-deleted row groups without emitting any rows.
-            if (rowGroupDescriptor.ActiveRowCount == 0)
-            {
-                continue;
-            }
-
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Skip tombstoned rows.
-                if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rgIndex);
+
+                // Zone map pruning: only attempted when a filter hint was provided.
+                if (filterHint is not null && filterColumnNames is not null)
+                {
+                    Dictionary<string, ColumnStatisticsRange> statistics =
+                        BuildStatistics(schema, rowGroupDescriptor, filterColumnNames);
+
+                    if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics))
+                    {
+                        continue;
+                    }
+                }
+
+                int rowCount = (int)rowGroupDescriptor.RowCount;
+                reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
+
+                // Skip fully-deleted row groups without emitting any rows.
+                if (rowGroupDescriptor.ActiveRowCount == 0)
                 {
                     continue;
                 }
 
-                DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
-                for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
                 {
-                    values[colPos] = columns[colPos][rowIndex];
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(new Row(projectedNames, values, nameIndex));
+                    // Skip tombstoned rows.
+                    if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                    {
+                        continue;
+                    }
 
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = null;
+                    DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
+                    for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
+                    {
+                        values[colPos] = columns[colPos][rowIndex];
+                    }
+
+                    batch ??= RowBatch.Rent(DefaultBatchSize);
+                    batch.Add(new Row(projectedNames, values, nameIndex));
+
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = null;
+                    }
                 }
             }
-        }
 
-        if (batch is not null && batch.Count > 0)
-        {
-            yield return batch;
-        }
+            if (batch is not null && batch.Count > 0)
+            {
+                yield return batch;
+            }
         }
         finally
         {
@@ -246,9 +239,6 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             }
         }
 
-        TotalRowGroups = reader.RowGroupCount;
-        PrunedRowGroups = 0;
-
         for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -262,7 +252,6 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
 
                 if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics))
                 {
-                    PrunedRowGroups++;
                     continue;
                 }
             }

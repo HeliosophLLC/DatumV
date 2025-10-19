@@ -1,6 +1,4 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -9,7 +7,7 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// Reads data from an <see cref="IColumnBatchProvider"/> source in column-major
+/// Reads data from a source in column-major
 /// format, applying projection pushdown and statistics-based partition pruning.
 /// This is the columnar counterpart of <see cref="ScanOperator"/> for providers
 /// that natively produce <see cref="ColumnBatch"/> output.
@@ -151,14 +149,7 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
         if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
             datumProvider.Store = context.Store;
 
-        if (provider is not IColumnBatchProvider columnBatchProvider)
-        {
-            throw new InvalidOperationException(
-                $"Provider for '{_descriptor.Name}' does not implement IColumnBatchProvider. " +
-                "The query planner should not have created a ColumnBatchScanOperator for this table.");
-        }
-
-        await foreach (ColumnBatch batch in columnBatchProvider.OpenColumnBatchAsync(
+        await foreach (ColumnBatch batch in provider.OpenColumnBatchAsync(
             _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
         {
             yield return batch;

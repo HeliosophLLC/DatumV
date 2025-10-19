@@ -8,6 +8,7 @@ using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 using DatumIngest.Indexing.Bloom;
+using DatumIngest.Catalog.Providers;
 
 namespace DatumIngest.Tests.Indexing;
 

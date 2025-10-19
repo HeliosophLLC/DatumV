@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -40,7 +41,7 @@ public sealed class AssertClauseTests
         TableCatalog catalog = new();
         foreach ((string name, Row[] rows) in tables)
         {
-            InMemoryColumnarProvider provider = new(rows);
+            InMemoryTableProvider provider = new(rows);
             catalog.RegisterProvider(name, () => provider);
             catalog.Register(new TableDescriptor(name, name, "", new Dictionary<string, string>()));
         }
@@ -584,100 +585,4 @@ public sealed class AssertClauseTests
         Assert.Equal(1L, diagnostics.SkippedRowCount);
     }
 
-    // ───────────────── Helpers ─────────────────
-
-    /// <summary>
-    /// In-memory table provider that also implements <see cref="IColumnBatchProvider"/>,
-    /// causing the <see cref="QueryPlanner"/> to route simple queries through the
-    /// columnar fast path. Used to verify that ASSERT clauses are not silently skipped
-    /// when the columnar pipeline is active.
-    /// </summary>
-    private sealed class InMemoryColumnarProvider : ITableProvider, IColumnBatchProvider
-    {
-        private readonly Row[] _rows;
-
-        public InMemoryColumnarProvider(Row[] rows)
-        {
-            _rows = rows;
-        }
-
-        /// <inheritdoc/>
-        public Task<Schema> GetSchemaAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            if (_rows.Length == 0)
-            {
-                return Task.FromResult(
-                    new Schema([new ColumnInfo("empty", DataKind.String, nullable: true)]));
-            }
-
-            List<ColumnInfo> columns = [];
-            foreach (string name in _rows[0].ColumnNames)
-            {
-                columns.Add(new ColumnInfo(name, _rows[0][name].Kind, nullable: true));
-            }
-
-            return Task.FromResult(new Schema(columns));
-        }
-
-        public long GetRowCount(TableDescriptor descriptor)
-        {
-            return _rows.Length;
-        }
-
-        /// <inheritdoc/>
-        public async IAsyncEnumerable<RowBatch> OpenAsync(
-            TableDescriptor descriptor,
-            IReadOnlySet<string>? requiredColumns,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            RowBatch batch = RowBatch.Rent(64);
-
-            foreach (Row row in _rows)
-            {
-                batch.Add(row);
-
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = RowBatch.Rent(64);
-                }
-            }
-
-            if (batch.Count > 0)
-                yield return batch;
-
-            await Task.CompletedTask;
-        }
-
-        /// <inheritdoc/>
-        public async IAsyncEnumerable<ColumnBatch> OpenColumnBatchAsync(
-            TableDescriptor descriptor,
-            IReadOnlySet<string>? requiredColumns,
-            Expression? filterHint,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            if (_rows.Length == 0) yield break;
-
-            string[] allNames = _rows[0].ColumnNames.ToArray();
-            string[] names = requiredColumns is null
-                ? allNames
-                : allNames.Where(n => requiredColumns.Contains(n)).ToArray();
-
-            ColumnBatch batch = ColumnBatch.Create(names, _rows.Length);
-
-            for (int rowIndex = 0; rowIndex < _rows.Length; rowIndex++)
-            {
-                for (int colIndex = 0; colIndex < names.Length; colIndex++)
-                {
-                    batch.SetValue(colIndex, rowIndex, _rows[rowIndex][names[colIndex]]);
-                }
-            }
-
-            batch.SetRowCount(_rows.Length);
-            yield return batch;
-
-            await Task.CompletedTask;
-        }
-    }
 }

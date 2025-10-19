@@ -230,7 +230,7 @@ public sealed class QueryPlanner
     /// Attempts to build a fully columnar pipeline for simple queries that scan a single
     /// table, optionally filter, project, and limit — with no joins, aggregation, window
     /// functions, or other complex features.  Returns <c>false</c> when the query is too
-    /// complex or the provider does not support <see cref="IColumnBatchProvider"/>.
+    /// complex.
     /// </summary>
     /// <param name="result">The columnar plan if successful, or <c>null</c>.</param>
     private bool TryPlanColumnar(
@@ -267,7 +267,6 @@ public sealed class QueryPlanner
 
         // Guard: provider must support columnar output.
         ITableProvider provider = _catalog.CreateProvider(descriptor);
-        if (provider is not IColumnBatchProvider) return false;
 
         // Projection pushdown.
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;
@@ -2419,7 +2418,7 @@ public sealed class QueryPlanner
     /// <see cref="JoinType.LeftSemi"/>; all others fall back to hash join.
     /// </summary>
     /// <remarks>
-    /// The seekable-provider check (<see cref="ISeekableTableProvider"/>) is
+    /// The seekable-provider check is
     /// intentionally deferred to runtime inside
     /// <see cref="JoinOperator.TryCreateIndexNestedLoopExecutor"/>.
     /// Using <see cref="ScanOperator.SourceIndex"/> presence as the plan-time

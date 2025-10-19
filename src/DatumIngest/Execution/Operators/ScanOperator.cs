@@ -12,8 +12,7 @@ namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Reads rows from a table provider, applying projection pushdown
-/// to skip unreferenced columns at the source. When the provider implements
-/// <see cref="IFilterableTableProvider"/> and a filter hint is present,
+/// to skip unreferenced columns at the source. When a filter hint is present,
 /// the provider may skip entire partitions based on column statistics.
 /// When a <see cref="SourceIndex"/> is available, chunk-level statistics
 /// enable partition pruning for any provider type. Bloom filter pruning
@@ -130,13 +129,6 @@ public sealed class ScanOperator : IQueryOperator
         _sortedIndexPruningKeys[columnName] = keyValues;
     }
 
-    /// <summary>
-    /// The most recent <see cref="IFilterableTableProvider"/> used during execution,
-    /// or <c>null</c> if the provider is not filterable. Used by the explain/instrumentation
-    /// layer to retrieve pruning statistics after execution.
-    /// </summary>
-    public IFilterableTableProvider? LastFilterableProvider { get; private set; }
-
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
@@ -241,69 +233,38 @@ public sealed class ScanOperator : IQueryOperator
 
         try
         {
+            // When a source index is available and either a filter hint, bloom pruning
+            // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
+            // apply chunk-level pruning.
+            bool hasIndexPruning = _sourceIndex is not null
+                && (_filterHint is not null || _bloomPruningKeys is not null
+                    || _sortedIndexPruningKeys is not null
+                    || _sourceIndex.MappedSortedIndexes is not null
+                    || _sourceIndex.BPlusTreeIndexes is not null
+                    || _sourceIndex.BitmapIndexes is not null);
 
-        // When a source index is available and either a filter hint, bloom pruning
-        // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
-        // apply chunk-level pruning.
-        bool hasIndexPruning = _sourceIndex is not null
-            && (_filterHint is not null || _bloomPruningKeys is not null
-                || _sortedIndexPruningKeys is not null
-                || _sourceIndex.MappedSortedIndexes is not null
-                || _sourceIndex.BPlusTreeIndexes is not null
-                || _sourceIndex.BitmapIndexes is not null);
+            ExecutionTracer.Write($"SCAN path  table={_descriptor.Name}  indexPruning={hasIndexPruning}");
 
-        ExecutionTracer.Write($"SCAN path  table={_descriptor.Name}  indexPruning={hasIndexPruning}");
-
-        if (hasIndexPruning)
-        {
-            await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
-                provider, context).ConfigureAwait(false))
+            if (hasIndexPruning)
             {
-                yield return batch;
-            }
-        }
-        else
-        {
-
-
-            // Columnar path: when the provider natively produces column batches,
-            // decode into ColumnBatch and convert to RowBatch using pooled buffers.
-            // This exercises the same decode pipeline as the fully columnar operators
-            // and avoids per-cell string allocations for arena-backed columns.
-            if (provider is IColumnBatchProvider columnBatchProvider)
-            {
-                await foreach (RowBatch batch in ExecuteViaColumnBatchAsync(
-                    columnBatchProvider, context).ConfigureAwait(false))
+                await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
+                    provider, context).ConfigureAwait(false))
                 {
                     yield return batch;
                 }
-
-                yield break;
-            }
-
-            IAsyncEnumerable<RowBatch> rows;
-
-            if (_filterHint is not null && provider is IFilterableTableProvider filterable)
-            {
-                LastFilterableProvider = filterable;
-                rows = filterable.OpenAsync(
-                    _descriptor, _requiredColumns, _filterHint, cancellationToken);
             }
             else
             {
-                rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
+                await foreach (RowBatch batch in ExecuteViaColumnBatchAsync(provider, context).ConfigureAwait(false))
+                {
+                    yield return batch;
+                }
             }
-
-            await foreach (RowBatch batch in rows.ConfigureAwait(false))
-            {
-                yield return batch;
-            }
-        }
 
         }
         finally
         {
-            (provider as IDisposable)?.Dispose();
+            provider.Dispose();
         }
     }
 
@@ -440,10 +401,11 @@ public sealed class ScanOperator : IQueryOperator
 
         ExecutionTracer.Write($"SCAN index pruning  table={_descriptor.Name}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
 
+        RowBatch? outputBatch = null;
+
         // When the provider supports seeking and equality predicates have
         // index hits, seek directly to matching rows rather than reading entire chunks.
-        if (provider is ISeekableTableProvider seekable
-            && _filterHint is not null)
+        if (provider.Seekable && _filterHint is not null)
         {
             List<long>? exactPositions = CollectExactSeekPositions(
                 _filterHint, _sourceIndex, chunks, activeChunkIndexes);
@@ -452,11 +414,10 @@ public sealed class ScanOperator : IQueryOperator
             {
                 ExecutionTracer.Write($"SCAN exact seek  table={_descriptor.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
-                RowBatch? outputBatch = null;
 
                 foreach (long rowPosition in exactPositions)
                 {
-                    await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, rowPosition, 1,
                         cancellationToken).ConfigureAwait(false))
                     {
@@ -490,10 +451,9 @@ public sealed class ScanOperator : IQueryOperator
 
         IAsyncEnumerable<RowBatch> OpenStream()
         {
-            if (_filterHint is not null && provider is IFilterableTableProvider filterable)
+            if (_filterHint is not null)
             {
-                LastFilterableProvider = filterable;
-                return filterable.OpenAsync(
+                return provider.OpenAsync(
                     _descriptor, _requiredColumns, _filterHint, cancellationToken);
             }
 
@@ -517,12 +477,8 @@ public sealed class ScanOperator : IQueryOperator
             yield break;
         }
 
-        // When the provider supports seeking, read only the surviving chunks directly
-        // instead of streaming all rows and discarding pruned ones.
-        if (provider is ISeekableTableProvider chunkSeekable)
+        if (provider.Seekable == true)
         {
-            RowBatch? outputBatch = null;
-
             foreach ((long start, long end, int activeChunkIndex) in activeRanges)
             {
                 int count = (int)(end - start);
@@ -533,7 +489,7 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     int rowInChunk = 0;
 
-                    await foreach (RowBatch inputBatch in chunkSeekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {
@@ -559,7 +515,7 @@ public sealed class ScanOperator : IQueryOperator
                 }
                 else
                 {
-                    await foreach (RowBatch inputBatch in chunkSeekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {
@@ -587,7 +543,7 @@ public sealed class ScanOperator : IQueryOperator
 
             yield break;
         }
-
+        
         // Fallback: stream all rows and skip those in pruned chunks by row index.
         // When bitmap row filters apply, also skip non-matching rows within active chunks.
         rows = OpenStream();
@@ -1364,19 +1320,19 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
-    /// Decodes data via <see cref="IColumnBatchProvider"/> and converts each
+    /// Decodes data via <see cref="ITableProvider"/> and converts each
     /// <see cref="ColumnBatch"/> to a <see cref="RowBatch"/> using pooled buffers.
     /// This path uses the same column decoder pipeline as the fully columnar
     /// operators, including arena-backed string storage during decode.
     /// </summary>
     private async IAsyncEnumerable<RowBatch> ExecuteViaColumnBatchAsync(
-        IColumnBatchProvider columnBatchProvider,
+        ITableProvider provider,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
         LocalBufferPool pool = context.LocalBufferPool;
 
-        await foreach (ColumnBatch columnBatch in columnBatchProvider.OpenColumnBatchAsync(
+        await foreach (ColumnBatch columnBatch in provider.OpenColumnBatchAsync(
             _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
         {
             int rowCount = columnBatch.RowCount;

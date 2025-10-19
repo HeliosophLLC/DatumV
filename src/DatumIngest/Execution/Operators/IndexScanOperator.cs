@@ -7,7 +7,7 @@ using DatumIngest.Model;
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// Scans rows from a <see cref="ISeekableTableProvider"/> in the order defined
+/// Scans rows in the order defined
 /// by an <see cref="IColumnIndex"/>. Entries in the index are walked
 /// sequentially, and each row is fetched via random access — producing sorted
 /// output without materializing and sorting the entire dataset.
@@ -105,11 +105,11 @@ public sealed class IndexScanOperator : IQueryOperator
         if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
             datumProvider.Store = context.Store;
 
-        if (provider is not ISeekableTableProvider seekable)
+        if (!provider.Seekable)
         {
             throw new InvalidOperationException(
                 $"IndexScanOperator requires a seekable provider, but '{_descriptor.Name}' " +
-                $"uses '{provider.GetType().Name}' which does not implement ISeekableTableProvider.");
+                $"uses '{provider.GetType().Name}' which does not indicate it is seekable.");
         }
 
         try
@@ -139,7 +139,7 @@ public sealed class IndexScanOperator : IQueryOperator
                 {
                     // Chunk boundary or size cap: flush the accumulated entries.
                     await foreach (Row row in FlushIndexEntriesAsync(
-                        seekable, indexEntries, cancellationToken).ConfigureAwait(false))
+                        provider, indexEntries, cancellationToken).ConfigureAwait(false))
                     {
                         if (ExecutionTracer.IsEnabled)
                         {
@@ -172,8 +172,7 @@ public sealed class IndexScanOperator : IQueryOperator
             // Flush any remaining entries.
             if (indexEntries.Count > 0)
             {
-                await foreach (Row row in FlushIndexEntriesAsync(
-                    seekable, indexEntries, cancellationToken).ConfigureAwait(false))
+                await foreach (Row row in FlushIndexEntriesAsync(provider, indexEntries, cancellationToken).ConfigureAwait(false))
                 {
                     if (ExecutionTracer.IsEnabled)
                     {
@@ -220,7 +219,7 @@ public sealed class IndexScanOperator : IQueryOperator
     /// range and yield rows in the order they appear in the batch.
     /// </summary>
     private async IAsyncEnumerable<Row> FlushIndexEntriesAsync(
-        ISeekableTableProvider seekable,
+        ITableProvider provider,
         List<ValueIndexEntry> indexEntries,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -229,7 +228,7 @@ public sealed class IndexScanOperator : IQueryOperator
             ValueIndexEntry entry = indexEntries[0];
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-            await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
+            await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
                 _descriptor, _requiredColumns, absoluteRow, 1,
                 cancellationToken).ConfigureAwait(false))
             {
@@ -259,7 +258,7 @@ public sealed class IndexScanOperator : IQueryOperator
         Dictionary<long, Row> rowsByOffset = new(indexEntries.Count);
         long totalFetched = 0;
 
-        await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
+        await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
             _descriptor, _requiredColumns, minRow, rangeCount,
             cancellationToken).ConfigureAwait(false))
         {

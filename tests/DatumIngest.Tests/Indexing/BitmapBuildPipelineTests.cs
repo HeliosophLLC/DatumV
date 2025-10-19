@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Model;
@@ -20,9 +21,9 @@ public sealed class BitmapBuildPipelineTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
 
         SourceIndexBuilder builder = new(chunkSize: 10);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["flag"],
-            Enumerable.Range(0, 10).Select(i => new DataValue[] { DataValue.FromBoolean(i % 2 == 0) }));
+            Enumerable.Range(0, 10).Select(i => new Row(["flag"], [DataValue.FromBoolean(i % 2 == 0)])).ToArray());
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -42,9 +43,9 @@ public sealed class BitmapBuildPipelineTests
         string[] colors = ["red", "green", "blue"];
 
         SourceIndexBuilder builder = new(chunkSize: 9);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["color"],
-            Enumerable.Range(0, 9).Select(i => new DataValue[] { DataValue.FromString(colors[i % 3]) }));
+            Enumerable.Range(0, 9).Select(i => new Row(["color"], [DataValue.FromString(colors[i % 3])])).ToArray());
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -64,9 +65,9 @@ public sealed class BitmapBuildPipelineTests
         int count = IndexConstants.BitmapAutoThreshold + 10;
 
         SourceIndexBuilder builder = new(chunkSize: count);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["id"],
-            Enumerable.Range(0, count).Select(i => new DataValue[] { DataValue.FromFloat32((float)i) }));
+            Enumerable.Range(0, count).Select(i => new Row(["id"], [DataValue.FromFloat32((float)i)])).ToArray());
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -82,15 +83,15 @@ public sealed class BitmapBuildPipelineTests
 
         // 6 rows, chunkSize=3 → 2 chunks.
         SourceIndexBuilder builder = new(chunkSize: 3);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["kind"],
             [
-                [DataValue.FromString("A")],
-                [DataValue.FromString("B")],
-                [DataValue.FromString("A")],
-                [DataValue.FromString("B")],
-                [DataValue.FromString("A")],
-                [DataValue.FromString("B")],
+                new Row(["kind"], [DataValue.FromString("A")]),
+                new Row(["kind"], [DataValue.FromString("B")]),
+                new Row(["kind"], [DataValue.FromString("A")]),
+                new Row(["kind"], [DataValue.FromString("B")]),
+                new Row(["kind"], [DataValue.FromString("A")]),
+                new Row(["kind"], [DataValue.FromString("B")]),
             ]);
 
         SourceIndex index = await builder.BuildAsync(
@@ -122,10 +123,9 @@ public sealed class BitmapBuildPipelineTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
 
         SourceIndexBuilder builder = new(chunkSize: 10);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["data"],
-            Enumerable.Range(0, 5).Select(i => new DataValue[]
-                { DataValue.FromUInt8Array(new byte[] { (byte)i }) }));
+            Enumerable.Range(0, 5).Select(i => new Row(["data"], [DataValue.FromUInt8Array(new byte[] { (byte)i })])).ToArray());
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -140,13 +140,13 @@ public sealed class BitmapBuildPipelineTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
 
         SourceIndexBuilder builder = new(chunkSize: 10);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["status"],
             [
-                [DataValue.FromString("active")],
-                [DataValue.Null(DataKind.String)],
-                [DataValue.FromString("active")],
-                [DataValue.Null(DataKind.String)],
+                new Row(["status"], [DataValue.FromString("active")]),
+                new Row(["status"], [DataValue.Null(DataKind.String)]),
+                new Row(["status"], [DataValue.FromString("active")]),
+                new Row(["status"], [DataValue.Null(DataKind.String)]),
             ]);
 
         SourceIndex index = await builder.BuildAsync(
@@ -169,9 +169,11 @@ public sealed class BitmapBuildPipelineTests
 
         // 5 rows, chunkSize=3 → chunk0 (3 rows), chunk1 (2 rows).
         SourceIndexBuilder builder = new(chunkSize: 3);
-        TestTableProvider provider = new(
+        InMemoryTableProvider provider = new(
             ["val"],
-            Enumerable.Range(0, 5).Select(i => new DataValue[] { DataValue.FromBoolean(true) }));
+            Enumerable.Range(0, 5)
+            .Select(i => new Row(["val"], [DataValue.FromBoolean(true)]))
+            .ToArray());
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -359,57 +361,5 @@ public sealed class BitmapBuildPipelineTests
     {
         internal static readonly TableDescriptor Default = new("csv", "test", "test.csv",
             new Dictionary<string, string>());
-    }
-
-    /// <summary>
-    /// Lightweight in-memory table provider that yields rows from a pre-built sequence.
-    /// </summary>
-    private sealed class TestTableProvider : ITableProvider
-    {
-        private readonly string[] _columnNames;
-        private readonly IEnumerable<DataValue[]> _rows;
-
-        internal TestTableProvider(string[] columnNames, IEnumerable<DataValue[]> rows)
-        {
-            _columnNames = columnNames;
-            _rows = rows;
-        }
-
-        public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            ColumnInfo[] columns = _columnNames.Select(name => new ColumnInfo(name, DataKind.String, true)).ToArray();
-            return Task.FromResult(new Schema(columns));
-        }
-
-        public long GetRowCount(TableDescriptor descriptor)
-        {
-            return _rows.Count();
-        }
-
-        public async IAsyncEnumerable<RowBatch> OpenAsync(
-            TableDescriptor descriptor,
-            IReadOnlySet<string>? requiredColumns,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            RowBatch batch = RowBatch.Rent(64);
-
-            foreach (DataValue[] values in _rows)
-            {
-                batch.Add(new Row(_columnNames, values));
-
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = RowBatch.Rent(64);
-                }
-            }
-
-            if (batch.Count > 0)
-            {
-                yield return batch;
-            }
-
-            await Task.CompletedTask;
-        }
     }
 }

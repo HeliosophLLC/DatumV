@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
@@ -11,8 +10,7 @@ namespace DatumIngest.Execution;
 /// <summary>
 /// Executes an equi-join by probing a column index on the build side for each
 /// probe-side row. Each probe-side key triggers an O(log n) lookup in the
-/// index, followed by a point-seek to the matching build-side row(s) via
-/// <see cref="ISeekableTableProvider.ReadRowRangeAsync"/>.
+/// index, followed by a point-seek to the matching build-side row(s).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -106,13 +104,12 @@ internal sealed class IndexNestedLoopJoinExecutor
         if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
             datumProvider.Store = context.Store;
 
-        if (provider is not ISeekableTableProvider seekable)
+        if (!provider.Seekable)
         {
             throw new InvalidOperationException(
                 $"IndexNestedLoopJoinExecutor requires a seekable provider, but '{_buildDescriptor.Name}' " +
-                $"uses '{provider.GetType().Name}' which does not implement ISeekableTableProvider.");
+                $"uses '{provider.GetType().Name}' which does not indicate it is seekable.");
         }
-
         // We only support single-key equi-joins for index NLJ.
         // The right expression is used against the build-side index, the left against the probe row.
         (Expression probeKeyExpression, Expression _) = _extraction.KeyPairs[0];
@@ -205,7 +202,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     foreach (ValueIndexEntry entry in matches)
                     {
-                        Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, bufferPool, cancellationToken)
+                        Row? rawBuildRow = await FetchBuildRowAsync(provider, entry, bufferPool, cancellationToken)
                             .ConfigureAwait(false);
 
                         if (rawBuildRow is null)
@@ -245,7 +242,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, bufferPool, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(provider, entry, bufferPool, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (rawBuildRow is null)
@@ -312,14 +309,14 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// derived from the index entry's chunk and offset.
     /// </summary>
     private async Task<Row?> FetchBuildRowAsync(
-        ISeekableTableProvider seekable,
+        ITableProvider provider,
         ValueIndexEntry entry,
         LocalBufferPool bufferPool,
         CancellationToken cancellationToken)
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-        await foreach (RowBatch batch in seekable.ReadRowRangeAsync(
+        await foreach (RowBatch batch in provider.ReadRowRangeAsync(
             _buildDescriptor, requiredColumns: null, absoluteRow, 1, cancellationToken)
             .ConfigureAwait(false))
         {
