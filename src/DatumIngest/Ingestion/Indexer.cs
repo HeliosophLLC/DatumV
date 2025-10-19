@@ -77,7 +77,7 @@ public sealed class Indexer
         try
         {
             await foreach (RowBatch batch in provider
-                .OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+                .ScanAsync(descriptor, requiredColumns: null, filterHint: null, cancellationToken)
                 .ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)

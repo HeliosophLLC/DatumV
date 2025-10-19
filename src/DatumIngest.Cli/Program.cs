@@ -311,7 +311,7 @@ static async Task BuildGroupedIndexAsync(
             ITableProvider provider = catalog.CreateProvider(descriptor);
             IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
 
-            await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None))
+            await foreach (RowBatch batch in provider.ScanAsync(descriptor, requiredColumns: null, filterHint: null, CancellationToken.None))
             {
                 for (int i = 0; i < batch.Count; i++)
                 {
@@ -435,8 +435,8 @@ static async Task BuildGroupedIndexAndManifestAsync(
             Dictionary<string, DataKind> columnKinds = new();
             long rowCount = 0;
 
-            await foreach (RowBatch batch in provider.OpenAsync(
-                descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
+            await foreach (RowBatch batch in provider.ScanAsync(
+                descriptor, requiredColumns: null, filterHint: null, CancellationToken.None).ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)
                 {

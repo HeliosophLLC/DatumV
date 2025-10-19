@@ -5,77 +5,160 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
-/// Simple in-memory table provider for testing. Yields cloned copies of the
-/// supplied rows so each batch owns independent <see cref="DataValue"/> arrays,
-/// matching the production <c>ScanOperator</c>'s <c>pool.Rent</c> behavior.
-/// This ensures <see cref="DatumIngest.Execution.LocalBufferPool.ReturnBatch"/>
-/// can safely return the arrays without corrupting test data.
+/// In-memory table provider for tests and small fixtures. Yields cloned copies of the
+/// supplied rows so each batch owns independent <see cref="DataValue"/> arrays — this
+/// matches the production <c>ScanOperator</c>'s pool-rented behaviour, so downstream
+/// consumers can safely return batches to <see cref="DatumIngest.Execution.LocalBufferPool"/>
+/// without corrupting the test fixture.
 /// </summary>
 public sealed class InMemoryTableProvider : ITableProvider
 {
+    private const int DefaultBatchSize = 64;
+
     private readonly string[] _columns;
     private readonly Row[] _rows;
+    private readonly Schema _schema;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="InMemoryTableProvider"/> with the specified rows.
+    /// Creates a provider from a sequence of rows. Column names are derived from the first
+    /// row's <see cref="Row.ColumnNames"/>; schema kinds are inferred from the first row's
+    /// values. When <paramref name="rows"/> is empty, a single <c>"empty"</c> column is used.
     /// </summary>
-    /// <param name="rows">The rows of data in the table.</param>
+    /// <param name="rows">The rows to serve.</param>
     public InMemoryTableProvider(Row[] rows)
     {
         _rows = rows;
         _columns = rows.Length == 0
             ? Array.Empty<string>()
-            : rows[0].ColumnNames?.ToArray()
-                ?? rows[0].RawValues.Select((v, i) => $"Column{i}").ToArray();
+            : rows[0].ColumnNames.ToArray();
+        _schema = BuildSchema(_columns, _rows);
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="InMemoryTableProvider"/> with the specified columns and rows.
+    /// Creates a provider from explicit column names and rows. Use this when the first
+    /// row's column names might not represent the full schema.
     /// </summary>
-    /// <param name="columns">The names of the columns in the table.</param>
-    /// <param name="rows">The rows of data in the table.</param>
+    /// <param name="columns">Column names for the schema.</param>
+    /// <param name="rows">The rows to serve. Each row must have values in <paramref name="columns"/> order.</param>
     public InMemoryTableProvider(string[] columns, Row[] rows)
     {
         _columns = columns;
         _rows = rows;
+        _schema = BuildSchema(_columns, _rows);
     }
 
     /// <inheritdoc/>
-    public bool Seekable => throw new NotImplementedException();
+    public bool Seekable => true;
 
     /// <inheritdoc/>
-    public void Dispose()
-    {
-        
-    }
+    public void Dispose() { }
 
     /// <inheritdoc/>
-    public long GetRowCount(TableDescriptor descriptor)
-    {
-        throw new NotImplementedException();
-    }
+    public long GetRowCount(TableDescriptor descriptor) => _rows.Length;
 
     /// <inheritdoc/>
     public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+        => Task.FromResult(_schema);
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<RowBatch> ScanAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        Expression? filterHint,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        // filterHint is advisory for zone-map pruning. An in-memory table has no
+        // partitions, so the hint is unused — the caller applies the filter downstream.
+        await foreach (RowBatch batch in EmitRows(_rows, cancellationToken).ConfigureAwait(false))
+        {
+            yield return batch;
+        }
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> OpenAsync(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, CancellationToken cancellationToken)
+    public async IAsyncEnumerable<RowBatch> SeekAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        if (startRow >= _rows.Length || count <= 0)
+        {
+            yield break;
+        }
+
+        int start = (int)Math.Min(startRow, int.MaxValue);
+        int available = Math.Min(count, _rows.Length - start);
+        ArraySegment<Row> slice = new(_rows, start, available);
+
+        await foreach (RowBatch batch in EmitRows(slice, cancellationToken).ConfigureAwait(false))
+        {
+            yield return batch;
+        }
     }
 
-    /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> OpenAsync(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, Expression filterHint, CancellationToken cancellationToken)
+    private static async IAsyncEnumerable<RowBatch> EmitRows(
+        IEnumerable<Row> rows,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        RowBatch batch = RowBatch.Rent(DefaultBatchSize);
+
+        foreach (Row row in rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Clone so the batch owns a fresh DataValue[] — when the consumer returns the
+            // batch to the pool, the fixture's original arrays are not corrupted.
+            batch.Add(row.Clone());
+
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = RowBatch.Rent(DefaultBatchSize);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
+        }
+
+        await Task.CompletedTask;
     }
 
-    /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> ReadRowRangeAsync(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, long startRow, int count, CancellationToken cancellationToken)
+    private static Schema BuildSchema(string[] columns, Row[] rows)
     {
-        throw new NotImplementedException();
+        if (columns.Length == 0)
+        {
+            return new Schema([new ColumnInfo("empty", DataKind.String, nullable: true)]);
+        }
+
+        ColumnInfo[] infos = new ColumnInfo[columns.Length];
+        for (int i = 0; i < columns.Length; i++)
+        {
+            DataKind kind = InferKind(rows, columns[i], i);
+            infos[i] = new ColumnInfo(columns[i], kind, nullable: true);
+        }
+
+        return new Schema(infos);
+    }
+
+    private static DataKind InferKind(Row[] rows, string columnName, int ordinal)
+    {
+        // Walk rows until a non-null value is found; fall back to String for all-null columns.
+        foreach (Row row in rows)
+        {
+            DataValue value = ordinal < row.FieldCount
+                ? row[ordinal]
+                : row[columnName];
+
+            if (!value.IsNull)
+            {
+                return value.Kind;
+            }
+        }
+
+        return DataKind.String;
     }
 }

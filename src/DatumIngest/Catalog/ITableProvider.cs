@@ -18,57 +18,42 @@ public interface ITableProvider : IDisposable
     Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Opens the table and streams rows asynchronously.
+    /// Streams all rows from the table, optionally applying an advisory filter hint for
+    /// statistics-based partition pruning. The caller is responsible for applying the
+    /// filter for correctness — the stream may still contain non-matching rows.
     /// </summary>
     /// <param name="descriptor">Table descriptor with file path and provider options.</param>
     /// <param name="requiredColumns">
-    /// Set of column names the consumer needs. The provider may skip
-    /// producing columns not in this set for projection pushdown.
-    /// When null, all columns are returned.
+    /// Columns needed downstream. When <c>null</c>, all columns are returned. Providers
+    /// that support projection pushdown may skip producing columns outside this set.
+    /// </param>
+    /// <param name="filterHint">
+    /// Optional predicate used for zone-map / chunk-level pruning. May be <c>null</c>.
+    /// Must not be used to suppress individual rows — the caller applies the filter for
+    /// correctness.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of row batches from the data source.</returns>
-    IAsyncEnumerable<RowBatch> OpenAsync(
+    IAsyncEnumerable<RowBatch> ScanAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
+        Expression? filterHint,
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Opens the table with an advisory filter hint. The provider may use the filter
-    /// to skip partitions whose statistics prove no rows can match, but the returned
-    /// stream is not guaranteed to contain only matching rows.
-    /// </summary>
-    /// <param name="descriptor">Table descriptor with file path and provider options.</param>
-    /// <param name="requiredColumns">
-    /// Columns to include in the result rows (projection pushdown). When <c>null</c>, all columns are returned.
-    /// </param>
-    /// <param name="filterHint">
-    /// An advisory WHERE predicate. The provider may consult column statistics to
-    /// skip partitions that provably contain no matching rows. Must not be used to
-    /// suppress individual rows — the caller applies the filter for correctness.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of row batches, possibly with non-matching partitions skipped.</returns>
-    IAsyncEnumerable<RowBatch> OpenAsync(
-        TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        Expression filterHint,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Reads a contiguous range of rows starting at <paramref name="startRow"/>.
-    /// The provider seeks directly to the specified position without reading
-    /// preceding rows.
+    /// Reads a contiguous range of rows starting at <paramref name="startRow"/>. Requires
+    /// <see cref="Seekable"/> to be <c>true</c>. Used by the index-scan and index-NLJ paths
+    /// to fetch specific physical rows identified by a prior index lookup.
     /// </summary>
     /// <param name="descriptor">Table descriptor identifying the source file.</param>
     /// <param name="requiredColumns">
-    /// Columns to include in the result rows (projection pushdown). When <c>null</c>, all columns are returned.
+    /// Columns needed downstream. When <c>null</c>, all columns are returned.
     /// </param>
     /// <param name="startRow">Zero-based index of the first row to read.</param>
     /// <param name="count">Maximum number of rows to read. The stream may yield fewer rows if the source is exhausted.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of row batches from the specified range.</returns>
-    IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
+    IAsyncEnumerable<RowBatch> SeekAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
@@ -83,8 +68,9 @@ public interface ITableProvider : IDisposable
     long GetRowCount(TableDescriptor descriptor);
 
     /// <summary>
-    /// Returns true if the provider supports seeking to specific row positions, enabling operators like <c>ScanOperator</c>
-    /// to perform index seeks for equality predicates.
+    /// Returns true if the provider supports seeking to specific row positions via
+    /// <see cref="SeekAsync"/>, enabling operators like <c>ScanOperator</c> to perform
+    /// index seeks for equality predicates.
     /// </summary>
     bool Seekable { get; }
 }

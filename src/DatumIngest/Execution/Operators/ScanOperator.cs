@@ -255,11 +255,8 @@ public sealed class ScanOperator : IQueryOperator
             }
             else
             {
-                IAsyncEnumerable<RowBatch> rows = _filterHint is not null
-                    ? provider.OpenAsync(_descriptor, _requiredColumns, _filterHint, cancellationToken)
-                    : provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
-
-                await foreach (RowBatch batch in rows.ConfigureAwait(false))
+                await foreach (RowBatch batch in provider.ScanAsync(
+                    _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
                 {
                     yield return batch;
                 }
@@ -420,7 +417,7 @@ public sealed class ScanOperator : IQueryOperator
 
                 foreach (long rowPosition in exactPositions)
                 {
-                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.SeekAsync(
                         _descriptor, _requiredColumns, rowPosition, 1,
                         cancellationToken).ConfigureAwait(false))
                     {
@@ -453,15 +450,7 @@ public sealed class ScanOperator : IQueryOperator
         IAsyncEnumerable<RowBatch>? rows = null;
 
         IAsyncEnumerable<RowBatch> OpenStream()
-        {
-            if (_filterHint is not null)
-            {
-                return provider.OpenAsync(
-                    _descriptor, _requiredColumns, _filterHint, cancellationToken);
-            }
-
-            return provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
-        }
+            => provider.ScanAsync(_descriptor, _requiredColumns, _filterHint, cancellationToken);
 
         // If no chunks were pruned and no bitmap row filtering is needed, stream all rows.
         bool hasBitmapRowFilter = _filterHint is not null
@@ -492,7 +481,7 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     int rowInChunk = 0;
 
-                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.SeekAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {
@@ -518,7 +507,7 @@ public sealed class ScanOperator : IQueryOperator
                 }
                 else
                 {
-                    await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in provider.SeekAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {

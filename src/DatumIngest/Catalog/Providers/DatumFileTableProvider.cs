@@ -16,13 +16,13 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
-    // Reused across multiple ReadRowRangeAsync calls within the same scan session.
+    // Reused across multiple SeekAsync calls within the same scan session.
     // Opening a DatumFileReader re-reads and decompresses all row-group metadata;
     // amortising that cost over the full index traversal is critical for B+Tree scans.
     private DatumFileReader? _cachedReader;
     private string? _cachedReaderPath;
 
-    // Pre-allocated column buffers for ReadRowRangeAsync — mirrors the optimization
+    // Pre-allocated column buffers for SeekAsync — mirrors the optimization
     // in OpenCoreAsync that eliminates LOH DataValue[] allocations per row group.
     // Rebuilt when the file or projected column set changes.
     private DataValue[][]? _seekColumnBuffers;
@@ -47,17 +47,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> OpenAsync(
+    public IAsyncEnumerable<RowBatch> ScanAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
-        CancellationToken cancellationToken)
-        => OpenCoreAsync(descriptor, requiredColumns, filterHint: null, cancellationToken);
-
-    /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> OpenAsync(
-        TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        Expression filterHint,
+        Expression? filterHint,
         CancellationToken cancellationToken)
         => OpenCoreAsync(descriptor, requiredColumns, filterHint, cancellationToken);
 
@@ -213,9 +206,9 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
             ArrayPool<byte>.Shared.Return(decompressedBuffer);
         }
     }
-
+    
     /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
+    public async IAsyncEnumerable<RowBatch> SeekAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
@@ -324,7 +317,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     }
 
     /// <summary>
-    /// Allocates the per-call-reusable buffers for <see cref="ReadRowRangeAsync"/>:
+    /// Allocates the per-call-reusable buffers for <see cref="SeekAsync"/>:
     /// one <see cref="DataValue"/> array per projected column (sized to the largest
     /// row group), plus byte buffers for compressed/decompressed page data.
     /// These replace the per-call <c>ReadColumns</c> allocations that previously

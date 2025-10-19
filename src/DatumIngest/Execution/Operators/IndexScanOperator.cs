@@ -228,7 +228,7 @@ public sealed class IndexScanOperator : IQueryOperator
             ValueIndexEntry entry = indexEntries[0];
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-            await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
+            await foreach (RowBatch inputBatch in provider.SeekAsync(
                 _descriptor, _requiredColumns, absoluteRow, 1,
                 cancellationToken).ConfigureAwait(false))
             {
@@ -258,7 +258,7 @@ public sealed class IndexScanOperator : IQueryOperator
         Dictionary<long, Row> rowsByOffset = new(indexEntries.Count);
         long totalFetched = 0;
 
-        await foreach (RowBatch inputBatch in provider.ReadRowRangeAsync(
+        await foreach (RowBatch inputBatch in provider.SeekAsync(
             _descriptor, _requiredColumns, minRow, rangeCount,
             cancellationToken).ConfigureAwait(false))
         {

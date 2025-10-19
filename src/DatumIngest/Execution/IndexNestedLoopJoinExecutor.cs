@@ -316,7 +316,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-        await foreach (RowBatch batch in provider.ReadRowRangeAsync(
+        await foreach (RowBatch batch in provider.SeekAsync(
             _buildDescriptor, requiredColumns: null, absoluteRow, 1, cancellationToken)
             .ConfigureAwait(false))
         {
