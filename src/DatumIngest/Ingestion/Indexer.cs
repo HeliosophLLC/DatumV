@@ -3,6 +3,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 
 namespace DatumIngest.Ingestion;
@@ -34,7 +35,7 @@ namespace DatumIngest.Ingestion;
 /// or by reducing <see cref="IndexOptions.ChunkSize"/>.
 /// </para>
 /// </remarks>
-public sealed class Indexer
+public sealed class Indexer(Pool pool)
 {
     /// <summary>
     /// Indexes the given <c>.datum</c> file with default options
@@ -73,7 +74,7 @@ public sealed class Indexer
         long bytesWritten;
         long rowCount = 0;
 
-        using DatumFileTableProvider provider = new();
+        using DatumFileTableProvider provider = new(pool);
         try
         {
             await foreach (RowBatch batch in provider

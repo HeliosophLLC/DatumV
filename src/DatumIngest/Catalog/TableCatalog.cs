@@ -3,6 +3,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 
 namespace DatumIngest.Catalog;
@@ -66,7 +67,7 @@ public sealed class TableCatalog : IDisposable
     /// </summary>
     public TableCatalog()
     {
-        _providerFactories["datum"] = () => new DatumFileTableProvider();
+        _providerFactories["datum"] = () => new DatumFileTableProvider(new Pool(GlobalPool.Backing));
     }
 
     /// <summary>

@@ -4,6 +4,7 @@ using DatumIngest.DatumFile;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Catalog.Providers;
 
@@ -12,7 +13,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IDisposable
+public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
@@ -38,22 +39,6 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     /// </summary>
     public IValueStore Store { get; set; } = new Arena();
 
-
-    /// <inheritdoc/>
-    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
-    {
-        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
-        return Task.FromResult(reader.Schema);
-    }
-
-    /// <inheritdoc/>
-    public IAsyncEnumerable<RowBatch> ScanAsync(
-        TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns,
-        Expression? filterHint,
-        CancellationToken cancellationToken)
-        => OpenCoreAsync(descriptor, requiredColumns, filterHint, cancellationToken);
-
     /// <inheritdoc/>
     public long GetRowCount(TableDescriptor descriptor)
     {
@@ -78,7 +63,16 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     /// <inheritdoc/>
     public bool Seekable => throw new Exception("TODO: Need to check if index side-cars are present for this file.");
 
-    private async IAsyncEnumerable<RowBatch> OpenCoreAsync(
+
+    /// <inheritdoc/>
+    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        return Task.FromResult(reader.Schema);
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<RowBatch> ScanAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
@@ -178,13 +172,15 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
                         continue;
                     }
 
-                    DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
+
+                    batch ??= pool.RentRowBatch(DefaultBatchSize);
+                    
+                    DataValue[] values = pool.RentDataValues(projectedIndices.Length);
                     for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                     {
                         values[colPos] = columns[colPos][rowIndex];
                     }
 
-                    batch ??= RowBatch.Rent(DefaultBatchSize);
                     batch.Add(new Row(projectedNames, values, nameIndex));
 
                     if (batch.IsFull)
@@ -288,13 +284,13 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
                     continue;
                 }
 
-                DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
+                DataValue[] values = pool.RentDataValues(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                batch ??= RowBatch.Rent(Math.Min(count, DefaultBatchSize));
+                batch ??= pool.RentRowBatch(Math.Min(count, DefaultBatchSize));
                 batch.Add(new Row(projectedNames, values, nameIndex));
                 emitted++;
 
