@@ -1,12 +1,13 @@
-﻿using DatumIngest.Model;
+﻿using DatumIngest.Indexing;
+using DatumIngest.Model;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.IO;
 
 /// <summary>
 /// Low-level <see cref="DataValue"/> serialization helpers shared across index writing
 /// and datum-file encoding paths. All methods are static; this class carries no state.
 /// </summary>
-internal static class IndexWriter
+internal static class DataValueWriter
 {    internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {
         if (!value.HasValue || value.Value.IsNull)

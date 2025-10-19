@@ -1,5 +1,6 @@
 using DatumIngest.Execution;
 using DatumIngest.Indexing.BTree;
+using DatumIngest.IO;
 using DatumIngest.Model;
 using ZstdSharp;
 
@@ -210,7 +211,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
             foreach (ValueIndexEntry entry in entries)
             {
-                IndexWriter.WriteDataValue(writer, entry.Key);
+                DataValueWriter.WriteDataValue(writer, entry.Key);
                 writer.Write(entry.ChunkIndex);
                 writer.Write(entry.RowOffsetInChunk);
             }
@@ -505,7 +506,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// written one at a time, keeping memory consumption at O(number of chunks).
     /// </summary>
     /// <param name="output">The binary writer to receive the sorted indexes in
-    /// <see cref="IndexWriter"/> format.</param>
+    /// <see cref="DataValueWriter"/> format.</param>
     /// <param name="excludeColumns">
     /// Columns to skip (e.g. columns assigned to B+Tree). When <c>null</c>, all columns are written.
     /// </param>
@@ -679,7 +680,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             int runIndex = queue.Dequeue();
             ValueIndexEntry entry = runs[runIndex].Current;
 
-            IndexWriter.WriteDataValue(output, entry.Key);
+            DataValueWriter.WriteDataValue(output, entry.Key);
             output.Write(entry.ChunkIndex);
             output.Write(entry.RowOffsetInChunk);
 
@@ -700,7 +701,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         for (int index = 0; index < count; index++)
         {
             ValueIndexEntry entry = ReadEntry(reader);
-            IndexWriter.WriteDataValue(output, entry.Key);
+            DataValueWriter.WriteDataValue(output, entry.Key);
             output.Write(entry.ChunkIndex);
             output.Write(entry.RowOffsetInChunk);
         }
@@ -777,7 +778,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
     private static ValueIndexEntry ReadEntry(BinaryReader reader)
     {
-        DataValue key = IndexReader.ReadDataValue(reader);
+        DataValue key = DataValueReader.ReadDataValue(reader);
         int chunkIndex = reader.ReadInt32();
         long rowOffset = reader.ReadInt64();
         return new ValueIndexEntry(key, chunkIndex, rowOffset);

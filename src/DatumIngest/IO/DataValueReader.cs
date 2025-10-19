@@ -1,12 +1,12 @@
 ﻿using DatumIngest.Model;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.IO;
 
 /// <summary>
 /// Low-level <see cref="DataValue"/> deserialization helpers shared across index reading
 /// and datum-file decoding paths. All methods are static; this class carries no state.
 /// </summary>
-internal static class IndexReader
+internal static class DataValueReader
 {
     /// <summary>
     /// Reads a nullable <see cref="DataValue"/> prefixed by a boolean presence byte.

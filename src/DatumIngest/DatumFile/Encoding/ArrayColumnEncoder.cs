@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Encoding;
@@ -66,7 +67,7 @@ internal sealed class ArrayColumnEncoder : DatumColumnEncoder
 
                     foreach (DataValue element in elements)
                     {
-                        IndexWriter.WriteDataValue(rowWriter, element, pageStore);
+                        DataValueWriter.WriteDataValue(rowWriter, element, pageStore);
                     }
 
                     rowWriter.Flush();

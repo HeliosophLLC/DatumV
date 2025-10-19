@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Encoding;
@@ -66,7 +67,7 @@ internal sealed class StructColumnEncoder : DatumColumnEncoder
 
                     foreach (DataValue field in fields)
                     {
-                        IndexWriter.WriteDataValue(rowWriter, field, pageStore);
+                        DataValueWriter.WriteDataValue(rowWriter, field, pageStore);
                     }
 
                     rowWriter.Flush();

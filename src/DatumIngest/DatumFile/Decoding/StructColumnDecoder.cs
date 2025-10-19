@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Decoding;
@@ -53,7 +54,7 @@ internal sealed class StructColumnDecoder : DatumColumnDecoder
             List<DataValue> fields = new();
             while (rowStream.Position < poolByteCount)
             {
-                fields.Add(IndexReader.ReadDataValue(rowReader));
+                fields.Add(DataValueReader.ReadDataValue(rowReader));
             }
 
             result[rowIndex] = DataValue.FromStruct((short)fields.Count, fields.ToArray());

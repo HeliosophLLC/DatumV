@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Compression;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing.BTree;
@@ -68,7 +69,7 @@ internal static class BPlusTreePageCodec
 
                     foreach (ValueIndexEntry entry in entries)
                     {
-                        IndexWriter.WriteDataValue(entryWriter, entry.Key);
+                        DataValueWriter.WriteDataValue(entryWriter, entry.Key);
                         entryWriter.Write(entry.ChunkIndex);
                         entryWriter.Write(entry.RowOffsetInChunk);
                     }
@@ -143,7 +144,7 @@ internal static class BPlusTreePageCodec
 
             foreach (ValueIndexEntry entry in entries)
             {
-                IndexWriter.WriteDataValue(writer, entry.Key);
+                DataValueWriter.WriteDataValue(writer, entry.Key);
                 writer.Write(entry.ChunkIndex);
                 writer.Write(entry.RowOffsetInChunk);
             }
@@ -247,7 +248,7 @@ internal static class BPlusTreePageCodec
         // Keys (using the same serialization as IndexWriter).
         foreach (DataValue key in keys)
         {
-            IndexWriter.WriteDataValue(writer, key);
+            DataValueWriter.WriteDataValue(writer, key);
         }
 
         // Child page indexes.
@@ -302,7 +303,7 @@ internal static class BPlusTreePageCodec
 
         for (int index = 0; index < keyCount; index++)
         {
-            keys[index] = IndexReader.ReadDataValue(reader);
+            keys[index] = DataValueReader.ReadDataValue(reader);
         }
 
         // Child page indexes (keyCount + 1).
@@ -336,7 +337,7 @@ internal static class BPlusTreePageCodec
 
         for (int index = 0; index < entryCount; index++)
         {
-            DataValue key = IndexReader.ReadDataValue(reader);
+            DataValue key = DataValueReader.ReadDataValue(reader);
             int chunkIndex = reader.ReadInt32();
             long rowOffsetInChunk = reader.ReadInt64();
             entries[index] = new ValueIndexEntry(key, chunkIndex, rowOffsetInChunk);

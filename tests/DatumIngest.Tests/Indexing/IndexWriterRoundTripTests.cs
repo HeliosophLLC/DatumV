@@ -1,4 +1,5 @@
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Indexing;
@@ -35,12 +36,12 @@ public sealed class IndexWriterRoundTripTests
 
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
-        IndexWriter.WriteDataValue(writer, original);
+        DataValueWriter.WriteDataValue(writer, original);
         writer.Flush();
 
         stream.Position = 0;
         using BinaryReader reader = new(stream);
-        DataValue restored = IndexReader.ReadDataValue(reader);
+        DataValue restored = DataValueReader.ReadDataValue(reader);
 
         AssertValuesEqual(original, restored, kind);
     }
@@ -57,12 +58,12 @@ public sealed class IndexWriterRoundTripTests
         using MemoryStream stream = new();
         using (BufferedIndexWriter buffered = new(stream))
         {
-            IndexWriter.WriteDataValue(buffered, original);
+            DataValueWriter.WriteDataValue(buffered, original);
         }
 
         stream.Position = 0;
         using BinaryReader reader = new(stream);
-        DataValue restored = IndexReader.ReadDataValue(reader);
+        DataValue restored = DataValueReader.ReadDataValue(reader);
 
         AssertValuesEqual(original, restored, kind);
     }
@@ -79,7 +80,7 @@ public sealed class IndexWriterRoundTripTests
 
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
-        Assert.Throws<NotSupportedException>(() => IndexWriter.WriteDataValue(writer, value));
+        Assert.Throws<NotSupportedException>(() => DataValueWriter.WriteDataValue(writer, value));
     }
 
     /// <summary>

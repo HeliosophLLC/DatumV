@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Indexing.BTree;
 using DatumIngest.Indexing.Sorted;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.Indexing.BTree;
 
 /// <summary>
 /// Collection of <see cref="BPlusTreeColumnIndex"/> instances keyed by column name.

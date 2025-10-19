@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Decoding;
@@ -54,7 +55,7 @@ internal sealed class ArrayColumnDecoder : DatumColumnDecoder
             List<DataValue> elements = new();
             while (rowStream.Position < poolByteCount)
             {
-                elements.Add(IndexReader.ReadDataValue(rowReader));
+                elements.Add(DataValueReader.ReadDataValue(rowReader));
             }
 
             // Infer element kind from the first element; default to Scalar for empty arrays.

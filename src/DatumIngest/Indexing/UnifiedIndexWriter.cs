@@ -5,6 +5,7 @@ using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
+using DatumIngest.IO;
 
 namespace DatumIngest.Indexing;
 
@@ -792,7 +793,7 @@ internal static class UnifiedIndexWriter
 
             foreach (KeyValuePair<DataValue, byte[][]> entry in compressedBitmaps)
             {
-                IndexWriter.WriteDataValue(writer, entry.Key);
+                DataValueWriter.WriteDataValue(writer, entry.Key);
 
                 byte[][] chunkBitmaps = entry.Value;
 

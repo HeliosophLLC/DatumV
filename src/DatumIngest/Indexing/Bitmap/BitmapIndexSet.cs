@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Indexing.Sorted;
+using DatumIngest.Indexing.BTree;
 
 namespace DatumIngest.Indexing.Bitmap;
 

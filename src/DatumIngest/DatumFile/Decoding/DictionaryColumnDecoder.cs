@@ -1,6 +1,7 @@
 using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Decoding;
@@ -87,7 +88,7 @@ internal sealed class DictionaryColumnDecoder : DatumColumnDecoder
         DataValue[] dictionary = new DataValue[dictionaryEntryCount];
         for (int entryIndex = 0; entryIndex < dictionaryEntryCount; entryIndex++)
         {
-            dictionary[entryIndex] = IndexReader.ReadDataValue(reader);
+            dictionary[entryIndex] = DataValueReader.ReadDataValue(reader);
         }
 
         bool wideCode = dictionaryEntryCount > 255;

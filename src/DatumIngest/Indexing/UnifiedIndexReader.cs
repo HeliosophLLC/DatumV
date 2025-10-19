@@ -6,6 +6,7 @@ using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
+using DatumIngest.IO;
 
 namespace DatumIngest.Indexing;
 
@@ -487,12 +488,12 @@ internal static class UnifiedIndexReader
                 Dictionary<DataValue, BitmapColumnIndex.ChunkLocation[]> chunkLocations = new(distinctValueCount);
 
                 // Reconstruct the first key from its kind byte + remaining bytes.
-                DataValue firstValue = IndexReader.ReadDataValueBody(reader, firstKind);
+                DataValue firstValue = DataValueReader.ReadDataValueBody(reader, firstKind);
                 chunkLocations[firstValue] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
 
                 for (int valueIndex = 1; valueIndex < distinctValueCount; valueIndex++)
                 {
-                    DataValue value = IndexReader.ReadDataValue(reader);
+                    DataValue value = DataValueReader.ReadDataValue(reader);
                     chunkLocations[value] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
                 }
 

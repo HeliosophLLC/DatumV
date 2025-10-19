@@ -4,6 +4,7 @@ using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.IO;
 using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
 
@@ -1395,7 +1396,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// <summary>
     /// The internal spill writer holding sorted index data on disk.
     /// Available after <see cref="Finalize"/> for streaming serialization via
-    /// <see cref="IndexWriter"/>. Disposed when this builder is disposed.
+    /// <see cref="DataValueWriter"/>. Disposed when this builder is disposed.
     /// </summary>
     internal SortedIndexSpillWriter? SpillWriter => _spillWriter;
 

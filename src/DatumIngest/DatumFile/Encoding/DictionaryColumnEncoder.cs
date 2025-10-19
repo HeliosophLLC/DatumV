@@ -4,6 +4,7 @@ using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 using DatumIngest.Indexing;
+using DatumIngest.IO;
 
 namespace DatumIngest.DatumFile.Encoding;
 
@@ -87,7 +88,7 @@ internal sealed class DictionaryColumnEncoder : DatumColumnEncoder
             dictWriter.Write((ushort)dictionary.Count);
             foreach (DataValue entry in dictionary)
             {
-                IndexWriter.WriteDataValue(dictWriter, entry);
+                DataValueWriter.WriteDataValue(dictWriter, entry);
             }
             dictWriter.Flush();
             byte[] dictBytes = dictStream.ToArray();
