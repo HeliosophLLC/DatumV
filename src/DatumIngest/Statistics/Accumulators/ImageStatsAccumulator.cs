@@ -64,14 +64,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             return;
         }
 
-        byte[]? imageBytes = value.Kind switch
+        if (value.Kind is not (DataKind.Image or DataKind.UInt8Array))
         {
-            DataKind.Image => value.AsImage(store),
-            DataKind.UInt8Array => value.AsUInt8Array(store),
-            _ => null
-        };
+            return;
+        }
 
-        if (imageBytes is null || imageBytes.Length == 0)
+        ReadOnlySpan<byte> imageBytes = value.AsByteSpan(store);
+        if (imageBytes.Length == 0)
         {
             return;
         }

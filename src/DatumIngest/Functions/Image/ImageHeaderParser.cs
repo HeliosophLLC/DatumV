@@ -12,7 +12,7 @@ public static class ImageHeaderParser
     /// </summary>
     /// <param name="data">The raw encoded image bytes.</param>
     /// <returns>Parsed dimensions, or <c>null</c> if the format is unrecognized or the header is malformed.</returns>
-    public static ImageDimensions? TryParseHeader(byte[] data)
+    public static ImageDimensions? TryParseHeader(ReadOnlySpan<byte> data)
     {
         if (data.Length < 8)
         {
@@ -48,7 +48,7 @@ public static class ImageHeaderParser
     /// </summary>
     /// <param name="data">The raw encoded image bytes.</param>
     /// <returns>The detected format, or <see cref="ImageFormat.Unknown"/> if unrecognized.</returns>
-    public static ImageFormat DetectFormat(byte[] data)
+    public static ImageFormat DetectFormat(ReadOnlySpan<byte> data)
     {
         if (data.Length < 4)
         {
@@ -77,7 +77,7 @@ public static class ImageHeaderParser
         return ImageFormat.Unknown;
     }
 
-    private static ImageDimensions? TryParseJpegHeader(byte[] data)
+    private static ImageDimensions? TryParseJpegHeader(ReadOnlySpan<byte> data)
     {
         // Scan for SOF markers: FF C0..C3, C5..C7, C9..CB, CD..CF
         int offset = 2; // skip SOI marker
@@ -138,7 +138,7 @@ public static class ImageHeaderParser
         return null;
     }
 
-    private static ImageDimensions? TryParsePngHeader(byte[] data)
+    private static ImageDimensions? TryParsePngHeader(ReadOnlySpan<byte> data)
     {
         // IHDR is always the first chunk after the 8-byte signature
         // Chunk: length(4) + type(4) + data + CRC(4)
@@ -171,7 +171,7 @@ public static class ImageHeaderParser
         return new ImageDimensions(width, height, channels);
     }
 
-    private static ImageDimensions? TryParseWebPHeader(byte[] data)
+    private static ImageDimensions? TryParseWebPHeader(ReadOnlySpan<byte> data)
     {
         if (data.Length < 20)
         {

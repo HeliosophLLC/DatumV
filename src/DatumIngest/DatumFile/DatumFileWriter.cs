@@ -26,6 +26,8 @@ public sealed class DatumFileWriter : IDisposable
     private DatumColumnDescriptor[]? _descriptors;
     private List<DataValue>[]? _columnBuffers;
     private int _rowGroupSize = DatumFileConstants.DefaultRowGroupSize;
+    private int _rowGroupByteThreshold = DatumFileConstants.RowGroupArenaByteThreshold;
+    private bool _serialColumnEncoding;
     private long _totalRowsWritten;
     private readonly List<DatumRowGroupDescriptor> _rowGroupDescriptors = new();
     private long _footerOffset;
@@ -106,6 +108,23 @@ public sealed class DatumFileWriter : IDisposable
     /// </summary>
     /// <param name="rowGroupSize">The maximum number of rows per row group.</param>
     internal void SetRowGroupSize(int rowGroupSize) => _rowGroupSize = rowGroupSize;
+
+    /// <summary>
+    /// Configures the writer's memory tradeoffs. Lower <paramref name="rowGroupByteThreshold"/>
+    /// and <paramref name="serialColumnEncoding"/> = <c>true</c> reduce peak working set
+    /// at the cost of more row groups and slower encode wall time. Must be called before
+    /// <see cref="Initialize"/>.
+    /// </summary>
+    public void SetMemoryBudget(int rowGroupByteThreshold, bool serialColumnEncoding)
+    {
+        if (_initialized)
+        {
+            throw new InvalidOperationException("Memory budget must be configured before Initialize.");
+        }
+
+        _rowGroupByteThreshold = rowGroupByteThreshold;
+        _serialColumnEncoding = serialColumnEncoding;
+    }
 
     /// <summary>
     /// Initializes the writer with a schema and writes the file header.
@@ -208,7 +227,7 @@ public sealed class DatumFileWriter : IDisposable
         // protects image and large-blob ingestion, where 64k rows of ~150 KB payload
         // each would hold ~9 GB in memory before a row-count-only trigger fires.
         _pendingFlush = _columnBuffers[0].Count >= _rowGroupSize
-            || _writerArena.BytesWritten >= DatumFileConstants.RowGroupArenaByteThreshold;
+            || _writerArena.BytesWritten >= _rowGroupByteThreshold;
         return new WriteHandle(pageStore, _pendingFlush);
     }
 
@@ -295,13 +314,27 @@ public sealed class DatumFileWriter : IDisposable
 
         // Encode all columns in parallel — encoders are stateless singletons and
         // compression uses [ThreadStatic] pools, so concurrent Encode calls are safe.
+        // Serial mode is used by memory-constrained callers to cap peak at one
+        // column's encode buffer instead of N in flight concurrently.
         DatumEncodedPage[] pages = new DatumEncodedPage[columnCount];
-        Parallel.For(0, columnCount, columnIndex =>
+        if (_serialColumnEncoding)
         {
-            DatumColumnDescriptor descriptor = _descriptors[columnIndex];
-            DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(descriptor);
-            pages[columnIndex] = encoder.Encode(_columnBuffers[columnIndex], descriptor, context);
-        });
+            for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
+            {
+                DatumColumnDescriptor descriptor = _descriptors[columnIndex];
+                DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(descriptor);
+                pages[columnIndex] = encoder.Encode(_columnBuffers[columnIndex], descriptor, context);
+            }
+        }
+        else
+        {
+            Parallel.For(0, columnCount, columnIndex =>
+            {
+                DatumColumnDescriptor descriptor = _descriptors[columnIndex];
+                DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(descriptor);
+                pages[columnIndex] = encoder.Encode(_columnBuffers[columnIndex], descriptor, context);
+            });
+        }
 
         // Write encoded pages sequentially — stream offsets must be ordered.
         DatumColumnChunkDescriptor[] chunks = new DatumColumnChunkDescriptor[columnCount];

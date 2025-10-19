@@ -144,14 +144,17 @@ public sealed class StatisticsCollector
         List<IStatisticAccumulator> accumulators =
         [
             new CountAccumulator(),
-            new CardinalityAccumulator(),
             new MissingRunsAccumulator()
         ];
 
-        // One sketch-backed accumulator emits top_k + entropy + categorical_diagnostics.
-        // Skipped for binary/multi-dim kinds that have no useful frequency semantics.
+        // Cardinality and top-K are skipped for binary/multi-dim kinds that have no
+        // useful distinct-value or frequency semantics. Images, byte blobs, vectors,
+        // and tensors are treated as opaque payloads — HLL on their arena offsets
+        // would just return the row count. Perceptual-hash cardinality is available
+        // on demand via the phash() SQL function.
         if (kind is not (DataKind.Image or DataKind.UInt8Array or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
         {
+            accumulators.Add(new CardinalityAccumulator());
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
         }
 

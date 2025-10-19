@@ -92,6 +92,10 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         int offsetsSize = (rowCount + 1) * 4;
         int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
         byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
+        // When compression is None, the raw buffer is handed straight to the page
+        // (image pages can be ~128 MB — the Compress(None) round-trip would rent
+        // and memcpy a full duplicate of this into another LOH buffer).
+        bool handedOff = false;
 
         try
         {
@@ -130,13 +134,18 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
                 }
             }
 
-            (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), compression);
+            if (compression == DatumCompression.None)
+            {
+                handedOff = true;
+                return new DatumEncodedPage(raw, rawLength, DatumEncoding.VariableBytes, compression, rawLength, zoneMap);
+            }
 
+            (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), compression);
             return new DatumEncodedPage(payload, payloadLength, DatumEncoding.VariableBytes, compression, rawLength, zoneMap);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(raw);
+            if (!handedOff) ArrayPool<byte>.Shared.Return(raw);
         }
     }
 

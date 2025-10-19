@@ -17,6 +17,14 @@ string destPath = args.Length > 1
 // Useful for profiling large sources without committing to a full ingest.
 int? timeoutSeconds = args.Length > 2 && int.TryParse(args[2], out int t) ? t : null;
 
+// Optional: fourth CLI arg = memory budget preset. "low" selects the
+// multi-tenant-server preset (32 MB row groups, serial column encoding,
+// 4 MB batch target). Anything else → default (max throughput).
+IngestionOptions ingestionOptions = args.Length > 3
+    && args[3].Equals("low", StringComparison.OrdinalIgnoreCase)
+    ? IngestionOptions.MultiTenantServer
+    : IngestionOptions.Default;
+
 if (!File.Exists(sourcePath))
 {
     Console.Error.WriteLine($"Source file not found: {sourcePath}");
@@ -28,6 +36,10 @@ Console.WriteLine($"Source:      {sourcePath}");
 Console.WriteLine($"Dest:        {destPath}");
 Console.WriteLine($"Source size: {sourceSize:N0} bytes ({sourceSize / (1024.0 * 1024.0):F1} MB)");
 if (timeoutSeconds is int sec) Console.WriteLine($"Timeout:     {sec}s");
+Console.WriteLine(
+    $"Memory:      row-group {ingestionOptions.RowGroupByteThreshold / (1024 * 1024)} MB, " +
+    $"{(ingestionOptions.SerialColumnEncoding ? "serial" : "parallel")} encode, " +
+    $"batch {ingestionOptions.BatchByteTarget / (1024 * 1024)} MB");
 Console.WriteLine();
 
 FormatRegistry registry = new([new CsvFileFormat(), new ZipFileFormat()]);
@@ -51,7 +63,7 @@ long beforeAllocated = GC.GetTotalAllocatedBytes(precise: false);
 IngestionResult? result = null;
 try
 {
-    result = await ingester.IngestAsync(source, dest, cts.Token);
+    result = await ingester.IngestAsync(source, dest, ingestionOptions, cts.Token);
 }
 catch (OperationCanceledException)
 {

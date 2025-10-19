@@ -42,9 +42,21 @@ public class Ingester(
         FileFormatDescriptor source,
         OutputDescriptor destination,
         CancellationToken cancellationToken = default)
+        => IngestAsync(source, destination, IngestionOptions.Default, cancellationToken);
+
+    /// <summary>
+    /// Ingests a source file with caller-specified memory/throughput options. Use
+    /// <see cref="IngestionOptions.MultiTenantServer"/> in processes that share memory
+    /// with concurrent query workloads.
+    /// </summary>
+    public Task<IngestionResult> IngestAsync(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        IngestionOptions options,
+        CancellationToken cancellationToken = default)
     {
         IFormatDeserializer deserializer = formatRegistry.CreateDeserializer(source);
-        return IngestAsync(source, destination, deserializer, cancellationToken);
+        return IngestAsync(source, destination, deserializer, options, cancellationToken);
     }
 
     /// <summary>
@@ -52,10 +64,21 @@ public class Ingester(
     /// caller wants to pre-configure the deserializer (e.g. opt out of strict types
     /// or inject a pre-computed scan result).
     /// </summary>
+    public Task<IngestionResult> IngestAsync(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        IFormatDeserializer deserializer,
+        CancellationToken cancellationToken = default)
+        => IngestAsync(source, destination, deserializer, IngestionOptions.Default, cancellationToken);
+
+    /// <summary>
+    /// Ingests a source file using a caller-provided deserializer and memory options.
+    /// </summary>
     public async Task<IngestionResult> IngestAsync(
         FileFormatDescriptor source,
         OutputDescriptor destination,
         IFormatDeserializer deserializer,
+        IngestionOptions options,
         CancellationToken cancellationToken = default)
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -65,8 +88,9 @@ public class Ingester(
 
         await using Stream outputStream = await destination.OpenAsync(cancellationToken);
         using DatumFileWriter writer = new(outputStream);
+        writer.SetMemoryBudget(options.RowGroupByteThreshold, options.SerialColumnEncoding);
 
-        SerializationContext sourceContext = new(pool);
+        SerializationContext sourceContext = new(pool, options.BatchByteTarget);
 
         long rowCount = 0;
         long batchCount = 0;

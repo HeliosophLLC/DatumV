@@ -35,9 +35,6 @@ namespace DatumIngest.Serialization.Zip;
 /// </remarks>
 public sealed class ZipDeserializer : IFormatDeserializer
 {
-    /// <summary>Target bytes per batch. Slightly exceeding is fine.</summary>
-    private const long TargetBatchBytes = 16 * 1024 * 1024;
-
     private readonly FileFormatDescriptor _descriptor;
 
     /// <summary>Creates a deserializer for the given file descriptor.</summary>
@@ -61,7 +58,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
             ["file_bytes"] = 1,
         };
 
-        int batchSize = ComputeBatchSize(archive);
+        int batchSize = ComputeBatchSize(archive, context.BatchByteTarget);
 
         RowBatch? batch = null;
 
@@ -96,10 +93,10 @@ public sealed class ZipDeserializer : IFormatDeserializer
     }
 
     /// <summary>
-    /// Computes a batch size targeting ~16 MB per batch based on mean entry size.
-    /// Scans the central directory (metadata only, no decompression).
+    /// Computes a batch size targeting <paramref name="targetBatchBytes"/> based on mean
+    /// entry size. Scans the central directory (metadata only, no decompression).
     /// </summary>
-    private static int ComputeBatchSize(ZipArchive archive)
+    private static int ComputeBatchSize(ZipArchive archive, int targetBatchBytes)
     {
         int fileEntryCount = 0;
         long totalUncompressedSize = 0;
@@ -113,7 +110,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
         }
 
         return fileEntryCount > 0
-            ? Math.Max(1, (int)(TargetBatchBytes / Math.Max(1, totalUncompressedSize / fileEntryCount)))
+            ? Math.Max(1, (int)((long)targetBatchBytes / Math.Max(1, totalUncompressedSize / fileEntryCount)))
             : 64;
     }
 
