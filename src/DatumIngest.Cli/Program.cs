@@ -32,11 +32,6 @@ try
     LoadIndexes(catalog, options);
 
     // Commands that build artifacts from raw data — no manifests or schemas needed.
-    if (options.Command == "index")
-    {
-        return await RunIndexAsync(catalog, options);
-    }
-
     if (options.Command == "ingest")
     {
         return await RunIngestAsync(catalog, options);
@@ -44,11 +39,6 @@ try
 
     // Remaining commands may require sidecar data (manifests, schemas, vocabularies).
     catalog.DiscoverSidecars();
-
-    if (options.Command == "index-manifest")
-    {
-        return await RunIndexManifestAsync(catalog, options);
-    }
 
     if (options.Command == "manifest-schema")
     {
@@ -127,7 +117,7 @@ try
         "stats" => await RunStatsViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, grpcParameters),
         "explain" => await RunExplainViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.Analyze),
         "manifest" => await RunManifestViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.OutputPath, grpcParameters),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'ingest'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', or 'ingest'.")
     };
 }
 catch (ArgumentException ex)
@@ -218,305 +208,6 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
     }
 }
 
-static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
-{
-    if (options.BloomAllColumns || options.IndexAllColumns || options.AutoIndexColumns)
-    {
-        if (options.BloomColumns.Count > 0 || options.IndexColumns.Count > 0)
-        {
-            throw new ArgumentException(
-                "Cannot combine --bloom-all/--index-all/--auto-index with --bloom-columns/--index-columns. Use one approach or the other.");
-        }
-
-        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns);
-    }
-
-    HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
-    HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
-    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns);
-}
-
-static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
-{
-    SourceIndexBuilder builder = CreateIndexBuilder(options);
-
-    // Collect descriptors from inline --source definitions.
-    // Directory sources are handled by BuildCatalog and skipped here so the
-    // fallback "index every table in the catalog" path picks them up.
-    List<TableDescriptor> descriptors = new();
-
-    foreach (string source in options.Sources)
-    {
-        if (Directory.Exists(source))
-        {
-            continue;
-        }
-
-        TableDescriptor descriptor = ParseSourceDefinition(source);
-
-        if (!catalog.TryResolve(descriptor.Name, out _))
-        {
-            catalog.Register(descriptor);
-        }
-
-        descriptors.Add(descriptor);
-    }
-
-    // When no explicit sources are given, index every table in the catalog.
-    if (descriptors.Count == 0)
-    {
-        foreach (string tableName in catalog.TableNames)
-        {
-            descriptors.Add(catalog.Resolve(tableName));
-        }
-    }
-
-    if (descriptors.Count == 0)
-    {
-        throw new ArgumentException("The 'index' command requires at least one --source definition or a --catalog with tables.");
-    }
-
-    foreach (IGrouping<string, TableDescriptor> group in descriptors
-        .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
-    {
-        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize);
-    }
-
-    return 0;
-}
-
-static async Task BuildGroupedIndexAsync(
-    IGrouping<string, TableDescriptor> group,
-    TableCatalog catalog,
-    SourceIndexBuilder builder,
-    int chunkSize)
-{
-    string filePath = group.Key;
-    Stream? sourceStream = null;
-
-    if (File.Exists(filePath))
-    {
-        sourceStream = File.OpenRead(filePath);
-    }
-
-    try
-    {
-        DatumIngest.Indexing.SourceFingerprint fingerprint = sourceStream is not null
-            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
-                sourceStream, CancellationToken.None).ConfigureAwait(false)
-            : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
-
-        foreach (TableDescriptor descriptor in group)
-        {
-            ITableProvider provider = catalog.CreateProvider(descriptor);
-            IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
-
-            await foreach (RowBatch batch in provider.ScanAsync(descriptor, requiredColumns: null, filterHint: null, CancellationToken.None))
-            {
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    Row row = batch[i];
-                    indexBuilder.AddRow(row);
-                }
-                batch.Return();
-            }
-
-            SourceIndex index = indexBuilder.Finalize();
-
-            Console.WriteLine($"  Table '{descriptor.Name}':");
-            Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
-            Console.WriteLine($"    Chunks: {index.Chunks.Count} (chunk size: {chunkSize})");
-
-            if (index.BloomFilters is not null)
-            {
-                Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
-            }
-
-            // Write the index using the streaming spill writer path, avoiding materialization
-            // of full ValueIndexEntry arrays that cause OOM for large datasets.
-            string sidecarTableName = GetSidecarTableName(descriptor);
-            SourceIndexSet indexSet = SourceIndexSet.Create(sidecarTableName, index);
-            string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
-
-            using FileStream outputStream = File.Create(indexPath);
-            UnifiedIndexWriter.Write(indexSet, outputStream, indexBuilder.SpillWriter);
-
-            indexBuilder.Dispose();
-
-            Console.WriteLine($"Index created: {indexPath}");
-        }
-    }
-    finally
-    {
-        if (sourceStream is not null)
-        {
-            await sourceStream.DisposeAsync();
-        }
-    }
-}
-
-static async Task<int> RunIndexManifestAsync(TableCatalog catalog, CliOptions options)
-{
-    SourceIndexBuilder builder = CreateIndexBuilder(options);
-
-    List<TableDescriptor> descriptors = new();
-
-    foreach (string source in options.Sources)
-    {
-        if (Directory.Exists(source))
-        {
-            continue;
-        }
-
-        TableDescriptor descriptor = ParseSourceDefinition(source);
-
-        if (!catalog.TryResolve(descriptor.Name, out _))
-        {
-            catalog.Register(descriptor);
-        }
-
-        descriptors.Add(descriptor);
-    }
-
-    if (descriptors.Count == 0)
-    {
-        foreach (string tableName in catalog.TableNames)
-        {
-            descriptors.Add(catalog.Resolve(tableName));
-        }
-    }
-
-    if (descriptors.Count == 0)
-    {
-        throw new ArgumentException("The 'index-manifest' command requires at least one --source definition or a --catalog with tables.");
-    }
-
-    foreach (IGrouping<string, TableDescriptor> group in descriptors
-        .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
-    {
-        await BuildGroupedIndexAndManifestAsync(group, catalog, builder, options);
-    }
-
-    return 0;
-}
-
-static async Task BuildGroupedIndexAndManifestAsync(
-    IGrouping<string, TableDescriptor> group,
-    TableCatalog catalog,
-    SourceIndexBuilder builder,
-    CliOptions options)
-{
-    string filePath = group.Key;
-    Stream? sourceStream = null;
-
-    if (File.Exists(filePath))
-    {
-        sourceStream = File.OpenRead(filePath);
-    }
-
-    try
-    {
-        DatumIngest.Indexing.SourceFingerprint fingerprint = sourceStream is not null
-            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
-                sourceStream, CancellationToken.None).ConfigureAwait(false)
-            : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
-
-        Dictionary<string, SourceIndex> tableIndexes = new();
-        Dictionary<string, QueryResultsManifest> tableManifests = new();
-
-        foreach (TableDescriptor descriptor in group)
-        {
-            ITableProvider provider = catalog.CreateProvider(descriptor);
-            IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
-            StatisticsCollector statisticsCollector = new();
-            using Arena statisticsArena = new(); // TODO: remove when CLI ingestion is refactored
-            ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
-            ProgressReporter progress = new();
-            Dictionary<string, DataKind> columnKinds = new();
-            long rowCount = 0;
-
-            await foreach (RowBatch batch in provider.ScanAsync(
-                descriptor, requiredColumns: null, filterHint: null, CancellationToken.None).ConfigureAwait(false))
-            {
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    Row row = batch[i];
-                    if (rowCount == 0)
-                    {
-                        foreach (string columnName in row.ColumnNames)
-                        {
-                            columnKinds[columnName] = row[columnName].Kind;
-                        }
-                    }
-
-                    indexBuilder.AddRow(row);
-                    statisticsCollector.AddRow(row, statisticsArena);
-                    interactionCollector?.AddRow(row);
-                    rowCount++;
-                    progress.ReportRow();
-                }
-                batch.Return();
-            }
-
-            progress.WriteSummary();
-
-            SourceIndex index = indexBuilder.Finalize();
-            string sidecarTableName = GetSidecarTableName(descriptor);
-            tableIndexes[sidecarTableName] = index;
-
-            Console.WriteLine($"  Table '{descriptor.Name}':");
-            Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
-            Console.WriteLine($"    Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
-
-            if (index.BloomFilters is not null)
-            {
-                Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
-            }
-
-            if (index.MappedSortedIndexes is { Count: > 0 })
-            {
-                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.MappedSortedIndexes.Keys)}");
-            }
-
-            IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
-            IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
-            QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-            tableManifests[sidecarTableName] = manifest;
-
-            Console.WriteLine($"    Features: {manifest.Features.Count}");
-
-            if (interactions is { Count: > 0 })
-            {
-                Console.WriteLine($"    Interactions: {interactions.Count} pairs");
-            }
-        }
-
-        // Write grouped index sidecar.
-        SourceIndexSet indexSet = new(fingerprint, tableIndexes);
-        string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
-        using (FileStream outputStream = File.Create(indexPath))
-        {
-            UnifiedIndexWriter.Write(indexSet, outputStream);
-        }
-
-        Console.WriteLine($"Index created: {indexPath}");
-
-        // Write grouped manifest sidecar.
-        SourceManifest sourceManifest = new() { Tables = tableManifests };
-        string manifestPath = options.OutputPath ?? FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-manifest";
-        await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
-
-        Console.WriteLine($"Manifest created: {manifestPath}");
-    }
-    finally
-    {
-        if (sourceStream is not null)
-        {
-            await sourceStream.DisposeAsync();
-        }
-    }
-}
-
 static async Task<int> RunIngestAsync(TableCatalog catalog, CliOptions options)
 {
     List<TableDescriptor> descriptors = new();
@@ -552,16 +243,9 @@ static async Task<int> RunIngestAsync(TableCatalog catalog, CliOptions options)
         throw new ArgumentException("The 'ingest' command requires at least one --source definition or a --catalog with tables.");
     }
 
-    bool withIndex = options.WithIndex || options.AutoIndexColumns
-        || options.IndexAllColumns || options.IndexColumns.Count > 0
-        || options.BloomAllColumns || options.BloomColumns.Count > 0
-        || options.BitmapAllColumns || options.BitmapColumns.Count > 0;
-
-    SourceIndexBuilder? indexBuilder = withIndex ? CreateIndexBuilder(options) : null;
-
     foreach (TableDescriptor descriptor in descriptors)
     {
-        await IngestTableAsync(descriptor, catalog, indexBuilder, options);
+        await IngestTableAsync(descriptor, catalog, options);
     }
 
     return 0;
@@ -570,7 +254,6 @@ static async Task<int> RunIngestAsync(TableCatalog catalog, CliOptions options)
 static Task IngestTableAsync(
     TableDescriptor descriptor,
     TableCatalog catalog,
-    SourceIndexBuilder? indexBuilder,
     CliOptions options)
 {
     // TODO: rewrite to use DatumIngest.Ingestion.Ingester. The old pipeline
@@ -578,23 +261,11 @@ static Task IngestTableAsync(
     // both of which have been removed.
     _ = descriptor;
     _ = catalog;
-    _ = indexBuilder;
     _ = options;
     throw new NotImplementedException(
         "The CLI 'ingest' command is being rewritten to use the new Ingester pipeline.");
 }
 
-static string GetSidecarTableName(TableDescriptor descriptor)
-{
-    // Expanded multi-table sources already use a stable qualified name.
-    if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
-    {
-        return descriptor.Name;
-    }
-
-    // Single-table sources should always key sidecars by the derived SQL table name.
-    return FileFormatDetector.DeriveTableName(descriptor.FilePath);
-}
 
 static void LoadCatalogFile(TableCatalog catalog, string catalogPath)
 {

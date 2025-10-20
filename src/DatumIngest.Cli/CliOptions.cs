@@ -1,5 +1,3 @@
-using DatumIngest.Indexing;
-
 namespace DatumIngest.Cli;
 
 /// <summary>
@@ -41,42 +39,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the paths to pre-built index files to load for query execution.</summary>
     public List<string> IndexPaths { get; set; } = new();
 
-    /// <summary>Gets or sets whether to co-generate a source index alongside INTO output.</summary>
-    public bool WithIndex { get; set; }
-
-    /// <summary>Gets or sets the chunk size for index building (rows per chunk).</summary>
-    public int ChunkSize { get; set; } = Indexing.IndexConstants.DefaultChunkSize;
-
-    /// <summary>Gets or sets the column names to build bloom filters for during index creation.</summary>
-    public HashSet<string> BloomColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Gets or sets whether to build bloom filters for all columns during index creation.</summary>
-    public bool BloomAllColumns { get; set; }
-
-    /// <summary>Gets or sets the column names to build sorted value indexes for during index creation.</summary>
-    public HashSet<string> IndexColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Gets or sets whether to build sorted value indexes for all columns during index creation.</summary>
-    public bool IndexAllColumns { get; set; }
-
-    /// <summary>Gets or sets whether to automatically select compact columns for sorted indexing
-    /// based on their data kind. Has no effect when <see cref="IndexAllColumns"/> is <c>true</c>
-    /// or explicit <see cref="IndexColumns"/> are provided.
-    /// </summary>
-    public bool AutoIndexColumns { get; set; }
-
-    /// <summary>Gets or sets the column names to build bitmap indexes for during index creation.</summary>
-    public HashSet<string> BitmapColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Gets or sets whether to build bitmap indexes for all auto-indexable columns during index creation.</summary>
-    public bool BitmapAllColumns { get; set; }
-
     /// <summary>Gets or sets the output directory for the ingest command. When <c>null</c>,
     /// output files are written alongside the source file.</summary>
     public string? OutputDirectory { get; set; }
-
-    /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
-    public bool WithInteractions { get; set; }
 
     /// <summary>
     /// Gets or sets the memory budget in bytes for operators that support spill-to-disk.
@@ -103,15 +68,15 @@ internal sealed class CliOptions
 
         if (args.Length < 1)
         {
-            throw new ArgumentException("Usage: datum-ingest <command> [<sql>] [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint] [--index <path>...] [--with-index] [--with-interactions] [--chunk-size <n>]");
+            throw new ArgumentException("Usage: datum-ingest <command> [<sql>] [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint] [--index <path>...]");
         }
 
         options.Command = args[0].ToLowerInvariant();
 
-        // The 'index' and 'manifest-schema' commands do not require a SQL argument.
+        // Commands that do not require a SQL argument.
         int argStart;
 
-        if (options.Command is "index" or "index-manifest" or "ingest" or "manifest-schema" or "shell" or "star-schema")
+        if (options.Command is "ingest" or "manifest-schema" or "shell" or "star-schema")
         {
             argStart = 1;
         }
@@ -173,72 +138,6 @@ internal sealed class CliOptions
                         throw new ArgumentException("--index requires a path argument");
                     }
                     options.IndexPaths.Add(args[++i]);
-                    break;
-
-                case "--with-index":
-                    options.WithIndex = true;
-                    break;
-
-                case "--with-interactions":
-                    options.WithInteractions = true;
-                    break;
-
-                case "--chunk-size":
-                    if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out int chunkSize))
-                    {
-                        throw new ArgumentException("--chunk-size requires a numeric argument");
-                    }
-                    options.ChunkSize = chunkSize;
-                    i++;
-                    break;
-
-                case "--bloom-columns":
-                    if (i + 1 >= args.Length)
-                    {
-                        throw new ArgumentException("--bloom-columns requires a comma-separated list of column names");
-                    }
-                    foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        options.BloomColumns.Add(column);
-                    }
-                    break;
-
-                case "--bloom-all":
-                    options.BloomAllColumns = true;
-                    break;
-
-                case "--index-columns":
-                    if (i + 1 >= args.Length)
-                    {
-                        throw new ArgumentException("--index-columns requires a comma-separated list of column names");
-                    }
-                    foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        options.IndexColumns.Add(column);
-                    }
-                    break;
-
-                case "--index-all":
-                    options.IndexAllColumns = true;
-                    break;
-
-                case "--auto-index":
-                    options.AutoIndexColumns = true;
-                    break;
-
-                case "--bitmap-columns":
-                    if (i + 1 >= args.Length)
-                    {
-                        throw new ArgumentException("--bitmap-columns requires a comma-separated list of column names");
-                    }
-                    foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        options.BitmapColumns.Add(column);
-                    }
-                    break;
-
-                case "--bitmap-all":
-                    options.BitmapAllColumns = true;
                     break;
 
                 case "--memory-budget":
@@ -307,7 +206,7 @@ internal sealed class CliOptions
         }
 
         // Require SQL from either the positional argument or --sql-file for SQL commands.
-        bool isSqlCommand = options.Command is not ("index" or "index-manifest" or "ingest" or "manifest-schema" or "shell" or "star-schema");
+        bool isSqlCommand = options.Command is not ("ingest" or "manifest-schema" or "shell" or "star-schema");
         if (isSqlCommand && string.IsNullOrEmpty(options.Sql) && options.SqlFile is null)
         {
             throw new ArgumentException("Usage: datum-ingest <command> <sql> [...options] (or use --sql-file <path>)");

@@ -261,24 +261,19 @@ internal sealed class StatementExecutor
     }
 
     /// <summary>
-    /// Rebuilds the source index and column statistics manifest for a session-owned table,
-    /// registering both on the session catalog for use by the query planner.
+    /// Rebuilds the column statistics manifest for a session-owned table and registers it
+    /// on the session catalog. Index sidecars are produced exclusively by
+    /// <see cref="DatumIngest.Ingestion.Indexer"/> and are not rebuilt here — the manifest
+    /// is sufficient for the query planner's selectivity estimates.
     /// </summary>
-    /// <remarks>
-    /// Uses <see cref="IncrementalIndexBuilder"/> to stream rows through the indexing pipeline
-    /// with disk-based spill, avoiding full in-memory materialization. The completed index sidecar
-    /// is written alongside the <c>.datum</c> file and the manifest is registered on the catalog.
-    /// </remarks>
     private void RebuildTempTableSidecars(string tableName, string filePath)
     {
-        SourceIndexBuilder sourceIndexBuilder = new(
-            bloomAllColumns: false, indexAllColumns: false, autoIndexColumns: true);
-        SourceFingerprint fingerprint = new(0, Array.Empty<byte>());
-        IncrementalIndexBuilder indexBuilder = sourceIndexBuilder.CreateIncrementalBuilder(fingerprint);
         StatisticsCollector statisticsCollector = new();
         using Arena statisticsArena = new(); // TODO: remove when sidecar rebuild is refactored
 
         Schema schema;
+        long totalRowCount = 0;
+
         using (DatumFileReader reader = DatumFileReader.Open(filePath))
         {
             schema = reader.Schema;
@@ -321,25 +316,11 @@ internal sealed class StatementExecutor
                     }
 
                     Row row = new(columnNames, values, nameIndex);
-                    indexBuilder.AddRow(row);
                     statisticsCollector.AddRow(row, statisticsArena);
+                    totalRowCount++;
                 }
             }
         }
-
-        // Finalize the index and write the sidecar.
-        SourceIndex sourceIndex = indexBuilder.Finalize();
-        SourceIndexSet indexSet = SourceIndexSet.Create(tableName, sourceIndex);
-
-        string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
-        using (FileStream output = File.Create(indexPath))
-        {
-            UnifiedIndexWriter.Write(indexSet, output, indexBuilder.SpillWriter);
-        }
-
-        indexBuilder.Dispose();
-
-        _queryContext.Catalog.RegisterIndex(tableName, sourceIndex);
 
         // Build and register the manifest.
         IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
@@ -349,7 +330,7 @@ internal sealed class StatementExecutor
             columnKinds[schema.Columns[columnIndex].Name] = schema.Columns[columnIndex].Kind;
         }
 
-        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, sourceIndex.Schema.TotalRowCount);
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, totalRowCount);
 
         string manifestPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-manifest";
         ManifestSerializer.WriteToFileAsync(tableName, manifest, manifestPath).GetAwaiter().GetResult();

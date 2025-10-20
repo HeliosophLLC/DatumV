@@ -1307,21 +1307,6 @@ public sealed class StatementExecutorTests : IDisposable
     // ──────────────────── SIDECAR GENERATION ────────────────────
 
     /// <summary>
-    /// After INSERT into a temp table, the catalog has a registered source index.
-    /// </summary>
-    [Fact]
-    public async Task InsertIntoTempTable_RegistersSourceIndex()
-    {
-        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
-        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
-
-        bool hasIndex = _queryContext.Catalog.TryGetIndex("data", out SourceIndex? index);
-        Assert.True(hasIndex, "Source index should be registered on the catalog after INSERT.");
-        Assert.NotNull(index);
-        Assert.Equal(2, index!.Schema.TotalRowCount);
-    }
-
-    /// <summary>
     /// After INSERT into a temp table, the catalog has a registered manifest with column statistics.
     /// </summary>
     [Fact]
@@ -1351,20 +1336,6 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.True(hasManifest, "Manifest should be registered even when columns have NULLs.");
         Assert.NotNull(manifest);
         Assert.Equal(1, manifest!.RowCount);
-    }
-
-    /// <summary>
-    /// Sidecar index file is written alongside the .datum file.
-    /// </summary>
-    [Fact]
-    public async Task InsertIntoTempTable_WritesIndexSidecarFile()
-    {
-        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
-        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
-
-        _queryContext.Catalog.TryResolve("data", out TableDescriptor? descriptor);
-        string indexPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-index");
-        Assert.True(File.Exists(indexPath), "Index sidecar file should exist on disk.");
     }
 
     /// <summary>
@@ -1405,7 +1376,7 @@ public sealed class StatementExecutorTests : IDisposable
     }
 
     /// <summary>
-    /// ANALYZE rebuilds the index and manifest after ALTER TABLE ADD COLUMN.
+    /// ANALYZE rebuilds the manifest after ALTER TABLE ADD COLUMN.
     /// </summary>
     [Fact]
     public async Task AnalyzeTable_RebuildsSidecarsAfterAlterTable()
@@ -1416,10 +1387,6 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("ALTER TABLE data ADD COLUMN label STRING DEFAULT 'x'");
         CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
         Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
-
-        bool hasIndex = _queryContext.Catalog.TryGetIndex("data", out SourceIndex? index);
-        Assert.True(hasIndex, "Index should be rebuilt after ANALYZE.");
-        Assert.Equal(3, index!.Schema.TotalRowCount);
 
         bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest, "Manifest should be rebuilt after ANALYZE.");
