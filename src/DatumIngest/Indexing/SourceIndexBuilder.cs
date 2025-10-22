@@ -24,8 +24,6 @@ public sealed class SourceIndexBuilder
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
-    private readonly int? _maxIndexedColumns;
-    private readonly IReadOnlyList<ColumnIndexHint>? _indexHints;
 
     /// <summary>
     /// Creates a builder with the specified chunk size and optional column-specific indexes.
@@ -56,21 +54,11 @@ public sealed class SourceIndexBuilder
     /// When <c>true</c> and <paramref name="indexAllColumns"/> is <c>false</c>,
     /// automatically selects compact columns for sorted indexing based on their data kind.
     /// </param>
-    /// <param name="maxIndexedColumns">
-    /// Maximum number of columns to include in the sorted index. When not <c>null</c>, only
-    /// the first N eligible columns (in schema order) are indexed. <c>null</c> means no limit.
-    /// </param>
-    /// <param name="indexHints">
-    /// Per-column index type hints from a previous manifest. When provided, override the
-    /// automatic index-type cascade for the hinted columns.
-    /// </param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
-        bool autoIndexColumns = false,
-        int? maxIndexedColumns = null,
-        IReadOnlyList<ColumnIndexHint>? indexHints = null)
+        bool autoIndexColumns = false)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
@@ -78,8 +66,6 @@ public sealed class SourceIndexBuilder
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
-        _maxIndexedColumns = maxIndexedColumns;
-        _indexHints = indexHints;
     }
 
     /// <summary>
@@ -184,8 +170,8 @@ public sealed class SourceIndexBuilder
                     ordinalBloomFilters = currentBloomFilters is not null ? new BloomFilter?[columnCount] : null;
                     ordinalSpillEntries = spillWriter is not null ? new List<ValueIndexEntry>?[columnCount] : null;
 
-                    bitmapAccumulators = CreateBitmapAccumulators(schema, _indexHints);
-                    hintLookup = BuildHintLookup(_indexHints);
+                    bitmapAccumulators = CreateBitmapAccumulators(schema);
+                    hintLookup = null;
                     ordinalBitmapAccumulators = bitmapAccumulators is not null
                         ? new BitmapChunkAccumulator?[columnCount]
                         : null;
@@ -428,81 +414,6 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
-    /// Builds a complete <see cref="SourceIndexSet"/> for one or more tables that share the
-    /// same source file. Computes the fingerprint once and builds each table's index in turn.
-    /// </summary>
-    /// <param name="tables">
-    /// One or more (descriptor, provider) pairs representing the logical tables within a single
-    /// source file. Each entry produces one keyed index in the resulting set.
-    /// </param>
-    /// <param name="sourceStream">
-    /// Seekable stream over the source file for fingerprint computation,
-    /// or <c>null</c> if fingerprinting is not possible.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A <see cref="SourceIndexSet"/> containing all per-table indexes and a shared fingerprint.</returns>
-    public async Task<SourceIndexSet> BuildSetAsync(
-        IReadOnlyList<(TableDescriptor Descriptor, ITableProvider Provider)> tables,
-        Stream? sourceStream,
-        CancellationToken cancellationToken)
-    {
-        return await BuildSetAsync(tables, sourceStream, fingerprint: null, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Builds a complete <see cref="SourceIndexSet"/> for one or more tables that share the
-    /// same source file, using an externally-computed fingerprint.
-    /// </summary>
-    /// <param name="tables">
-    /// One or more (descriptor, provider) pairs representing the logical tables within a single
-    /// source file. Each entry produces one keyed index in the resulting set.
-    /// </param>
-    /// <param name="sourceStream">
-    /// Seekable stream over the source file, used only when <paramref name="fingerprint"/> is
-    /// <c>null</c>. Otherwise ignored.
-    /// </param>
-    /// <param name="fingerprint">
-    /// Pre-computed fingerprint, or <c>null</c> to compute from <paramref name="sourceStream"/>.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A <see cref="SourceIndexSet"/> containing all per-table indexes and a shared fingerprint.</returns>
-    public async Task<SourceIndexSet> BuildSetAsync(
-        IReadOnlyList<(TableDescriptor Descriptor, ITableProvider Provider)> tables,
-        Stream? sourceStream,
-        SourceFingerprint? fingerprint,
-        CancellationToken cancellationToken)
-    {
-        fingerprint ??= sourceStream is not null
-            ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
-            : new SourceFingerprint(0, Array.Empty<byte>());
-
-        Dictionary<string, SourceIndex> tableIndexes = new();
-
-        foreach ((TableDescriptor descriptor, ITableProvider provider) in tables)
-        {
-            SourceIndex index = await BuildAsync(
-                descriptor, provider, sourceStream: null, fingerprint, cancellationToken)
-                .ConfigureAwait(false);
-
-            string sidecarTableName = GetSidecarTableName(descriptor);
-            tableIndexes[sidecarTableName] = index;
-        }
-
-        return new SourceIndexSet(fingerprint, tableIndexes);
-    }
-
-    private static string GetSidecarTableName(TableDescriptor descriptor)
-    {
-        if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
-        {
-            return descriptor.Name;
-        }
-
-        return FileFormatDetector.DeriveTableName(descriptor.FilePath);
-    }
-
-    /// <summary>
     /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
     /// Each row is observed but not consumed — the caller still owns the enumeration.
     /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.
@@ -514,7 +425,10 @@ public sealed class SourceIndexBuilder
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
-        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns, _autoIndexColumns, _maxIndexedColumns, _indexHints);
+        return new IncrementalIndexBuilder(
+            _chunkSize, fingerprint,
+            _bloomColumns, _indexColumns,
+            _bloomAllColumns, _indexAllColumns, _autoIndexColumns);
     }
 
     /// <summary>
@@ -570,106 +484,7 @@ public sealed class SourceIndexBuilder
             return null;
         }
 
-        result = AugmentWithIndexHints(result, schema, _indexHints);
-        result = ExcludeHintedColumnsFromSortedIndex(result, _indexHints);
-
-        return ApplyMaxIndexedColumns(result);
-    }
-
-    /// <summary>
-    /// Augments the resolved index column set with columns from manifest hints
-    /// that recommend <see cref="IndexHintType.Sorted"/> or <see cref="IndexHintType.BTree"/>.
-    /// Returns the original set unchanged when no hints apply.
-    /// </summary>
-    internal static IReadOnlySet<string>? AugmentWithIndexHints(
-        IReadOnlySet<string>? columns,
-        Schema schema,
-        IReadOnlyList<ColumnIndexHint>? indexHints)
-    {
-        if (indexHints is null || indexHints.Count == 0)
-        {
-            return columns;
-        }
-
-        HashSet<string> schemaColumns = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (ColumnInfo column in schema.Columns)
-        {
-            schemaColumns.Add(column.Name);
-        }
-
-        HashSet<string>? augmented = null;
-
-        foreach (ColumnIndexHint hint in indexHints)
-        {
-            if (hint.PreferredType is IndexHintType.Sorted or IndexHintType.BTree or IndexHintType.Auto
-                && schemaColumns.Contains(hint.ColumnName)
-                && (columns is null || !columns.Contains(hint.ColumnName)))
-            {
-                augmented ??= columns is not null
-                    ? new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase)
-                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                augmented.Add(hint.ColumnName);
-            }
-        }
-
-        return augmented ?? columns;
-    }
-
-    /// <summary>
-    /// Removes columns from the sorted index column set that are hinted as
-    /// <see cref="IndexHintType.Bitmap"/> or <see cref="IndexHintType.None"/>.
-    /// These columns should not participate in sorted or B+Tree indexing.
-    /// Returns the original set unchanged when no exclusions apply.
-    /// </summary>
-    internal static IReadOnlySet<string>? ExcludeHintedColumnsFromSortedIndex(
-        IReadOnlySet<string>? columns,
-        IReadOnlyList<ColumnIndexHint>? indexHints)
-    {
-        if (columns is null || indexHints is null || indexHints.Count == 0)
-        {
-            return columns;
-        }
-
-        HashSet<string>? filtered = null;
-
-        foreach (ColumnIndexHint hint in indexHints)
-        {
-            if (hint.PreferredType is IndexHintType.Bitmap or IndexHintType.None
-                && columns.Contains(hint.ColumnName))
-            {
-                filtered ??= new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
-                filtered.Remove(hint.ColumnName);
-            }
-        }
-
-        return filtered ?? columns;
-    }
-
-    /// <summary>
-    /// Trims a column set to at most <see cref="_maxIndexedColumns"/> entries when set.
-    /// Preserves schema ordering (which matches the insertion order from resolution).
-    /// </summary>
-    private IReadOnlySet<string>? ApplyMaxIndexedColumns(IReadOnlySet<string>? columns)
-    {
-        if (columns is null || _maxIndexedColumns is not int max || columns.Count <= max)
-        {
-            return columns;
-        }
-
-        HashSet<string> trimmed = new(max, StringComparer.OrdinalIgnoreCase);
-
-        foreach (string column in columns)
-        {
-            trimmed.Add(column);
-
-            if (trimmed.Count >= max)
-            {
-                break;
-            }
-        }
-
-        return trimmed;
+        return result;
     }
 
     /// <summary>
@@ -715,29 +530,6 @@ public sealed class SourceIndexBuilder
             or DataKind.Duration
             or DataKind.Uuid
             or DataKind.String; // String is tentatively included; dropped later if values exceed 16 chars.
-    }
-
-    /// <summary>
-    /// Builds a column-name-to-hint-type lookup dictionary from manifest hints.
-    /// Returns <c>null</c> when no hints are provided.
-    /// </summary>
-    internal static Dictionary<string, IndexHintType>? BuildHintLookup(
-        IReadOnlyList<ColumnIndexHint>? indexHints)
-    {
-        if (indexHints is null || indexHints.Count == 0)
-        {
-            return null;
-        }
-
-        Dictionary<string, IndexHintType> lookup = new(
-            indexHints.Count, StringComparer.OrdinalIgnoreCase);
-
-        foreach (ColumnIndexHint hint in indexHints)
-        {
-            lookup[hint.ColumnName] = hint.PreferredType;
-        }
-
-        return lookup;
     }
 
     private static Schema BuildSchemaFromRow(Row row)
@@ -996,37 +788,13 @@ public sealed class SourceIndexBuilder
     /// <see cref="IndexHintType.None"/> are excluded. Returns <c>null</c> if no columns are eligible.
     /// </summary>
     internal static Dictionary<string, BitmapChunkAccumulator>? CreateBitmapAccumulators(
-        Schema schema,
-        IReadOnlyList<ColumnIndexHint>? indexHints = null)
+        Schema schema)
     {
-        Dictionary<string, IndexHintType>? hintLookup = null;
-
-        if (indexHints is { Count: > 0 })
-        {
-            hintLookup = new Dictionary<string, IndexHintType>(
-                indexHints.Count, StringComparer.OrdinalIgnoreCase);
-
-            foreach (ColumnIndexHint hint in indexHints)
-            {
-                hintLookup[hint.ColumnName] = hint.PreferredType;
-            }
-        }
-
         Dictionary<string, BitmapChunkAccumulator>? accumulators = null;
 
         foreach (ColumnInfo column in schema.Columns)
         {
-            bool include;
-
-            if (hintLookup is not null && hintLookup.TryGetValue(column.Name, out IndexHintType hintType))
-            {
-                // Explicit hint overrides auto-detection.
-                include = hintType is IndexHintType.Bitmap;
-            }
-            else
-            {
-                // No hint — fall back to auto-indexable kind check.
-                include = IsAutoIndexableKind(column.Kind);
+            if (IsAutoIndexableKind(column.Kind))
             }
 
             if (include)

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("IngestOnce", "ReadCsv")]
+    [ValidateSet("IngestOnce", "IndexOnce", "ReadCsv")]
     [string]$Tool = "IngestOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     [string]$Profile = "gc-collect",
@@ -21,23 +21,32 @@ if (-not (Test-Path "traces")) {
 # Disable ReadyToRun so the SampleProfiler can resolve BCL method names.
 $env:DOTNET_ReadyToRun = "0"
 
-# Per-tool config: project path, exe name, and whether the tool accepts a dest arg.
+# Per-tool config: project path, exe name, whether the tool accepts a dest arg,
+# and the output extension used when deriving a default dest path.
 switch ($Tool) {
     "IngestOnce" {
         $project = "tools\IngestOnce\IngestOnce.csproj"
         $exeName = "ingest-once.exe"
         $needsDest = $true
+        $destExt = ".datum"
+    }
+    "IndexOnce" {
+        $project = "tools\IndexOnce\IndexOnce.csproj"
+        $exeName = "index-once.exe"
+        $needsDest = $true
+        $destExt = ".datum-index"
     }
     "ReadCsv" {
         $project = "tools\ReadCsv\ReadCsv.csproj"
         $exeName = "read-csv.exe"
         $needsDest = $false
+        $destExt = ""
     }
 }
 
-# Derive a default destination path alongside the source if IngestOnce and none provided.
+# Derive a default destination path alongside the source if the tool needs one.
 if ($needsDest -and [string]::IsNullOrWhiteSpace($Dest)) {
-    $Dest = [System.IO.Path]::ChangeExtension($Source, ".datum")
+    $Dest = [System.IO.Path]::ChangeExtension($Source, $destExt)
 }
 
 # Build the chosen harness. dotnet-trace attaches reliably to a built executable
