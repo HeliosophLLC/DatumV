@@ -146,52 +146,10 @@ public sealed class IndexHintTests : IDisposable
         Assert.Equal(IndexHintType.Bitmap, hint.PreferredType);
     }
 
-    // ───────────────── SourceIndexBuilder hint consumption ─────────────────
+    // ───────────────── SourceIndexBuilder consumption ─────────────────
 
     [Fact]
-    public void CreateBitmapAccumulators_BitmapHint_IncludesColumn()
-    {
-        Schema schema = new([
-            new ColumnInfo("value", DataKind.Float32, false),
-            new ColumnInfo("label", DataKind.String, false),
-        ]);
-
-        // Only hint "value" as bitmap — "label" would be auto-included anyway.
-        List<ColumnIndexHint> hints =
-        [
-            new ColumnIndexHint("value", IndexHintType.Bitmap),
-            new ColumnIndexHint("label", IndexHintType.None),
-        ];
-
-        Dictionary<string, BitmapChunkAccumulator>? accumulators =
-            SourceIndexBuilder.CreateBitmapAccumulators(schema, hints);
-
-        Assert.NotNull(accumulators);
-        Assert.True(accumulators.ContainsKey("value"));
-        Assert.False(accumulators.ContainsKey("label"));
-    }
-
-    [Fact]
-    public void CreateBitmapAccumulators_SortedHint_ExcludesColumn()
-    {
-        Schema schema = new([
-            new ColumnInfo("id", DataKind.Float32, false),
-        ]);
-
-        List<ColumnIndexHint> hints =
-        [
-            new ColumnIndexHint("id", IndexHintType.Sorted),
-        ];
-
-        Dictionary<string, BitmapChunkAccumulator>? accumulators =
-            SourceIndexBuilder.CreateBitmapAccumulators(schema, hints);
-
-        // "id" is auto-indexable by kind but the Sorted hint excludes it from bitmaps.
-        Assert.Null(accumulators);
-    }
-
-    [Fact]
-    public void CreateBitmapAccumulators_NoHints_FallsBackToAutoDetection()
+    public void CreateBitmapAccumulators_SelectsAutoIndexableColumns()
     {
         Schema schema = new([
             new ColumnInfo("value", DataKind.Float32, false),
@@ -204,26 +162,6 @@ public sealed class IndexHintTests : IDisposable
         Assert.NotNull(accumulators);
         Assert.True(accumulators.ContainsKey("value"));
         Assert.False(accumulators.ContainsKey("embedding"));
-    }
-
-    [Fact]
-    public void CreateBitmapAccumulators_BitmapHintOnNonAutoKind_IncludesColumn()
-    {
-        // A Vector column isn't normally auto-indexable, but a Bitmap hint forces inclusion.
-        Schema schema = new([
-            new ColumnInfo("embedding", DataKind.Vector, false),
-        ]);
-
-        List<ColumnIndexHint> hints =
-        [
-            new ColumnIndexHint("embedding", IndexHintType.Bitmap),
-        ];
-
-        Dictionary<string, BitmapChunkAccumulator>? accumulators =
-            SourceIndexBuilder.CreateBitmapAccumulators(schema, hints);
-
-        Assert.NotNull(accumulators);
-        Assert.True(accumulators.ContainsKey("embedding"));
     }
 
     // ───────────────── Helpers ─────────────────

@@ -1,7 +1,7 @@
 using System.Text;
 using DatumIngest.Model;
 
-namespace DatumIngest.Cli.Shell;
+namespace DatumIngest.Shell;
 
 /// <summary>
 /// Formats streaming rows into psql-style aligned tables with column headers,
@@ -18,16 +18,12 @@ internal sealed class TableFormatter
     /// <summary>
     /// Formats an asynchronous stream of rows into a psql-style table written to a <see cref="TextWriter"/>.
     /// </summary>
-    /// <param name="rows">Asynchronous stream of rows to display.</param>
-    /// <param name="schema">Schema describing the column names and types.</param>
-    /// <param name="writer">Target text writer (typically <see cref="Console.Out"/>).</param>
     public async Task FormatAsync(IAsyncEnumerable<RowBatch> rows, Schema schema, TextWriter writer)
     {
         List<string[]> bufferedCells = new();
         int columnCount = schema.Columns.Count;
         bool truncated = false;
 
-        // Buffer all rows (up to limit) and format cell values.
         await foreach (RowBatch batch in rows.ConfigureAwait(false))
         {
             for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
@@ -57,7 +53,6 @@ internal sealed class TableFormatter
             return;
         }
 
-        // Compute column widths.
         int[] widths = new int[columnCount];
         for (int i = 0; i < columnCount; i++)
         {
@@ -75,7 +70,6 @@ internal sealed class TableFormatter
             }
         }
 
-        // Cap widths and determine alignment.
         bool[] rightAlign = new bool[columnCount];
         for (int i = 0; i < columnCount; i++)
         {
@@ -84,15 +78,13 @@ internal sealed class TableFormatter
                 widths[i] = MaxColumnWidth;
             }
 
-            rightAlign[i] = DataValueComparer.IsNumericScalar(schema.Columns[i].Kind);
+            rightAlign[i] = IsNumericScalar(schema.Columns[i].Kind);
         }
 
-        // Write header.
         StringBuilder line = new();
         FormatRow(line, schema.Columns.Select(c => c.Name).ToArray(), widths, rightAlign);
         await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
 
-        // Write separator.
         line.Clear();
         for (int i = 0; i < columnCount; i++)
         {
@@ -106,7 +98,6 @@ internal sealed class TableFormatter
 
         await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
 
-        // Write data rows.
         foreach (string[] cells in bufferedCells)
         {
             line.Clear();
@@ -114,7 +105,6 @@ internal sealed class TableFormatter
             await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
         }
 
-        // Write footer.
         string rowLabel = bufferedCells.Count == 1 ? "row" : "rows";
         string footer = truncated
             ? $"({bufferedCells.Count} {rowLabel}, truncated)"
@@ -133,7 +123,6 @@ internal sealed class TableFormatter
 
             string value = values[i];
 
-            // Truncate if exceeding max width.
             if (value.Length > widths[i])
             {
                 value = string.Concat(value.AsSpan(0, widths[i] - 1), "~");
@@ -150,13 +139,6 @@ internal sealed class TableFormatter
         }
     }
 
-    /// <summary>
-    /// Formats a single <see cref="DataValue"/> for display in the table.
-    /// When the value is a <see cref="DataKind.Struct"/>, <paramref name="structFields"/> supplies
-    /// the field names from the column schema so values are rendered as <c>{name: value, …}</c>.
-    /// When <paramref name="structFields"/> is <see langword="null"/> the fields are rendered
-    /// positionally as <c>{f0: value, …}</c>.
-    /// </summary>
     internal static string FormatValue(DataValue value, IReadOnlyList<ColumnInfo>? structFields = null)
     {
         if (structFields is not null && value.Kind == DataKind.Struct)
@@ -166,6 +148,13 @@ internal sealed class TableFormatter
 
         return value.ToDisplayString();
     }
+
+    private static bool IsNumericScalar(DataKind kind) => kind is
+        DataKind.Int8 or DataKind.UInt8 or
+        DataKind.Int16 or DataKind.UInt16 or
+        DataKind.Int32 or DataKind.UInt32 or
+        DataKind.Int64 or DataKind.UInt64 or
+        DataKind.Float32 or DataKind.Float64;
 
     private static string FormatStructValue(DataValue value, IReadOnlyList<ColumnInfo>? fields)
     {

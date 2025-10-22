@@ -4,7 +4,7 @@ using Spectre.Console;
 using Spectre.Console.Rendering;
 using Superpower.Model;
 
-namespace DatumIngest.Cli.Shell;
+namespace DatumIngest.Shell;
 
 /// <summary>
 /// Applies syntax highlighting to SQL input using the DatumIngest SQL tokenizer.
@@ -68,7 +68,6 @@ internal sealed class ShellHighlighter : IHighlighter
     {
         return kind switch
         {
-            // Keywords
             SqlToken.Select or SqlToken.From or SqlToken.Where or
             SqlToken.Join or SqlToken.Left or SqlToken.Right or
             SqlToken.Full or SqlToken.Outer or SqlToken.Cross or
@@ -80,26 +79,20 @@ internal sealed class ShellHighlighter : IHighlighter
             SqlToken.Desc or SqlToken.Limit or SqlToken.Offset or
             SqlToken.Cast => "blue",
 
-            // Boolean and Null keywords
             SqlToken.True or SqlToken.False or SqlToken.Null => "magenta",
 
-            // String literals
             SqlToken.StringLiteral => "green",
 
-            // Number literals
             SqlToken.NumberLiteral => "cyan",
 
-            // Identifiers (tables, columns, functions)
             SqlToken.Identifier => "white",
 
-            // Operators and symbols
             SqlToken.Star or SqlToken.Equals or SqlToken.NotEquals or
             SqlToken.LessThan or SqlToken.GreaterThan or
             SqlToken.LessOrEqual or SqlToken.GreaterOrEqual or
             SqlToken.Plus or SqlToken.Minus or SqlToken.Slash or
             SqlToken.Percent or SqlToken.Caret or SqlToken.Pipe => "yellow",
 
-            // Punctuation
             SqlToken.Comma or SqlToken.Dot or
             SqlToken.LeftParen or SqlToken.RightParen => "grey",
 
@@ -128,8 +121,5 @@ internal sealed class ShellHighlighter : IHighlighter
         return new Markup(builder.ToString());
     }
 
-    /// <summary>
-    /// Represents a text span with an optional color for rendering.
-    /// </summary>
     private readonly record struct HighlightedSpan(string Text, string? Color);
 }

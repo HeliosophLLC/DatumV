@@ -1,5 +1,4 @@
 using System.Text;
-using DatumIngest.Catalog;
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Compute.Services;
 using DatumIngest.Execution;
@@ -10,49 +9,30 @@ using Spectre.Console;
 
 using GrpcClient = global::DatumIngest.Compute.Grpc.DatumCompute.DatumComputeClient;
 
-namespace DatumIngest.Cli.Shell;
+namespace DatumIngest.Shell;
 
 /// <summary>
 /// Interactive REPL shell that routes all commands through a gRPC
-/// <see cref="GrpcClient"/> connected to an
-/// in-process <see cref="EmbeddedComputeHost"/>.
+/// <see cref="GrpcClient"/> connected to a DatumIngest compute server.
 /// </summary>
 internal sealed class InteractiveShell
 {
     private readonly GrpcClient _client;
     private readonly string _sessionId;
     private readonly string _contextId;
-    private readonly TableCatalog _catalog;
 
-    /// <summary>
-    /// Initializes the shell with a gRPC client connected to the embedded server.
-    /// </summary>
-    /// <param name="client">gRPC client for the in-process compute server.</param>
-    /// <param name="sessionId">Pre-created session identifier.</param>
-    /// <param name="contextId">Pre-created query context identifier.</param>
-    /// <param name="catalog">Table catalog for tab completion.</param>
-    public InteractiveShell(
-        GrpcClient client,
-        string sessionId,
-        string contextId,
-        TableCatalog catalog)
+    public InteractiveShell(GrpcClient client, string sessionId, string contextId)
     {
         _client = client;
         _sessionId = sessionId;
         _contextId = contextId;
-        _catalog = catalog;
     }
 
     /// <summary>
     /// Runs the interactive REPL loop until the user exits.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token for the shell lifetime.</param>
-    /// <returns>Exit code.</returns>
     public async Task<int> RunAsync(CancellationToken cancellationToken)
     {
-        // Fetch functions for tab completion via gRPC.
-        Functions.FunctionRegistry functionRegistry = Functions.FunctionRegistry.CreateDefault();
-
         TableFormatter formatter = new();
 
         bool timerEnabled = false;
@@ -69,7 +49,6 @@ internal sealed class InteractiveShell
         {
             Prompt = new LineEditorPrompt("[green]datum>[/]"),
             MultiLine = false,
-            Completion = new ShellCompletionHandler(_catalog, functionRegistry),
             Highlighter = new ShellHighlighter(),
         };
 
@@ -148,7 +127,6 @@ internal sealed class InteractiveShell
                         continue;
                     }
 
-                    // Route dot-commands to gRPC.
                     await ExecuteDotCommandAsync(trimmedLine, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
@@ -223,7 +201,6 @@ internal sealed class InteractiveShell
 
         if (grpcResult.Effect is { } effect)
         {
-            // DDL/DML result.
             await foreach (RowBatch batch in grpcResult.Rows.WithCancellation(cancellationToken))
             {
                 batch.Return();
@@ -236,13 +213,11 @@ internal sealed class InteractiveShell
         }
         else if (exportPath is not null)
         {
-            // Export to file.
             await ExportResultAsync(grpcResult, exportPath, cancellationToken);
         }
         else
         {
             // Consume the first batch to get the schema, then format all rows.
-            // TableFormatter needs schema + rows; schema arrives with the first row.
             List<RowBatch> prefetched = [];
             Schema? schema = null;
 
@@ -258,7 +233,6 @@ internal sealed class InteractiveShell
 
             if (schema is not null)
             {
-                // Chain prefetched batches with the remaining stream.
                 async IAsyncEnumerable<RowBatch> ChainBatches()
                 {
                     foreach (RowBatch b in prefetched) yield return b;
@@ -479,7 +453,7 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine($"\n[grey]({schema.Columns.Count} column(s))[/]");
     }
 
-    private static void RenderAssertionDiagnostics(AssertionDiagnostics? diagnostics)
+    private static void RenderAssertionDiagnostics(ShellAssertionDiagnostics? diagnostics)
     {
         if (diagnostics is null) return;
         if (diagnostics.WarnedRowCount == 0 && diagnostics.SkippedRowCount == 0) return;
@@ -577,7 +551,7 @@ internal sealed class InteractiveShell
 
     private static void PrintBanner()
     {
-        AnsiConsole.MarkupLine("[bold blue]DatumIngest Interactive Shell[/]");
+        AnsiConsole.MarkupLine("[bold blue]DatumIngest Shell[/]");
         AnsiConsole.MarkupLine("[grey]Type SQL (end with ;) or .help for commands.[/]");
         AnsiConsole.WriteLine();
     }
@@ -607,10 +581,6 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("[grey]SQL-prefix syntax: EXPLAIN <sql>; or EXPLAIN ANALYZE <sql>;[/]");
     }
 
-    /// <summary>
-    /// Renders an <see cref="ExplainPlanNode"/> tree with Spectre.Console
-    /// colored markup for operator names, details, metrics, and warnings.
-    /// </summary>
     private static void RenderExplainPlan(ExplainPlanNode root)
     {
         AnsiConsole.WriteLine();
@@ -621,7 +591,7 @@ internal sealed class InteractiveShell
     private static void RenderPlanNode(
         ExplainPlanNode node, string prefix, bool isLast, bool isRoot)
     {
-        string connector = isRoot ? "" : (isLast ? "\u2514\u2500 " : "\u251c\u2500 ");
+        string connector = isRoot ? "" : (isLast ? "└─ " : "├─ ");
         string labelPrefix = node.ChildLabel is not null ? $"[grey][[{Markup.Escape(node.ChildLabel)}]][/] " : "";
 
         StringBuilder line = new();
@@ -652,7 +622,7 @@ internal sealed class InteractiveShell
                     ? (double)node.RowsProduced!.Value / node.RowsConsumed.Value * 100.0
                     : 0;
                 AnsiConsole.Markup(
-                    $"  rows in: [white]{node.RowsConsumed.Value:N0}[/] \u2192 out: [white]{node.RowsProduced!.Value:N0}[/] ({selectivity:F1}%)");
+                    $"  rows in: [white]{node.RowsConsumed.Value:N0}[/] → out: [white]{node.RowsProduced!.Value:N0}[/] ({selectivity:F1}%)");
             }
             else if (node.RowsProduced.HasValue)
             {
@@ -672,7 +642,7 @@ internal sealed class InteractiveShell
 
         AnsiConsole.WriteLine();
 
-        string childPrefix = isRoot ? "" : (prefix + (isLast ? "    " : "\u2502   "));
+        string childPrefix = isRoot ? "" : (prefix + (isLast ? "    " : "│   "));
 
         foreach (string annotation in node.RuntimeAnnotations)
         {
@@ -683,13 +653,13 @@ internal sealed class InteractiveShell
         foreach (string annotation in node.Annotations)
         {
             AnsiConsole.MarkupLine(
-                $"{Markup.Escape(childPrefix)}    [dim]\u2192 {Markup.Escape(annotation)}[/]");
+                $"{Markup.Escape(childPrefix)}    [dim]→ {Markup.Escape(annotation)}[/]");
         }
 
         foreach (string warning in node.Warnings)
         {
             AnsiConsole.MarkupLine(
-                $"{Markup.Escape(childPrefix)}    [yellow]\u26a0 {Markup.Escape(warning)}[/]");
+                $"{Markup.Escape(childPrefix)}    [yellow]⚠ {Markup.Escape(warning)}[/]");
         }
 
         for (int i = 0; i < node.Children.Count; i++)
@@ -702,7 +672,7 @@ internal sealed class InteractiveShell
     {
         if (time.TotalMilliseconds < 1.0)
         {
-            return $"{time.TotalMicroseconds:F1} \u03bcs";
+            return $"{time.TotalMicroseconds:F1} μs";
         }
 
         if (time.TotalSeconds < 1.0)

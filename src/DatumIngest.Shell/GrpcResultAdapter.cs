@@ -1,30 +1,31 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Compute.Services;
-using DatumIngest.Execution;
 using DatumIngest.Model;
 using Grpc.Core;
 
-namespace DatumIngest.Cli;
+namespace DatumIngest.Shell;
 
 /// <summary>
-/// Converts gRPC server-streaming query results into domain types
-/// consumable by the CLI rendering and output-writing infrastructure.
+/// Shell-local snapshot of assertion diagnostics received from a query stream.
+/// Mirrors the relevant fields of <c>DatumIngest.Execution.AssertionDiagnostics</c>
+/// without taking an internals-visible dependency on it.
+/// </summary>
+internal sealed class ShellAssertionDiagnostics
+{
+    public long WarnedRowCount { get; init; }
+    public long SkippedRowCount { get; init; }
+    public IReadOnlyList<string> SampleMessages { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>
+/// Converts gRPC server-streaming query results into domain types consumable by the
+/// shell's rendering and output-writing infrastructure.
 /// </summary>
 internal static class GrpcResultAdapter
 {
     private const int BatchSize = 128;
 
-    /// <summary>
-    /// Reads a server-streaming <c>Query</c> call and yields domain
-    /// <see cref="RowBatch"/> objects along with the resolved schema.
-    /// </summary>
-    /// <param name="call">The active gRPC streaming call.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>
-    /// A result containing the schema (available after the first row),
-    /// the row stream, and any assertion diagnostics.
-    /// </returns>
     public static async Task<GrpcQueryResult> ReadQueryAsync(
         AsyncServerStreamingCall<QueryResult> call,
         CancellationToken cancellationToken = default)
@@ -32,10 +33,10 @@ internal static class GrpcResultAdapter
         Schema? schema = null;
         string[]? names = null;
         Dictionary<string, int>? nameIndex = null;
-        AssertionDiagnostics? diagnostics = null;
+        ShellAssertionDiagnostics? diagnostics = null;
         StatementEffect? effect = null;
 
-        var rows = ReadRowsCore(call, r =>
+        IAsyncEnumerable<RowBatch> rows = ReadRowsCore(call, r =>
         {
             schema = r.Schema;
             names = r.Names;
@@ -44,6 +45,7 @@ internal static class GrpcResultAdapter
             effect = r.Effect;
         }, cancellationToken);
 
+        await Task.CompletedTask;
         return new GrpcQueryResult(rows, () => schema, () => diagnostics, () => effect);
     }
 
@@ -62,7 +64,6 @@ internal static class GrpcResultAdapter
                 case QueryResult.ResultOneofCase.Row:
                     QueryResultRow protoRow = result.Row;
 
-                    // First row carries the schema.
                     if (protoRow.Schema is { Columns.Count: > 0 } schemaMsg && state.Schema is null)
                     {
                         state.Schema = ProtoConverter.FromProto(schemaMsg);
@@ -104,26 +105,17 @@ internal static class GrpcResultAdapter
 
                 case QueryResult.ResultOneofCase.Diagnostics:
                     AssertionDiagnosticsMessage msg = result.Diagnostics;
-                    AssertionDiagnostics diag = new();
-                    for (long i = 0; i < msg.WarnedRowCount; i++)
+                    state.Diagnostics = new ShellAssertionDiagnostics
                     {
-                        diag.RecordWarn(null);
-                    }
-                    for (long i = 0; i < msg.SkippedRowCount; i++)
-                    {
-                        diag.RecordSkip(null);
-                    }
-                    foreach (string sample in msg.SampleMessages)
-                    {
-                        diag.RecordWarn(sample);
-                    }
-                    state.Diagnostics = diag;
+                        WarnedRowCount = msg.WarnedRowCount,
+                        SkippedRowCount = msg.SkippedRowCount,
+                        SampleMessages = msg.SampleMessages.ToArray(),
+                    };
                     stateCallback(state);
                     break;
             }
         }
 
-        // Yield any partial batch after the stream completes.
         if (batch is { Count: > 0 })
         {
             yield return batch;
@@ -141,25 +133,24 @@ internal static class GrpcResultAdapter
         public Schema? Schema;
         public string[]? Names;
         public Dictionary<string, int>? NameIndex;
-        public AssertionDiagnostics? Diagnostics;
+        public ShellAssertionDiagnostics? Diagnostics;
         public StatementEffect? Effect;
     }
 }
 
 /// <summary>
-/// Holds the results of a gRPC query call: the row stream, schema, and
-/// optional diagnostics/effects.
+/// Holds the results of a gRPC query call: row stream, schema, diagnostics, and effect.
 /// </summary>
 internal sealed class GrpcQueryResult
 {
     private readonly Func<Schema?> _schemaAccessor;
-    private readonly Func<AssertionDiagnostics?> _diagnosticsAccessor;
+    private readonly Func<ShellAssertionDiagnostics?> _diagnosticsAccessor;
     private readonly Func<StatementEffect?> _effectAccessor;
 
     internal GrpcQueryResult(
         IAsyncEnumerable<RowBatch> rows,
         Func<Schema?> schemaAccessor,
-        Func<AssertionDiagnostics?> diagnosticsAccessor,
+        Func<ShellAssertionDiagnostics?> diagnosticsAccessor,
         Func<StatementEffect?> effectAccessor)
     {
         Rows = rows;
@@ -168,24 +159,8 @@ internal sealed class GrpcQueryResult
         _effectAccessor = effectAccessor;
     }
 
-    /// <summary>
-    /// The row stream. Consuming this stream populates <see cref="Schema"/>
-    /// and <see cref="Diagnostics"/> as data arrives.
-    /// </summary>
     public IAsyncEnumerable<RowBatch> Rows { get; }
-
-    /// <summary>
-    /// The result schema. Available after the first row has been yielded.
-    /// </summary>
     public Schema? Schema => _schemaAccessor();
-
-    /// <summary>
-    /// Assertion diagnostics. Available after the stream completes.
-    /// </summary>
-    public AssertionDiagnostics? Diagnostics => _diagnosticsAccessor();
-
-    /// <summary>
-    /// Statement effect for DDL/DML statements. Available after the stream completes.
-    /// </summary>
+    public ShellAssertionDiagnostics? Diagnostics => _diagnosticsAccessor();
     public StatementEffect? Effect => _effectAccessor();
 }
