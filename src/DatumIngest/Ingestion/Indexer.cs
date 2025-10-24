@@ -87,7 +87,8 @@ public sealed class Indexer(Pool pool)
                 }
 
                 rowCount += batch.Count;
-                batch.Return();
+                
+                pool.ReturnRowBatch(batch);
             }
 
             index = incremental.Finalize();

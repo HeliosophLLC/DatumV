@@ -1,4 +1,4 @@
-namespace DatumIngest.Editor;
+namespace DatumIngest.LanguageServer;
 
 /// <summary>
 /// Builds the Monarch grammar definition for the DatumIngest SQL dialect.

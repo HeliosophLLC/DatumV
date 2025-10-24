@@ -19,8 +19,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DatumIngest.Tests" />
-    <InternalsVisibleTo Include="DatumIngest.Server" />
-    <InternalsVisibleTo Include="DatumIngest.Compute" />
     <InternalsVisibleTo Include="DatumIngest.Serialization" />
   </ItemGroup>
 

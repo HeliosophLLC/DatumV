@@ -1,3 +1,6 @@
+// Disabled until a programmatic DatumIngest API replaces the gRPC compute client.
+// To re-enable, delete the `#if DATUM_SHELL` / `#endif` markers at the top and bottom.
+#if DATUM_SHELL
 using System.Text;
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Compute.Services;
@@ -683,3 +686,4 @@ internal sealed class InteractiveShell
         return $"{time.TotalSeconds:F2} s";
     }
 }
+#endif

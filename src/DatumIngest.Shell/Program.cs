@@ -1,3 +1,6 @@
+// Disabled until a programmatic DatumIngest API replaces the gRPC compute client.
+// To re-enable, delete the `#if DATUM_SHELL` / `#endif` markers at the top and bottom.
+#if DATUM_SHELL
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Shell;
 using Grpc.Core;
@@ -112,3 +115,4 @@ static void PrintUsage()
     Console.Error.WriteLine("  --dataset <id>       Dataset identifier");
     Console.Error.WriteLine("  --help, -h           Show this help");
 }
+#endif

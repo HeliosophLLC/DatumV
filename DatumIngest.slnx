@@ -3,17 +3,16 @@
     <Project Path="benchmarks/DatumIngest.Benchmarks/DatumIngest.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/DatumIngest.Compute/DatumIngest.Compute.csproj" />
-    <Project Path="src/DatumIngest.Compute.Client/DatumIngest.Compute.Client.csproj" />
-    <Project Path="src/DatumIngest.Editor/DatumIngest.Editor.csproj" />
     <Project Path="src/DatumIngest.LanguageServer/DatumIngest.LanguageServer.csproj" />
     <Project Path="src/DatumIngest.Parsing/DatumIngest.Parsing.csproj" />
-    <Project Path="src/DatumIngest.Server/DatumIngest.Server.csproj" />
     <Project Path="src/DatumIngest.Serialization/DatumIngest.Serialization.csproj" />
-    <Project Path="src/DatumIngest.Shell/DatumIngest.Shell.csproj" />
     <Project Path="src/DatumIngest/DatumIngest.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DatumIngest.Tests/DatumIngest.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/IndexOnce/IndexOnce.csproj" />
+    <Project Path="tools/IngestOnce/IngestOnce.csproj" />
   </Folder>
 </Solution>

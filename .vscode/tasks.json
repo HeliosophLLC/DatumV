@@ -2,6 +2,50 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Debug: Build IndexOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/IndexOnce",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
+			"label": "Debug: Build IngestOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/IngestOnce",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
+			"label": "Release: Build Solution",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"DatumIngest.slnx",
+				"-c", "Release"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
 			"label": "Pack NuGet (Local)",
 			"type": "shell",
 			"command": "dotnet",
@@ -19,121 +63,14 @@
 			"group": "build"
 		},
 		{
-			"label": "Docs Site: Build & Serve (Docker)",
-			"type": "shell",
-			"command": "docker",
-			"args": [
-				"build",
-				"-f", "docs-site/Dockerfile",
-				"-t", "datumingest-docs",
-				"."
-			],
-			"problemMatcher": [],
-			"group": "build",
-			"presentation": {
-				"reveal": "always",
-				"panel": "dedicated"
-			}
-		},
-		{
-			"label": "Docs Site: Run (Docker)",
-			"type": "shell",
-			"command": "docker",
-			"args": [
-				"run",
-				"--rm",
-				"-p", "4000:4000",
-				"-p", "35729:35729",
-				"--name", "datumingest-docs",
-				"datumingest-docs"
-			],
-			"dependsOn": "Docs Site: Build & Serve (Docker)",
-			"problemMatcher": [],
-			"isBackground": true,
-			"presentation": {
-				"reveal": "always",
-				"panel": "dedicated"
-			}
-		},
-		{
-			"label": "Docs Site: Rebuild & Run (Docker)",
-			"type": "shell",
-			"command": "docker",
-			"args": [
-				"rm", "-f", "datumingest-docs"
-			],
-			"problemMatcher": [],
-			"presentation": {
-				"reveal": "silent"
-			},
-			"dependsOrder": "sequence",
-			"dependsOn": [],
-			"hide": true
-		},
-		{
-			"label": "Docs Site: Start",
-			"dependsOrder": "sequence",
-			"dependsOn": [
-				"Docs Site: Rebuild & Run (Docker)",
-				"Docs Site: Run (Docker)"
-			],
-			"problemMatcher": [],
-			"group": "build",
-			"presentation": {
-				"reveal": "always"
-			}
-		},
-		{
-			"label": "Docs Site: Stop",
-			"type": "shell",
-			"command": "docker",
-			"args": [
-				"rm", "-f", "datumingest-docs"
-			],
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "Benchmark: Run Query",
-			"type": "shell",
-			"command": "src\\DatumIngest.Cli\\bin\\Release\\net10.0\\win-x64\\DatumIngest.Cli.exe",
-			"args": [
-				"query",
-				"SELECT orders_csv.user_id, order_products__prior_csv.product_id, COUNT(*) FROM orders_csv LEFT JOIN order_products__prior_csv ON orders_csv.order_id = order_products__prior_csv.order_id GROUP BY orders_csv.user_id, order_products__prior_csv.product_id LIMIT 100",
-				"--source", "E:\\Datasets\\019d5610-9245-70c1-9fbf-038e7addb609",
-				"--repeat", "3"
-			],
-			"dependsOn": "Benchmark: Build CLI",
-			"problemMatcher": [],
-			"group": "test",
-			"presentation": {
-				"reveal": "always",
-				"panel": "dedicated"
-			}
-		},
-		{
-			"label": "Benchmark: Build CLI",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"src/DatumIngest.Cli",
-				"-c", "Release"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"hide": true
-		},
-		{
 			"label": "Trace: CPU + GC",
 			"type": "shell",
 			"command": "powershell",
 			"args": [
 				"-ExecutionPolicy", "Bypass",
-				"-File", "tools\\trace.ps1"
+				"-File", "tools\\trace.ps1",
+				"-Tool", "${input:traceTool}"
 			],
-			"dependsOn": "Benchmark: Build CLI",
 			"problemMatcher": [],
 			"group": "test",
 			"presentation": {
@@ -141,49 +78,14 @@
 				"panel": "dedicated"
 			}
 		},
-		{
-			"label": "Debug: Build CLI",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"src/DatumIngest.Cli",
-				"-c", "Debug"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"hide": true
-		},
-		{
-			"label": "Shell: Build & Launch",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"run",
-				"-c", "Release",
-				"--project", "src/DatumIngest.Cli",
-				"--",
-				"shell",
-				"--source", "${input:sourceDirectory}"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"presentation": {
-				"reveal": "always",
-				"panel": "dedicated",
-				"focus": true
-			}
-		}
 	],
 	"inputs": [
 		{
-			"id": "sourceDirectory",
-			"type": "promptString",
-			"description": "Path to the directory containing .datum files",
-			"default": "E:\\Datasets\\019d5610-9245-70c1-9fbf-038e7addb609"
+			"id": "traceTool",
+			"type": "pickString",
+			"description": "Which tool to trace",
+			"options": ["IngestOnce", "IndexOnce", "ReadCsv"],
+			"default": "IndexOnce"
 		}
 	]
 }

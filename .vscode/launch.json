@@ -2,25 +2,46 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Shell: Debug",
+			"name": "IndexOnce: Debug",
 			"type": "coreclr",
 			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Cli/bin/Debug/net10.0/win-x64/DatumIngest.Cli.dll",
+			"program": "${workspaceFolder}/tools/IndexOnce/bin/Debug/net10.0/index-once.dll",
 			"args": [
-				"shell",
-				"--source", "${input:sourceDirectory}"
+				"${input:datumFile}"
 			],
 			"cwd": "${workspaceFolder}",
 			"console": "integratedTerminal",
-			"preLaunchTask": "Debug: Build CLI"
-		}
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build IndexOnce"
+		},
+		{
+			"name": "IngestOnce: Debug",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/tools/IngestOnce/bin/Debug/net10.0/ingest-once.dll",
+			"args": [
+				"${input:sourceFile}"
+			],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build IngestOnce"
+		},
 	],
 	"inputs": [
 		{
-			"id": "sourceDirectory",
+			"id": "datumFile",
 			"type": "promptString",
-			"description": "Path to the directory containing .datum files",
-			"default": "E:\\Datasets\\019d5610-9245-70c1-9fbf-038e7addb609"
+			"description": "Path to the .datum file to index (dest derived as .datum-index alongside)",
+			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.datum"
+		},
+		{
+			"id": "sourceFile",
+			"type": "promptString",
+			"description": "Path to the source file to ingest (CSV, ZIP, IDX, etc.)",
+			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.csv"
 		}
 	]
 }

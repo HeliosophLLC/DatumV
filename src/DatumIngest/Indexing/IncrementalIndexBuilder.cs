@@ -84,6 +84,18 @@ public sealed class IncrementalIndexBuilder : IDisposable
     }
 
     /// <summary>
+    /// Observes every row in the given batch. Convenience wrapper around
+    /// <see cref="AddRow"/> for callers that already have a <see cref="RowBatch"/>.
+    /// </summary>
+    public void AddBatch(RowBatch batch)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            AddRow(batch[i]);
+        }
+    }
+
+    /// <summary>
     /// Observes a single row for index building. Call once per row as it streams through
     /// the output writer.
     /// </summary>

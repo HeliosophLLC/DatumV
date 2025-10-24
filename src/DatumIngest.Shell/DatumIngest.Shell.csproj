@@ -1,3 +1,13 @@
+<!--
+  Disabled project: the shell is wired for the gRPC compute server that used to
+  live in this repo (DatumIngest.Compute / DatumIngest.Server). Those projects
+  moved to the Heliosoph repo. The shell's .cs files are kept in place, each
+  wrapped in `#if DATUM_SHELL` / `#endif`, as reference material for when a
+  programmatic DatumIngest API replaces the gRPC client.
+
+  The project is intentionally excluded from DatumIngest.slnx so it does not
+  build. Do not add it back until the replacement client exists.
+-->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -9,17 +19,5 @@
     <AssemblyName>datum-shell</AssemblyName>
     <RootNamespace>DatumIngest.Shell</RootNamespace>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
-    <ProjectReference Include="..\DatumIngest.Compute\DatumIngest.Compute.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
-    <PackageReference Include="Grpc.Core.Api" Version="2.71.0" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-    <PackageReference Include="RadLine" Version="0.9.0" />
-  </ItemGroup>
 
 </Project>

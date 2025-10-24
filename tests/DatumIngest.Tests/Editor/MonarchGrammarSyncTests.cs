@@ -1,6 +1,5 @@
 namespace DatumIngest.Tests.Editor;
 
-using DatumIngest.Editor;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.LanguageServer;

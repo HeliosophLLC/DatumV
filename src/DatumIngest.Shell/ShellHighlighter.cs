@@ -1,3 +1,6 @@
+// Disabled until a programmatic DatumIngest API replaces the gRPC compute client.
+// To re-enable, delete the `#if DATUM_SHELL` / `#endif` markers at the top and bottom.
+#if DATUM_SHELL
 using DatumIngest.Parsing.Tokens;
 using RadLine;
 using Spectre.Console;
@@ -123,3 +126,4 @@ internal sealed class ShellHighlighter : IHighlighter
 
     private readonly record struct HighlightedSpan(string Text, string? Color);
 }
+#endif
