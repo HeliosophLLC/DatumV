@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 
-namespace DatumIngest.Indexing;
+namespace DatumIngest.IO;
 
 /// <summary>
 /// High-throughput binary writer that batches small writes into a rented buffer
@@ -17,7 +17,7 @@ namespace DatumIngest.Indexing;
 /// Strings are length-prefixed using the same 7-bit encoded integer format as
 /// <see cref="BinaryWriter"/> for binary compatibility.
 /// </remarks>
-internal sealed class BufferedIndexWriter : IDisposable
+internal sealed class BufferedWriter : IDisposable
 {
     private readonly Stream _output;
     private readonly byte[] _buffer;
@@ -28,7 +28,7 @@ internal sealed class BufferedIndexWriter : IDisposable
     /// </summary>
     /// <param name="output">Target stream. Must be writable.</param>
     /// <param name="bufferSize">Flush threshold in bytes. Defaults to 64 KiB.</param>
-    public BufferedIndexWriter(Stream output, int bufferSize = 65_536)
+    public BufferedWriter(Stream output, int bufferSize = 65_536)
     {
         _output = output;
         _buffer = ArrayPool<byte>.Shared.Rent(bufferSize);

@@ -374,7 +374,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// When <c>null</c>, all indexed columns with entries are written.
     /// </param>
     internal void WriteBPlusTreeIndexesToStream(
-        BufferedIndexWriter output,
+        BufferedWriter output,
         Schema schema,
         IReadOnlySet<string>? columnFilter = null)
     {
@@ -510,7 +510,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// <param name="excludeColumns">
     /// Columns to skip (e.g. columns assigned to B+Tree). When <c>null</c>, all columns are written.
     /// </param>
-    internal void WriteSortedIndexesToStream(BufferedIndexWriter output, IReadOnlySet<string>? excludeColumns = null)
+    internal void WriteSortedIndexesToStream(BufferedWriter output, IReadOnlySet<string>? excludeColumns = null)
     {
         PrepareForReading();
 
@@ -560,7 +560,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// <param name="excludeColumns">
     /// Columns to skip (e.g. columns assigned to B+Tree). When <c>null</c>, all columns are written.
     /// </param>
-    internal void WriteCompressedSortedIndexesToStream(BufferedIndexWriter output, IReadOnlySet<string>? excludeColumns = null)
+    internal void WriteCompressedSortedIndexesToStream(BufferedWriter output, IReadOnlySet<string>? excludeColumns = null)
     {
         PrepareForReading();
 
@@ -614,7 +614,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 leaveOpen: true))
             {
                 ByteCountingStream counting = new(zstdStream);
-                using (BufferedIndexWriter zstdWriter = new(counting))
+                using (BufferedWriter zstdWriter = new(counting))
                 {
                     StreamMergeSortedRuns(zstdWriter, columnName, runCount);
                 }
@@ -642,7 +642,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// K-way merges pre-sorted runs from a column's spill file and writes each entry
     /// directly to the output writer in sorted order, without allocating the full result array.
     /// </summary>
-    private void StreamMergeSortedRuns(BufferedIndexWriter output, string columnName, int runCount)
+    private void StreamMergeSortedRuns(BufferedWriter output, string columnName, int runCount)
     {
         string spillPath = GetSpillPath(columnName);
         using FileStream fileStream = File.OpenRead(spillPath);
@@ -694,7 +694,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// <summary>
     /// Reads all entries from a single run and writes them directly to the output.
     /// </summary>
-    private static void StreamSingleRun(BufferedIndexWriter output, BinaryReader reader)
+    private static void StreamSingleRun(BufferedWriter output, BinaryReader reader)
     {
         int count = reader.ReadInt32();
 

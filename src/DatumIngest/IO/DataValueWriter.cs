@@ -1,5 +1,4 @@
-﻿using DatumIngest.Indexing;
-using DatumIngest.Model;
+﻿using DatumIngest.Model;
 
 namespace DatumIngest.IO;
 
@@ -238,9 +237,9 @@ internal static class DataValueWriter
     }
 
     /// <summary>
-    /// Writes a nullable <see cref="DataValue"/> using a <see cref="BufferedIndexWriter"/>.
+    /// Writes a nullable <see cref="DataValue"/> using a <see cref="BufferedWriter"/>.
     /// </summary>
-    internal static void WriteNullableDataValue(BufferedIndexWriter writer, DataValue? value)
+    internal static void WriteNullableDataValue(BufferedWriter writer, DataValue? value)
     {
         if (!value.HasValue || value.Value.IsNull)
         {
@@ -253,10 +252,10 @@ internal static class DataValueWriter
     }
 
     /// <summary>
-    /// Writes a <see cref="DataValue"/> using a <see cref="BufferedIndexWriter"/>
+    /// Writes a <see cref="DataValue"/> using a <see cref="BufferedWriter"/>
     /// for high-throughput serialization on hot index-writing paths.
     /// </summary>
-    internal static void WriteDataValue(BufferedIndexWriter writer, DataValue value)
+    internal static void WriteDataValue(BufferedWriter writer, DataValue value)
     {
         writer.Write((byte)value.Kind);
 

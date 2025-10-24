@@ -65,7 +65,7 @@ internal static class BPlusTreePageCodec
                 // the data exceeds the buffer. Fall back to the growable path if that happens.
                 try
                 {
-                    using BufferedIndexWriter entryWriter = new(entryStream);
+                    using BufferedWriter entryWriter = new(entryStream);
 
                     foreach (ValueIndexEntry entry in entries)
                     {
@@ -140,7 +140,7 @@ internal static class BPlusTreePageCodec
 
         using (MemoryStream buffer = new())
         {
-            using BufferedIndexWriter writer = new(buffer);
+            using BufferedWriter writer = new(buffer);
 
             foreach (ValueIndexEntry entry in entries)
             {
@@ -238,7 +238,7 @@ internal static class BPlusTreePageCodec
         // fixed-capacity MemoryStream. FindMaxInternalKeys relies on catching
         // InvalidOperationException to probe the maximum key count per page.
         using MemoryStream stream = new();
-        using BufferedIndexWriter writer = new(stream);
+        using BufferedWriter writer = new(stream);
 
         // Common header.
         writer.Write((byte)BPlusTreePageType.Internal);

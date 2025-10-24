@@ -47,7 +47,7 @@ public sealed class IndexWriterRoundTripTests
     }
 
     /// <summary>
-    /// Same round-trip through the <see cref="BufferedIndexWriter"/> overload.
+    /// Same round-trip through the <see cref="BufferedWriter"/> overload.
     /// </summary>
     [Theory]
     [MemberData(nameof(AllSupportedKinds))]
@@ -56,7 +56,7 @@ public sealed class IndexWriterRoundTripTests
         DataValue original = CreateSampleValue(kind);
 
         using MemoryStream stream = new();
-        using (BufferedIndexWriter buffered = new(stream))
+        using (BufferedWriter buffered = new(stream))
         {
             DataValueWriter.WriteDataValue(buffered, original);
         }

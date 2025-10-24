@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Sorted;
+using DatumIngest.IO;
 
 namespace DatumIngest.Indexing.BTree;
 
@@ -71,14 +72,14 @@ internal sealed class BPlusTreeBulkLoader
         long estimatedEntryCount = 0)
     {
         output.Flush();
-        using BufferedIndexWriter writer = new(output.BaseStream);
+        using BufferedWriter writer = new(output.BaseStream);
         BPlusTreeSectionHeader? result = Build(sortedEntries, columnName, keyKind, writer, estimatedEntryCount);
         writer.Flush();
         return result;
     }
 
     /// <summary>
-    /// Builds a B+Tree from sorted entries using a <see cref="BufferedIndexWriter"/>
+    /// Builds a B+Tree from sorted entries using a <see cref="BufferedWriter"/>
     /// for high-throughput page serialization.
     /// </summary>
     /// <param name="sortedEntries">Entries in ascending key order.</param>
@@ -93,7 +94,7 @@ internal sealed class BPlusTreeBulkLoader
         IEnumerable<ValueIndexEntry> sortedEntries,
         string columnName,
         DataKind keyKind,
-        BufferedIndexWriter output,
+        BufferedWriter output,
         long estimatedEntryCount = 0)
     {
         // Write placeholder section header (same column name ensures identical byte length).
@@ -158,9 +159,9 @@ internal sealed class BPlusTreeBulkLoader
     }
 
     /// <summary>
-    /// Writes the B+Tree section header using a <see cref="BufferedIndexWriter"/>.
+    /// Writes the B+Tree section header using a <see cref="BufferedWriter"/>.
     /// </summary>
-    internal static void WriteSectionHeader(BufferedIndexWriter writer, BPlusTreeSectionHeader header)
+    internal static void WriteSectionHeader(BufferedWriter writer, BPlusTreeSectionHeader header)
     {
         writer.Write(header.ColumnName);
         writer.Write((byte)header.KeyKind);
@@ -197,7 +198,7 @@ internal sealed class BPlusTreeBulkLoader
     /// </summary>
     private static LeafBuildResult WriteLeafPages(
         IEnumerable<ValueIndexEntry> sortedEntries,
-        BufferedIndexWriter output,
+        BufferedWriter output,
         long estimatedEntryCount = 0)
     {
         // Pre-size lists when the caller provides an entry count estimate.
@@ -383,7 +384,7 @@ internal sealed class BPlusTreeBulkLoader
     /// Patches the next-leaf pointer in the last written leaf page from
     /// <c>pageIndex + 1</c> to <see cref="BPlusTreeConstants.NoLinkedPage"/>.
     /// </summary>
-    private static void PatchLastLeafNextPointer(BufferedIndexWriter writer, long leafStreamPosition)
+    private static void PatchLastLeafNextPointer(BufferedWriter writer, long leafStreamPosition)
     {
         // The next-leaf field is at offset: PageHeaderSize (4) + sizeof(uint) prev (4) = 8.
         long nextLeafFieldOffset = leafStreamPosition
@@ -406,7 +407,7 @@ internal sealed class BPlusTreeBulkLoader
         List<DataValue> separatorKeys,
         List<uint> childPageIndexes,
         uint nextPageIndex,
-        BufferedIndexWriter output)
+        BufferedWriter output)
     {
         if (childPageIndexes.Count <= 1)
         {
