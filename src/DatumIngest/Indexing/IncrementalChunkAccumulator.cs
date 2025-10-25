@@ -96,7 +96,7 @@ internal sealed class IncrementalChunkAccumulator
                 _cardinality.Add((long)value.AsUInt64());
                 break;
             case DataKind.String:
-                _cardinality.Add(value.AsString());
+                _cardinality.Add(value.RawContentHash);
                 break;
             case DataKind.Date:
                 _cardinality.Add(value.AsDate().DayNumber);
@@ -105,7 +105,7 @@ internal sealed class IncrementalChunkAccumulator
                 _cardinality.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
             case DataKind.JsonValue:
-                _cardinality.Add(value.AsJsonValue());
+                _cardinality.Add(value.RawContentHash);
                 break;
             default:
                 _cardinality.Add(value.GetHashCode());

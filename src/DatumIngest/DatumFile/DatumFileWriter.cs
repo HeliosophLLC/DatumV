@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using DatumIngest.DatumFile.Encoding;
 using DatumIngest.Model;
 
@@ -33,7 +34,6 @@ public sealed class DatumFileWriter : IDisposable
     private long _footerOffset;
     private bool _initialized;
     private bool _finalized;
-    private bool _disposed;
 
     /// <summary>
     /// Writer-owned arena holding verbatim byte copies of every incoming batch's arena.
@@ -41,7 +41,7 @@ public sealed class DatumFileWriter : IDisposable
     /// per-page layout so encoders can resolve page-relative DataValue offsets via
     /// <see cref="Arena.Slice(int, int)"/>. Reset between row groups; disposed with the writer.
     /// </summary>
-    private readonly Arena _writerArena;
+    private Arena? _writerArena;
 
     /// <summary>
     /// Read access to the writer's arena for consumers that need to resolve
@@ -50,7 +50,14 @@ public sealed class DatumFileWriter : IDisposable
     /// Only valid between row-group resets — do not retain references past a
     /// <see cref="FlushRowGroup"/> call.
     /// </summary>
-    public Arena WriterArena => _writerArena;
+    public Arena WriterArena
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(Disposed, this);
+            return _writerArena;
+        }
+    }
 
     /// <summary>
     /// Per-page layout of the current row group's column buffers. Cleared on
@@ -85,7 +92,7 @@ public sealed class DatumFileWriter : IDisposable
 
         _stream = stream;
         _ownsStream = false;
-        _writerArena = new Arena(owner: this);
+        _writerArena = new Arena();
     }
 
     /// <summary>
@@ -99,8 +106,15 @@ public sealed class DatumFileWriter : IDisposable
         // _stream will be opened in Initialize once we know the file path is valid.
         _stream = Stream.Null;
         _ownsStream = false;
-        _writerArena = new Arena(owner: this);
+        _writerArena = new Arena();
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the writer has been disposed. Disposed writers should
+    /// not be written to or finalized; they have already released their resources.
+    /// </summary>
+    [MemberNotNullWhen(false, nameof(_writerArena))]
+    public bool Disposed { get; private set; }
 
     /// <summary>
     /// Overrides the row group size used for flushing.
@@ -192,6 +206,7 @@ public sealed class DatumFileWriter : IDisposable
     /// </exception>
     public WriteHandle WriteRowBatch(RowBatch batch)
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
         ThrowIfNotReady();
 
         if (_pendingFlush)
@@ -239,6 +254,8 @@ public sealed class DatumFileWriter : IDisposable
     /// <exception cref="InvalidOperationException">Thrown when not initialized or already finalized.</exception>
     public long Finalize()
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         ThrowIfNotReady();
 
         if (_columnBuffers![0].Count > 0)
@@ -269,8 +286,7 @@ public sealed class DatumFileWriter : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Disposed) return;
 
         if (_ownsStream)
         {
@@ -279,6 +295,9 @@ public sealed class DatumFileWriter : IDisposable
         }
 
         _writerArena.Dispose();
+        _writerArena = null;
+
+        Disposed = true;
     }
 
     // ──────────────────── Row group flush ────────────────────
@@ -291,6 +310,7 @@ public sealed class DatumFileWriter : IDisposable
     /// </summary>
     public void FlushRowGroup()
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
         ThrowIfNotReady();
 
         int rowCount = _columnBuffers![0].Count;
@@ -401,8 +421,8 @@ public sealed class DatumFileWriter : IDisposable
             foreach (PageSpan page in _pages)
             {
                 IValueStore pageStore = page.ArenaLength > 0
-                    ? _writerArena.Slice(page.ArenaBase, page.ArenaLength)
-                    : _writerArena;
+                    ? WriterArena.Slice(page.ArenaBase, page.ArenaLength)
+                    : WriterArena;
 
                 int endRow = page.RowStart + page.RowCount;
                 int[]? shape = null;

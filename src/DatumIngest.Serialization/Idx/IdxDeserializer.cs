@@ -29,12 +29,8 @@ public sealed class IdxDeserializer : IFormatDeserializer
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
         IdxHeader header = IdxHeader.Read(stream);
 
-        IReadOnlyList<string> names = ["index", header.DataColumnName];
-        Dictionary<string, int> nameIndex = new(2, StringComparer.OrdinalIgnoreCase)
-        {
-            ["index"] = 0,
-            [header.DataColumnName] = 1,
-        };
+
+        ColumnLookup columnLookup = new(["index", header.DataColumnName]);
 
         int itemByteSize = header.ItemByteSize;
         byte[] itemBuffer = new byte[itemByteSize];
@@ -47,12 +43,12 @@ public sealed class IdxDeserializer : IFormatDeserializer
 
             IdxHeader.ReadExactly(stream, itemBuffer);
 
-            batch ??= context.Pool.RentRowBatch(DefaultBatchSize);
+            batch ??= context.Pool.RentRowBatch(columnLookup, DefaultBatchSize);
             DataValue[] values = context.Pool.RentDataValues(2);
             values[0] = DataValue.FromFloat32(rowIndex);
             values[1] = IdxValueReader.CreateDataValue(header, itemBuffer, batch.Arena);
 
-            batch.Add(new Row(names, values, nameIndex));
+            batch.Add(values);
 
             if (batch.IsFull)
             {

@@ -43,6 +43,7 @@ public sealed class Arena : IValueStore, IDisposable
     private int _position;
     private bool _disposed;
     private bool _pooled;
+    private int _refCount;
 
     // Side-list for managed objects that cannot be byte-serialized (e.g. ImageHandle).
     // Accessed under _writeLock for thread safety.
@@ -53,11 +54,9 @@ public sealed class Arena : IValueStore, IDisposable
     /// Initial size of the anonymous memory-mapped region in bytes.
     /// The mapping is not allocated until the first write.
     /// </param>
-    /// <param name="owner">The object that owns this arena (e.g. a RowBatch). Null if unowned.</param>
-    public Arena(int initialCapacity = DefaultCapacity, object? owner = null)
+    public Arena(int initialCapacity = DefaultCapacity)
     {
         _initialCapacity = Math.Max(initialCapacity, DefaultCapacity);
-        Owner = owner;
     }
 
     /// <summary>Whether the backing memory-mapped region has been allocated.</summary>
@@ -66,8 +65,17 @@ public sealed class Arena : IValueStore, IDisposable
     /// <summary>Whether this arena is currently held in a pool and must not be accessed.</summary>
     public bool Pooled { get => _pooled; private set => _pooled = value; }
 
-    /// <summary>The object that owns this arena (e.g. a RowBatch), or null if unowned/pooled.</summary>
-    public object? Owner { get; private set; }
+    /// <summary>
+    /// Gets the number of active references to this arena. Used by the owning batch to determine when to return the arena to the pool.
+    /// </summary>
+    public int ReferenceCount => _refCount;
+
+    internal void AddReference() => Interlocked.Increment(ref _refCount);
+
+    internal int ReleaseReference()
+    {
+        return Interlocked.Decrement(ref _refCount);  
+    } 
 
     // ───────────────────────── IValueStore ─────────────────────────
 
@@ -517,7 +525,6 @@ public sealed class Arena : IValueStore, IDisposable
             _objects?.Clear();
         }
 
-        Owner = null;
         _pooled = true;
     }
 
@@ -525,13 +532,11 @@ public sealed class Arena : IValueStore, IDisposable
     /// Marks this arena as active, resets it for reuse, and assigns the new owner.
     /// Called by the pool when the arena is rented out.
     /// </summary>
-    /// <param name="owner">The object that will own this arena.</param>
-    internal void Unpool(object owner)
+    internal void Unpool()
     {
         if (!_pooled)
             throw new InvalidOperationException("Arena is not pooled — double-rent detected.");
         _pooled = false;
-        Owner = owner;
     }
 
     private void ThrowIfPooled()

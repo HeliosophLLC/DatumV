@@ -76,7 +76,7 @@ public sealed class OperatorBufferReturnTests
         values[0] = DataValue.FromFloat32(1);
         values[1] = DataValue.FromFloat32(2);
         string[] names = ["a", "b"];
-        batch.Add(new Row(names, values, new() { ["a"] = 0, ["b"] = 1 }));
+        batch.Add(values);
 
         // Capture the row before returning.
         Row row = batch[0];
@@ -103,7 +103,7 @@ public sealed class OperatorBufferReturnTests
         DataValue[] values = pool.Rent(2);
         values[0] = DataValue.FromFloat32(1);
         values[1] = DataValue.FromFloat32(2);
-        batch.Add(new Row(["a", "b"], values, new() { ["a"] = 0, ["b"] = 1 }));
+        batch.Add(values);
 
         pool.ReturnBatch(batch);
 
@@ -123,7 +123,7 @@ public sealed class OperatorBufferReturnTests
         DataValue[] values = pool.Rent(2);
         values[0] = DataValue.FromFloat32(1);
         values[1] = DataValue.FromFloat32(2);
-        batch.Add(new Row(["a", "b"], values, new() { ["a"] = 0, ["b"] = 1 }));
+        batch.Add(values);
 
         batch.Return(); // Legacy path — should NOT return DataValue[] arrays.
 

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -145,32 +146,70 @@ public sealed class PoolBacking
     /// <summary>
     /// Rents a <see cref="RowBatch"/> with a backing <see cref="Row"/> array of exactly.
     /// </summary>
+    /// <param name="columnLookup">The column lookup for the batch.</param>
     /// <param name="capacity">The capacity of the column batch.</param>
-    public RowBatch RentRowBatch(int capacity)
+    /// <param name="arena">An optional <see cref="Arena"/> if an arena should not be rented from the pool; if null, a new arena will be rented for the batch.</param> 
+    public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity, Arena? arena = null)
     {
-        RowBatch rowBatch = RowBatch.Rent(capacity);
-        Arena arena = RentArena(owner: rowBatch);
+        if (arena != null)
+        {
+            arena.AddReference();
+        }
+        else
+        {
+            arena = RentArena();
+        }
 
-        rowBatch.Rent(arena);
+        Row[] rows = ArrayPool<Row>.Shared.Rent(capacity);
+        RowBatch rowBatch = new(columnLookup, rows, arena);
 
         return rowBatch;
     }
 
+    /// <summary>
+    /// Rents a <see cref="ColumnBatch"/> with the specified column lookup and row capacity.
+    /// </summary>
+    /// <param name="columnLookup">The column lookup for the batch.</param>
+    /// <param name="rowCapacity">The row capacity for the batch.</param>
+    /// <param name="arena">An optional <see cref="Arena"/> if an arena should not be rented from the pool; if null, a new arena will be rented for the batch.</param>
+    /// <returns>A rented <see cref="ColumnBatch"/>.</returns>
+    public ColumnBatch RentColumnBatch(ColumnLookup columnLookup, int rowCapacity, Arena? arena = null)
+    {
+        DataValue[][] columns = ArrayPool<DataValue[]>.Shared.Rent(columnLookup.Count);
+        for (int i = 0; i < columnLookup.Count; i++)
+        {
+            columns[i] = RentDataValues(rowCapacity);
+        }
+
+        if (arena != null)
+        {
+            arena.AddReference();
+        }
+        else
+        {
+            arena = RentArena();
+        }
+        
+        return new ColumnBatch(columnLookup, columns, arena);
+    }
 
     /// <summary>
     /// Rents an <see cref="Arena"/> with at least the specified capacity. The returned arena may have a larger capacity than requested;
     /// </summary>
-    /// <param name="owner">The object that owns this arena (e.g. a RowBatch).</param>
-    /// <returns></returns>
-    public Arena RentArena(object owner)
+    public Arena RentArena()
     {
         if (arenaPools.TryDequeue(out Arena? arena))
         {
-            arena.Unpool(owner);
-            return arena;
+            arena.Unpool();
+        }
+        else
+        {
+            arena = new Arena();
         }
 
-        return new Arena(owner: owner);
+        arena.AddReference();
+
+        return arena;
     }
 
     /// <summary>
@@ -250,12 +289,27 @@ public sealed class PoolBacking
             Return(batch[i]);
         }
 
-        if (batch.Arena?.Owner == batch)
+        TryReturn(batch.Arena);
+
+        batch.Dispose();
+    }
+
+    /// <summary>
+    /// Returns a <see cref="ColumnBatch"/> to the pool, including all its backing buffers and arena.
+    /// The batch is disposed after return; callers must not access any properties or methods
+    /// of the batch after calling this method.
+    /// </summary>
+    /// <param name="batch"></param>
+    public void Return(ColumnBatch batch)
+    {
+        for (int column = 0; column < batch.ColumnCount; column++)
         {
-            Return(batch.Arena);
+            Return(batch.GetColumnBuffer(column));
         }
 
-        batch.ReturnShell();
+        TryReturn(batch.Arena);
+
+        batch.Dispose();
     }
 
     /// <summary>
@@ -263,18 +317,28 @@ public sealed class PoolBacking
     /// Arenas above a certain capacity are not pooled to prevent unbounded memory usage from errant returns.
     /// </summary>
     /// <param name="arena">The arena to return.</param>
-    public void Return(Arena arena)
+    /// <returns><see langword="true"/> if the arena was accepted into the pool; <see langword="false"/> if the arena was not pooled (e.g. still in use by another owner, or above the capacity threshold).</returns>
+    public bool TryReturn(Arena arena)
     {
         const int maxArenaCapacity = 4 * 1024 * 1024; // 4 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
 
-        if (arena.Capacity >= maxArenaCapacity)
+        if (arena.ReleaseReference() > 0)
+        {
+            // Arena is still has outstanding references
+            return false;
+        }
+        else if (arena.Capacity >= maxArenaCapacity)
         {
             arena.Dispose();
-            return;
+
+            return true;
         }
 
         arena.Pool();
+
         arenaPools.Enqueue(arena);
+
+        return true;
     }
 
     /// <summary>

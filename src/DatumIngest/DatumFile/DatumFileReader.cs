@@ -137,11 +137,7 @@ public sealed class DatumFileReader : IDisposable
     /// <see cref="ArrayPool{T}"/> and returned immediately after decoding.
     /// </summary>
     /// <param name="rowGroupIndex">Zero-based row group index.</param>
-    /// <param name="columnIndices">Schema column indices to decode.</param>
-    /// <param name="target">
-    /// Pre-allocated column buffers. <c>target[i]</c> must have at least as many elements as the
-    /// row group's row count. Reused across row groups to avoid LOH churn.
-    /// </param>
+    /// <param name="columnBatch">The column batch containing pre-allocated column buffers.</param>
     /// <param name="compressedBuffer">
     /// Caller-owned buffer reused for reading compressed page bytes. Must be at least as
     /// large as the largest compressed page across all row groups and columns being read.
@@ -155,21 +151,27 @@ public sealed class DatumFileReader : IDisposable
     /// </param>
     internal void ReadColumnsInto(
         int rowGroupIndex,
-        int[] columnIndices,
-        DataValue[][] target,
+        ColumnBatch columnBatch,
         byte[] compressedBuffer,
         byte[] decompressedBuffer)
     {
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() {
+            DatumFilePath = _filePath
+        };
 
-        for (int i = 0; i < columnIndices.Length; i++)
+        columnBatch.SetRowCount(rowCount);
+
+        ColumnLookup columnLookup = columnBatch.ColumnLookup;
+        for (int i = 0; i < columnLookup.Count; i++)
         {
-            int columnIndex = columnIndices[i];
+            int columnIndex = columnLookup.GetSchemaColumnIndex(i);
             DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
             DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
             int compressedLength = (int)chunk.CompressedByteLength;
+
+            DataValue[] columnBuffer = columnBatch.GetColumnBuffer(i);
 
             _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
             _stream.ReadExactly(compressedBuffer.AsSpan(0, compressedLength));
@@ -186,59 +188,10 @@ public sealed class DatumFileReader : IDisposable
                 rowCount,
                 descriptor,
                 context,
-                target[i],
+                columnBuffer,
                 payloadLength: compressedLength,
                 decompressedBuffer: decompressedBuffer);
         }
-    }
-
-    /// <summary>
-    /// Reads and decodes the specified columns for the given row group directly into
-    /// a <see cref="ColumnBatch"/>.  String and JSON columns are decoded into the
-    /// batch's <see cref="Arena"/> as raw UTF-8 bytes rather than managed strings.
-    /// </summary>
-    /// <param name="rowGroupIndex">Zero-based row group index.</param>
-    /// <param name="columnIndices">Schema column indices to decode.</param>
-    /// <param name="columnNames">Projected column names in the same order as <paramref name="columnIndices"/>.</param>
-    /// <param name="nameIndex">Case-insensitive name-to-ordinal mapping (shared with caller).</param>
-    /// <returns>A <see cref="ColumnBatch"/> with <see cref="ColumnBatch.RowCount"/> set. Caller must dispose.</returns>
-    public ColumnBatch ReadColumnsAsColumnBatch(
-        int rowGroupIndex,
-        int[] columnIndices,
-        string[] columnNames,
-        Dictionary<string, int> nameIndex)
-    {
-        DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
-        int rowCount = (int)rowGroup.RowCount;
-
-        ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
-
-        for (int i = 0; i < columnIndices.Length; i++)
-        {
-            int columnIndex = columnIndices[i];
-            DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
-            DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
-
-            byte[] compressedBytes = new byte[chunk.CompressedByteLength];
-            _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
-            _stream.ReadExactly(compressedBytes);
-
-            DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
-            decoder.DecodeIntoColumn(
-                compressedBytes,
-                chunk.Encoding,
-                chunk.Compression,
-                (int)chunk.UncompressedByteLength,
-                rowCount,
-                descriptor,
-                context,
-                batch.GetColumnBuffer(i),
-                batch.Arena);
-        }
-
-        batch.SetRowCount(rowCount);
-        return batch;
     }
 
     /// <inheritdoc/>

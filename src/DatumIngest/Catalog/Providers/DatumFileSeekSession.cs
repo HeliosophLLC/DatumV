@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
@@ -21,35 +22,37 @@ internal sealed class DatumFileSeekSession : ISeekSession
 {
     private const int DefaultBatchSize = 1024;
 
-    private readonly Pool _pool;
-    private readonly DatumFileReader _reader;
-    private readonly int[] _projectedIndices;
-    private readonly string[] _projectedNames;
-    private readonly Dictionary<string, int> _nameIndex;
-    private readonly DataValue[][] _columnBuffers;
-    private readonly byte[] _compressedBuffer;
-    private readonly byte[] _decompressedBuffer;
-    private bool _disposed;
+    private Pool? _pool;
+    private DatumFileReader? _reader;
+    private ColumnBatch? _columnBatch;
+    private byte[]? _compressedBuffer;
+    private byte[]? _decompressedBuffer;
 
     internal DatumFileSeekSession(
         Pool pool,
         DatumFileReader reader,
-        int[] projectedIndices,
-        string[] projectedNames,
-        Dictionary<string, int> nameIndex,
-        DataValue[][] columnBuffers,
+        ColumnBatch columnBatch,
         byte[] compressedBuffer,
         byte[] decompressedBuffer)
     {
         _pool = pool;
         _reader = reader;
-        _projectedIndices = projectedIndices;
-        _projectedNames = projectedNames;
-        _nameIndex = nameIndex;
-        _columnBuffers = columnBuffers;
+        _columnBatch = columnBatch;
         _compressedBuffer = compressedBuffer;
         _decompressedBuffer = decompressedBuffer;
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the session has been disposed. Disposed sessions
+    /// should not be used or seeked; they have already returned their buffers to the pool,
+    /// so using them risks data corruption and memory safety issues.
+    /// </summary>
+    [MemberNotNullWhen(false, nameof(_columnBatch))]
+    [MemberNotNullWhen(false, nameof(_reader))]
+    [MemberNotNullWhen(false, nameof(_pool))]
+    [MemberNotNullWhen(false, nameof(_compressedBuffer))]
+    [MemberNotNullWhen(false, nameof(_decompressedBuffer))]
+    public bool Disposed { get; private set;}
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> SeekAsync(
@@ -57,7 +60,7 @@ internal sealed class DatumFileSeekSession : ISeekSession
         int count,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Disposed, this);
 
         long endRow = startRow + count;
         long cumulativeRow = 0;
@@ -86,11 +89,12 @@ internal sealed class DatumFileSeekSession : ISeekSession
             }
 
             // Decode directly into the session's owned column buffers.
-            _reader.ReadColumnsInto(
-                rgIndex, _projectedIndices, _columnBuffers, _compressedBuffer, _decompressedBuffer);
+            _reader.ReadColumnsInto(rgIndex, _columnBatch, _compressedBuffer, _decompressedBuffer);
 
             int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
             int sliceEnd = (int)Math.Min(endRow - cumulativeRow, rgRowCount);
+
+            IReadOnlyList<DataValue[]> columns = _columnBatch.Columns;
 
             for (int rowIndex = sliceStart; rowIndex < sliceEnd && emitted < count; rowIndex++)
             {
@@ -102,14 +106,13 @@ internal sealed class DatumFileSeekSession : ISeekSession
                     continue;
                 }
 
-                DataValue[] values = _pool.RentDataValues(_projectedIndices.Length);
-                for (int colPos = 0; colPos < _projectedIndices.Length; colPos++)
-                {
-                    values[colPos] = _columnBuffers[colPos][rowIndex];
-                }
+                batch ??= _pool.RentRowBatch(_columnBatch.ColumnLookup, Math.Min(count, DefaultBatchSize), _columnBatch.Arena);
 
-                batch ??= _pool.RentRowBatch(Math.Min(count, DefaultBatchSize));
-                batch.Add(new Row(_projectedNames, values, _nameIndex));
+                DataValue[] values = _pool.RentDataValues(_columnBatch.ColumnLookup.Count);
+
+                _columnBatch.CopyRow(rowIndex, values);
+
+                batch.Add(values);
                 emitted++;
 
                 if (batch.IsFull)
@@ -119,45 +122,42 @@ internal sealed class DatumFileSeekSession : ISeekSession
                 }
             }
 
+            if (batch is not null && batch.Count > 0)
+            {
+                yield return batch;
+                batch = null;
+            }
+
             cumulativeRow = rgEnd;
         }
-
-        if (batch is not null && batch.Count > 0)
-        {
-            yield return batch;
-        }
-
-        await Task.CompletedTask;
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (_disposed)
+        if (Disposed)
         {
             return;
         }
 
-        _disposed = true;
-
         _reader.Dispose();
-
-        foreach (DataValue[] buffer in _columnBuffers)
-        {
-            if (buffer.Length > 0)
-            {
-                _pool.ReturnDataValues(buffer);
-            }
-        }
-
+        _reader = null;
+        _pool.ReturnColumnBatch(_columnBatch);
+        _pool = null;
+        _columnBatch = null;
+        
         if (_compressedBuffer.Length > 0)
         {
             ArrayPool<byte>.Shared.Return(_compressedBuffer);
+            _compressedBuffer = null;
         }
 
         if (_decompressedBuffer.Length > 0)
         {
             ArrayPool<byte>.Shared.Return(_decompressedBuffer);
+            _decompressedBuffer = null;
         }
+        
+        Disposed = true;
     }
 }

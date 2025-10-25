@@ -80,10 +80,10 @@ public sealed class LocalBufferPool : IDisposable
     /// <see cref="DataValue"/> arrays are returned to this pool.
     /// </summary>
     /// <param name="capacity">The maximum number of rows the batch can hold.</param>
-    /// <returns>An empty batch ready for <see cref="RowBatch.Add"/> calls.</returns>
+    /// <returns>An empty batch ready for <see cref="RowBatch.Add(DataValue[])"/> calls.</returns>
     public RowBatch RentBatch(int capacity)
     {
-        return _backing.RentRowBatch(capacity);
+        throw new NotImplementedException("DON'T USE THIS");
     }
 
     /// <summary>
@@ -94,12 +94,7 @@ public sealed class LocalBufferPool : IDisposable
     /// <param name="batch">The batch to return.</param>
     public void ReturnBatch(RowBatch batch)
     {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            ReturnValues(batch[i]);
-        }
-
-        batch.ReturnShell();
+        throw new NotImplementedException("DON'T USE THIS");
     }
 
     /// <summary>Total number of <see cref="Rent"/> calls made against this pool.</summary>

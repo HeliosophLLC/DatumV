@@ -17,20 +17,6 @@ public class RowBatchTests
         return new Row([nameColumn, ageColumn], [DataValue.FromString(nameValue), DataValue.FromFloat32(ageValue)]);
     }
 
-    /// <summary>
-    /// Verifies that <see cref="RowBatch.Rent"/> creates a batch with the
-    /// requested capacity and an initial count of zero.
-    /// </summary>
-    [Fact]
-    public void RentCreatesBatchWithCorrectCapacityAndZeroCount()
-    {
-        RowBatch batch = RowBatch.Rent(8);
-
-        Assert.Equal(8, batch.Capacity);
-        Assert.Equal(0, batch.Count);
-
-        batch.Return();
-    }
 
     /// <summary>
     /// Verifies that <see cref="RowBatch.Add"/> increments the count and

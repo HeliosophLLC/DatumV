@@ -9,13 +9,12 @@ public sealed class BatchStatisticsCollectorTests
 {
     private static RowBatch MakeBatch(Pool pool, string[] names, params DataValue[][] rows)
     {
-        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < names.Length; i++)
-            nameIndex[names[i]] = i;
+        ColumnLookup columnLookup = new(names);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 1024);
 
-        RowBatch batch = pool.RentRowBatch(1024);
         foreach (DataValue[] values in rows)
-            batch.Add(new Row(names, values, nameIndex));
+            batch.Add(values);
+
         return batch;
     }
 

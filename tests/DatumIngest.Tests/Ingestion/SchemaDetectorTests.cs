@@ -8,13 +8,13 @@ public sealed class SchemaDetectorTests
 {
     private static RowBatch MakeBatch(Pool pool, IReadOnlyList<string> names, params DataValue[][] rows)
     {
-        Dictionary<string, int> nameIndex = new(names.Count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < names.Count; i++)
-            nameIndex[names[i]] = i;
+        ColumnLookup columnLookup = new(names);
 
-        RowBatch batch = pool.RentRowBatch(1024);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 1024);
+
         foreach (DataValue[] values in rows)
-            batch.Add(new Row(names, values, nameIndex));
+            batch.Add(values);
+
         return batch;
     }
 
@@ -80,7 +80,8 @@ public sealed class SchemaDetectorTests
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
-        RowBatch empty = pool.RentRowBatch(1024);
+        ColumnLookup columnLookup = new(Array.Empty<string>());
+        RowBatch empty = pool.RentRowBatch(columnLookup, 1024);
 
         SchemaDetector detector = new();
         detector.Detect(empty);

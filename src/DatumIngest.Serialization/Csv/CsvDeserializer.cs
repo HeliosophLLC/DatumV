@@ -126,10 +126,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
             temporalCache = new(names.Length);
         }
 
-        // Build name index once (shared across all rows).
-        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < names.Length; i++)
-            nameIndex[names[i]] = i;
+        ColumnLookup columnLookup = new(names);
 
         // Stream is at position 0 after open. Create line reader.
         using LineReader lineReader = new(stream);
@@ -148,7 +145,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
             lineNumber++;
 
             DataValue[] values = context.Pool.RentDataValues(names.Length);
-            batch ??= context.Pool.RentRowBatch(DefaultBatchSize);
+            batch ??= context.Pool.RentRowBatch(columnLookup, DefaultBatchSize);
 
             if (!lineSpan.Contains('"'))
             {
@@ -188,7 +185,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
                 ParseQuotedLineIntoValues(lineSpan, delimiter, kinds, names, values, batch.Arena, temporalCache);
             }
 
-            batch.Add(new Row(names, values, nameIndex));
+            batch.Add(values);
 
             if (batch.IsFull)
             {

@@ -462,7 +462,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 if (!ordinalsResolved && !isGlobalAggregation && batchCount > 0)
                 {
                     ordinalsResolved = true;
-                    Dictionary<string, int> nameIndex = inputBatch[0].RawNameIndex;
+                    IReadOnlyDictionary<string, int> nameIndex = inputBatch.ColumnLookup.NameIndex;
                     int[] candidateOrdinals = new int[keyCount];
                     bool allResolved = true;
 

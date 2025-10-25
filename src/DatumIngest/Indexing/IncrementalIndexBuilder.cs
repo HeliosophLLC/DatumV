@@ -91,7 +91,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     {
         for (int i = 0; i < batch.Count; i++)
         {
-            AddRow(batch[i]);
+            AddRow(batch[i], batch.Arena);
         }
     }
 
@@ -100,7 +100,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// the output writer.
     /// </summary>
     /// <param name="row">The row to index.</param>
-    public void AddRow(Row row)
+    /// <param name="valueStore">The value store to use for decoding string values if needed for bloom or sorted indexes.</param>
+    public void AddRow(Row row, IValueStore valueStore)
     {
         if (_schema is null)
         {

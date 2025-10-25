@@ -51,12 +51,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
         using ZipArchive archive = new(stream, ZipArchiveMode.Read);
 
-        IReadOnlyList<string> names = ["file_name", "file_bytes"];
-        Dictionary<string, int> nameIndex = new(2, StringComparer.OrdinalIgnoreCase)
-        {
-            ["file_name"] = 0,
-            ["file_bytes"] = 1,
-        };
+        ColumnLookup columnLookup = new(["file_name", "file_bytes"]);
 
         int batchSize = ComputeBatchSize(archive, context.BatchByteTarget);
 
@@ -71,13 +66,13 @@ public sealed class ZipDeserializer : IFormatDeserializer
             if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith('/')) continue;
             if (IsIgnorableMetadata(entry.FullName)) continue;
 
-            batch ??= context.Pool.RentRowBatch(batchSize);
+            batch ??= context.Pool.RentRowBatch(columnLookup, batchSize);
             DataValue[] values = context.Pool.RentDataValues(2);
 
             values[0] = DataValue.FromString(entry.FullName, batch.Arena);
             values[1] = StoreEntryIntoArena(entry, batch.Arena);
 
-            batch.Add(new Row(names, values, nameIndex));
+            batch.Add(values);
 
             if (batch.IsFull)
             {

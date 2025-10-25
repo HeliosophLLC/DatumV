@@ -32,7 +32,18 @@ public sealed class Pool
     /// <summary>
     /// Rents a <see cref="RowBatch"/> with the specified capacity.
     /// </summary>
-    public RowBatch RentRowBatch(int capacity) => Backing.RentRowBatch(capacity);
+    public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity, Arena? arena = null)
+        => Backing.RentRowBatch(columnLookup, capacity, arena);
+
+    /// <summary>
+    /// Rents a <see cref="ColumnBatch"/> with the specified column lookup and row capacity.
+    /// </summary>
+    /// <param name="columnLookup">The column lookup for the batch.</param>
+    /// <param name="rowCapacity">The row capacity for the batch.</param>
+    /// <param name="arena">An optional arena to use for the batch; if null, a new arena will be created.</param>
+    /// <returns>A rented <see cref="ColumnBatch"/>.</returns>
+    public ColumnBatch RentColumnBatch(ColumnLookup columnLookup, int rowCapacity, Arena? arena = null)
+        => Backing.RentColumnBatch(columnLookup, rowCapacity, arena);
 
     /// <summary>
     /// Rents a <see cref="GroupState"/> with the specified number of accumulators.
@@ -47,13 +58,21 @@ public sealed class Pool
     /// <summary>
     /// Returns the <paramref name="row"/> and its backing <see cref="DataValue"/> array to the pool for reuse.
     /// </summary>
+    /// <param name="row">The row to return.</param>
     public void ReturnRow(Row row) => Backing.Return(row);
 
     /// <summary>
     /// Returns the <paramref name="rowBatch"/> and all its contained buffers to the pool for reuse.
     /// </summary>
-    /// <param name="rowBatch">The batch to return.</param>
+    /// <param name="rowBatch">The row batch to return.</param>
     public void ReturnRowBatch(RowBatch rowBatch) => Backing.Return(rowBatch);
+
+    /// <summary>
+    /// Returns the <paramref name="columnBatch"/> and all its contained buffers to the pool for reuse.
+    /// </summary>
+    /// <param name="columnBatch">The column batch to return.</param>
+    public void ReturnColumnBatch(ColumnBatch columnBatch) => Backing.Return(columnBatch);
+
 
     /// <summary>
     /// Returns the <paramref name="groupState"/> and all its contained buffers to the pool for reuse.

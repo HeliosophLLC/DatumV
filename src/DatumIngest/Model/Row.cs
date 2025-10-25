@@ -19,9 +19,19 @@ namespace DatumIngest.Model;
 /// </remarks>
 public readonly struct Row
 {
-    private readonly IReadOnlyList<string> _names;
     private readonly DataValue[] _values;
-    private readonly Dictionary<string, int> _nameIndex;
+    private readonly ColumnLookup _columnLookup;
+
+    /// <summary>
+    /// Initializes a new <see cref="Row"/> with the given column lookup and values.
+    /// </summary>
+    /// <param name="columnLookup">The column lookup containing column names and indices.</param>
+    /// <param name="values">The array of data values for this row.</param>
+    public Row(ColumnLookup columnLookup, DataValue[] values)
+    {
+        _columnLookup = columnLookup;
+        _values = values;
+    }
 
     /// <summary>
     /// Creates a row from parallel arrays of column names and values, building a
@@ -32,20 +42,7 @@ public readonly struct Row
     /// </exception>
     public Row(string[] names, DataValue[] values)
     {
-        if (names.Length != values.Length)
-        {
-            throw new ArgumentException(
-                $"Name count ({names.Length}) must equal value count ({values.Length}).");
-        }
-
-        _names = names;
-        _values = values;
-
-        _nameIndex = new Dictionary<string, int>(names.Length, StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < names.Length; index++)
-        {
-            _nameIndex[names[index]] = index;
-        }
+        throw new Exception("DON'T USE");
     }
 
     /// <summary>
@@ -57,18 +54,21 @@ public readonly struct Row
     /// Callers must guarantee that <paramref name="names"/> and <paramref name="nameIndex"/>
     /// are never mutated after construction.
     /// </remarks>
-    public Row(IReadOnlyList<string> names, DataValue[] values, Dictionary<string, int> nameIndex)
+    public Row(IReadOnlyList<string> names, DataValue[] values, IReadOnlyDictionary<string, int> nameIndex)
     {
-        _names = names;
-        _values = values;
-        _nameIndex = nameIndex;
+        throw new Exception("DON'T USE");
     }
 
     /// <summary>The number of fields in this row.</summary>
     public int FieldCount => _values.Length;
 
     /// <summary>The ordered column names.</summary>
-    public IReadOnlyList<string> ColumnNames => _names;
+    public IReadOnlyList<string> ColumnNames => _columnLookup.ColumnNames;
+
+    /// <summary>
+    /// Gets the column lookup associated with this row, which contains column names and indices.
+    /// </summary>
+    public ColumnLookup ColumnLookup => _columnLookup;
 
     /// <summary>
     /// The raw backing array of values. Used internally by pooling infrastructure
@@ -89,20 +89,13 @@ public readonly struct Row
     /// The raw column name array. Used internally by flat-buffer probe storage
     /// in <see cref="Execution.SpillPartition"/> to share schema across reconstructed rows.
     /// </summary>
-    internal IReadOnlyList<string> RawNames => _names;
+    internal IReadOnlyList<string> RawNames => _columnLookup.ColumnNames;
 
     /// <summary>
     /// The raw name-to-ordinal dictionary. Used internally by flat-buffer probe storage
     /// in <see cref="Execution.SpillPartition"/> to share schema across reconstructed rows.
     /// </summary>
-    internal Dictionary<string, int> RawNameIndex => _nameIndex;
-
-    /// <summary>
-    /// <c>true</c> when this instance is the <c>default</c> (uninitialized) value.
-    /// Useful for nullable-replacement patterns where <c>Row?</c> (<see cref="Nullable{Row}"/>)
-    /// is avoided.
-    /// </summary>
-    public bool IsEmpty => _values is null;
+    internal IReadOnlyDictionary<string, int> RawNameIndex => _columnLookup.NameIndex;
 
     /// <summary>
     /// Creates a deep copy of this row with its own <see cref="DataValue"/> array.
@@ -115,7 +108,10 @@ public readonly struct Row
     {
         DataValue[] copy = new DataValue[_values.Length];
         Array.Copy(_values, copy, _values.Length);
-        return new Row(_names, copy, _nameIndex);
+
+        throw new Exception("DON'T USE");
+
+        //return new Row(_columnLookup, copy);
     }
 
     /// <summary>
@@ -126,7 +122,7 @@ public readonly struct Row
     {
         get
         {
-            if (_nameIndex.TryGetValue(name, out int index))
+            if (_columnLookup.TryGetColumnOrdinal(name, out int index))
             {
                 return _values[index];
             }
@@ -161,7 +157,7 @@ public readonly struct Row
     /// <returns><c>true</c> if the column exists; otherwise <c>false</c>.</returns>
     public bool TryGetValue(string name, out DataValue result)
     {
-        if (_nameIndex.TryGetValue(name, out int index))
+        if (_columnLookup.TryGetColumnOrdinal(name, out int index))
         {
             result = _values[index];
             return true;

@@ -1,5 +1,5 @@
 using System.Buffers;
-using DatumIngest.Execution;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DatumIngest.Model;
 
@@ -11,24 +11,26 @@ namespace DatumIngest.Model;
 /// <remarks>
 /// <para>
 /// RowBatch is a dumb container — it does not manage <see cref="DataValue"/>
-/// array lifetimes. Lifecycle management is handled by <see cref="LocalBufferPool"/>
-/// via <see cref="LocalBufferPool.RentBatch"/> and <see cref="LocalBufferPool.ReturnBatch"/>.
+/// array lifetimes. Lifecycle management is handled by <see cref="Pooling.Pool"/>
+/// via <see cref="Pooling.Pool.ReturnRowBatch(RowBatch)"/>
+/// and <see cref="Pooling.Pool.ReturnRowBatch(RowBatch)"/>.
 /// </para>
 /// </remarks>
-public sealed class RowBatch
+public sealed class RowBatch : IDisposable
 {
-    private Row[] _rows;
-    private bool _returned;
+    private Row[]? _rows;
     private Arena? _arena;
+    private ColumnLookup _columnLookup;
 
-    private RowBatch(Row[] rows, int capacity)
+    internal RowBatch(ColumnLookup columnLookup, Row[] rows, Arena arena)
     {
+        _columnLookup = columnLookup;
         _rows = rows;
-        Capacity = capacity;
+        _arena = arena;
     }
 
     /// <summary>Maximum number of rows this batch can hold.</summary>
-    public int Capacity { get; }
+    public int Capacity => _rows?.Length ?? 0;
 
     /// <summary>Current number of rows in this batch.</summary>
     public int Count { get; private set; }
@@ -37,12 +39,29 @@ public sealed class RowBatch
     public bool IsFull => Count >= Capacity;
 
     /// <summary>
+    /// Gets the <see cref="ColumnLookup"/> associated with this batch, which contains column names and indices.
+    /// </summary>
+    public ColumnLookup ColumnLookup => _columnLookup;
+
+    /// <summary>
+    /// Gets a value indicating whether this batch has been disposed. Disposed batches should not be used or returned to the pool.
+    /// Disposed batches have already had their backing array returned to the pool, so using them risks data corruption and memory safety issues.
+    /// </summary>
+    [MemberNotNullWhen(false, nameof(_rows))]
+    [MemberNotNullWhen(false, nameof(_arena))]
+    public bool Disposed { get; private set; }
+
+    /// <summary>
     /// Gets the <see cref="Arena"/> associated with this batch.
     /// </summary>
     public Arena Arena
     {
-        get => _arena
-            ?? throw new InvalidOperationException("RowBatch does not have an associated Arena.");
+        get
+        {
+            ObjectDisposedException.ThrowIf(Disposed, this);
+
+            return _arena;
+        }
     }
 
     /// <summary>
@@ -57,10 +76,8 @@ public sealed class RowBatch
     {
         get
         {
-            if ((uint)index >= (uint)Count)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index));
-            }
+            ObjectDisposedException.ThrowIf(Disposed, this);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, Count);
 
             return _rows[index];
         }
@@ -73,12 +90,24 @@ public sealed class RowBatch
     /// <exception cref="InvalidOperationException">Thrown when the batch is already full.</exception>
     public void Add(Row row)
     {
+        throw new NotImplementedException("DON'T USE THIS");
+    }
+
+    /// <summary>
+    /// Appends a row to this batch.
+    /// </summary>
+    /// <param name="values">The array of data values for the new row.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the batch is already full.</exception>
+    public void Add(DataValue[] values)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         if (Count >= Capacity)
         {
             throw new InvalidOperationException("RowBatch is full.");
         }
 
-        _rows[Count] = row;
+        _rows[Count] = new Row(_columnLookup, values);
         Count++;
     }
 
@@ -89,11 +118,9 @@ public sealed class RowBatch
     /// their lifecycle is managed separately by operators.
     /// </summary>
     /// <param name="capacity">The maximum number of rows the batch can hold.</param>
-    /// <returns>An empty batch ready for <see cref="Add"/> calls.</returns>
     public static RowBatch Rent(int capacity)
     {
-        Row[] rows = ArrayPool<Row>.Shared.Rent(capacity);
-        return new RowBatch(rows, capacity);
+        throw new NotImplementedException("DON'T USE THIS");
     }
 
     /// <summary>
@@ -104,49 +131,27 @@ public sealed class RowBatch
     /// </summary>
     public void Return()
     {
-        if (_returned)
+        throw new NotImplementedException("DON'T USE THIS");
+    }
+
+    /// <summary>
+    /// Disposes this batch by returning the backing array to <see cref="ArrayPool{T}.Shared"/> and clearing all references to
+    /// the contained rows and arena. Disposed batches should not be used or returned to the pool.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Disposed)
         {
             return;
         }
 
-        _returned = true;
-        Array.Clear(_rows, 0, Count);
-        ArrayPool<Row>.Shared.Return(_rows);
-        _rows = Array.Empty<Row>();
-        Count = 0;
-    }
-
-    /// <summary>
-    /// Returns the backing array to <see cref="ArrayPool{T}.Shared"/> without
-    /// clearing Row references. Called by <see cref="LocalBufferPool.ReturnBatch"/>
-    /// after it has already returned the contained <see cref="DataValue"/> arrays.
-    /// </summary>
-    internal void ReturnShell()
-    {
-        if (_returned)
-        {
-            throw new InvalidOperationException(
-                "RowBatch has already been returned. This indicates a double-return bug — " +
-                "two code paths are returning the same batch.");
-        }
-
-        _returned = true;
         _arena = null;
         Array.Clear(_rows, 0, Count);
         ArrayPool<Row>.Shared.Return(_rows);
         _rows = Array.Empty<Row>();
         Count = 0;
-    }
 
-    internal void Rent(Arena arena)
-    {
-        if (_arena != null)
-        {
-            throw new InvalidOperationException("RowBatch is already rented with an Arena. This indicates a bug in the operator code where a batch is being rented multiple times without being returned.");
-        }
-
-        _arena = arena;
-        _returned = false;
+        Disposed = true;
     }
 
     /// <summary>
@@ -157,8 +162,6 @@ public sealed class RowBatch
     /// <returns>A batch with <see cref="Count"/> equal to 1.</returns>
     public static RowBatch CreateSingleRow(Row row)
     {
-        RowBatch batch = Rent(1);
-        batch.Add(row);
-        return batch;
+        throw new NotImplementedException("DON'T USE THIS");
     }
 }
