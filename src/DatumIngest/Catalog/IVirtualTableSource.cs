@@ -1,3 +1,4 @@
+#if false
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -27,3 +28,4 @@ public interface IVirtualTableSource
     /// <returns>An asynchronous sequence of row batches.</returns>
     IAsyncEnumerable<RowBatch> ScanAsync(VirtualTableContext context, CancellationToken cancellationToken);
 }
+#endif

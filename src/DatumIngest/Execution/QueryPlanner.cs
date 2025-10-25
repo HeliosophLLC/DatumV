@@ -20,7 +20,6 @@ public sealed class QueryPlanner
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functionRegistry;
-    private readonly VirtualSchemaRegistry? _virtualSchemaRegistry;
 
     /// <summary>
     /// Creates a query planner for the given table catalog, function registry,
@@ -28,15 +27,10 @@ public sealed class QueryPlanner
     /// </summary>
     /// <param name="catalog">The catalog used to resolve table names.</param>
     /// <param name="functionRegistry">The registry used to resolve table-valued functions.</param>
-    /// <param name="virtualSchemaRegistry">
-    /// Optional registry for virtual schemas (e.g. <c>information_schema</c>, <c>datum_catalog</c>).
-    /// When <see langword="null"/>, schema-qualified table references are not resolved.
-    /// </param>
-    public QueryPlanner(TableCatalog catalog, FunctionRegistry functionRegistry, VirtualSchemaRegistry? virtualSchemaRegistry = null)
+    public QueryPlanner(TableCatalog catalog, FunctionRegistry functionRegistry)
     {
         _catalog = catalog;
         _functionRegistry = functionRegistry;
-        _virtualSchemaRegistry = virtualSchemaRegistry;
     }
 
     /// <summary>
@@ -1817,7 +1811,7 @@ public sealed class QueryPlanner
         while (true)
         {
             if (current is ScanOperator scan)
-                return scan.Descriptor.Name;
+                return scan.TableProvider.Name;
             if (current is AliasOperator alias)
                 current = alias.Source;
             else if (current is FilterOperator filter)
@@ -2172,7 +2166,7 @@ public sealed class QueryPlanner
         bool descending = item.Direction == SortDirection.Descending;
 
         IndexScanOperator indexScan = new(
-            scan.Descriptor,
+            scan.TableProvider,
             scan.RequiredColumns,
             columnIndex,
             scan.SourceIndex.Chunks,
@@ -2433,7 +2427,7 @@ public sealed class QueryPlanner
 
         // Replace both ScanOperators with ascending IndexScanOperators.
         IndexScanOperator leftIndexScan = new(
-            leftScan.Descriptor,
+            leftScan.TableProvider,
             leftScan.RequiredColumns,
             leftColumnIndex,
             leftScan.SourceIndex.Chunks,
@@ -2441,7 +2435,7 @@ public sealed class QueryPlanner
             leftColumnName);
 
         IndexScanOperator rightIndexScan = new(
-            rightScan.Descriptor,
+            rightScan.TableProvider,
             rightScan.RequiredColumns,
             rightColumnIndex,
             rightScan.SourceIndex.Chunks,
@@ -3961,11 +3955,6 @@ public sealed class QueryPlanner
         bool hasJoins,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
-        // Virtual schema reference: schema.table (e.g. information_schema.tables).
-        if (tableRef.SchemaName is not null)
-        {
-            return PlanVirtualTableReference(tableRef, allReferencedColumns, hasJoins);
-        }
 
         // CTE reference: return the shared CTE operator wrapped with an alias.
         if (commonTableExpressionOperators is not null &&
@@ -3980,19 +3969,18 @@ public sealed class QueryPlanner
             return cteSource;
         }
 
-        TableDescriptor descriptor = _catalog.Resolve(tableRef.Name);
+        ITableProvider provider = _catalog[tableRef.Name];
 
         // Projection pushdown: compute required columns for this table's alias.
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;
         IReadOnlySet<string>? requiredColumns =
             ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
 
-        ITableProvider provider = _catalog.CreateProvider(descriptor);
-        long rowCount = provider.GetRowCount(descriptor);
-        ScanOperator scanOperator = new(descriptor, requiredColumns, rowCount);
+        long rowCount = provider.GetRowCount();
+        ScanOperator scanOperator = new(provider, requiredColumns, rowCount);
 
         // Attach per-column statistics from manifest if available.
-        if (_catalog.TryGetManifest(descriptor.Name, out Manifest.QueryResultsManifest? manifest) && manifest is not null)
+        if (provider.GetManifest() is Manifest.QueryResultsManifest manifest)
         {
             // Build column-name → FeatureManifest lookup for selectivity estimation.
             Dictionary<string, Manifest.FeatureManifest> columnStatistics = new(StringComparer.OrdinalIgnoreCase);
@@ -4005,9 +3993,9 @@ public sealed class QueryPlanner
         }
 
         // Attach source index for chunk-based pruning if one is registered.
-        if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
+        if (provider.GetSourceIndex() is Indexing.SourceIndex sourceIndex)
         {
-            scanOperator.SetSourceIndex(sourceIndex!);
+            scanOperator.SetSourceIndex(sourceIndex);
         }
 
         IQueryOperator outOperator = scanOperator;
@@ -4046,53 +4034,6 @@ public sealed class QueryPlanner
         }
 
         return outOperator;
-    }
-
-    /// <summary>
-    /// Plans a schema-qualified table reference (e.g. <c>information_schema.tables</c>)
-    /// by resolving the schema and table through the virtual schema registry.
-    /// </summary>
-    private IQueryOperator PlanVirtualTableReference(
-        TableReference tableRef,
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        bool hasJoins)
-    {
-        if (_virtualSchemaRegistry is null)
-        {
-            throw new InvalidOperationException(
-                $"Schema-qualified table reference '{tableRef.SchemaName}.{tableRef.Name}' " +
-                "is not supported in this context.");
-        }
-
-        IVirtualSchema? virtualSchema = _virtualSchemaRegistry.TryResolve(tableRef.SchemaName!);
-
-        if (virtualSchema is null)
-        {
-            throw new InvalidOperationException(
-                $"Unknown schema: '{tableRef.SchemaName}'.");
-        }
-
-        IVirtualTableSource? virtualSource = virtualSchema.TryResolve(tableRef.Name);
-
-        if (virtualSource is null)
-        {
-            throw new InvalidOperationException(
-                $"Table '{tableRef.Name}' not found in schema '{tableRef.SchemaName}'.");
-        }
-
-        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
-        IReadOnlySet<string>? requiredColumns =
-            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
-
-        IQueryOperator scanOperator = new VirtualTableScanOperator(
-            virtualSource, tableRef.SchemaName!, tableRef.Name, requiredColumns);
-
-        if (tableRef.Alias is not null || hasJoins)
-        {
-            scanOperator = new AliasOperator(scanOperator, effectiveAlias);
-        }
-
-        return scanOperator;
     }
 
     private IQueryOperator PlanSubquery(SubquerySource subquery)

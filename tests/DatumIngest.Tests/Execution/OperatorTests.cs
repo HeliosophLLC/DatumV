@@ -74,14 +74,6 @@ internal sealed class CountingOperator : IQueryOperator
 
 public class OperatorTests
 {
-    private static ExecutionContext CreateContext()
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool());
-    }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
@@ -92,7 +84,7 @@ public class OperatorTests
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= TestExecutionContext.Create();
         return await op.CollectRowsAsync(context);
     }
 
@@ -915,10 +907,7 @@ public class OperatorTests
         QueryMeter meter = new(budget: 5);
         meter.Add(6);
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -946,10 +935,7 @@ public class OperatorTests
         QueryMeter meter = new(budget: 5);
         meter.Add(6);
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -974,10 +960,7 @@ public class OperatorTests
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = new(
-            cancellationTokenSource.Token,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool());
+        ExecutionContext context = TestExecutionContext.Create();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(orderBy, context));

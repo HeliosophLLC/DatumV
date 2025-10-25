@@ -13,9 +13,28 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposable
+public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
+
+    /// <summary>
+    /// Initializes the provider with the given descriptor and pool.
+    /// </summary>
+    /// <param name="descriptor">The table descriptor containing metadata and file path.</param>
+    /// <param name="pool">The resource pool for managing provider resources.</param>
+    public DatumFileTableProvider(TableDescriptor descriptor, Pool pool)
+    {
+        Descriptor = descriptor;
+        Reader = DatumFileReader.Open(descriptor.FilePath);
+        Pool = pool;
+    }
+
+    private DatumFileReader Reader { get; }
+
+    private Pool Pool { get;}
+
+    /// <inheritdoc/>
+    private TableDescriptor Descriptor { get; }
 
     /// <summary>
     /// Optional value store for decoding string columns into Arena-backed values.
@@ -24,47 +43,48 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
     public IValueStore Store { get; set; } = new Arena();
 
     /// <inheritdoc/>
-    public long GetRowCount(TableDescriptor descriptor)
+    public long GetRowCount()
     {
-        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
-
         // When tombstones are present, report the active (non-deleted) row count
         // so the query planner sees the true logical size.
-        if (reader.Flags.HasFlag(DatumFileFlags.HasTombstones))
+        if (Reader.Flags.HasFlag(DatumFileFlags.HasTombstones))
         {
             long activeCount = 0;
-            for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
+            for (int rowGroupIndex = 0; rowGroupIndex < Reader.RowGroupCount; rowGroupIndex++)
             {
-                activeCount += reader.GetRowGroupDescriptor(rowGroupIndex).ActiveRowCount;
+                activeCount += Reader.GetRowGroupDescriptor(rowGroupIndex).ActiveRowCount;
             }
 
             return activeCount;
         }
 
-        return reader.TotalRowCount;
+        return Reader.TotalRowCount;
     }
+
+    /// <inheritdoc/>
+    public string Name => Descriptor.Name;
 
     /// <inheritdoc/>
     public bool Seekable => throw new Exception("TODO: Need to check if index side-cars are present for this file.");
 
+    /// <inheritdoc/>
+    public Schema GetSchema() => Reader.Schema;
 
     /// <inheritdoc/>
-    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
-    {
-        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
-        return Task.FromResult(reader.Schema);
-    }
+    public Manifest.QueryResultsManifest? GetManifest()
+        => throw new NotSupportedException("DatumFileTableProvider does not support manifests.");
+
+    /// <inheritdoc/>
+    public Indexing.SourceIndex? GetSourceIndex()
+        => throw new NotSupportedException("DatumFileTableProvider does not support source indices.");
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
-        TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
-        reader.Store = Store;
-        Schema schema = reader.Schema;
+        Schema schema = Reader.Schema;
 
         // Resolve which column indices to decode (projection pushdown).
         int[] projectedIndices = ResolveProjection(schema, requiredColumns);
@@ -91,9 +111,9 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
         int maxRowGroupSize = 0;
         int maxCompressedPageSize = 0;
         int maxUncompressedPageSize = 0;
-        for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
+        for (int rgIndex = 0; rgIndex < Reader.RowGroupCount; rgIndex++)
         {
-            DatumRowGroupDescriptor rgDescriptor = reader.GetRowGroupDescriptor(rgIndex);
+            DatumRowGroupDescriptor rgDescriptor = Reader.GetRowGroupDescriptor(rgIndex);
             int rowCount = (int)rgDescriptor.RowCount;
             if (rowCount > maxRowGroupSize) maxRowGroupSize = rowCount;
 
@@ -108,6 +128,7 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
         }
 
         DataValue[][] columns = new DataValue[projectedIndices.Length][];
+
         for (int colIndex = 0; colIndex < projectedIndices.Length; colIndex++)
         {
             columns[colIndex] = new DataValue[maxRowGroupSize];
@@ -119,11 +140,11 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
 
         try
         {
-            for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
+            for (int rgIndex = 0; rgIndex < Reader.RowGroupCount; rgIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rgIndex);
+                DatumRowGroupDescriptor rowGroupDescriptor = Reader.GetRowGroupDescriptor(rgIndex);
 
                 // Zone map pruning: only attempted when a filter hint was provided.
                 if (filterHint is not null && filterColumnNames is not null)
@@ -137,8 +158,7 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
                     }
                 }
 
-                int rowCount = (int)rowGroupDescriptor.RowCount;
-                reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
+                Reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
 
                 // Skip fully-deleted row groups without emitting any rows.
                 if (rowGroupDescriptor.ActiveRowCount == 0)
@@ -146,20 +166,21 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
                     continue;
                 }
 
-                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                long rowCount = rowGroupDescriptor.RowCount;
+                for (long rowIndex = 0; rowIndex < rowCount; rowIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Skip tombstoned rows.
-                    if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                    // TODO: Convert to long
+                    if (rowGroupDescriptor.IsRowDeleted((int)rowIndex))
                     {
                         continue;
                     }
 
-
-                    batch ??= pool.RentRowBatch(DefaultBatchSize);
+                    batch ??= Pool.RentRowBatch(DefaultBatchSize);
                     
-                    DataValue[] values = pool.RentDataValues(projectedIndices.Length);
+                    DataValue[] values = Pool.RentDataValues(projectedIndices.Length);
                     for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                     {
                         values[colPos] = columns[colPos][rowIndex];
@@ -188,19 +209,15 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
     }
     
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(
-        TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns)
+    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
     {
         // Snapshot the value store at open time so concurrent Store mutations from other
         // callers don't affect this session. The session is self-contained from here on.
         IValueStore storeSnapshot = Store;
 
-        DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
         try
         {
-            reader.Store = storeSnapshot;
-            Schema schema = reader.Schema;
+            Schema schema = GetSchema();
 
             int[] projectedIndices = ResolveProjection(schema, requiredColumns);
             string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
@@ -210,9 +227,9 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
             int maxRowGroupSize = 0;
             int maxCompressed = 0;
             int maxUncompressed = 0;
-            for (int rg = 0; rg < reader.RowGroupCount; rg++)
+            for (int rg = 0; rg < Reader.RowGroupCount; rg++)
             {
-                DatumRowGroupDescriptor rgd = reader.GetRowGroupDescriptor(rg);
+                DatumRowGroupDescriptor rgd = Reader.GetRowGroupDescriptor(rg);
                 int rgRows = (int)rgd.RowCount;
                 if (rgRows > maxRowGroupSize) maxRowGroupSize = rgRows;
 
@@ -230,7 +247,7 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
             for (int ci = 0; ci < projectedIndices.Length; ci++)
             {
                 columnBuffers[ci] = maxRowGroupSize > 0
-                    ? pool.RentDataValues(maxRowGroupSize)
+                    ? Pool.RentDataValues(maxRowGroupSize)
                     : [];
             }
 
@@ -242,12 +259,11 @@ public sealed class DatumFileTableProvider(Pool pool) : ITableProvider, IDisposa
                 : [];
 
             return new DatumFileSeekSession(
-                pool, reader, projectedIndices, projectedNames, nameIndex,
+                Pool, Reader, projectedIndices, projectedNames, nameIndex,
                 columnBuffers, compressedBuffer, decompressedBuffer);
         }
         catch
         {
-            reader.Dispose();
             throw;
         }
     }

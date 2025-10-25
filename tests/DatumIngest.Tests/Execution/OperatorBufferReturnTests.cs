@@ -380,7 +380,7 @@ public sealed class OperatorBufferReturnTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             pool,
             memoryBudgetBytes: memoryBudgetBytes)
         {

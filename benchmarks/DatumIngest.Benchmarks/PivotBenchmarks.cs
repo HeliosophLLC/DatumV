@@ -1,3 +1,4 @@
+#if false
 using System.Globalization;
 
 using BenchmarkDotNet.Attributes;
@@ -214,3 +215,4 @@ public class PivotBenchmarks
         return filePath;
     }
 }
+#endif

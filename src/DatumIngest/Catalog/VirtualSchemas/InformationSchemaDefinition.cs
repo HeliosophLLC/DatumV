@@ -1,3 +1,4 @@
+#if false
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog.VirtualSchemas;
@@ -230,3 +231,4 @@ internal sealed class InformationSchemaDefinition : IVirtualSchema
         }
     }
 }
+#endif

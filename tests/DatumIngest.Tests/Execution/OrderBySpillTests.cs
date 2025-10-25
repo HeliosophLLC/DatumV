@@ -286,12 +286,7 @@ public sealed class OrderBySpillTests
 
     private static ExecutionContext CreateContext(long? memoryBudgetBytes = null)
     {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes);
+        return TestExecutionContext.Create(memoryBudgetBytes: memoryBudgetBytes);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)

@@ -554,7 +554,7 @@ public sealed class GraceHashJoinTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes)
         {
@@ -571,11 +571,8 @@ public sealed class GraceHashJoinTests
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool());
+        context ??= TestExecutionContext.Create();
+
 
         return await op.CollectRowsAsync(context);
     }

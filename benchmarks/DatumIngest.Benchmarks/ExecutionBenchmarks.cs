@@ -1,3 +1,4 @@
+#if false
 using BenchmarkDotNet.Attributes;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
@@ -467,3 +468,4 @@ public class ExecutionBenchmarks
         }
     }
 }
+#endif

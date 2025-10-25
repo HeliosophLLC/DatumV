@@ -249,7 +249,7 @@ public sealed class JoinOperator : IQueryOperator
         while (true)
         {
             if (current is ScanOperator scan)
-                return scan.Descriptor.Name;
+                return scan.TableProvider.Name;
             if (current is AliasOperator alias)
                 current = alias.Source;
             else if (current is FilterOperator filter)
@@ -335,11 +335,7 @@ public sealed class JoinOperator : IQueryOperator
         }
 
         // Verify the provider supports seeking.
-        ITableProvider provider = context.Catalog.CreateProvider(buildScan.Descriptor);
-        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
-            datumProvider.Store = context.Store;
-
-        if (!provider.Seekable)
+        if (!buildScan.TableProvider.Seekable)
         {
             return null;
         }
@@ -351,11 +347,11 @@ public sealed class JoinOperator : IQueryOperator
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
         return new IndexNestedLoopJoinExecutor(
+            buildScan.TableProvider,
             _joinType,
             extraction,
             columnIndex,
             buildScan.SourceIndex.Chunks,
-            buildScan.Descriptor,
             buildAlias,
             evaluator);
     }

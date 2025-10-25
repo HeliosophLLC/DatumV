@@ -16,16 +16,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class SetOperationTests
 {
-    private static ExecutionContext CreateContext(long? memoryBudgetBytes = null)
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes);
-    }
-
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(column => column.Name).ToArray();
@@ -36,7 +26,7 @@ public sealed class SetOperationTests
     private static async Task<List<Row>> CollectAsync(
         IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= TestExecutionContext.Create();
         return await op.CollectRowsAsync(context);
     }
 
@@ -482,7 +472,7 @@ public sealed class SetOperationTests
         MockOperator right = new(rightRows);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
 
-        ExecutionContext context = CreateContext(memoryBudgetBytes: 1024);
+        ExecutionContext context = TestExecutionContext.Create(memoryBudgetBytes: 1024);
         List<Row> results = await CollectAsync(op, context);
 
         // 0..499 UNION 250..749 → 0..749 = 750 distinct values

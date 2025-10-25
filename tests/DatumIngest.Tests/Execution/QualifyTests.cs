@@ -21,14 +21,6 @@ public sealed class QualifyTests
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 
-    private static ExecutionContext CreateContext()
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            DefaultFunctions,
-            new TableCatalog(),
-            new LocalBufferPool());
-    }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
@@ -39,28 +31,15 @@ public sealed class QualifyTests
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator operatorNode, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= TestExecutionContext.Create();
         return await operatorNode.CollectRowsAsync(context);
-    }
-
-    private static TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
-    {
-        TableCatalog catalog = new();
-        foreach ((string name, Row[] rows) in tables)
-        {
-            InMemoryTableProvider provider = new(rows);
-            catalog.RegisterProvider(name, () => provider);
-            catalog.Register(new TableDescriptor(name, name, "", new Dictionary<string, string>()));
-        }
-
-        return catalog;
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
+        ExecutionContext context = TestExecutionContext.Create(catalog: catalog);
         IQueryOperator plan = planner.Plan(query);
 
         return await plan.CollectRowsAsync(context);
@@ -296,7 +275,7 @@ public sealed class QualifyTests
             MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(40f))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, score, ROW_NUMBER() OVER (PARTITION BY category ORDER BY score DESC) AS rn " +
@@ -331,7 +310,7 @@ public sealed class QualifyTests
             MakeRow(("name", DataValue.FromString("dave")), ("score", DataValue.FromFloat32(40f))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name, score FROM data " +
@@ -364,7 +343,7 @@ public sealed class QualifyTests
             MakeRow(("department", DataValue.FromString("hr")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(50f))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("employees", employees));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("employees", employees));
 
         // WHERE filters to active only → GROUP BY department →
         // HAVING COUNT(*) > 1 → ROW_NUMBER by department name → QUALIFY rn = 1
@@ -402,7 +381,7 @@ public sealed class QualifyTests
             MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(3f))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT DISTINCT category, value FROM data " +

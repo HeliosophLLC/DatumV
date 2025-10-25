@@ -30,7 +30,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     private readonly JoinKeyExtractionResult _extraction;
     private readonly IColumnIndex _buildIndex;
     private readonly IReadOnlyList<IndexChunk> _buildChunks;
-    private readonly TableDescriptor _buildDescriptor;
+    private readonly ITableProvider _buildTableProvider;
     private readonly string? _buildAlias;
     private readonly ExpressionEvaluator _evaluator;
     private bool _circuitBreakerTripped;
@@ -45,11 +45,11 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// <summary>
     /// Creates an index nested loop join executor.
     /// </summary>
+    /// <param name="tableProvider">The seekable provider for the build-side source table.</param>
     /// <param name="joinType">The join type (must be Inner or LeftSemi).</param>
     /// <param name="extraction">The extracted equi-join key pairs and optional residual filter.</param>
     /// <param name="buildIndex">The column index on the build-side join column.</param>
     /// <param name="buildChunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
-    /// <param name="buildDescriptor">The table descriptor for the build-side source (used for seeks).</param>
     /// <param name="buildAlias">
     /// The table alias that the query planner assigned to the build side via
     /// <see cref="Operators.AliasOperator"/>. When non-null, fetched build-side rows
@@ -59,19 +59,19 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// </param>
     /// <param name="evaluator">Expression evaluator for key extraction and residual filter evaluation.</param>
     internal IndexNestedLoopJoinExecutor(
+        ITableProvider tableProvider,
         JoinType joinType,
         JoinKeyExtractionResult extraction,
         IColumnIndex buildIndex,
         IReadOnlyList<IndexChunk> buildChunks,
-        TableDescriptor buildDescriptor,
         string? buildAlias,
         ExpressionEvaluator evaluator)
     {
+        _buildTableProvider = tableProvider;
         _joinType = joinType;
         _extraction = extraction;
         _buildIndex = buildIndex;
         _buildChunks = buildChunks;
-        _buildDescriptor = buildDescriptor;
         _buildAlias = buildAlias;
         _evaluator = evaluator;
     }
@@ -100,15 +100,12 @@ internal sealed class IndexNestedLoopJoinExecutor
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        ITableProvider provider = context.Catalog.CreateProvider(_buildDescriptor);
-        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
-            datumProvider.Store = context.Store;
 
-        if (!provider.Seekable)
+        if (!_buildTableProvider.Seekable)
         {
             throw new InvalidOperationException(
-                $"IndexNestedLoopJoinExecutor requires a seekable provider, but '{_buildDescriptor.Name}' " +
-                $"uses '{provider.GetType().Name}' which does not indicate it is seekable.");
+                $"IndexNestedLoopJoinExecutor requires a seekable provider, but '{_buildTableProvider.Name}' " +
+                $"does not indicate it is seekable.");
         }
         // We only support single-key equi-joins for index NLJ.
         // The right expression is used against the build-side index, the left against the probe row.
@@ -138,17 +135,11 @@ internal sealed class IndexNestedLoopJoinExecutor
         long probeRowsProcessed = 0;
         long totalMatches = 0;
 
-        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildDescriptor.Name}  buildAlias={_buildAlias}  joinType={_joinType}");
+        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildTableProvider.Name}  buildAlias={_buildAlias}  joinType={_joinType}");
 
         // Open a seek session once for the lifetime of this executor — it owns the
         // reader, decode buffers, and projection metadata for every build-side fetch.
-        ISeekSession seekSession = provider.OpenSeekSession(_buildDescriptor, requiredColumns: null);
-
-        // Wrap the entire execution in try/finally so the session and provider are
-        // always disposed. Without this, the session's rented buffers and the provider
-        // itself accumulate across repeated executions.
-        try
-        {
+        ISeekSession seekSession = _buildTableProvider.OpenSeekSession(requiredColumns: null);
 
         ExecutionTracer.Write("INLJ probing probe side");
         await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
@@ -299,13 +290,6 @@ internal sealed class IndexNestedLoopJoinExecutor
         if (outputBatch is not null)
         {
             yield return outputBatch;
-        }
-
-        } // end try
-        finally
-        {
-            seekSession.Dispose();
-            (provider as IDisposable)?.Dispose();
         }
     }
 

@@ -69,27 +69,6 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
-    /// Builds an index for the specified table by streaming all rows.
-    /// </summary>
-    /// <param name="descriptor">Table descriptor identifying the source.</param>
-    /// <param name="provider">The table provider to read rows from.</param>
-    /// <param name="sourceStream">
-    /// Seekable stream over the source file for fingerprint computation,
-    /// or <c>null</c> if fingerprinting is not possible (e.g. stream not available).
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A fully constructed source index.</returns>
-    public async Task<SourceIndex> BuildAsync(
-        TableDescriptor descriptor,
-        ITableProvider provider,
-        Stream? sourceStream,
-        CancellationToken cancellationToken)
-    {
-        return await BuildAsync(descriptor, provider, sourceStream, fingerprint: null, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Builds an index for the specified table by streaming all rows, using an
     /// externally-computed fingerprint to avoid redundant source file hashing.
     /// </summary>
@@ -144,7 +123,7 @@ public sealed class SourceIndexBuilder
 
         try
         {
-            await foreach (RowBatch batch in provider.ScanAsync(descriptor, requiredColumns: null, filterHint: null, cancellationToken)
+            await foreach (RowBatch batch in provider.ScanAsync(requiredColumns: null, filterHint: null, cancellationToken)
                 .ConfigureAwait(false))
             {
                 for (int i = 0; i < batch.Count; i++)
@@ -610,7 +589,7 @@ public sealed class SourceIndexBuilder
 
         int rowsInChunk = 0;
 
-        await foreach (RowBatch batch in provider.ScanAsync(descriptor, requiredColumns: null, filterHint: null, cancellationToken)
+        await foreach (RowBatch batch in provider.ScanAsync(requiredColumns: null, filterHint: null, cancellationToken)
             .ConfigureAwait(false))
         {
             for (int batchRow = 0; batchRow < batch.Count; batchRow++)

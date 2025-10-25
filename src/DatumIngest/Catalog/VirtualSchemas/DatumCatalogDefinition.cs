@@ -1,3 +1,4 @@
+#if false
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
@@ -635,3 +636,4 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
             value.HasValue ? DataValue.FromFloat64(value.Value) : DataValue.Null(DataKind.Float64);
     }
 }
+#endif

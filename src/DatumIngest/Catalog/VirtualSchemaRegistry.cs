@@ -1,3 +1,4 @@
+#if false
 namespace DatumIngest.Catalog;
 
 /// <summary>
@@ -50,3 +51,4 @@ public sealed class VirtualSchemaRegistry
         return registry;
     }
 }
+#endif

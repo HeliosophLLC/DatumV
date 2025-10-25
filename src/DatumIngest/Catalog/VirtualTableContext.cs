@@ -1,3 +1,4 @@
+#if false
 using DatumIngest.Functions;
 
 namespace DatumIngest.Catalog;
@@ -30,3 +31,4 @@ public sealed class VirtualTableContext
     /// </summary>
     public FunctionRegistry FunctionRegistry { get; }
 }
+#endif

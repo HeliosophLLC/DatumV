@@ -53,13 +53,12 @@ public static class QueryExplainer
     {
         OperatorPlanDescription description = scan.DescribeForExplain();
 
-        string tableName = scan.Descriptor.Name;
-        string provider = scan.Descriptor.Provider;
+        string tableName = scan.TableProvider.Name;
         string columns = scan.RequiredColumns is not null
             ? string.Join(", ", scan.RequiredColumns)
             : "*";
 
-        string details = $"table: {tableName}, provider: {provider}, columns: [{columns}]";
+        string details = $"table: {tableName}, columns: [{columns}]";
 
         if (scan.FilterHint is not null)
         {

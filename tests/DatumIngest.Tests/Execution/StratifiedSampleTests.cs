@@ -17,7 +17,7 @@ public sealed class StratifiedSampleTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool())
         {
             MaxStratifyClasses = maxStratifyClasses,

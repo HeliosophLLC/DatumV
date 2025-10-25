@@ -169,7 +169,7 @@ public sealed class FlippedJoinTests
                 new ColumnReference("r", "id")),
             flipped: true);
 
-        List<Row> rows = await CollectAsync(join, CreateContext(TinyBudget));
+        List<Row> rows = await CollectAsync(join, TestExecutionContext.Create(memoryBudgetBytes: TinyBudget));
 
         Assert.Equal(3, rows.Count);
 
@@ -210,16 +210,6 @@ public sealed class FlippedJoinTests
         Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
     }
 
-    private static ExecutionContext CreateContext(long memoryBudgetBytes)
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes);
-    }
-
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(column => column.Name).ToArray();
@@ -232,7 +222,7 @@ public sealed class FlippedJoinTests
         context ??= new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool());
 
         return await op.CollectRowsAsync(context);

@@ -408,11 +408,7 @@ public sealed class MergeJoinTests
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool());
+        context ??= TestExecutionContext.Create();
 
         return await op.CollectRowsAsync(context);
     }

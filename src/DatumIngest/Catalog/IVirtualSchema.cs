@@ -1,3 +1,4 @@
+#if false
 namespace DatumIngest.Catalog;
 
 /// <summary>
@@ -25,3 +26,4 @@ public interface IVirtualSchema
     /// <returns>The virtual table source, or <see langword="null"/> if no such table exists.</returns>
     IVirtualTableSource? TryResolve(string tableName);
 }
+#endif

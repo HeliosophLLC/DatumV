@@ -187,7 +187,10 @@ public sealed record TableReference(
     string? Alias = null,
     SourceSpan? Span = null,
     TablesampleClause? Tablesample = null,
-    string? SchemaName = null) : TableSource;
+    string? SchemaName = null) : TableSource
+{
+    
+}
 
 /// <summary>
 /// The sampling method used in a TABLESAMPLE clause.

@@ -16,15 +16,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class StreamingGroupByTests
 {
-    private static ExecutionContext CreateContext()
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool());
-    }
-
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(c => c.Name).ToArray();
@@ -34,7 +25,7 @@ public sealed class StreamingGroupByTests
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= TestExecutionContext.Create();
         return await op.CollectRowsAsync(context);
     }
 
@@ -223,7 +214,7 @@ public sealed class StreamingGroupByTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool())
         {
             BatchSize = 8,

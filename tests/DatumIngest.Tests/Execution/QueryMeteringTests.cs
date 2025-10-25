@@ -135,10 +135,7 @@ public class QueryMeteringTests
     public async Task GroupByOperator_AggregateCalls_AccumulateQueryUnits()
     {
         QueryMeter meter = new();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(1f)]),
@@ -174,10 +171,7 @@ public class QueryMeteringTests
     public async Task GroupByOperator_HeavyAggregate_AccumulatesHigherCost()
     {
         QueryMeter meter = new();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(4f)]),
@@ -214,10 +208,7 @@ public class QueryMeteringTests
     public async Task WindowOperator_WindowFunctionCalls_AccumulateQueryUnits()
     {
         QueryMeter meter = new();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(1f)]),

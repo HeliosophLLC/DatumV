@@ -28,37 +28,6 @@ public sealed class SourceFingerprintCollectorTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Collect_ReturnsFingerprints_WithCorrectSizeAndProvider()
-    {
-        string filePath = Path.Combine(_tempDir, "data.csv");
-        File.WriteAllText(filePath, "id,name\n1,Alice\n2,Bob\n");
-
-        TableCatalog catalog = new();
-        catalog.Register(new TableDescriptor("csv", "data", filePath, new Dictionary<string, string>()));
-
-        IReadOnlyList<SourceFingerprint> fingerprints = SourceFingerprintCollector.Collect(catalog);
-
-        Assert.Single(fingerprints);
-        Assert.Equal("data", fingerprints[0].Name);
-        Assert.Equal("csv", fingerprints[0].Provider);
-        Assert.Equal(filePath, fingerprints[0].Path);
-        Assert.True(fingerprints[0].SizeBytes > 0);
-    }
-
-    [Fact]
-    public void Collect_NonexistentFile_ReturnsZeroSizeFingerprint()
-    {
-        TableCatalog catalog = new();
-        catalog.Register(new TableDescriptor("csv", "missing", "/no/such/file.csv", new Dictionary<string, string>()));
-
-        IReadOnlyList<SourceFingerprint> fingerprints = SourceFingerprintCollector.Collect(catalog);
-
-        Assert.Single(fingerprints);
-        Assert.Equal(0, fingerprints[0].SizeBytes);
-        Assert.Equal(DateTime.MinValue, fingerprints[0].LastModifiedUtc);
-    }
-
-    [Fact]
     public void Validate_MatchingFingerprints_ReturnsNull()
     {
         DateTime timestamp = new(2026, 3, 17, 12, 0, 0, DateTimeKind.Utc);

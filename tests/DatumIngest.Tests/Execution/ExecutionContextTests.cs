@@ -23,7 +23,7 @@ public sealed class ExecutionContextTests
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool(),
             memoryBudgetBytes: 512)
         {
@@ -54,10 +54,7 @@ public sealed class ExecutionContextTests
     public void WithOuterRow_PreservesDefaultMaxRecursionDepth()
     {
         Row outerRow = new(["y"], [DataValue.FromFloat32(2f)]);
-        ExecutionContext original = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool());
+        ExecutionContext original = TestExecutionContext.Create();
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);
 

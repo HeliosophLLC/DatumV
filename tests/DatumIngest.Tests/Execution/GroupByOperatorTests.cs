@@ -20,7 +20,7 @@ public class GroupByOperatorTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool());
     }
 
@@ -326,10 +326,7 @@ public class GroupByOperatorTests
             ]);
 
         QueryMeter meter = new(budget: 1);
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool(), meter);
+        ExecutionContext context = TestExecutionContext.Create(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(groupBy, context));
@@ -358,10 +355,7 @@ public class GroupByOperatorTests
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = new(
-            cancellationTokenSource.Token,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool());
+        ExecutionContext context = TestExecutionContext.Create();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(groupBy, context));

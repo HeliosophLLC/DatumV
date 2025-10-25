@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -24,9 +25,11 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// row's <see cref="Row.ColumnNames"/>; schema kinds are inferred from the first row's
     /// values. When <paramref name="rows"/> is empty, a single <c>"empty"</c> column is used.
     /// </summary>
+    /// <param name="name">The name of the table.</param>
     /// <param name="rows">The rows to serve.</param>
-    public InMemoryTableProvider(Row[] rows)
+    public InMemoryTableProvider(string name, Row[] rows)
     {
+        Name = name;
         _rows = rows;
         _columns = rows.Length == 0
             ? Array.Empty<string>()
@@ -38,14 +41,19 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// Creates a provider from explicit column names and rows. Use this when the first
     /// row's column names might not represent the full schema.
     /// </summary>
+    /// <param name="name">The name of the table.</param>
     /// <param name="columns">Column names for the schema.</param>
     /// <param name="rows">The rows to serve. Each row must have values in <paramref name="columns"/> order.</param>
-    public InMemoryTableProvider(string[] columns, Row[] rows)
+    public InMemoryTableProvider(string name, string[] columns, Row[] rows)
     {
+        this.Name = name;
         _columns = columns;
         _rows = rows;
         _schema = BuildSchema(_columns, _rows);
     }
+
+    /// <inheritdoc/>
+    public string Name { get; }
 
     /// <inheritdoc/>
     public bool Seekable => true;
@@ -54,15 +62,19 @@ public sealed class InMemoryTableProvider : ITableProvider
     public void Dispose() { }
 
     /// <inheritdoc/>
-    public long GetRowCount(TableDescriptor descriptor) => _rows.Length;
+    public long GetRowCount() => _rows.Length;
 
     /// <inheritdoc/>
-    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
-        => Task.FromResult(_schema);
+    public Schema GetSchema() => _schema;
+
+    /// <inheritdoc/>
+    public Manifest.QueryResultsManifest? GetManifest() => null;
+
+    /// <inheritdoc/>
+    public SourceIndex? GetSourceIndex() => null;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
-        TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -76,9 +88,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(
-        TableDescriptor descriptor,
-        IReadOnlySet<string>? requiredColumns)
+    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
         => new InMemorySeekSession(_rows);
 
     private sealed class InMemorySeekSession : ISeekSession

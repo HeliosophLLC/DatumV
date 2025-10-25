@@ -21,7 +21,6 @@ namespace DatumIngest.Execution.Operators;
 /// </summary>
 public sealed class ScanOperator : IQueryOperator
 {
-    private readonly TableDescriptor _descriptor;
     private readonly IReadOnlySet<string>? _requiredColumns;
     private Expression? _filterHint;
     private SourceIndex? _sourceIndex;
@@ -37,18 +36,18 @@ public sealed class ScanOperator : IQueryOperator
     /// <summary>
     /// Creates a scan operator for the given table.
     /// </summary>
-    /// <param name="descriptor">Table descriptor identifying the data source.</param>
+    /// <param name="tableProvider">The table provider identifying the data source.</param>
     /// <param name="requiredColumns">Columns needed downstream; null means all columns.</param>
     /// <param name="tableRowCount">The row count for the table.</param>
-    public ScanOperator(TableDescriptor descriptor, IReadOnlySet<string>? requiredColumns, long tableRowCount)
+    public ScanOperator(ITableProvider tableProvider, IReadOnlySet<string>? requiredColumns, long tableRowCount)
     {
-        _descriptor = descriptor;
+        TableProvider = tableProvider;
         _requiredColumns = requiredColumns;
         TableRowCount = tableRowCount;
     }
 
     /// <summary>The table descriptor this operator scans.</summary>
-    public TableDescriptor Descriptor => _descriptor;
+    public ITableProvider TableProvider { get; private set;}
 
     /// <summary>The set of columns requested for projection pushdown.</summary>
     public IReadOnlySet<string>? RequiredColumns => _requiredColumns;
@@ -134,8 +133,7 @@ public sealed class ScanOperator : IQueryOperator
     {
         Dictionary<string, string> properties = new()
         {
-            ["table"] = _descriptor.Name,
-            ["provider"] = _descriptor.Provider,
+            ["table"] = TableProvider.Name,
             ["columns"] = _requiredColumns is not null
                 ? string.Join(", ", _requiredColumns)
                 : "*",
@@ -225,46 +223,35 @@ public sealed class ScanOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
-        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
-            datumProvider.Store = context.Store;
+        ExecutionTracer.Write($"SCAN start  table={TableProvider.Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
 
-        ExecutionTracer.Write($"SCAN start  table={_descriptor.Name}  provider={provider.GetType().Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
+        // When a source index is available and either a filter hint, bloom pruning
+        // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
+        // apply chunk-level pruning.
+        bool hasIndexPruning = _sourceIndex is not null
+            && (_filterHint is not null || _bloomPruningKeys is not null
+                || _sortedIndexPruningKeys is not null
+                || _sourceIndex.MappedSortedIndexes is not null
+                || _sourceIndex.BPlusTreeIndexes is not null
+                || _sourceIndex.BitmapIndexes is not null);
 
-        try
+        ExecutionTracer.Write($"SCAN path  table={TableProvider.Name}  indexPruning={hasIndexPruning}");
+
+        if (hasIndexPruning)
         {
-            // When a source index is available and either a filter hint, bloom pruning
-            // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
-            // apply chunk-level pruning.
-            bool hasIndexPruning = _sourceIndex is not null
-                && (_filterHint is not null || _bloomPruningKeys is not null
-                    || _sortedIndexPruningKeys is not null
-                    || _sourceIndex.MappedSortedIndexes is not null
-                    || _sourceIndex.BPlusTreeIndexes is not null
-                    || _sourceIndex.BitmapIndexes is not null);
-
-            ExecutionTracer.Write($"SCAN path  table={_descriptor.Name}  indexPruning={hasIndexPruning}");
-
-            if (hasIndexPruning)
+            await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
+                TableProvider, context).ConfigureAwait(false))
             {
-                await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
-                    provider, context).ConfigureAwait(false))
-                {
-                    yield return batch;
-                }
-            }
-            else
-            {
-                await foreach (RowBatch batch in provider.ScanAsync(
-                    _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
-                {
-                    yield return batch;
-                }
+                yield return batch;
             }
         }
-        finally
+        else
         {
-            provider.Dispose();
+            await foreach (RowBatch batch in TableProvider.ScanAsync(
+                _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+            {
+                yield return batch;
+            }
         }
     }
 
@@ -302,7 +289,7 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     if (chunkIndex == 0)
                     {
-                        ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=zonemap  table={_descriptor.Name}  statsKeys=[{string.Join(",", statistics.Keys)}]");
+                        ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=zonemap  table={TableProvider.Name}  statsKeys=[{string.Join(",", statistics.Keys)}]");
                     }
                     pruned = true;
                 }
@@ -328,7 +315,7 @@ public sealed class ScanOperator : IQueryOperator
 
                         if (!anyMayMatch)
                         {
-                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bloom  table={_descriptor.Name}");
+                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bloom  table={TableProvider.Name}");
                             pruned = true;
                             break;
                         }
@@ -358,7 +345,7 @@ public sealed class ScanOperator : IQueryOperator
 
                         if (!anyPresent)
                         {
-                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={_descriptor.Name}");
+                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={TableProvider.Name}");
                             pruned = true;
                             break;
                         }
@@ -372,7 +359,7 @@ public sealed class ScanOperator : IQueryOperator
             {
                 if (ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex))
                 {
-                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={_descriptor.Name}");
+                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.Name}");
                     pruned = true;
                 }
             }
@@ -383,7 +370,7 @@ public sealed class ScanOperator : IQueryOperator
             {
                 if (ShouldPruneWithBitmapIndexes(_filterHint, _sourceIndex.BitmapIndexes, chunkIndex))
                 {
-                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={_descriptor.Name}");
+                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.Name}");
                     pruned = true;
                 }
             }
@@ -399,7 +386,7 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
-        ExecutionTracer.Write($"SCAN index pruning  table={_descriptor.Name}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
+        ExecutionTracer.Write($"SCAN index pruning  table={TableProvider.Name}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
 
         RowBatch? outputBatch = null;
 
@@ -412,10 +399,10 @@ public sealed class ScanOperator : IQueryOperator
 
             if (exactPositions is not null)
             {
-                ExecutionTracer.Write($"SCAN exact seek  table={_descriptor.Name}  positions={exactPositions.Count}");
+                ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
 
-                using ISeekSession seekSession = provider.OpenSeekSession(_descriptor, _requiredColumns);
+                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
 
                 foreach (long rowPosition in exactPositions)
                 {
@@ -451,7 +438,7 @@ public sealed class ScanOperator : IQueryOperator
         IAsyncEnumerable<RowBatch>? rows = null;
 
         IAsyncEnumerable<RowBatch> OpenStream()
-            => provider.ScanAsync(_descriptor, _requiredColumns, _filterHint, cancellationToken);
+            => provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken);
 
         // If no chunks were pruned and no bitmap row filtering is needed, stream all rows.
         bool hasBitmapRowFilter = _filterHint is not null
@@ -472,7 +459,7 @@ public sealed class ScanOperator : IQueryOperator
 
         if (provider.Seekable == true)
         {
-            using ISeekSession seekSession = provider.OpenSeekSession(_descriptor, _requiredColumns);
+            using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
 
             foreach ((long start, long end, int activeChunkIndex) in activeRanges)
             {

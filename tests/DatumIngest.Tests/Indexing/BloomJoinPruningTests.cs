@@ -9,6 +9,7 @@ using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 using DatumIngest.Indexing.Bloom;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Indexing;
 
@@ -82,10 +83,11 @@ public sealed class BloomJoinPruningTests
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
         // Create ScanOperator for the left side with the source index.
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+           new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Right (build) side: only has key value 3.0 — should match chunk 1 only.
@@ -152,10 +154,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
@@ -204,10 +207,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
@@ -281,10 +285,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Wrap in alias to test traversal.
@@ -370,10 +375,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema orderIndexSchema = new(orderSchema, 4);
         SourceIndex orderSourceIndex = new(orderFingerprint, orderIndexSchema, orderChunks, orderBloomSet);
 
-        TableDescriptor orderDescriptor = new("test", "orders", "orders.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(orderRows));
-        ScanOperator orderScan = new(orderDescriptor, null, orderRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("orders", orderRows)
+        };
+        ScanOperator orderScan = new(catalog["orders"], null, orderRows.Length);
         orderScan.SetSourceIndex(orderSourceIndex);
 
         // Inner right: "customers" table — simple, no bloom needed.
@@ -427,13 +433,13 @@ public sealed class BloomJoinPruningTests
     [Fact]
     public void CollectScanOperators_FindsAllScansInNestedJoinTree()
     {
-        TableDescriptor descriptor1 = new("test", "t1", "t1.test", new Dictionary<string, string>());
-        TableDescriptor descriptor2 = new("test", "t2", "t2.test", new Dictionary<string, string>());
-        TableDescriptor descriptor3 = new("test", "t3", "t3.test", new Dictionary<string, string>());
+        InMemoryTableProvider t1 = new("t1", []);
+        InMemoryTableProvider t2 = new("t2", []);
+        InMemoryTableProvider t3 = new("t3", []);
 
-        ScanOperator scan1 = new(descriptor1, null, 123);
-        ScanOperator scan2 = new(descriptor2, null, 234);
-        ScanOperator scan3 = new(descriptor3, null, 345);
+        ScanOperator scan1 = new(t1, null, 123);
+        ScanOperator scan2 = new(t2, null, 234);
+        ScanOperator scan3 = new(t3, null, 345);
 
         // Wrap scan2 in AliasOperator.
         AliasOperator aliased2 = new(scan2, "a2");
@@ -504,10 +510,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema indexSchema = new(schema, 6);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side: only key 4.0 — should match chunk 1 only.
@@ -584,10 +591,11 @@ public sealed class BloomJoinPruningTests
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
-        TableCatalog catalog = new();
-        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
-        ScanOperator scanOperator = new(descriptor, null, leftRows.Length);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
+        {
+            new InMemoryTableProvider("left", leftRows)
+        };
+        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side has keys from both chunks.

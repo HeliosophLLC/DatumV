@@ -5,6 +5,7 @@ using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -24,7 +25,7 @@ public sealed class ParallelOperatorTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
+            TestTableCatalog.Create(),
             new LocalBufferPool())
         {
             DegreeOfParallelism = degreeOfParallelism,
@@ -569,7 +570,8 @@ public sealed class ParallelOperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool())
+            TestTableCatalog.Create(),
+            new LocalBufferPool())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,
@@ -604,10 +606,11 @@ public sealed class ParallelOperatorTests
                 new ColumnReference("r", "id")));
 
         ParallelismBudget budget = new(4);
+        TableCatalog catalog = new(new Pool(GlobalPool.Backing));
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new LocalBufferPool())
+            catalog, new LocalBufferPool())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,

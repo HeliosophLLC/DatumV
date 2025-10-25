@@ -22,12 +22,7 @@ public sealed class GroupBySpillTests
 
     private static ExecutionContext CreateContext(long? memoryBudgetBytes = null)
     {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes);
+        return TestExecutionContext.Create(memoryBudgetBytes: memoryBudgetBytes);
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

@@ -7,6 +7,7 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -137,7 +138,7 @@ public sealed class FoldScanTests
             MakeRow(("grp", DataValue.FromInt32(1)), ("id", DataValue.FromFloat32(1f)), ("fare", DataValue.FromFloat32(100f))),
             MakeRow(("grp", DataValue.FromInt32(1)), ("id", DataValue.FromFloat32(2f)), ("fare", DataValue.FromFloat32(40f))),
         ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT grp, id, fare, SCAN ema = 0.15 * fare + 0.85 * ema INIT fare " +
@@ -165,7 +166,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(3)), ("value", DataValue.FromFloat32(30))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t",
@@ -184,7 +185,7 @@ public sealed class FoldScanTests
     [Fact]
     public async Task E2E_EmptyInput()
     {
-        TableCatalog catalog = CreateCatalog(("t", []));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", []));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + 1 INIT 0 OVER (ORDER BY id) AS rn FROM t",
@@ -201,7 +202,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(42))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS total FROM t",
@@ -223,7 +224,7 @@ public sealed class FoldScanTests
             MakeRow(("grp", DataValue.FromString("B")), ("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(200))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT grp, SCAN s = s + value INIT 0 OVER (PARTITION BY grp ORDER BY id) AS total FROM t",
@@ -254,7 +255,7 @@ public sealed class FoldScanTests
             MakeRow(("date", DataValue.FromFloat32(3)), ("price", DataValue.FromFloat32(105))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN ema = 0.1 * price + 0.9 * ema INIT price OVER (ORDER BY date) AS ema_10 FROM t",
@@ -279,7 +280,7 @@ public sealed class FoldScanTests
             MakeRow(("user_id", DataValue.FromString("u1")), ("ts", DataValue.FromFloat32(200))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         // Session increments when gap > 50
         List<Row> results = await ExecuteQueryAsync(
@@ -308,7 +309,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(4)), ("won", DataValue.FromFloat32(1))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN streak = CASE WHEN won = 1 THEN streak + 1 ELSE 0 END " +
@@ -331,7 +332,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET total = SCAN s = s + value INIT 0 OVER (ORDER BY id) AS _total, " +
@@ -354,7 +355,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(4)), ("gap", DataValue.FromFloat32(5))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN (episode, step) = " +
@@ -388,7 +389,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT id, value, SCAN s = s + value INIT 0 OVER (ORDER BY id) AS total FROM t",
@@ -410,7 +411,7 @@ public sealed class FoldScanTests
             MakeRow(("id", DataValue.FromFloat32(3)), ("value", DataValue.FromFloat32(30))),
         ];
 
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT ROW_NUMBER() OVER (ORDER BY id) AS rn, " +
@@ -436,18 +437,6 @@ public sealed class FoldScanTests
         string[] names = columns.Select(c => c.Name).ToArray();
         DataValue[] values = columns.Select(c => c.Value).ToArray();
         return new Row(names, values);
-    }
-
-    private static TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
-    {
-        TableCatalog catalog = new();
-        foreach ((string name, Row[] rows) in tables)
-        {
-            InMemoryTableProvider provider = new(rows);
-            catalog.RegisterProvider(name, () => provider);
-            catalog.Register(new TableDescriptor(name, name, "", new Dictionary<string, string>()));
-        }
-        return catalog;
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)

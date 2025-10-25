@@ -19,19 +19,6 @@ public sealed class DefineBlockTests
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 
-    private static TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
-    {
-        TableCatalog catalog = new();
-        foreach ((string name, Row[] rows) in tables)
-        {
-            InMemoryTableProvider provider = new(rows);
-            catalog.RegisterProvider(name, () => provider);
-            catalog.Register(new TableDescriptor(name, name, "", new Dictionary<string, string>()));
-        }
-
-        return catalog;
-    }
-
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(c => c.Name).ToArray();
@@ -197,7 +184,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineLet_EquivalentToInlineLet()
     {
-        TableCatalog catalog = CreateCatalog(("sales", [
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("sales", [
             MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(3))),
             MakeRow(("price", DataValue.FromInt32(5)),  ("qty", DataValue.FromInt32(4))),
         ]));
@@ -223,7 +210,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineAssertAbort_ThrowsOnFailure()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", [
             MakeRow(("x", DataValue.FromInt32(5))),
             MakeRow(("x", DataValue.FromInt32(-1))),
         ]));
@@ -238,7 +225,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineAssertSkip_FiltersFailingRows()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", [
             MakeRow(("x", DataValue.FromInt32(1))),
             MakeRow(("x", DataValue.FromInt32(-2))),
             MakeRow(("x", DataValue.FromInt32(3))),
@@ -259,7 +246,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_AssertReferencesLetFromSameDefineBlock_Works()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", [
             MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(5))),
             MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(0))),
         ]));
@@ -279,7 +266,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineAssertAndTrailingAssert_BothApplied()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", [
             MakeRow(("a", DataValue.FromInt32(1)), ("b", DataValue.FromInt32(1))),
             MakeRow(("a", DataValue.FromInt32(-1)), ("b", DataValue.FromInt32(1))),
             MakeRow(("a", DataValue.FromInt32(1)), ("b", DataValue.FromInt32(-1))),
@@ -338,7 +325,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefinePositionalDestructuring_ProducesComponents()
     {
-        TableCatalog catalog = CreateCatalog(("t",
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t",
         [
             MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
                 [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]))),
@@ -364,7 +351,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineNamedDestructuring_ProducesNamedFields()
     {
-        TableCatalog catalog = CreateCatalog(("t",
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t",
         [
             MakeRow(("dummy", DataValue.FromFloat32(0f))),
         ]));
@@ -386,7 +373,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_AssertReferencesPositionalDestructuringNames_Works()
     {
-        TableCatalog catalog = CreateCatalog(("t",
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t",
         [
             MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
                 [DataValue.FromFloat32(5f), DataValue.FromFloat32(10f)]))),
@@ -411,7 +398,7 @@ public sealed class DefineBlockTests
     [Fact]
     public async Task Execute_DefineMixedDestructuringAndScalarLet_AllColumnsAvailable()
     {
-        TableCatalog catalog = CreateCatalog(("t",
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t",
         [
             MakeRow(
                 ("arr", DataValue.FromArray(DataKind.Float32,

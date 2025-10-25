@@ -29,7 +29,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 1000;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(50) REPEATABLE(42)",
@@ -47,7 +47,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 100;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(100)",
@@ -64,7 +64,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 100;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(0)",
@@ -83,7 +83,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 500;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> first = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(30) REPEATABLE(12345)",
@@ -108,7 +108,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 500;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> seed1 = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(30) REPEATABLE(1)",
@@ -139,7 +139,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 1000;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE SYSTEM(50) REPEATABLE(42)",
@@ -158,7 +158,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 100;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT d.id FROM data TABLESAMPLE BERNOULLI(100) AS d",
@@ -177,7 +177,7 @@ public sealed class TablesampleExecutionTests
     {
         const int totalRows = 1000;
         Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(1) REPEATABLE(42)",
@@ -196,7 +196,7 @@ public sealed class TablesampleExecutionTests
     public async Task Stratified_E2E_PreservesDistribution()
     {
         Row[] data = GenerateClassRows(("cat", 300), ("dog", 300), ("bird", 300));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE STRATIFIED(50) ON label REPEATABLE(42)",
@@ -224,7 +224,7 @@ public sealed class TablesampleExecutionTests
     public async Task Balanced_E2E_ExactCountPerClass()
     {
         Row[] data = GenerateClassRows(("cat", 300), ("dog", 200), ("bird", 100));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
@@ -248,7 +248,7 @@ public sealed class TablesampleExecutionTests
     public async Task Balanced_E2E_SmallClass()
     {
         Row[] data = GenerateClassRows(("cat", 100), ("dog", 3));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
@@ -268,7 +268,7 @@ public sealed class TablesampleExecutionTests
     public async Task Balanced_E2E_Deterministic()
     {
         Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         List<Row> result1 = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(20) ON label REPEATABLE(42)",
@@ -291,7 +291,7 @@ public sealed class TablesampleExecutionTests
     public async Task Stratified_E2E_WithWhereClause()
     {
         Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
 
         // WHERE id >= 100 filters to ~300 rows, then sample 100%.
         List<Row> results = await ExecuteQueryAsync(
@@ -339,20 +339,6 @@ public sealed class TablesampleExecutionTests
         string[] names = columns.Select(c => c.Name).ToArray();
         DataValue[] values = columns.Select(c => c.Value).ToArray();
         return new Row(names, values);
-    }
-
-    private static TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
-    {
-        TableCatalog catalog = new();
-
-        foreach ((string name, Row[] rows) in tables)
-        {
-            InMemoryTableProvider provider = new(rows);
-            catalog.RegisterProvider(name, () => provider);
-            catalog.Register(new TableDescriptor(name, name, "", new Dictionary<string, string>()));
-        }
-
-        return catalog;
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)

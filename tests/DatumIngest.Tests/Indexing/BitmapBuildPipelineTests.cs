@@ -22,6 +22,7 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndexBuilder builder = new(chunkSize: 10);
         InMemoryTableProvider provider = new(
+            "test",
             ["flag"],
             Enumerable.Range(0, 10).Select(i => new Row(["flag"], [DataValue.FromBoolean(i % 2 == 0)])).ToArray());
 
@@ -44,6 +45,7 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndexBuilder builder = new(chunkSize: 9);
         InMemoryTableProvider provider = new(
+            "test",
             ["color"],
             Enumerable.Range(0, 9).Select(i => new Row(["color"], [DataValue.FromString(colors[i % 3])])).ToArray());
 
@@ -66,6 +68,7 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndexBuilder builder = new(chunkSize: count);
         InMemoryTableProvider provider = new(
+            "test",
             ["id"],
             Enumerable.Range(0, count).Select(i => new Row(["id"], [DataValue.FromFloat32((float)i)])).ToArray());
 
@@ -84,6 +87,7 @@ public sealed class BitmapBuildPipelineTests
         // 6 rows, chunkSize=3 → 2 chunks.
         SourceIndexBuilder builder = new(chunkSize: 3);
         InMemoryTableProvider provider = new(
+            "test",
             ["kind"],
             [
                 new Row(["kind"], [DataValue.FromString("A")]),
@@ -124,6 +128,7 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndexBuilder builder = new(chunkSize: 10);
         InMemoryTableProvider provider = new(
+            "test",
             ["data"],
             Enumerable.Range(0, 5).Select(i => new Row(["data"], [DataValue.FromUInt8Array(new byte[] { (byte)i })])).ToArray());
 
@@ -141,6 +146,7 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndexBuilder builder = new(chunkSize: 10);
         InMemoryTableProvider provider = new(
+            "test",
             ["status"],
             [
                 new Row(["status"], [DataValue.FromString("active")]),
@@ -170,6 +176,7 @@ public sealed class BitmapBuildPipelineTests
         // 5 rows, chunkSize=3 → chunk0 (3 rows), chunk1 (2 rows).
         SourceIndexBuilder builder = new(chunkSize: 3);
         InMemoryTableProvider provider = new(
+            "test",
             ["val"],
             Enumerable.Range(0, 5)
             .Select(i => new Row(["val"], [DataValue.FromBoolean(true)]))
@@ -354,12 +361,4 @@ public sealed class BitmapBuildPipelineTests
         }
     }
 
-    // ───────────────────────── Helpers ─────────────────────────
-
-    /// <summary>Minimal table descriptor for test purposes.</summary>
-    private static class TestTableDescriptor
-    {
-        internal static readonly TableDescriptor Default = new("csv", "test", "test.csv",
-            new Dictionary<string, string>());
-    }
 }

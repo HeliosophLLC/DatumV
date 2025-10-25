@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
@@ -21,13 +22,15 @@ internal static class TestExecutionContext
     internal static ExecutionContext Create(
         FunctionRegistry? functionRegistry = null,
         TableCatalog? catalog = null,
-        long? memoryBudgetBytes = null)
+        long? memoryBudgetBytes = null,
+        QueryMeter? meter = null)
     {
         return new ExecutionContext(
             CancellationToken.None,
             functionRegistry ?? FunctionRegistry.CreateDefault(),
-            catalog ?? new TableCatalog(),
+            catalog ?? new TableCatalog(new Pool(GlobalPool.Backing)),
             new LocalBufferPool(),
+            queryMeter: meter,
             memoryBudgetBytes: memoryBudgetBytes);
     }
 }

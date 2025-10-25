@@ -29,7 +29,6 @@ public sealed class IndexScanOperator : IQueryOperator
     /// </summary>
     private const int MaxIndexEntriesPerFlush = 8192;
 
-    private readonly TableDescriptor _descriptor;
     private readonly IReadOnlySet<string>? _requiredColumns;
     private readonly IColumnIndex _columnIndex;
     private readonly IReadOnlyList<IndexChunk> _chunks;
@@ -39,21 +38,21 @@ public sealed class IndexScanOperator : IQueryOperator
     /// <summary>
     /// Creates an index scan operator.
     /// </summary>
-    /// <param name="descriptor">Table descriptor identifying the data source.</param>
+    /// <param name="tableProvider">Table provider identifying the data source.</param>
     /// <param name="requiredColumns">Columns needed downstream; null means all columns.</param>
     /// <param name="columnIndex">The column index defining scan order.</param>
     /// <param name="chunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
     /// <param name="descending">Whether to walk the index in reverse (descending) order.</param>
     /// <param name="columnName">The name of the indexed column, used for plan descriptions.</param>
     public IndexScanOperator(
-        TableDescriptor descriptor,
+        ITableProvider tableProvider,
         IReadOnlySet<string>? requiredColumns,
         IColumnIndex columnIndex,
         IReadOnlyList<IndexChunk> chunks,
         bool descending,
         string columnName = "unknown")
     {
-        _descriptor = descriptor;
+        TableProvider = tableProvider;
         _requiredColumns = requiredColumns;
         _columnIndex = columnIndex;
         _chunks = chunks;
@@ -61,8 +60,8 @@ public sealed class IndexScanOperator : IQueryOperator
         _columnName = columnName;
     }
 
-    /// <summary>The table descriptor this operator scans.</summary>
-    public TableDescriptor Descriptor => _descriptor;
+    /// <summary>The table provider this operator scans.</summary>
+    public ITableProvider TableProvider { get; }
 
     /// <summary>The set of columns requested for projection pushdown.</summary>
     public IReadOnlySet<string>? RequiredColumns => _requiredColumns;
@@ -78,8 +77,7 @@ public sealed class IndexScanOperator : IQueryOperator
     {
         Dictionary<string, string> properties = new()
         {
-            ["table"] = _descriptor.Name,
-            ["provider"] = _descriptor.Provider,
+            ["table"] = TableProvider.Name,
             ["column"] = _columnName,
             ["direction"] = _descending ? "DESC" : "ASC",
         };
@@ -101,82 +99,44 @@ public sealed class IndexScanOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
-        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
-            datumProvider.Store = context.Store;
 
-        if (!provider.Seekable)
+        if (!TableProvider.Seekable)
         {
             throw new InvalidOperationException(
-                $"IndexScanOperator requires a seekable provider, but '{_descriptor.Name}' " +
-                $"uses '{provider.GetType().Name}' which does not indicate it is seekable.");
+                $"IndexScanOperator requires a seekable provider, but '{TableProvider.Name}' " +
+                $"does not indicate it is seekable.");
         }
 
         // Open a seek session for the lifetime of this scan — reader and decode
         // buffers are owned by the session, not shared with concurrent calls.
-        using ISeekSession seekSession = provider.OpenSeekSession(_descriptor, _requiredColumns);
+        using ISeekSession seekSession = TableProvider.OpenSeekSession(_requiredColumns);
 
-        try
+        // Traverse the index in sorted order (ascending or descending).
+        // Batch consecutive entries from the same chunk into a single read.
+        IEnumerable<ValueIndexEntry> traversal = _descending
+            ? _columnIndex.TraverseBackward()
+            : _columnIndex.TraverseForward();
+
+        List<ValueIndexEntry> indexEntries = new();
+        int currentChunkIndex = -1;
+        long indexScanRowsYielded = 0;
+        RowBatch? outputBatch = null;
+
+        if (ExecutionTracer.IsEnabled)
         {
-            // Traverse the index in sorted order (ascending or descending).
-            // Batch consecutive entries from the same chunk into a single read.
-            IEnumerable<ValueIndexEntry> traversal = _descending
-                ? _columnIndex.TraverseBackward()
-                : _columnIndex.TraverseForward();
+            ExecutionTracer.Write(
+                $"IndexScan  start  table={TableProvider.Name}  totalEntries={_columnIndex.EntryCount:N0}");
+        }
 
-            List<ValueIndexEntry> indexEntries = new();
-            int currentChunkIndex = -1;
-            long indexScanRowsYielded = 0;
-            RowBatch? outputBatch = null;
-
-            if (ExecutionTracer.IsEnabled)
+        foreach (ValueIndexEntry entry in traversal)
+        {
+            if (indexEntries.Count > 0
+                && (entry.ChunkIndex != currentChunkIndex
+                    || indexEntries.Count >= MaxIndexEntriesPerFlush))
             {
-                ExecutionTracer.Write(
-                    $"IndexScan  start  table={_descriptor.Name}  totalEntries={_columnIndex.EntryCount:N0}");
-            }
-
-            foreach (ValueIndexEntry entry in traversal)
-            {
-                if (indexEntries.Count > 0
-                    && (entry.ChunkIndex != currentChunkIndex
-                        || indexEntries.Count >= MaxIndexEntriesPerFlush))
-                {
-                    // Chunk boundary or size cap: flush the accumulated entries.
-                    await foreach (Row row in FlushIndexEntriesAsync(
-                        seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
-                    {
-                        if (ExecutionTracer.IsEnabled)
-                        {
-                            indexScanRowsYielded++;
-
-                            if (indexScanRowsYielded % 1_000_000 == 0)
-                            {
-                                ExecutionTracer.Write(
-                                    $"IndexScan  {_descriptor.Name}  yielded {indexScanRowsYielded:N0} rows");
-                            }
-                        }
-
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(row);
-
-                        if (outputBatch.IsFull)
-                        {
-                            yield return outputBatch;
-                            outputBatch = null;
-                        }
-                    }
-
-                    indexEntries.Clear();
-                }
-
-                indexEntries.Add(entry);
-                currentChunkIndex = entry.ChunkIndex;
-            }
-
-            // Flush any remaining entries.
-            if (indexEntries.Count > 0)
-            {
-                await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
+                // Chunk boundary or size cap: flush the accumulated entries.
+                await foreach (Row row in FlushIndexEntriesAsync(
+                    seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
                 {
                     if (ExecutionTracer.IsEnabled)
                     {
@@ -185,7 +145,7 @@ public sealed class IndexScanOperator : IQueryOperator
                         if (indexScanRowsYielded % 1_000_000 == 0)
                         {
                             ExecutionTracer.Write(
-                                $"IndexScan  {_descriptor.Name}  yielded {indexScanRowsYielded:N0} rows");
+                                $"IndexScan  {TableProvider.Name}  yielded {indexScanRowsYielded:N0} rows");
                         }
                     }
 
@@ -198,22 +158,50 @@ public sealed class IndexScanOperator : IQueryOperator
                         outputBatch = null;
                     }
                 }
+
+                indexEntries.Clear();
             }
 
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
-            }
+            indexEntries.Add(entry);
+            currentChunkIndex = entry.ChunkIndex;
+        }
 
-            if (ExecutionTracer.IsEnabled)
+        // Flush any remaining entries.
+        if (indexEntries.Count > 0)
+        {
+            await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
             {
-                ExecutionTracer.Write(
-                    $"IndexScan  done  table={_descriptor.Name}  totalYielded={indexScanRowsYielded:N0}");
+                if (ExecutionTracer.IsEnabled)
+                {
+                    indexScanRowsYielded++;
+
+                    if (indexScanRowsYielded % 1_000_000 == 0)
+                    {
+                        ExecutionTracer.Write(
+                            $"IndexScan  {TableProvider.Name}  yielded {indexScanRowsYielded:N0} rows");
+                    }
+                }
+
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
+                outputBatch.Add(row);
+
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
             }
         }
-        finally
+
+        if (outputBatch is not null)
         {
-            (provider as IDisposable)?.Dispose();
+            yield return outputBatch;
+        }
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.Write(
+                $"IndexScan  done  table={TableProvider.Name}  totalYielded={indexScanRowsYielded:N0}");
         }
     }
 

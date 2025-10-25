@@ -65,29 +65,24 @@ public sealed class Indexer(Pool pool)
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
         TableDescriptor descriptor = new(
-            Provider: "datum",
             Name: PathDetector.DeriveTableName(source.FilePath),
-            FilePath: source.FilePath,
-            Options: new Dictionary<string, string>());
+            FilePath: source.FilePath);
 
         SourceIndex index;
         long bytesWritten;
         long rowCount = 0;
 
-        using DatumFileTableProvider provider = new(pool);
+        using DatumFileTableProvider provider = new(descriptor, pool);
         try
         {
             await foreach (RowBatch batch in provider
-                .ScanAsync(descriptor, requiredColumns: null, filterHint: null, cancellationToken)
+                .ScanAsync(requiredColumns: null, filterHint: null, cancellationToken)
                 .ConfigureAwait(false))
             {
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    incremental.AddRow(batch[i]);
-                }
+                incremental.AddBatch(batch);
 
                 rowCount += batch.Count;
-                
+
                 pool.ReturnRowBatch(batch);
             }
 
