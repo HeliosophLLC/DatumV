@@ -130,8 +130,5 @@ public sealed class ArgMaxFunction : IAggregateFunction
             int comparison = CompareKeys(candidate, current);
             return _findMaximum ? comparison > 0 : comparison < 0;
         }
-
-        private static int CompareKeys(DataValue left, DataValue right) =>
-            DataValueComparer.Compare(left, right);
     }
 }

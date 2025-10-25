@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.Bloom;
 using DatumIngest.Indexing.Sorted;
@@ -22,7 +23,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private IReadOnlySet<string>? _effectiveBloomColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
-    private Dictionary<string, IncrementalChunkAccumulator> _currentAccumulators = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ChunkAccumulator>? _currentAccumulators = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, BloomFilter>? _currentBloomFilters;
     private readonly List<Dictionary<string, BloomFilter>>? _allChunkBloomFilters;
     private SortedIndexSpillWriter? _spillWriter;
@@ -31,7 +32,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private string[]? _resolvedColumnNames;
 
     /// <summary>Ordinal-indexed accumulators, rebuilt at each chunk boundary.</summary>
-    private IncrementalChunkAccumulator?[]? _ordinalAccumulators;
+    private ChunkAccumulator?[]? _ordinalAccumulators;
 
     /// <summary>Ordinal-indexed bloom filters, rebuilt at each chunk boundary.</summary>
     private BloomFilter?[]? _ordinalBloomFilters;
@@ -59,7 +60,6 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private long _totalRowCount;
     private long _currentChunkRowOffset;
     private int _currentChunkIndex;
-    private bool _disposed;
 
     internal IncrementalIndexBuilder(
         int chunkSize,
@@ -84,6 +84,12 @@ public sealed class IncrementalIndexBuilder : IDisposable
     }
 
     /// <summary>
+    /// Gets a value indicating whether this builder has been disposed.
+    /// </summary>
+    [MemberNotNullWhen(false, nameof(_currentAccumulators))]
+    public bool Disposed { get; private set; }
+
+    /// <summary>
     /// Observes every row in the given batch. Convenience wrapper around
     /// <see cref="AddRow"/> for callers that already have a <see cref="RowBatch"/>.
     /// </summary>
@@ -100,9 +106,11 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// the output writer.
     /// </summary>
     /// <param name="row">The row to index.</param>
-    /// <param name="valueStore">The value store to use for decoding string values if needed for bloom or sorted indexes.</param>
-    public void AddRow(Row row, IValueStore valueStore)
+    /// <param name="arena">The arena to use for decoding string values if needed for bloom or sorted indexes.</param>
+    public void AddRow(Row row, Arena arena)
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         if (_schema is null)
         {
             _schema = BuildSchemaFromRow(row);
@@ -113,7 +121,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
             if (_spillWriter is not null && effectiveIndexColumns is not null)
             {
-                _spillWriter.Initialize(effectiveIndexColumns, _chunkSize);
+                _spillWriter.Initialize(effectiveIndexColumns, _chunkSize, _schema);
             }
 
             _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema);
@@ -130,7 +138,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         }
 
         int fieldCount = row.FieldCount;
-        IncrementalChunkAccumulator?[] accumulators = _ordinalAccumulators!;
+        ChunkAccumulator?[] accumulators = _ordinalAccumulators!;
         BloomFilter?[]? bloomFilters = _ordinalBloomFilters;
         List<ValueIndexEntry>?[]? spillEntries = _ordinalSpillEntries;
         BitmapChunkAccumulator?[]? bitmapAccs = _ordinalBitmapAccumulators;
@@ -139,19 +147,13 @@ public sealed class IncrementalIndexBuilder : IDisposable
         {
             DataValue value = row[ordinal];
 
-            IncrementalChunkAccumulator? accumulator = accumulators[ordinal];
-            if (accumulator is not null)
-            {
-                accumulator.Add(value);
-            }
+            ChunkAccumulator? accumulator = accumulators[ordinal];
+            accumulator?.Add(value);
 
             if (bloomFilters is not null)
             {
                 BloomFilter? bloom = bloomFilters[ordinal];
-                if (bloom is not null)
-                {
-                    bloom.Add(value, valueStore);
-                }
+                bloom?.Add(value, arena);
             }
 
             if (spillEntries is not null && !value.IsNull)
@@ -159,8 +161,9 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 List<ValueIndexEntry>? entries = spillEntries[ordinal];
                 if (entries is not null)
                 {
-                    if (value.Kind == DataKind.String
-                        && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
+                    // Non-inline String/JsonValue can't be retained in the sorted index without
+                    // arena plumbing. Drop the column on first sight — "indexable = self-contained."
+                    if (value.Kind is DataKind.String or DataKind.JsonValue && !value.IsInline)
                     {
                         string droppedName = _resolvedColumnNames![ordinal];
                         _spillWriter!.DropColumn(droppedName);
@@ -266,21 +269,27 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        if (Disposed)
         {
             return;
         }
 
-        _disposed = true;
+        _currentAccumulators = null;
+        _ordinalAccumulators = null;
+
         _spillWriter?.Dispose();
         _spillWriter = null;
+
+        Disposed = true;
     }
 
     private void FinalizeCurrentChunk()
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (KeyValuePair<string, IncrementalChunkAccumulator> entry in _currentAccumulators)
+        foreach (KeyValuePair<string, ChunkAccumulator> entry in _currentAccumulators)
         {
             stats[entry.Key] = entry.Value.ToStatistics(_rowsInCurrentChunk);
         }
@@ -328,22 +337,12 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
     private void InitializeAccumulators(Row row)
     {
-        _currentAccumulators = new Dictionary<string, IncrementalChunkAccumulator>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string name in row.ColumnNames)
-        {
-            _currentAccumulators[name] = new IncrementalChunkAccumulator();
-        }
+        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(row);
     }
 
     private void InitializeAccumulatorsFromSchema()
     {
-        _currentAccumulators = new Dictionary<string, IncrementalChunkAccumulator>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (ColumnInfo column in _schema!.Columns)
-        {
-            _currentAccumulators[column.Name] = new IncrementalChunkAccumulator();
-        }
+        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(_schema!);
     }
 
     /// <summary>
@@ -392,12 +391,14 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// </summary>
     private void RebuildOrdinalAccumulatorsAndBlooms()
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
         int columnCount = _resolvedColumnNames!.Length;
-        _ordinalAccumulators = new IncrementalChunkAccumulator?[columnCount];
+        _ordinalAccumulators = new ChunkAccumulator?[columnCount];
 
         for (int ordinal = 0; ordinal < columnCount; ordinal++)
         {
-            _currentAccumulators.TryGetValue(_resolvedColumnNames[ordinal], out IncrementalChunkAccumulator? accumulator);
+            _currentAccumulators.TryGetValue(_resolvedColumnNames[ordinal], out ChunkAccumulator? accumulator);
             _ordinalAccumulators[ordinal] = accumulator;
         }
 

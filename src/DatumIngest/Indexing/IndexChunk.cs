@@ -1,3 +1,5 @@
+using DatumIngest.Model;
+
 namespace DatumIngest.Indexing;
 
 /// <summary>
@@ -10,4 +12,17 @@ namespace DatumIngest.Indexing;
 public sealed record IndexChunk(
     long RowOffset,
     long RowCount,
-    IReadOnlyDictionary<string, ChunkColumnStatistics> ColumnStatistics);
+    IReadOnlyDictionary<string, ChunkColumnStatistics> ColumnStatistics)
+{
+    /// <summary>
+    /// Creates a <see cref="ColumnStatisticsRangeLookup"/> for this chunk, which can be used for efficient
+    /// range-based pruning of the chunk based on its column statistics.
+    /// </summary>
+    public ColumnStatisticsRangeLookup CreateStatisticsLookup()
+    {
+        return new ColumnStatisticsRangeLookup(
+            ColumnStatistics.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.ToColumnStatisticsRange()));
+    }
+}

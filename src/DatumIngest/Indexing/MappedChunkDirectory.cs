@@ -3,6 +3,7 @@ using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.MemoryMappedFiles;
 using System.Text;
+using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Sorted;
 
@@ -35,8 +36,12 @@ namespace DatumIngest.Indexing;
 /// </remarks>
 internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
 {
-    /// <summary>Width of the per-chunk fixed fields: 4 × <c>i64</c> = 32 bytes.</summary>
-    private const int ChunkFixedFieldWidth = 32;
+    /// <summary>
+    /// Width of the per-chunk fixed fields written by <see cref="UnifiedIndexWriter.WriteChunkDirectory"/>:
+    /// 2 × <c>i64</c> (rowOffset + rowCount) = 16 bytes. Must stay in sync with the writer's
+    /// per-chunk emission loop.
+    /// </summary>
+    private const int ChunkFixedFieldWidth = 16;
 
     /// <summary>Width of the three scalar statistics per zone map entry: 3 × <c>i64</c> = 24 bytes.</summary>
     private const int ScalarStatisticsWidth = 24;
@@ -120,6 +125,10 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
         Dictionary<string, int> columnIndexByName;
         string[]? stringTable;
 
+        if (ExecutionTracer.IsEnabled)
+            ExecutionTracer.Write(
+                $"ChunkDir.Read   section at absolute offset {sectionOffset}, length {sectionLength}");
+
         using (MemoryMappedViewStream stream = memoryMappedFile.CreateViewStream(
             sectionOffset, sectionLength, MemoryMappedFileAccess.Read))
         {
@@ -147,23 +156,55 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
             // Chunk fixed fields start immediately after the column headers.
             chunkFixedFieldsOffset = sectionOffset + stream.Position;
 
+            if (ExecutionTracer.IsEnabled)
+                ExecutionTracer.Write(
+                    $"ChunkDir.Read   chunkFixedFields at stream pos {stream.Position} (abs {chunkFixedFieldsOffset}), " +
+                    $"chunks={chunkCount}, zoneMapColumns={zoneMapColumnCount}, perChunkWidth={ChunkFixedFieldWidth}");
+
             // Zone maps start after chunk fixed fields.
             long zoneMapStart = chunkFixedFieldsOffset + (long)chunkCount * ChunkFixedFieldWidth;
             long currentZoneMapOffset = zoneMapStart;
+
+            if (ExecutionTracer.IsEnabled)
+                ExecutionTracer.Write(
+                    $"ChunkDir.Read   zoneMaps at stream pos {zoneMapStart - sectionOffset} (abs {zoneMapStart})");
 
             for (int columnIndex = 0; columnIndex < zoneMapColumnCount; columnIndex++)
             {
                 ZoneMapColumnDescriptor column = columns[columnIndex];
                 columns[columnIndex] = column with { ZoneMapBaseOffset = currentZoneMapOffset };
+
+                if (ExecutionTracer.IsEnabled)
+                    ExecutionTracer.Write(
+                        $"ChunkDir.Read   col='{column.Name}' kind={column.Kind} keyWidth={column.KeyWidth}  " +
+                        $"stride={column.EntryStride}  baseAbs={currentZoneMapOffset}  totalBytes={(long)chunkCount * column.EntryStride}");
+
                 currentZoneMapOffset += (long)chunkCount * column.EntryStride;
             }
 
             // Read string table (after all zone maps).
             long stringTableStreamPosition = currentZoneMapOffset - sectionOffset;
+
+            if (ExecutionTracer.IsEnabled)
+                ExecutionTracer.Write(
+                    $"ChunkDir.Read   stringTable at stream pos {stringTableStreamPosition} (abs {currentZoneMapOffset}), " +
+                    $"sectionLength={sectionLength}, remaining={sectionLength - stringTableStreamPosition}");
+
+            if (stringTableStreamPosition >= sectionLength)
+            {
+                throw new InvalidDataException(
+                    $"Chunk directory string-table position {stringTableStreamPosition} lands at or past " +
+                    $"section length {sectionLength}. Writer and reader disagree on zone-map layout. " +
+                    $"chunkCount={chunkCount}, zoneMapColumnCount={zoneMapColumnCount}, chunkFixedFieldWidth={ChunkFixedFieldWidth}.");
+            }
+
             stream.Position = stringTableStreamPosition;
 
             int stringTableEntryCount = reader.ReadInt32();
             stringTable = null;
+
+            if (ExecutionTracer.IsEnabled)
+                ExecutionTracer.Write($"ChunkDir.Read   stringTable count={stringTableEntryCount}");
 
             if (stringTableEntryCount > 0)
             {

@@ -21,14 +21,53 @@ namespace DatumIngest.Model;
 internal static class DataValueComparer
 {
     /// <summary>
+    /// Compares two non-null values without providing an <see cref="Arena"/>. Safe for
+    /// scalar kinds, null values, and inline strings (which are self-contained in the
+    /// <see cref="DataValue"/> struct). Throws for non-inline <see cref="DataKind.String"/>
+    /// or <see cref="DataKind.JsonValue"/> values — those require arenas to resolve payload
+    /// bytes; use <see cref="Compare(DataValue, Arena, DataValue, Arena)"/> instead.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when either side is a non-inline String or JsonValue. The caller must
+    /// supply arenas via the two-arena overload to compare those content-correctly.
+    /// </exception>
+    internal static int Compare(DataValue left, DataValue right)
+    {
+        bool leftNeedsArena = NeedsArenaForCompare(left);
+        bool rightNeedsArena = NeedsArenaForCompare(right);
+        if (leftNeedsArena || rightNeedsArena)
+        {
+            throw new InvalidOperationException(
+                "Comparing non-inline String/JsonValue requires arenas. " +
+                "Use DataValueComparer.Compare(left, leftArena, right, rightArena) instead.");
+        }
+
+        // Safe: arena is only read inside Compare for String/JsonValue reference-store kinds,
+        // and we've just proven both sides are either inline, null, or scalar.
+        return Compare(left, null!, right, null!);
+    }
+
+    private static bool NeedsArenaForCompare(DataValue value) =>
+        (value.Kind is DataKind.String or DataKind.JsonValue)
+        && !value.IsNull
+        && !value.IsInline;
+
+    /// <summary>
     /// Compares two non-null values of the same kind.
-    /// When <paramref name="arena"/> is supplied, arena-backed strings are compared
-    /// via their raw UTF-8 byte spans for maximum throughput.
     /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
     /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
     /// are widened to <see cref="double"/> before comparison.
     /// </summary>
-    internal static int Compare(DataValue left, DataValue right, Arena? arena = null)
+    internal static int Compare(DataValue left, DataValue right, Arena arena)
+        => Compare(left, arena, right, arena);
+
+    /// <summary>
+    /// Compares two non-null values of the same kind.
+    /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
+    /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
+    /// are widened to <see cref="double"/> before comparison.
+    /// </summary>
+    internal static int Compare(DataValue left, Arena leftArena, DataValue right, Arena rightArena)
     {
         // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
         // original per-class implementations and handles cases like INT column vs FLOAT literal.
@@ -56,16 +95,15 @@ internal static class DataValueComparer
             DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
             DataKind.Type     => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
-            DataKind.String   => arena is not null
-                ? CompareStrings(left, right, arena)
-                : string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal),
+            DataKind.String   => left.AsUtf8Span(leftArena).SequenceCompareTo(right.AsUtf8Span(rightArena)),
+            DataKind.JsonValue => left.AsUtf8Span(leftArena).SequenceCompareTo(right.AsUtf8Span(rightArena)),
             _ => 0,
         };
     }
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="kind"/> supports natural
-    /// ordering via <see cref="Compare"/>. This includes all numeric scalars, strings,
+    /// ordering via <see cref="Compare(DataValue, Arena, DataValue, Arena)"/>. This includes all numeric scalars, strings,
     /// date/time types, duration, uuid, and boolean.
     /// </summary>
     internal static bool IsComparable(DataKind kind) =>
@@ -164,9 +202,9 @@ internal static class DataValueComparer
     /// </summary>
     /// <param name="kind">The target <see cref="DataKind"/>.</param>
     /// <param name="boxed">The managed-boxed primitive value (e.g. <see cref="long"/>, <see cref="string"/>, <see cref="DateOnly"/>), or <c>null</c>.</param>
-    /// <param name="store">Value store for arena-backed kinds (String). May be <c>null</c> for inline kinds only.</param>
+    /// <param name="store">Value store for arena-backed kinds (String).</param>
     /// <returns>The materialized <see cref="DataValue"/>, or <c>null</c> if <paramref name="boxed"/> is null or the kind is unsupported.</returns>
-    internal static DataValue? MakeFromBoxed(DataKind kind, object? boxed, IValueStore? store = null)
+    internal static DataValue? MakeFromBoxed(DataKind kind, object? boxed, IValueStore store)
     {
         if (boxed is null) return null;
 
@@ -314,16 +352,4 @@ internal static class DataValueComparer
 
     private static double ToDouble(DataValue value) =>
         value.TryToDouble(out double d) ? d : 0.0;
-
-    private static int CompareStrings(DataValue left, DataValue right, Arena arena)
-    {
-        if (left.IsArenaBacked && right.IsArenaBacked)
-        {
-            return left.GetArenaStringSpan(arena).SequenceCompareTo(right.GetArenaStringSpan(arena));
-        }
-
-        string leftStr = left.IsArenaBacked ? left.AsString(arena) : left.AsString();
-        string rightStr = right.IsArenaBacked ? right.AsString(arena) : right.AsString();
-        return string.Compare(leftStr, rightStr, StringComparison.Ordinal);
-    }
 }

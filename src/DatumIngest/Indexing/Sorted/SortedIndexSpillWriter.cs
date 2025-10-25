@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using DatumIngest.Execution;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.IO;
@@ -29,12 +31,6 @@ namespace DatumIngest.Indexing.Sorted;
 internal sealed class SortedIndexSpillWriter : IDisposable
 {
     /// <summary>
-    /// Maximum string length for auto-indexed string columns. Strings observed to exceed
-    /// this length cause the column to be dropped from indexing.
-    /// </summary>
-    internal const int AutoIndexMaxStringLength = 16;
-
-    /// <summary>
     /// Reusable comparison for sorting <see cref="ValueIndexEntry"/> by key. Fast-paths
     /// the common float (scalar) case to avoid the overhead of the general-purpose
     /// <see cref="StatisticsPredicateEvaluator.CompareValues"/> dispatch.
@@ -57,12 +53,137 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         return DataValueComparer.Compare(left, right);
     }
 
+    /// <summary>
+    /// Attempts to sort <paramref name="entries"/> in place by encoding each key as a
+    /// sort-preserving <see cref="ulong"/> and delegating to <see cref="MemoryExtensions.Sort{TKey, TValue}(Span{TKey}, Span{TValue})"/>.
+    /// Primitive-keyed sort avoids per-compare DataValueComparer dispatch.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> on success; <c>false</c> when <paramref name="kind"/> cannot be encoded
+    /// as a ulong (Uuid, String, JsonValue, Array, Struct, etc). Callers fall back to the
+    /// generic <see cref="EntryKeyComparison"/> path.
+    /// </returns>
+    private static bool TrySortByUlongKey(List<ValueIndexEntry> entries, DataKind kind)
+    {
+        if (!CanEncodeAsSortableUlong(kind))
+        {
+            return false;
+        }
+
+        int count = entries.Count;
+        ulong[] rented = ArrayPool<ulong>.Shared.Rent(count);
+        try
+        {
+            Span<ulong> keys = rented.AsSpan(0, count);
+            Span<ValueIndexEntry> items = CollectionsMarshal.AsSpan(entries)[..count];
+
+            for (int i = 0; i < count; i++)
+            {
+                keys[i] = EncodeAsSortableUlong(items[i].Key);
+            }
+
+            MemoryExtensions.Sort(keys, items);
+            return true;
+        }
+        finally
+        {
+            ArrayPool<ulong>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the kind's sort-preserving encoding fits in 64 bits. Matches the
+    /// kinds handled by <see cref="EncodeAsSortableUlong"/>.
+    /// </summary>
+    private static bool CanEncodeAsSortableUlong(DataKind kind) => kind switch
+    {
+        DataKind.Boolean or
+        DataKind.UInt8 or DataKind.Int8 or
+        DataKind.UInt16 or DataKind.Int16 or
+        DataKind.UInt32 or DataKind.Int32 or
+        DataKind.UInt64 or DataKind.Int64 or
+        DataKind.Float32 or DataKind.Float64 or
+        DataKind.Date or DataKind.DateTime or
+        DataKind.Time or DataKind.Duration => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Encodes a <see cref="DataValue"/> to a 64-bit unsigned integer that preserves
+    /// sort order under native ulong comparison. Mirrors the byte-level encoding in
+    /// <see cref="SortedIndexKeyEncoder"/>: sign-flip for signed integers, IEEE-to-sortable
+    /// for floats, top-bit flip for tick-based temporal types. Narrower kinds fit in the
+    /// low bits; the high bits stay zero, so cross-width comparisons remain correct within
+    /// a single column.
+    /// </summary>
+    private static ulong EncodeAsSortableUlong(DataValue value) => value.Kind switch
+    {
+        DataKind.Boolean  => value.AsBoolean() ? 1UL : 0UL,
+        DataKind.UInt8    => value.AsUInt8(),
+        DataKind.Int8     => (ulong)(byte)(value.AsInt8() ^ unchecked((sbyte)0x80)),
+        DataKind.UInt16   => value.AsUInt16(),
+        DataKind.Int16    => (ulong)(ushort)(value.AsInt16() ^ unchecked((short)0x8000)),
+        DataKind.UInt32   => value.AsUInt32(),
+        DataKind.Int32    => (uint)(value.AsInt32() ^ unchecked((int)0x80000000)),
+        DataKind.Float32  => EncodeFloat32Sortable(value.AsFloat32()),
+        DataKind.Date     => (uint)(value.AsDate().DayNumber ^ unchecked((int)0x80000000)),
+        DataKind.UInt64   => value.AsUInt64(),
+        DataKind.Int64    => (ulong)(value.AsInt64() ^ unchecked((long)0x8000000000000000L)),
+        DataKind.Float64  => EncodeFloat64Sortable(value.AsFloat64()),
+        DataKind.DateTime => (ulong)(value.AsDateTime().UtcTicks ^ unchecked((long)0x8000000000000000L)),
+        DataKind.Time     => (ulong)(value.AsTime().Ticks ^ unchecked((long)0x8000000000000000L)),
+        DataKind.Duration => (ulong)(value.AsDuration().Ticks ^ unchecked((long)0x8000000000000000L)),
+        _ => throw new InvalidOperationException($"Kind {value.Kind} is not ulong-encodable; call CanEncodeAsSortableUlong first."),
+    };
+
+    /// <summary>
+    /// IEEE 754 float → sort-preserving unsigned integer (matches <see cref="SortedIndexKeyEncoder"/>).
+    /// Negative floats have all bits flipped; non-negative floats have only the sign bit flipped.
+    /// Negative zero and NaN are canonicalized so the sort treats -0 == +0 and all NaN patterns identical.
+    /// </summary>
+    private static ulong EncodeFloat32Sortable(float value)
+    {
+        int bits = BitConverter.SingleToInt32Bits(value);
+
+        if (float.IsNaN(value))
+            bits = BitConverter.SingleToInt32Bits(float.NaN);
+        else if (bits == unchecked((int)0x80000000))
+            bits = 0;
+
+        uint encoded = (bits < 0)
+            ? (uint)~bits
+            : (uint)bits ^ 0x80000000u;
+
+        return encoded;
+    }
+
+    /// <summary>
+    /// IEEE 754 double → sort-preserving unsigned long. Same canonicalization as
+    /// <see cref="EncodeFloat32Sortable"/> but 64-bit.
+    /// </summary>
+    private static ulong EncodeFloat64Sortable(double value)
+    {
+        long bits = BitConverter.DoubleToInt64Bits(value);
+
+        if (double.IsNaN(value))
+            bits = BitConverter.DoubleToInt64Bits(double.NaN);
+        else if (bits == unchecked((long)0x8000000000000000L))
+            bits = 0L;
+
+        ulong encoded = (bits < 0)
+            ? (ulong)~bits
+            : (ulong)bits ^ 0x8000000000000000uL;
+
+        return encoded;
+    }
+
     private readonly string _spillDirectory;
     private readonly Dictionary<string, List<ValueIndexEntry>> _currentChunkEntries;
     private readonly Dictionary<string, BinaryWriter> _spillWriters;
     private readonly Dictionary<string, int> _spillRunCounts;
     private readonly Dictionary<string, long> _spillTotalEntries;
     private readonly Dictionary<string, List<SpillRunMetadata>> _spillRunMetadata;
+    private readonly Dictionary<string, DataKind> _columnKinds;
     private readonly HashSet<string> _droppedColumns;
     private bool _preparedForReading;
     private bool _disposed;
@@ -78,6 +199,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         _spillRunCounts = new(StringComparer.OrdinalIgnoreCase);
         _spillTotalEntries = new(StringComparer.OrdinalIgnoreCase);
         _spillRunMetadata = new(StringComparer.OrdinalIgnoreCase);
+        _columnKinds = new(StringComparer.OrdinalIgnoreCase);
         _droppedColumns = new(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -90,7 +212,13 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// per-column entry lists and avoid geometric-doubling allocations during the
     /// first chunk.
     /// </param>
-    internal void Initialize(IReadOnlySet<string> indexColumns, int chunkCapacity = 0)
+    /// <param name="schema">
+    /// Optional schema. When provided, each column's <see cref="DataKind"/> is cached
+    /// so <see cref="FlushChunk"/> can sort via a fast ulong-key path for the common
+    /// numeric/temporal kinds instead of dispatching through DataValueComparer.Compare
+    /// for every comparison. Strings, UUIDs, and unknown kinds still use the generic sort.
+    /// </param>
+    internal void Initialize(IReadOnlySet<string> indexColumns, int chunkCapacity = 0, Schema? schema = null)
     {
         foreach (string column in indexColumns)
         {
@@ -100,6 +228,11 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             _spillRunCounts.TryAdd(column, 0);
             _spillTotalEntries.TryAdd(column, 0);
             _spillRunMetadata.TryAdd(column, new List<SpillRunMetadata>());
+
+            if (schema is not null)
+            {
+                _columnKinds[column] = ResolveDataKind(column, schema);
+            }
         }
     }
 
@@ -128,8 +261,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
-    /// Checks whether an auto-indexed string column should be dropped because the
-    /// observed value exceeds <see cref="AutoIndexMaxStringLength"/>. Call this for
+    /// Checks whether an auto-indexed String/JsonValue column should be dropped because
+    /// the observed value is not self-contained in the <see cref="DataValue"/> struct
+    /// (i.e. its UTF-8 form exceeds the inline capacity of 16 bytes). Call this for
     /// string values before or after <see cref="AddEntry"/>; if it returns <c>true</c>,
     /// the column is marked as dropped and all accumulated entries are discarded.
     /// </summary>
@@ -143,12 +277,12 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             return true;
         }
 
-        if (value.Kind != DataKind.String || value.IsNull)
+        if (value.Kind is not (DataKind.String or DataKind.JsonValue) || value.IsNull)
         {
             return false;
         }
 
-        if (value.AsString().Length > AutoIndexMaxStringLength)
+        if (!value.IsInline)
         {
             DropColumn(columnName);
             return true;
@@ -167,6 +301,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         _spillRunCounts.Remove(columnName);
         _spillTotalEntries.Remove(columnName);
         _spillRunMetadata.Remove(columnName);
+        _columnKinds.Remove(columnName);
 
         if (_spillWriters.TryGetValue(columnName, out BinaryWriter? writer))
         {
@@ -198,8 +333,18 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
             string columnName = pair.Key;
 
-            // Sort the chunk's entries by key.
-            entries.Sort(EntryKeyComparison);
+            // Sort the chunk's entries by key. When we know the column's kind and it
+            // fits in a ulong (numeric/temporal), sort via a primitive-keyed Span.Sort
+            // to skip the DataValueComparer.Compare dispatch per-compare.
+            if (_columnKinds.TryGetValue(columnName, out DataKind kind)
+                && TrySortByUlongKey(entries, kind))
+            {
+                // In-place sort completed via ulong keys.
+            }
+            else
+            {
+                entries.Sort(EntryKeyComparison);
+            }
 
             // Append to the spill file.
             BinaryWriter writer = GetOrCreateSpillWriter(columnName);

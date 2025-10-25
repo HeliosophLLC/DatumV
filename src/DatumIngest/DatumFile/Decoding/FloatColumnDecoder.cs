@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
@@ -110,37 +111,61 @@ internal sealed class FloatColumnDecoder : DatumColumnDecoder
 
     private static void DecodeFloat32(byte[] raw, int bitmapByteCount, int rowCount, DatumNullBitmap nullBitmap, DataValue[] target)
     {
-        float[] floats = new float[rowCount];
-        ByteLaneShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        int dataLength = rowCount * sizeof(float);
+        byte[] unshuffled = ArrayPool<byte>.Shared.Rent(dataLength);
+        try
         {
-            target[rowIndex] = nullBitmap.IsNull(rowIndex)
-                ? DataValue.Null(DataKind.Float32)
-                : DataValue.FromFloat32(floats[rowIndex]);
+            ByteLaneShuffle.Unshuffle(
+                raw.AsSpan(bitmapByteCount, dataLength),
+                unshuffled.AsSpan(0, dataLength),
+                sizeof(float));
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                if (nullBitmap.IsNull(rowIndex))
+                {
+                    target[rowIndex] = DataValue.Null(DataKind.Float32);
+                }
+                else
+                {
+                    float f = BinaryPrimitives.ReadSingleLittleEndian(unshuffled.AsSpan(rowIndex * sizeof(float)));
+                    target[rowIndex] = DataValue.FromFloat32(f);
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(unshuffled);
         }
     }
 
     private static void DecodeFloat64(byte[] raw, int bitmapByteCount, int rowCount, DatumNullBitmap nullBitmap, DataValue[] target)
     {
         int dataLength = rowCount * sizeof(double);
-        byte[] unshuffled = new byte[dataLength];
-        ByteLaneShuffle.Unshuffle(
-            raw.AsSpan(bitmapByteCount, dataLength),
-            unshuffled,
-            sizeof(double));
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        byte[] unshuffled = ArrayPool<byte>.Shared.Rent(dataLength);
+        try
         {
-            if (nullBitmap.IsNull(rowIndex))
+            ByteLaneShuffle.Unshuffle(
+                raw.AsSpan(bitmapByteCount, dataLength),
+                unshuffled.AsSpan(0, dataLength),
+                sizeof(double));
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                target[rowIndex] = DataValue.Null(DataKind.Float64);
+                if (nullBitmap.IsNull(rowIndex))
+                {
+                    target[rowIndex] = DataValue.Null(DataKind.Float64);
+                }
+                else
+                {
+                    double d = BinaryPrimitives.ReadDoubleLittleEndian(unshuffled.AsSpan(rowIndex * sizeof(double)));
+                    target[rowIndex] = DataValue.FromFloat64(d);
+                }
             }
-            else
-            {
-                double d = BinaryPrimitives.ReadDoubleLittleEndian(unshuffled.AsSpan(rowIndex * sizeof(double)));
-                target[rowIndex] = DataValue.FromFloat64(d);
-            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(unshuffled);
         }
     }
 }

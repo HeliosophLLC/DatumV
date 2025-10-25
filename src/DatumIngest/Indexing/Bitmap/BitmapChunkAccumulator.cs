@@ -96,7 +96,9 @@ internal sealed class BitmapChunkAccumulator
 
     /// <summary>
     /// Records a non-null value at the given row offset within the current chunk.
-    /// Abandons tracking if the global distinct count would exceed the threshold.
+    /// Abandons tracking if the global distinct count would exceed the threshold, or if
+    /// the value is a non-inline reference type (strings &gt;16 UTF-8 bytes) — long strings
+    /// are not indexable under the "indexable = self-contained in the DataValue" rule.
     /// </summary>
     /// <param name="value">The cell value (must not be null).</param>
     /// <param name="rowOffsetInChunk">Zero-based row offset within the current chunk.</param>
@@ -109,6 +111,14 @@ internal sealed class BitmapChunkAccumulator
 
         if (value.IsNull)
         {
+            return;
+        }
+
+        // Non-inline String/JsonValue can't be retained as a dictionary key without arena
+        // plumbing. Drop the column from the bitmap index the first time we see one.
+        if ((value.Kind is DataKind.String or DataKind.JsonValue) && !value.IsInline)
+        {
+            Abandon();
             return;
         }
 

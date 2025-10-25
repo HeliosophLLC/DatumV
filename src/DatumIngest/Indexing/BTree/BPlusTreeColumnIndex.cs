@@ -151,8 +151,16 @@ internal sealed class BPlusTreeColumnIndex : IColumnIndex
         return chunks;
     }
 
+    /// <summary>
+    /// Compares a decoded key against a caller-supplied bound.
+    /// </summary>
+    /// <remarks>
+    /// Phase 2 of the arena-safe retention work will upgrade this to the arena-aware
+    /// <see cref="DataValueComparer.Compare(DataValue, Arena, DataValue, Arena)"/> so that
+    /// non-inline string keys compare correctly against non-inline string bounds.
+    /// For now, inline strings and fixed-size scalars work correctly; non-inline strings
+    /// throw (same as the underlying <see cref="DataValueComparer.Compare(DataValue, DataValue)"/>).
+    /// </remarks>
     private static int CompareKeys(DataValue left, DataValue right)
-    {
-        return StatisticsPredicateEvaluator.CompareValues(left, right);
-    }
+        => StatisticsPredicateEvaluator.CompareValues(left, right);
 }

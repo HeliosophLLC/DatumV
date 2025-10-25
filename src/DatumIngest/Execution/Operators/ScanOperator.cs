@@ -278,14 +278,9 @@ public sealed class ScanOperator : IQueryOperator
             // Statistics-based pruning: check filter predicates against min/max stats.
             if (!pruned && _filterHint is not null)
             {
-                Dictionary<string, ColumnStatisticsRange> statistics = new(StringComparer.OrdinalIgnoreCase);
+                using ColumnStatisticsRangeLookup statistics = chunk.CreateStatisticsLookup();
 
-                foreach (KeyValuePair<string, ChunkColumnStatistics> entry in chunk.ColumnStatistics)
-                {
-                    statistics[entry.Key] = entry.Value.ToColumnStatisticsRange();
-                }
-
-                if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint, statistics))
+                if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint, statistics, context.Store))
                 {
                     if (chunkIndex == 0)
                     {

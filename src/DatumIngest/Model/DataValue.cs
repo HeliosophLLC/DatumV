@@ -52,8 +52,12 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
-    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference
-    [FieldOffset(2)]  private readonly ushort _charCount;  //  2 bytes — string/JSON char count (0 = unknown, 65535 = overflow)
+    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference, bit 2: IsInline
+    // ushort at offset 2 carries string/JSON sizing info, interpreted by storage mode:
+    //   Non-inline (reference-store / arena-slice): full char count (0 = unknown, 65535 = overflow sentinel)
+    //   Inline: low byte  = UTF-8 byte length (0-16)
+    //           high byte = char count         (0-16)
+    [FieldOffset(2)]  private readonly ushort _charCount;
 
     // Payload — inline interpretation (16 bytes)
     [FieldOffset(4)]  private readonly int _p0;            //  4 bytes — payload word 0
@@ -109,7 +113,17 @@ public readonly struct DataValue : IEquatable<DataValue>
     public bool IsInline => (_flags & FlagIsInline) != 0;
 
     /// <summary>
-    /// Returns a span over the 16 inline payload bytes, sliced to <see cref="_charCount"/>.
+    /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.
+    /// </summary>
+    private byte InlineByteLength => (byte)(_charCount & 0xFF);
+
+    /// <summary>
+    /// For inline strings, the char count (0-16) stored in the high byte of <c>_charCount</c>.
+    /// </summary>
+    private byte InlineCharCount => (byte)(_charCount >> 8);
+
+    /// <summary>
+    /// Returns a span over the 16 inline payload bytes, sliced to the UTF-8 byte length.
     /// Only valid when <see cref="IsInline"/> is <c>true</c>.
     /// </summary>
     private ReadOnlySpan<byte> InlineUtf8Span
@@ -117,7 +131,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         get
         {
             ref byte byteRef = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
-            return MemoryMarshal.CreateReadOnlySpan(ref byteRef, _charCount);
+            return MemoryMarshal.CreateReadOnlySpan(ref byteRef, InlineByteLength);
         }
     }
 
@@ -190,10 +204,22 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.UInt8Array, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
-    /// <summary>Creates a value from a text string.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromString(string, IValueStore)"/> instead.</remarks>
-    public static DataValue FromString(string value) =>
-        throw new InvalidOperationException("Use FromString(value, store). ReferenceStore is no longer available.");
+    /// <summary>
+    /// Creates a value from a text string without a store. Works only when the string's
+    /// UTF-8 form fits in 16 bytes (inline path); longer strings require a store —
+    /// see <see cref="FromString(string, IValueStore)"/>.
+    /// </summary>
+    public static DataValue FromString(string value)
+    {
+        Span<byte> scratch = stackalloc byte[16];
+        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
+        {
+            return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
+        }
+        throw new InvalidOperationException(
+            "FromString(value) without a store only supports strings whose UTF-8 form fits in 16 bytes. " +
+            "Use FromString(value, store) for longer strings.");
+    }
 
     /// <summary>
     /// Creates a value from a text string using an explicit <see cref="IValueStore"/>.
@@ -207,7 +233,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[16];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.String, scratch[..written]);
+            return FromInlineUtf8(DataKind.String, scratch[..written], value.Length);
         }
 
         var (p0, p1) = store.StoreString(value);
@@ -222,7 +248,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[16];
         if (System.Text.Encoding.UTF8.TryGetBytes(chars, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.String, scratch[..written]);
+            return FromInlineUtf8(DataKind.String, scratch[..written], chars.Length);
         }
 
         var (p0, p1) = store.StoreChars(chars);
@@ -236,7 +262,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (utf8.Length <= 16)
         {
-            return FromInlineUtf8(DataKind.String, utf8);
+            return FromInlineUtf8(DataKind.String, utf8, charCount);
         }
 
         var (p0, p1) = store.StoreUtf8(utf8);
@@ -248,9 +274,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>
     /// Creates an inline <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
     /// whose UTF-8 bytes live directly in <c>_p0</c>-<c>_p3</c>. Requires
-    /// <paramref name="utf8Bytes"/>.Length &lt;= 16. Unused payload bytes are zeroed.
+    /// <paramref name="utf8Bytes"/>.Length &lt;= 16 and <paramref name="charCount"/> &lt;= 16.
+    /// Unused payload bytes are zeroed. Byte length and char count are packed into
+    /// <c>_charCount</c> (low byte = bytes, high byte = chars).
     /// </summary>
-    private static DataValue FromInlineUtf8(DataKind kind, ReadOnlySpan<byte> utf8Bytes)
+    private static DataValue FromInlineUtf8(DataKind kind, ReadOnlySpan<byte> utf8Bytes, int charCount)
     {
         Span<byte> padded = stackalloc byte[16];
         padded.Clear();
@@ -260,6 +288,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         // the struct stores _p0-_p3 in memory. InlineUtf8Span reads the same bytes back
         // by casting the fields to a byte span, so the round-trip is endian-neutral.
         Span<int> asInts = MemoryMarshal.Cast<byte, int>(padded);
+
+        ushort packed = (ushort)((utf8Bytes.Length & 0xFF) | ((charCount & 0xFF) << 8));
+
         return new(
             kind,
             flags: FlagIsInline,
@@ -267,7 +298,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             p1: asInts[1],
             p2: asInts[2],
             p3: asInts[3],
-            charCount: (ushort)utf8Bytes.Length);
+            charCount: packed);
     }
 
     /// <summary>
@@ -390,10 +421,21 @@ public readonly struct DataValue : IEquatable<DataValue>
             p2: (int)(value.Offset.Ticks / TimeSpan.TicksPerMinute));
     }
 
-    /// <summary>Creates a value from a raw JSON string.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromJsonValue(string, IValueStore)"/> instead.</remarks>
-    public static DataValue FromJsonValue(string value) =>
-        throw new InvalidOperationException("Use FromJsonValue(value, store). ReferenceStore is no longer available.");
+    /// <summary>
+    /// Creates a value from a raw JSON string without a store. Works only when the string's
+    /// UTF-8 form fits in 16 bytes (inline path); longer strings require a store.
+    /// </summary>
+    public static DataValue FromJsonValue(string value)
+    {
+        Span<byte> scratch = stackalloc byte[16];
+        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
+        {
+            return FromInlineUtf8(DataKind.JsonValue, scratch[..written], value.Length);
+        }
+        throw new InvalidOperationException(
+            "FromJsonValue(value) without a store only supports values whose UTF-8 form fits in 16 bytes. " +
+            "Use FromJsonValue(value, store) for longer values.");
+    }
 
     /// <summary>
     /// Creates a value from a raw JSON string using an explicit <see cref="IValueStore"/>.
@@ -405,7 +447,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         Span<byte> scratch = stackalloc byte[16];
         if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
         {
-            return FromInlineUtf8(DataKind.JsonValue, scratch[..written]);
+            return FromInlineUtf8(DataKind.JsonValue, scratch[..written], value.Length);
         }
 
         var (p0, p1) = store.StoreString(value);
@@ -626,22 +668,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <remarks>Note: string literals require a store. Use <see cref="FromLiteral(object, IValueStore)"/> for string literals.</remarks>
     public static DataValue FromLiteral(object rawLiteral)
     {
-        return rawLiteral switch
-        {
-            DataValue dataValue => dataValue,
-            sbyte int8Value => FromInt8(int8Value),
-            short int16Value => FromInt16(int16Value),
-            int intValue => FromInt32(intValue),
-            long longValue => FromInt64(longValue),
-            float floatValue => FromFloat32(floatValue),
-            double doubleValue => FromFloat64(doubleValue),
-            decimal decimalValue => FromFloat64((double)decimalValue),
-            string => throw new InvalidOperationException(
-                "Use FromLiteral(rawLiteral, store) for string literals. ReferenceStore is no longer available."),
-            bool boolValue => FromBoolean(boolValue),
-            _ => throw new ArgumentException(
-                $"Unsupported literal type: {rawLiteral.GetType().Name}.", nameof(rawLiteral)),
-        };
+        throw new InvalidOperationException(
+            "Use FromLiteral(rawLiteral, store) for string literals. ReferenceStore is no longer available.");
     }
 
     /// <summary>
@@ -1135,11 +1163,19 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the text string payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsString(IValueStore)"/> or <see cref="AsString(Arena)"/> instead.</remarks>
+    /// <remarks>
+    /// Works for inline strings (whose bytes are self-contained in the struct) without a store.
+    /// For non-inline strings (reference-store or arena-backed), use
+    /// <see cref="AsString(IValueStore)"/> or <see cref="AsString(Arena)"/> — those require an
+    /// explicit store to resolve the payload.
+    /// </remarks>
     public string AsString()
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        throw new InvalidOperationException("Use AsString(store) or AsString(arena). ReferenceStore is no longer available.");
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
+        throw new InvalidOperationException(
+            "AsString() without a store only supports inline strings. For non-inline strings, " +
+            "use AsString(IValueStore) or AsString(Arena).");
     }
 
     /// <summary>Returns the text string payload from an explicit <see cref="IValueStore"/>.</summary>
@@ -1161,10 +1197,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int StringCharCount(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        // Inline: _charCount is UTF-8 byte length (not char count). Decode on the fly —
-        // cheap for <=16 bytes, and only differs from byte length for multi-byte UTF-8.
-        if (IsInline) return System.Text.Encoding.UTF8.GetCharCount(InlineUtf8Span);
-        // _charCount holds the char count (ushort). 65535 = overflow sentinel → fall back to decode.
+        // Inline: char count is cached in the high byte of _charCount at construction.
+        if (IsInline) return InlineCharCount;
+        // _charCount holds the full char count (ushort). 65535 = overflow sentinel → fall back to decode.
         // 0 = unknown (e.g. FromStringSlice) → also fall back.
         return _charCount is not 0 and not ushort.MaxValue
             ? _charCount
@@ -1181,7 +1216,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// signal (e.g. the auto-indexing size threshold). Callers that need exact lengths for strings
     /// near or above 65535 chars should use <see cref="StringCharCount(IValueStore)"/> instead.
     /// </remarks>
-    public int RawCharCount => _charCount;
+    public int RawCharCount => IsInline ? InlineCharCount : _charCount;
 
     /// <summary>
     /// Returns the UTF-8 byte length of a <see cref="DataKind.String"/> or
@@ -1202,7 +1237,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 throw new InvalidOperationException(
                     $"Cannot read StringByteLength on a {_kind} value.");
             }
-            return IsInline ? _charCount : _p1;
+            return IsInline ? InlineByteLength : _p1;
         }
     }
 
@@ -1221,7 +1256,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 throw new InvalidOperationException(
                     $"Cannot read StringOrBinaryByteLength on a {_kind} value.");
             }
-            return IsInline ? _charCount : _p1;
+            return IsInline ? InlineByteLength : _p1;
         }
     }
 

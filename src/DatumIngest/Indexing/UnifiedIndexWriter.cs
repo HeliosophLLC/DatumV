@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
@@ -292,6 +293,10 @@ internal static class UnifiedIndexWriter
         IReadOnlyList<IndexChunk> chunks,
         Schema schema)
     {
+        long sectionStartPos = writer.BaseStream.Position;
+        if (ExecutionTracer.IsEnabled)
+            ExecutionTracer.Write($"ChunkDir.Write  section starts at stream pos {sectionStartPos}");
+
         writer.Write(chunks.Count);
 
         // Determine indexable columns from the schema.
@@ -315,12 +320,24 @@ internal static class UnifiedIndexWriter
             writer.Write(keyWidth);
         }
 
-        // Write chunk fixed fields (rowOffset, rowCount).
+        long chunkFixedFieldsPos = writer.BaseStream.Position;
+        if (ExecutionTracer.IsEnabled)
+            ExecutionTracer.Write(
+                $"ChunkDir.Write  chunkFixedFields at stream pos {chunkFixedFieldsPos} (rel {chunkFixedFieldsPos - sectionStartPos}), " +
+                $"chunks={chunks.Count}, zoneMapColumns={zoneMapColumns.Count}");
+
+        // Write chunk fixed fields (rowOffset, rowCount) — 16 bytes per chunk.
         foreach (IndexChunk chunk in chunks)
         {
             writer.Write(chunk.RowOffset);
             writer.Write(chunk.RowCount);
         }
+
+        long zoneMapsStartPos = writer.BaseStream.Position;
+        if (ExecutionTracer.IsEnabled)
+            ExecutionTracer.Write(
+                $"ChunkDir.Write  zoneMaps at stream pos {zoneMapsStartPos} (rel {zoneMapsStartPos - sectionStartPos}), " +
+                $"per-chunk width emitted={(zoneMapsStartPos - chunkFixedFieldsPos) / Math.Max(1, chunks.Count)}");
 
         // Collect string table entries for string/JSON min/max values.
         List<byte[]> stringTableEntries = new();
@@ -330,6 +347,7 @@ internal static class UnifiedIndexWriter
         foreach ((string columnName, DataKind kind, int keyWidth) in zoneMapColumns)
         {
             bool isStringType = kind is DataKind.String or DataKind.JsonValue;
+            long colStartPos = writer.BaseStream.Position;
 
             foreach (IndexChunk chunk in chunks)
             {
@@ -349,7 +367,24 @@ internal static class UnifiedIndexWriter
                 writer.Write(statistics?.RowCount ?? 0L);
                 writer.Write(statistics?.EstimatedCardinality ?? 0L);
             }
+
+            if (ExecutionTracer.IsEnabled)
+            {
+                long colBytes = writer.BaseStream.Position - colStartPos;
+                int expectedStride = 2 * (1 + keyWidth) + 24;
+                long actualStride = chunks.Count > 0 ? colBytes / chunks.Count : 0;
+                ExecutionTracer.Write(
+                    $"ChunkDir.Write  col='{columnName}' kind={kind} keyWidth={keyWidth}  " +
+                    $"bytes={colBytes}  actualStride={actualStride}  expectedStride={expectedStride}  " +
+                    $"{(actualStride == expectedStride ? "OK" : "STRIDE MISMATCH")}");
+            }
         }
+
+        long stringTablePos = writer.BaseStream.Position;
+        if (ExecutionTracer.IsEnabled)
+            ExecutionTracer.Write(
+                $"ChunkDir.Write  stringTable at stream pos {stringTablePos} (rel {stringTablePos - sectionStartPos}), " +
+                $"entries={stringTableEntries.Count}");
 
         // Write string table.
         writer.Write(stringTableEntries.Count);
@@ -358,6 +393,13 @@ internal static class UnifiedIndexWriter
         {
             writer.Write(entry.Length);
             writer.Write(entry);
+        }
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            long endPos = writer.BaseStream.Position;
+            ExecutionTracer.Write(
+                $"ChunkDir.Write  section ends at stream pos {endPos} (total section bytes {endPos - sectionStartPos})");
         }
     }
 

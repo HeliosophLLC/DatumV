@@ -36,12 +36,6 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     /// <inheritdoc/>
     private TableDescriptor Descriptor { get; }
 
-    /// <summary>
-    /// Optional value store for decoding string columns into Arena-backed values.
-    /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>.
-    /// </summary>
-    public IValueStore Store { get; set; } = new Arena();
-
     /// <inheritdoc/>
     public long GetRowCount()
     {
@@ -143,10 +137,9 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
                     // Zone map pruning: only attempted when a filter hint was provided.
                     if (filterHint is not null && filterColumnNames is not null)
                     {
-                        Dictionary<string, ColumnStatisticsRange> statistics =
-                            BuildStatistics(schema, rowGroupDescriptor, filterColumnNames);
+                        using ColumnStatisticsRangeLookup statistics = BuildStatistics(schema, rowGroupDescriptor, filterColumnNames, columnBatch.Arena);
 
-                        if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics))
+                        if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics, columnBatch.Arena))
                         {
                             continue;
                         }
@@ -269,10 +262,11 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
         return new ColumnLookup(projected);
     }
 
-    private Dictionary<string, ColumnStatisticsRange> BuildStatistics(
+    private ColumnStatisticsRangeLookup BuildStatistics(
         Schema schema,
         DatumRowGroupDescriptor rowGroup,
-        HashSet<string> filterColumnNames)
+        HashSet<string> filterColumnNames,
+        Arena arena)
     {
         Dictionary<string, ColumnStatisticsRange> statistics =
             new(filterColumnNames.Count, StringComparer.OrdinalIgnoreCase);
@@ -284,12 +278,12 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 
             DatumZoneMap zoneMap = rowGroup.ColumnChunks[columnIndex].ZoneMap;
             statistics[columnName] = new ColumnStatisticsRange(
-                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Minimum, Store),
-                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Maximum, Store),
+                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Minimum, arena),
+                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Maximum, arena),
                 zoneMap.NullCount,
                 rowGroup.RowCount);
         }
 
-        return statistics;
+        return new ColumnStatisticsRangeLookup(statistics);
     }
 }

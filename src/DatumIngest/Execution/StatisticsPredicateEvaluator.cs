@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -17,10 +18,25 @@ namespace DatumIngest.Execution;
 public static class StatisticsPredicateEvaluator
 {
     /// <summary>
+    /// Compares two non-null values for ordering. Delegates to
+    /// <see cref="DataValueComparer.Compare(DataValue, DataValue)"/>; see that method's
+    /// remarks for constraints on non-inline String/JsonValue values.
+    /// </summary>
+    /// <remarks>
+    /// Kept for call-site compatibility with existing index navigation code. New callers
+    /// should prefer the arena-aware
+    /// <see cref="DataValueComparer.Compare(DataValue, Arena, DataValue, Arena)"/> overload
+    /// so that non-inline string keys compare correctly against non-inline string bounds.
+    /// </remarks>
+    internal static int CompareValues(DataValue left, DataValue right)
+        => DataValueComparer.Compare(left, right);
+
+    /// <summary>
     /// Determines whether a partition can be skipped based on its column statistics.
     /// </summary>
     /// <param name="predicate">The WHERE predicate to evaluate against statistics.</param>
     /// <param name="statistics">Per-column statistics for the partition, keyed by column name (case-insensitive).</param>
+    /// <param name="arena">The memory arena for temporary allocations.</param>
     /// <returns>
     /// <c>true</c> if the predicate is provably unsatisfiable for every row in this partition;
     /// <c>false</c> if the partition might contain matching rows (or if the predicate cannot
@@ -28,20 +44,22 @@ public static class StatisticsPredicateEvaluator
     /// </returns>
     public static bool CanSkipPartition(
         Expression predicate,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics,
+        Arena arena)
     {
-        return CanSkip(predicate, statistics);
+        return CanSkip(predicate, statistics, arena);
     }
 
     private static bool CanSkip(
         Expression expression,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics,
+        Arena arena)
     {
         return expression switch
         {
-            BinaryExpression binary => CanSkipBinary(binary, statistics),
-            InExpression inExpression => CanSkipIn(inExpression, statistics),
-            BetweenExpression between => CanSkipBetween(between, statistics),
+            BinaryExpression binary => CanSkipBinary(binary, statistics, arena),
+            InExpression inExpression => CanSkipIn(inExpression, statistics, arena),
+            BetweenExpression between => CanSkipBetween(between, statistics, arena),
             IsNullExpression isNull => CanSkipIsNull(isNull, statistics),
             LikeExpression => false, // Cannot prune partitions for LIKE with ESCAPE.
             _ => false, // Conservative: unknown expression → do not skip.
@@ -52,18 +70,19 @@ public static class StatisticsPredicateEvaluator
 
     private static bool CanSkipBinary(
         BinaryExpression binary,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics,
+        Arena arena)
     {
         // AND: skip if either side can be skipped (any false conjunct kills the whole AND).
         if (binary.Operator == BinaryOperator.And)
         {
-            return CanSkip(binary.Left, statistics) || CanSkip(binary.Right, statistics);
+            return CanSkip(binary.Left, statistics, arena) || CanSkip(binary.Right, statistics, arena);
         }
 
         // OR: skip only if both sides can be skipped (all disjuncts must be false).
         if (binary.Operator == BinaryOperator.Or)
         {
-            return CanSkip(binary.Left, statistics) && CanSkip(binary.Right, statistics);
+            return CanSkip(binary.Left, statistics, arena) && CanSkip(binary.Right, statistics, arena);
         }
 
         // Comparison operators: col op literal or literal op col.
@@ -78,7 +97,7 @@ public static class StatisticsPredicateEvaluator
             return false;
         }
 
-        if (!statistics.TryGetValue(columnName!, out ColumnStatisticsRange? range))
+        if (!statistics.TryGetStatistics(columnName, out ColumnStatisticsRange? range))
         {
             return false;
         }
@@ -91,7 +110,7 @@ public static class StatisticsPredicateEvaluator
         // Flip the operator if the literal was on the left: "5 > col" becomes "col < 5".
         BinaryOperator effectiveOperator = flipped ? FlipOperator(binary.Operator) : binary.Operator;
 
-        return CanSkipComparison(effectiveOperator, range.Minimum.Value, range.Maximum.Value, literalValue);
+        return CanSkipComparison(effectiveOperator, range.Minimum.Value, range.Maximum.Value, literalValue, arena);
     }
 
     /// <summary>
@@ -102,29 +121,30 @@ public static class StatisticsPredicateEvaluator
         BinaryOperator op,
         DataValue minimum,
         DataValue maximum,
-        DataValue literal)
+        DataValue literal,
+        Arena arena)
     {
         return op switch
         {
             // col = literal → skip if literal < min or literal > max
-            BinaryOperator.Equal => CompareValues(literal, minimum) < 0
-                                 || CompareValues(literal, maximum) > 0,
+            BinaryOperator.Equal => DataValueComparer.Compare(literal, minimum, arena) < 0
+                                 || DataValueComparer.Compare(literal, maximum, arena) > 0,
 
             // col != literal → skip if min = max = literal (all rows have the same value)
-            BinaryOperator.NotEqual => CompareValues(minimum, maximum) == 0
-                                    && CompareValues(minimum, literal) == 0,
+            BinaryOperator.NotEqual => DataValueComparer.Compare(minimum, maximum, arena) == 0
+                                    && DataValueComparer.Compare(minimum, literal, arena) == 0,
 
             // col < literal → skip if min >= literal
-            BinaryOperator.LessThan => CompareValues(minimum, literal) >= 0,
+            BinaryOperator.LessThan => DataValueComparer.Compare(minimum, literal, arena) >= 0,
 
             // col <= literal → skip if min > literal
-            BinaryOperator.LessThanOrEqual => CompareValues(minimum, literal) > 0,
+            BinaryOperator.LessThanOrEqual => DataValueComparer.Compare(minimum, literal, arena) > 0,
 
             // col > literal → skip if max <= literal
-            BinaryOperator.GreaterThan => CompareValues(maximum, literal) <= 0,
+            BinaryOperator.GreaterThan => DataValueComparer.Compare(maximum, literal, arena) <= 0,
 
             // col >= literal → skip if max < literal
-            BinaryOperator.GreaterThanOrEqual => CompareValues(maximum, literal) < 0,
+            BinaryOperator.GreaterThanOrEqual => DataValueComparer.Compare(maximum, literal, arena) < 0,
 
             _ => false,
         };
@@ -134,7 +154,8 @@ public static class StatisticsPredicateEvaluator
 
     private static bool CanSkipIn(
         InExpression inExpression,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics,
+        Arena arena)
     {
         // Only handle: col IN (literal1, literal2, ...)
         if (inExpression.Expression is not ColumnReference column)
@@ -143,7 +164,7 @@ public static class StatisticsPredicateEvaluator
         }
 
         string columnName = column.ColumnName;
-        if (!statistics.TryGetValue(columnName, out ColumnStatisticsRange? range))
+        if (!statistics.TryGetStatistics(columnName, out ColumnStatisticsRange? range))
         {
             return false;
         }
@@ -156,7 +177,7 @@ public static class StatisticsPredicateEvaluator
         if (inExpression.Negated)
         {
             // NOT IN — skip only if min = max and that single value is in the exclusion list.
-            if (CompareValues(range.Minimum.Value, range.Maximum.Value) != 0)
+            if (DataValueComparer.Compare(range.Minimum.Value, range.Maximum.Value, arena) != 0)
             {
                 return false;
             }
@@ -165,8 +186,8 @@ public static class StatisticsPredicateEvaluator
             {
                 if (valueExpression is LiteralExpression { Value: not null } literal)
                 {
-                    DataValue literalValue = DataValue.FromLiteral(literal.Value);
-                    if (CompareValues(range.Minimum.Value, literalValue) == 0)
+                    DataValue literalValue = DataValue.FromLiteral(literal.Value, arena);
+                    if (DataValueComparer.Compare(range.Minimum.Value, literalValue, arena) == 0)
                     {
                         return true;
                     }
@@ -184,11 +205,11 @@ public static class StatisticsPredicateEvaluator
                 return false; // Non-literal value — cannot evaluate.
             }
 
-            DataValue literalValue = DataValue.FromLiteral(literal.Value);
+            DataValue literalValue = DataValue.FromLiteral(literal.Value, arena);
 
             // If any value falls within [min, max], we cannot skip.
-            if (CompareValues(literalValue, range.Minimum.Value) >= 0
-                && CompareValues(literalValue, range.Maximum.Value) <= 0)
+            if (DataValueComparer.Compare(literalValue, range.Minimum.Value, arena) >= 0
+                && DataValueComparer.Compare(literalValue, range.Maximum.Value, arena) <= 0)
             {
                 return false;
             }
@@ -201,7 +222,8 @@ public static class StatisticsPredicateEvaluator
 
     private static bool CanSkipBetween(
         BetweenExpression between,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics,
+        Arena arena)
     {
         if (between.Expression is not ColumnReference column)
         {
@@ -209,7 +231,7 @@ public static class StatisticsPredicateEvaluator
         }
 
         string columnName = column.ColumnName;
-        if (!statistics.TryGetValue(columnName, out ColumnStatisticsRange? range))
+        if (!statistics.TryGetStatistics(columnName, out ColumnStatisticsRange? range))
         {
             return false;
         }
@@ -226,8 +248,8 @@ public static class StatisticsPredicateEvaluator
             return false;
         }
 
-        DataValue? lowValue = lowLiteral.Value is null ? null : DataValue.FromLiteral(lowLiteral.Value);
-        DataValue? highValue = highLiteral.Value is null ? null : DataValue.FromLiteral(highLiteral.Value);
+        DataValue? lowValue = lowLiteral.Value is null ? null : DataValue.FromLiteral(lowLiteral.Value, arena);
+        DataValue? highValue = highLiteral.Value is null ? null : DataValue.FromLiteral(highLiteral.Value, arena);
 
         if (lowValue is null || highValue is null)
         {
@@ -238,21 +260,21 @@ public static class StatisticsPredicateEvaluator
         {
             // NOT BETWEEN low AND high → col < low OR col > high
             // Skip if all values are within [low, high]: min >= low AND max <= high.
-            return CompareValues(range.Minimum.Value, lowValue.Value) >= 0
-                && CompareValues(range.Maximum.Value, highValue.Value) <= 0;
+            return DataValueComparer.Compare(range.Minimum.Value, lowValue.Value, arena) >= 0
+                && DataValueComparer.Compare(range.Maximum.Value, highValue.Value, arena) <= 0;
         }
 
         // BETWEEN low AND high → col >= low AND col <= high
         // Skip if the partition range doesn't overlap [low, high]: max < low OR min > high.
-        return CompareValues(range.Maximum.Value, lowValue.Value) < 0
-            || CompareValues(range.Minimum.Value, highValue.Value) > 0;
+        return DataValueComparer.Compare(range.Maximum.Value, lowValue.Value, arena) < 0
+            || DataValueComparer.Compare(range.Minimum.Value, highValue.Value, arena) > 0;
     }
 
     // ──────────────────── IS NULL / IS NOT NULL ────────────────────
 
     private static bool CanSkipIsNull(
         IsNullExpression isNull,
-        IReadOnlyDictionary<string, ColumnStatisticsRange> statistics)
+        ColumnStatisticsRangeLookup statistics)
     {
         if (isNull.Expression is not ColumnReference column)
         {
@@ -260,7 +282,7 @@ public static class StatisticsPredicateEvaluator
         }
 
         string columnName = column.ColumnName;
-        if (!statistics.TryGetValue(columnName, out ColumnStatisticsRange? range))
+        if (!statistics.TryGetStatistics(columnName, out ColumnStatisticsRange? range))
         {
             return false;
         }
@@ -288,7 +310,7 @@ public static class StatisticsPredicateEvaluator
     /// </summary>
     private static bool TryExtractColumnAndLiteral(
         BinaryExpression binary,
-        out string? columnName,
+        [NotNullWhen(true)] out string? columnName,
         out DataValue literalValue,
         out bool flipped)
     {
@@ -343,8 +365,4 @@ public static class StatisticsPredicateEvaluator
         };
     }
 
-
-
-    internal static int CompareValues(DataValue left, DataValue right) =>
-        DataValueComparer.Compare(left, right);
 }

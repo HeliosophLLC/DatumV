@@ -213,7 +213,8 @@ internal static class BPlusTreePageCodec
         byte[] compressed = reader.ReadBytes(compressedSize);
         byte[] decompressed = DatumCompressor.Decompress(compressed, uncompressedSize, DatumCompression.Zstd);
 
-        // Deserialize entries from decompressed buffer.
+        // Keys are guaranteed inline (≤16 UTF-8 bytes) or fixed-size scalars by the
+        // indexable = self-contained rule enforced at build time. No external store needed.
         ValueIndexEntry[] entries = DeserializeLeafEntries(decompressed, entryCount);
 
         return new BPlusTreeLeafPage(pageIndex, entries, previousLeaf, nextLeaf);
@@ -298,7 +299,7 @@ internal static class BPlusTreePageCodec
         ushort keyCount = reader.ReadUInt16();
         _ = reader.ReadByte(); // Reserved.
 
-        // Keys.
+        // Keys are guaranteed inline or fixed-size by the indexable = self-contained rule.
         DataValue[] keys = new DataValue[keyCount];
 
         for (int index = 0; index < keyCount; index++)

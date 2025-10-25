@@ -62,6 +62,61 @@ internal sealed class DateTimeColumnDecoder : DatumColumnDecoder
     }
 
     /// <inheritdoc/>
+    public override void DecodeInto(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        int payloadLength = -1,
+        byte[]? decompressedBuffer = null)
+    {
+        int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
+        byte[] raw;
+        if (decompressedBuffer is not null)
+        {
+            DecompressPayloadInto(payload, effectiveLength, decompressedBuffer, uncompressedByteLength, compression);
+            raw = decompressedBuffer;
+        }
+        else
+        {
+            raw = DecompressPayload(payload, effectiveLength, uncompressedByteLength, compression);
+        }
+
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        int baselineOffset = bitmapByteCount;
+        long baseline = BinaryPrimitives.ReadInt64LittleEndian(raw.AsSpan(baselineOffset));
+
+        // Two parallel cursors: tick deltas and tz offsets live in separate regions
+        // on disk, so we walk them simultaneously instead of materialising tickDeltas[].
+        int tickCursor = baselineOffset + 8;
+        int tzCursor = tickCursor + 8 * rowCount;
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            long tickDelta = BinaryPrimitives.ReadInt64LittleEndian(raw.AsSpan(tickCursor));
+            short tzOffset = BinaryPrimitives.ReadInt16LittleEndian(raw.AsSpan(tzCursor));
+            tickCursor += 8;
+            tzCursor += 2;
+
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                target[rowIndex] = DataValue.Null(DataKind.DateTime);
+            }
+            else
+            {
+                DateTimeOffset dto = new(baseline + tickDelta, TimeSpan.FromMinutes(tzOffset));
+                target[rowIndex] = DataValue.FromDateTime(dto);
+            }
+        }
+    }
+
+    /// <inheritdoc/>
     public override void DecodeIntoColumn(
         byte[] payload,
         DatumEncoding encoding,

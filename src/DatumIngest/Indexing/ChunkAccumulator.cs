@@ -1,24 +1,32 @@
 using CardinalityEstimation;
-using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Per-chunk column accumulator used by <see cref="IncrementalIndexBuilder"/>. Tracks
-/// min, max, null count, and a cardinality estimator for a single column across the
-/// rows in one index chunk.
+/// Per-chunk column accumulator. Tracks min, max, null count, and a
+/// cardinality estimator for a single column across the rows in one index chunk.
 /// </summary>
 /// <remarks>
-/// Near-identical in behaviour to <c>SourceIndexBuilder.ChunkAccumulator</c> (the inner
-/// class used by the streaming <c>BuildAsync</c> path); kept separate because the
-/// incremental builder is the production path and may evolve independently.
+/// <para>
+/// Only retains <see cref="DataValue"/> instances that are self-contained: inline strings
+/// (≤16 UTF-8 bytes, stored in the struct) and fixed-size scalars. On observing a non-inline
+/// String or JsonValue, min/max tracking for that column is invalidated and no further
+/// min/max is recorded — the serialized statistics will have <c>null</c> min/max, which
+/// downstream zone-map pruning correctly treats as "no pruning possible."
+/// </para>
+/// <para>
+/// Cardinality estimation is still updated for non-inline strings via <see cref="DataValue.RawContentHash"/>,
+/// which is safe because the hash is either precomputed or derived from UTF-8 bytes at the
+/// call site (before any source arena disposal).
+/// </para>
 /// </remarks>
-internal sealed class IncrementalChunkAccumulator
+internal sealed class ChunkAccumulator
 {
     private DataValue? _minimum;
     private DataValue? _maximum;
     private long _nullCount;
+    private bool _minMaxEligible = true;
     private readonly CardinalityEstimator _cardinality = new();
 
     public void Add(DataValue value)
@@ -45,17 +53,34 @@ internal sealed class IncrementalChunkAccumulator
 
     private void UpdateMinMax(DataValue value)
     {
-        if (!IsComparableKind(value.Kind))
+        if (!_minMaxEligible)
         {
             return;
         }
 
-        if (_minimum is null || StatisticsPredicateEvaluator.CompareValues(value, _minimum.Value) < 0)
+        if (!DataValueComparer.IsComparable(value.Kind))
+        {
+            return;
+        }
+
+        // Non-inline String/JsonValue can't be retained across batches without an external
+        // arena. Rather than chase retention plumbing, we invalidate min/max for the column
+        // on first sight. Downstream zone-map pruning treats null min/max as "unknown, do
+        // not prune" — correct, conservative behaviour.
+        if ((value.Kind is DataKind.String or DataKind.JsonValue) && !value.IsInline)
+        {
+            _minimum = null;
+            _maximum = null;
+            _minMaxEligible = false;
+            return;
+        }
+
+        if (_minimum is null || DataValueComparer.Compare(value, _minimum.Value) < 0)
         {
             _minimum = value;
         }
 
-        if (_maximum is null || StatisticsPredicateEvaluator.CompareValues(value, _maximum.Value) > 0)
+        if (_maximum is null || DataValueComparer.Compare(value, _maximum.Value) > 0)
         {
             _maximum = value;
         }
@@ -95,9 +120,6 @@ internal sealed class IncrementalChunkAccumulator
             case DataKind.UInt64:
                 _cardinality.Add((long)value.AsUInt64());
                 break;
-            case DataKind.String:
-                _cardinality.Add(value.RawContentHash);
-                break;
             case DataKind.Date:
                 _cardinality.Add(value.AsDate().DayNumber);
                 break;
@@ -105,21 +127,12 @@ internal sealed class IncrementalChunkAccumulator
                 _cardinality.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
             case DataKind.JsonValue:
+            case DataKind.String:
                 _cardinality.Add(value.RawContentHash);
                 break;
             default:
                 _cardinality.Add(value.GetHashCode());
                 break;
         }
-    }
-
-    private static bool IsComparableKind(DataKind kind)
-    {
-        return kind is DataKind.Float32 or DataKind.Float64
-            or DataKind.UInt8 or DataKind.Int8
-            or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32
-            or DataKind.Int64 or DataKind.UInt64
-            or DataKind.String or DataKind.Date or DataKind.DateTime;
     }
 }

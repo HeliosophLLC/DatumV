@@ -177,6 +177,9 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
                 ? _stringCompressedBitmaps.Keys
                 : _stringChunkLocations!.Keys;
 
+            // Keys are guaranteed ≤16 UTF-8 bytes (enforced at build time by the
+            // indexable = inline rule), so FromString / FromJsonValue land on the inline
+            // path and don't require a store.
             return keys.Select(s => _keyKind == DataKind.JsonValue
                 ? DataValue.FromJsonValue(s)
                 : DataValue.FromString(s)).ToList();
@@ -551,6 +554,8 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     {
         Dictionary<string, TValue> result = new(source.Count, StringComparer.Ordinal);
 
+        // Keys are guaranteed inline (≤16 UTF-8 bytes) by the indexable-rule enforced
+        // during build. AsString() on an inline value needs no store.
         foreach (KeyValuePair<DataValue, TValue> entry in source)
         {
             result[entry.Key.AsString()] = entry.Value;

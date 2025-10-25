@@ -46,6 +46,49 @@ internal sealed class DateColumnDecoder : DatumColumnDecoder
     }
 
     /// <inheritdoc/>
+    public override void DecodeInto(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        int payloadLength = -1,
+        byte[]? decompressedBuffer = null)
+    {
+        int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
+        byte[] raw;
+        if (decompressedBuffer is not null)
+        {
+            DecompressPayloadInto(payload, effectiveLength, decompressedBuffer, uncompressedByteLength, compression);
+            raw = decompressedBuffer;
+        }
+        else
+        {
+            raw = DecompressPayload(payload, effectiveLength, uncompressedByteLength, compression);
+        }
+
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        int readOffset = bitmapByteCount;
+        int baseline = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(readOffset));
+        readOffset += 4;
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            int delta = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(readOffset));
+            readOffset += 4;
+
+            target[rowIndex] = nullBitmap.IsNull(rowIndex)
+                ? DataValue.Null(DataKind.Date)
+                : DataValue.FromDate(DateOnly.FromDayNumber(baseline + delta));
+        }
+    }
+
+    /// <inheritdoc/>
     public override void DecodeIntoColumn(
         byte[] payload,
         DatumEncoding encoding,

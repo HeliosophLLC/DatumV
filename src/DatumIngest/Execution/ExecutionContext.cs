@@ -28,36 +28,36 @@ public sealed class ExecutionContext
         MaxStratifyClasses = context.MaxStratifyClasses;
     }
 
-    /// <summary>
-    /// Creates a new execution context.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
-    /// <param name="functionRegistry">Registry of scalar and table-valued functions.</param>
-    /// <param name="catalog">Registry of named tables and provider factories.</param>
-    /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
-    /// <param name="memoryBudgetBytes">
-    /// Optional memory budget in bytes for operators that support spill-to-disk.
-    /// When <see langword="null"/>, operators keep all intermediate state in memory.
-    /// When set, operators spill to temporary files when estimated memory exceeds this budget.
-    /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
-    /// and materialised CTEs.
-    /// </param>
-    /// <param name="localBufferPool">
-    /// Pool for reusing <see cref="Model.Row"/> objects and their backing
-    /// <see cref="Model.DataValue"/> arrays in join operators.
-    /// </param>
-    /// <param name="store">
-    /// Optional value store for reference-type payloads. Defaults to a new <see cref="Arena"/>
-    /// if not provided.
-    /// </param>
-    public ExecutionContext(
+  /// <summary>
+  /// Creates a new execution context.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
+  /// <param name="functionRegistry">Registry of scalar and table-valued functions.</param>
+  /// <param name="catalog">Registry of named tables and provider factories.</param>
+  /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
+  /// <param name="memoryBudgetBytes">
+  /// Optional memory budget in bytes for operators that support spill-to-disk.
+  /// When <see langword="null"/>, operators keep all intermediate state in memory.
+  /// When set, operators spill to temporary files when estimated memory exceeds this budget.
+  /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
+  /// and materialised CTEs.
+  /// </param>
+  /// <param name="localBufferPool">
+  /// Pool for reusing <see cref="Model.Row"/> objects and their backing
+  /// <see cref="Model.DataValue"/> arrays in join operators.
+  /// </param>
+  /// <param name="store">
+  /// Optional value store for reference-type payloads. Defaults to a new <see cref="Model.Arena"/>
+  /// if not provided.
+  /// </param>
+  public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
         LocalBufferPool localBufferPool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
-        IValueStore? store = null)
+        Arena? store = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
@@ -83,7 +83,7 @@ public sealed class ExecutionContext
     /// Operators use this store for all reference-type <see cref="DataValue"/> access
     /// for all reference-type payloads.
     /// </summary>
-    public IValueStore Store { get; }
+    public Arena Store { get; }
 
     /// <summary>
     /// Optional meter for accumulating Query Unit costs during execution.
