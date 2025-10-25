@@ -3,7 +3,7 @@ param(
     [string]$Tool = "IngestOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     [string]$Profile = "gc-collect",
-    [string]$Source = "E:\Datasets\COCO2017\test2017.zip",
+    [string]$Source = "E:\Datasets\Chicago Crimes Dataset\Crimes_-_2001_to_Present_20260331.csv",
     [string]$Dest = "",
     [string]$Duration = "00:01:30",
     [string]$Configuration = "Release"

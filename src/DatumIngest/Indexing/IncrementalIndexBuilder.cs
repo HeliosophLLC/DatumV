@@ -150,7 +150,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 BloomFilter? bloom = bloomFilters[ordinal];
                 if (bloom is not null)
                 {
-                    bloom.Add(value);
+                    bloom.Add(value, valueStore);
                 }
             }
 

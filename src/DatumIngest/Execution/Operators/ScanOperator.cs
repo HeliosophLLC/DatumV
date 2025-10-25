@@ -306,7 +306,7 @@ public sealed class ScanOperator : IQueryOperator
                         bool anyMayMatch = false;
                         foreach (DataValue keyValue in entry.Value)
                         {
-                            if (filter.MayContain(keyValue))
+                            if (filter.MayContain(keyValue, context.Store))
                             {
                                 anyMayMatch = true;
                                 break;

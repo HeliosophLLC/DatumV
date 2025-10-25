@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -117,7 +118,8 @@ public sealed class BloomFilter
     /// Adds a value to the bloom filter.
     /// </summary>
     /// <param name="value">The value to add. Null values are ignored.</param>
-    public void Add(DataValue value)
+    /// <param name="store">The value store to use for decoding variable-length values.</param>
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -129,7 +131,7 @@ public sealed class BloomFilter
             throw new InvalidOperationException("Cannot add values to a memory-mapped bloom filter.");
         }
 
-        (uint hash1, uint hash2) = ComputeHashes(value);
+        (uint hash1, uint hash2) = ComputeHashes(value, store);
 
         for (int i = 0; i < _hashCount; i++)
         {
@@ -145,15 +147,16 @@ public sealed class BloomFilter
     /// Returns <c>true</c> when the value is probably present (subject to false positive rate).
     /// </summary>
     /// <param name="value">The value to test.</param>
+    /// <param name="store">The value store to use for decoding variable-length values.</param>
     /// <returns><c>true</c> if the value may be present; <c>false</c> if definitely absent.</returns>
-    public bool MayContain(DataValue value)
+    public bool MayContain(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
             return false;
         }
 
-        (uint hash1, uint hash2) = ComputeHashes(value);
+        (uint hash1, uint hash2) = ComputeHashes(value, store);
 
         for (int i = 0; i < _hashCount; i++)
         {
@@ -186,7 +189,7 @@ public sealed class BloomFilter
     /// Fixed-size numeric types are hashed directly from a stack-allocated
     /// buffer, avoiding per-call heap allocations.
     /// </summary>
-    private static (uint Hash1, uint Hash2) ComputeHashes(DataValue value)
+    private static (uint Hash1, uint Hash2) ComputeHashes(DataValue value, IValueStore store)
     {
         // Fast path: fixed-size types hash from stackalloc without any heap allocation.
         switch (value.Kind)
@@ -269,8 +272,17 @@ public sealed class BloomFilter
                 BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsDateTime().ToUnixTimeMilliseconds());
                 return FinalizeHashes(buffer);
             }
+            case DataKind.String:
+            case DataKind.JsonValue:
+            {
+                ulong h = value.RawContentHash;
+                if (h == 0) h = XxHash64.HashToUInt64(value.AsUtf8Span(store));
+                uint h1 = (uint)h;
+                uint h2 = (uint)(h >> 32) | 1;   // preserve the odd trick
+                return (h1, h2);
+            }
             default:
-                return FinalizeHashes(GetValueBytesHeap(value));
+                return FinalizeHashes(GetValueBytesHeap(value, store));
         }
     }
 
@@ -290,23 +302,14 @@ public sealed class BloomFilter
     /// Heap-allocating fallback for variable-length and complex types
     /// that cannot use a fixed-size stack buffer.
     /// </summary>
-    private static ReadOnlySpan<byte> GetValueBytesHeap(DataValue value)
+    private static ReadOnlySpan<byte> GetValueBytesHeap(DataValue value, IValueStore store)
     {
         switch (value.Kind)
         {
-            case DataKind.String:
-                return System.Text.Encoding.UTF8.GetBytes(value.AsString());
-            case DataKind.JsonValue:
-                return System.Text.Encoding.UTF8.GetBytes(value.AsJsonValue());
             case DataKind.UInt8Array:
-                return value.AsUInt8Array();
+                return value.AsUInt8Array(store);
             case DataKind.Vector:
-            {
-                float[] vector = value.AsVector();
-                byte[] vectorBytes = new byte[vector.Length * 4];
-                Buffer.BlockCopy(vector, 0, vectorBytes, 0, vectorBytes.Length);
-                return vectorBytes;
-            }
+                return MemoryMarshal.AsBytes(value.AsVector(store).AsSpan());
             default:
             {
                 // Matrix, Tensor, Image, and any future complex types.

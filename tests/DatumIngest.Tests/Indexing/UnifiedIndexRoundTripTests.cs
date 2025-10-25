@@ -17,6 +17,7 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class UnifiedIndexRoundTripTests : IDisposable
 {
+    private static readonly Arena Store = new();
     private readonly string _tempDirectory;
 
     /// <summary>Creates a temporary directory for test files.</summary>
@@ -266,12 +267,12 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
         ];
 
         BloomFilter filter0 = new(expectedElements: 100);
-        filter0.Add(DataValue.FromFloat32(1.0f));
-        filter0.Add(DataValue.FromFloat32(50.0f));
+        filter0.Add(DataValue.FromFloat32(1.0f), Store);
+        filter0.Add(DataValue.FromFloat32(50.0f), Store);
 
         BloomFilter filter1 = new(expectedElements: 100);
-        filter1.Add(DataValue.FromFloat32(51.0f));
-        filter1.Add(DataValue.FromFloat32(100.0f));
+        filter1.Add(DataValue.FromFloat32(51.0f), Store);
+        filter1.Add(DataValue.FromFloat32(100.0f), Store);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -289,12 +290,12 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
         Assert.Equal(2, restored.BloomFilters.ChunkCount);
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredFilter0));
-        Assert.True(restoredFilter0!.MayContain(DataValue.FromFloat32(1.0f)));
-        Assert.True(restoredFilter0.MayContain(DataValue.FromFloat32(50.0f)));
-        Assert.False(restoredFilter0.MayContain(DataValue.FromFloat32(999.0f)));
+        Assert.True(restoredFilter0!.MayContain(DataValue.FromFloat32(1.0f), Store));
+        Assert.True(restoredFilter0.MayContain(DataValue.FromFloat32(50.0f), Store));
+        Assert.False(restoredFilter0.MayContain(DataValue.FromFloat32(999.0f), Store));
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 1, out BloomFilter? restoredFilter1));
-        Assert.True(restoredFilter1!.MayContain(DataValue.FromFloat32(51.0f)));
+        Assert.True(restoredFilter1!.MayContain(DataValue.FromFloat32(51.0f), Store));
     }
 
     // ────────────────────── Sorted indexes ──────────────────────
@@ -483,7 +484,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         // Bloom filters.
         BloomFilter idBloom0 = new(expectedElements: 100);
-        idBloom0.Add(DataValue.FromInt32(42));
+        idBloom0.Add(DataValue.FromInt32(42), Store);
         BloomFilter idBloom1 = new(expectedElements: 100);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
@@ -506,7 +507,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
         Assert.Equal(1, restored.Chunks[0].ColumnStatistics["id"].Minimum.GetValueOrDefault().AsInt32());
         Assert.NotNull(restored.BloomFilters);
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredBloom));
-        Assert.True(restoredBloom!.MayContain(DataValue.FromInt32(42)));
+        Assert.True(restoredBloom!.MayContain(DataValue.FromInt32(42), Store));
     }
 
     // ────────────────────── Error handling ──────────────────────

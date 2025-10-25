@@ -41,6 +41,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Bit mask indicating the value has a payload in an <see cref="IValueStore"/>.</summary>
     private const byte FlagHasReference = 0x02;
 
+    /// <summary>
+    /// Bit mask indicating a <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
+    /// payload whose UTF-8 bytes are stored inline in <c>_p0</c>-<c>_p3</c> (up to 16 bytes).
+    /// When set, <c>_charCount</c> holds the UTF-8 byte length (0-16).
+    /// </summary>
+    private const byte FlagIsInline = 0x04;
+
     // ───────────────────────── Fields (20 bytes) ─────────────────────────
 
     // Header (4 bytes)
@@ -94,6 +101,25 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Whether this value has a reference-type payload in an <see cref="IValueStore"/>.</summary>
     internal bool HasReference => (_flags & FlagHasReference) != 0;
+
+    /// <summary>
+    /// Whether this value is a <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
+    /// whose UTF-8 bytes are stored inline in <c>_p0</c>-<c>_p3</c>.
+    /// </summary>
+    public bool IsInline => (_flags & FlagIsInline) != 0;
+
+    /// <summary>
+    /// Returns a span over the 16 inline payload bytes, sliced to <see cref="_charCount"/>.
+    /// Only valid when <see cref="IsInline"/> is <c>true</c>.
+    /// </summary>
+    private ReadOnlySpan<byte> InlineUtf8Span
+    {
+        get
+        {
+            ref byte byteRef = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
+            return MemoryMarshal.CreateReadOnlySpan(ref byteRef, _charCount);
+        }
+    }
 
     // ───────────────────────── Cached common instances ─────────────────────────
 
@@ -171,11 +197,19 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Creates a value from a text string using an explicit <see cref="IValueStore"/>.
+    /// Strings whose UTF-8 form fits in 16 bytes are stored inline in the struct;
+    /// longer strings are written to <paramref name="store"/>.
     /// </summary>
     /// <param name="value">The string to store.</param>
     /// <param name="store">The store to use for storage and later retrieval.</param>
     public static DataValue FromString(string value, IValueStore store)
     {
+        Span<byte> scratch = stackalloc byte[16];
+        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
+        {
+            return FromInlineUtf8(DataKind.String, scratch[..written]);
+        }
+
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
@@ -185,6 +219,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
     public static DataValue FromCharSpan(ReadOnlySpan<char> chars, IValueStore store)
     {
+        Span<byte> scratch = stackalloc byte[16];
+        if (System.Text.Encoding.UTF8.TryGetBytes(chars, scratch, out int written))
+        {
+            return FromInlineUtf8(DataKind.String, scratch[..written]);
+        }
+
         var (p0, p1) = store.StoreChars(chars);
         var (hashLo, hashHi) = HashString(chars);
         ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
@@ -194,10 +234,40 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
     public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, int charCount, IValueStore store)
     {
+        if (utf8.Length <= 16)
+        {
+            return FromInlineUtf8(DataKind.String, utf8);
+        }
+
         var (p0, p1) = store.StoreUtf8(utf8);
         var (hashLo, hashHi) = HashUtf8(utf8);
         ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
         return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+    }
+
+    /// <summary>
+    /// Creates an inline <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
+    /// whose UTF-8 bytes live directly in <c>_p0</c>-<c>_p3</c>. Requires
+    /// <paramref name="utf8Bytes"/>.Length &lt;= 16. Unused payload bytes are zeroed.
+    /// </summary>
+    private static DataValue FromInlineUtf8(DataKind kind, ReadOnlySpan<byte> utf8Bytes)
+    {
+        Span<byte> padded = stackalloc byte[16];
+        padded.Clear();
+        utf8Bytes.CopyTo(padded);
+
+        // Reinterpret the 16-byte buffer as four native-order int32 words, matching how
+        // the struct stores _p0-_p3 in memory. InlineUtf8Span reads the same bytes back
+        // by casting the fields to a byte span, so the round-trip is endian-neutral.
+        Span<int> asInts = MemoryMarshal.Cast<byte, int>(padded);
+        return new(
+            kind,
+            flags: FlagIsInline,
+            p0: asInts[0],
+            p1: asInts[1],
+            p2: asInts[2],
+            p3: asInts[3],
+            charCount: (ushort)utf8Bytes.Length);
     }
 
     /// <summary>
@@ -327,9 +397,17 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Creates a value from a raw JSON string using an explicit <see cref="IValueStore"/>.
+    /// Values whose UTF-8 form fits in 16 bytes are stored inline; longer values are
+    /// written to <paramref name="store"/>.
     /// </summary>
     public static DataValue FromJsonValue(string value, IValueStore store)
     {
+        Span<byte> scratch = stackalloc byte[16];
+        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
+        {
+            return FromInlineUtf8(DataKind.JsonValue, scratch[..written]);
+        }
+
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
@@ -407,9 +485,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>
     /// Whether this value stores an arena offset rather than a direct reference.
     /// True for string/JSON values created via <see cref="FromStringSlice(int, int)"/>.
+    /// Inline strings (see <see cref="IsInline"/>) are self-contained and return <c>false</c>.
     /// </summary>
     public bool IsArenaBacked =>
-        (_kind is DataKind.String or DataKind.JsonValue) && (_flags & (FlagIsNull | FlagHasReference)) == 0;
+        (_kind is DataKind.String or DataKind.JsonValue)
+        && (_flags & (FlagIsNull | FlagHasReference | FlagIsInline)) == 0;
 
     /// <summary>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
@@ -1066,6 +1146,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         return store.RetrieveString(_p0, _p1);
     }
 
@@ -1080,6 +1161,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int StringCharCount(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        // Inline: _charCount is UTF-8 byte length (not char count). Decode on the fly —
+        // cheap for <=16 bytes, and only differs from byte length for multi-byte UTF-8.
+        if (IsInline) return System.Text.Encoding.UTF8.GetCharCount(InlineUtf8Span);
         // _charCount holds the char count (ushort). 65535 = overflow sentinel → fall back to decode.
         // 0 = unknown (e.g. FromStringSlice) → also fall back.
         return _charCount is not 0 and not ushort.MaxValue
@@ -1118,7 +1202,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 throw new InvalidOperationException(
                     $"Cannot read StringByteLength on a {_kind} value.");
             }
-            return _p1;
+            return IsInline ? _charCount : _p1;
         }
     }
 
@@ -1137,7 +1221,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 throw new InvalidOperationException(
                     $"Cannot read StringOrBinaryByteLength on a {_kind} value.");
             }
-            return _p1;
+            return IsInline ? _charCount : _p1;
         }
     }
 
@@ -1152,8 +1236,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// cached hash is absent, callers must fall back to hashing the UTF-8 bytes
     /// through an <see cref="IValueStore"/>.
     /// </remarks>
-    public ulong RawContentHash =>
-        (uint)_p2 | ((ulong)(uint)_p3 << 32);
+    public ulong RawContentHash
+    {
+        get
+        {
+            // Inline strings don't cache a hash — _p2 and _p3 hold payload bytes, not hash bits.
+            // XxHash64 over a <=16-byte span is a single stripe, effectively free.
+            if (IsInline) return XxHash64.HashToUInt64(InlineUtf8Span);
+            return (uint)_p2 | ((ulong)(uint)_p3 << 32);
+        }
+    }
 
     /// <summary>
     /// Returns the element count for collection-type values without accessing the store.
@@ -1187,6 +1279,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
             ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsInline) return InlineUtf8Span;
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
@@ -1224,6 +1317,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString(Arena arena)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         if ((_flags & FlagHasReference) != 0)
         {
             // HasReference values need a full IValueStore. Arena can serve as one since it implements IValueStore.
@@ -1386,6 +1480,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsJsonValue(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
         return store.RetrieveString(_p0, _p1);
     }
 
@@ -1663,9 +1758,12 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, BitConverter.Int64BitsToDouble(ReadLong())),
 
             // Reference types:
+            // RawContentHash returns XxHash64-over-UTF-8 for both inline and cached-hash
+            // values, so equal-content strings across the two modes hash to the same code —
+            // matching CompareStrings' mixed-mode hash match.
             DataKind.String or DataKind.JsonValue
-                => (_p2 | _p3) != 0
-                    ? HashCode.Combine(_kind, _p2, _p3)
+                => RawContentHash != 0
+                    ? HashCode.Combine(_kind, RawContentHash)
                     : ComputeStringHashCode(),
             DataKind.DateTime
                 => HashCode.Combine(_kind, _p0, _p1, _p2),
@@ -1706,6 +1804,29 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     private static bool CompareStrings(in DataValue left, in DataValue right)
     {
+        bool leftInline = left.IsInline;
+        bool rightInline = right.IsInline;
+
+        // Both inline: bitwise compare payload + byte length (unused bytes are zeroed at construction).
+        if (leftInline && rightInline)
+        {
+            return left._charCount == right._charCount
+                && left._p0 == right._p0 && left._p1 == right._p1
+                && left._p2 == right._p2 && left._p3 == right._p3;
+        }
+
+        // Mixed inline/non-inline: compare via RawContentHash. Inline computes XxHash64 over
+        // its bytes; reference-store values return their cached XxHash64. Both use the same
+        // hash function over UTF-8 bytes, so equal content hashes equal. Arena-slice values
+        // return 0 for RawContentHash and cannot be compared here without a store.
+        if (leftInline || rightInline)
+        {
+            ulong leftHash = left.RawContentHash;
+            ulong rightHash = right.RawContentHash;
+            return leftHash != 0 && rightHash != 0 && leftHash == rightHash;
+        }
+
+        // Both non-inline: existing offset + cached-hash comparison.
         // Fast path: same offset + same byte length → identical bytes in the same store.
         if (left._p0 == right._p0 && left._p1 == right._p1)
             return true;
@@ -1820,14 +1941,18 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int64 => ReadLong().ToString(),
             DataKind.UInt64 => unchecked((ulong)ReadLong()).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
-            DataKind.String => HasReference
-                ? $"String[offset={_p0}, len={_p1}]"
-                : $"String[arena@{_p0}+{_p1}]",
+            DataKind.String => IsInline
+                ? $"String[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
+                : HasReference
+                    ? $"String[offset={_p0}, len={_p1}]"
+                    : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
-            DataKind.JsonValue => HasReference
-                ? $"JsonValue[offset={_p0}, len={_p1}]"
-                : $"JsonValue[arena@{_p0}+{_p1}]",
+            DataKind.JsonValue => IsInline
+                ? $"JsonValue[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
+                : HasReference
+                    ? $"JsonValue[offset={_p0}, len={_p1}]"
+                    : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),

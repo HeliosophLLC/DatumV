@@ -21,6 +21,8 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class BloomJoinPruningTests
 {
+    private static readonly Arena Store = new();
+
     [Fact]
     public async Task HashJoin_WithBloomFilters_PrunesChunksWithNoMatchingKeys()
     {
@@ -38,16 +40,16 @@ public sealed class BloomJoinPruningTests
 
         // Build bloom filters per chunk for the "id" column.
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
-        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f), Store);
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f), Store);
 
         BloomFilter chunk1Bloom = new(expectedElements: 10);
-        chunk1Bloom.Add(DataValue.FromFloat32(3.0f));
-        chunk1Bloom.Add(DataValue.FromFloat32(4.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(3.0f), Store);
+        chunk1Bloom.Add(DataValue.FromFloat32(4.0f), Store);
 
         BloomFilter chunk2Bloom = new(expectedElements: 10);
-        chunk2Bloom.Add(DataValue.FromFloat32(5.0f));
-        chunk2Bloom.Add(DataValue.FromFloat32(6.0f));
+        chunk2Bloom.Add(DataValue.FromFloat32(5.0f), Store);
+        chunk2Bloom.Add(DataValue.FromFloat32(6.0f), Store);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -132,8 +134,8 @@ public sealed class BloomJoinPruningTests
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
-        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f), Store);
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f), Store);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -251,12 +253,12 @@ public sealed class BloomJoinPruningTests
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
-        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f), Store);
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f), Store);
 
         BloomFilter chunk1Bloom = new(expectedElements: 10);
-        chunk1Bloom.Add(DataValue.FromFloat32(3.0f));
-        chunk1Bloom.Add(DataValue.FromFloat32(4.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(3.0f), Store);
+        chunk1Bloom.Add(DataValue.FromFloat32(4.0f), Store);
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -341,12 +343,12 @@ public sealed class BloomJoinPruningTests
         ];
 
         BloomFilter orderChunk0Bloom = new(expectedElements: 10);
-        orderChunk0Bloom.Add(DataValue.FromFloat32(1.0f));
-        orderChunk0Bloom.Add(DataValue.FromFloat32(2.0f));
+        orderChunk0Bloom.Add(DataValue.FromFloat32(1.0f), Store);
+        orderChunk0Bloom.Add(DataValue.FromFloat32(2.0f), Store);
 
         BloomFilter orderChunk1Bloom = new(expectedElements: 10);
-        orderChunk1Bloom.Add(DataValue.FromFloat32(3.0f));
-        orderChunk1Bloom.Add(DataValue.FromFloat32(4.0f));
+        orderChunk1Bloom.Add(DataValue.FromFloat32(3.0f), Store);
+        orderChunk1Bloom.Add(DataValue.FromFloat32(4.0f), Store);
 
         Dictionary<string, BloomFilter[]> orderBloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {

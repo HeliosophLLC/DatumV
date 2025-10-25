@@ -205,7 +205,7 @@ public sealed class SourceIndexBuilder
                         BloomFilter? bloom = ordinalBloomFilters[ordinal];
                         if (bloom is not null)
                         {
-                            bloom.Add(value);
+                            bloom.Add(value, batch.Arena);
                         }
                     }
 

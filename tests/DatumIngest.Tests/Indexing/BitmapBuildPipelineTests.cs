@@ -13,6 +13,8 @@ namespace DatumIngest.Tests.Indexing;
 /// </summary>
 public sealed class BitmapBuildPipelineTests
 {
+    private static readonly Arena Store = new();
+
     // ───────────────────────── SourceIndexBuilder ─────────────────────────
 
     [Fact]
@@ -207,7 +209,7 @@ public sealed class BitmapBuildPipelineTests
         {
             string[] names = ["flag"];
             DataValue[] values = [DataValue.FromBoolean(i % 2 == 0)];
-            incremental.AddRow(new Row(names, values));
+            incremental.AddRow(new Row(names, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -231,7 +233,7 @@ public sealed class BitmapBuildPipelineTests
         {
             string[] names = ["cat"];
             DataValue[] values = [DataValue.FromString(categories[i % 2])];
-            incremental.AddRow(new Row(names, values));
+            incremental.AddRow(new Row(names, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -260,7 +262,7 @@ public sealed class BitmapBuildPipelineTests
         {
             string[] names = ["id"];
             DataValue[] values = [DataValue.FromFloat32((float)i)];
-            incremental.AddRow(new Row(names, values));
+            incremental.AddRow(new Row(names, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -282,7 +284,7 @@ public sealed class BitmapBuildPipelineTests
         {
             string[] names = ["color"];
             DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(new Row(names, values));
+            incremental.AddRow(new Row(names, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -331,7 +333,7 @@ public sealed class BitmapBuildPipelineTests
         {
             string[] names = ["color"];
             DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(new Row(names, values));
+            incremental.AddRow(new Row(names, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
