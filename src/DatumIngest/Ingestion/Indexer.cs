@@ -133,19 +133,24 @@ public sealed class Indexer(Pool pool)
                 bloomAllColumns: true,
                 indexAllColumns: false,
                 chunkSize: options.ChunkSize,
-                autoIndexColumns: true),
+                autoIndexColumns: true,
+                computeCardinality: options.ComputeCardinality),
 
             IndexColumnSelection.All => new SourceIndexBuilder(
                 bloomAllColumns: true,
                 indexAllColumns: true,
-                chunkSize: options.ChunkSize),
+                chunkSize: options.ChunkSize,
+                computeCardinality: options.ComputeCardinality),
 
             IndexColumnSelection.Explicit explicitSelection => new SourceIndexBuilder(
                 chunkSize: options.ChunkSize,
                 bloomColumns: ToColumnSet(explicitSelection.Columns),
-                indexColumns: ToColumnSet(explicitSelection.Columns)),
+                indexColumns: ToColumnSet(explicitSelection.Columns),
+                computeCardinality: options.ComputeCardinality),
 
-            IndexColumnSelection.None => new SourceIndexBuilder(chunkSize: options.ChunkSize),
+            IndexColumnSelection.None => new SourceIndexBuilder(
+                chunkSize: options.ChunkSize,
+                computeCardinality: options.ComputeCardinality),
 
             _ => throw new InvalidOperationException(
                 $"Unknown {nameof(IndexColumnSelection)}: {options.Columns.GetType().Name}"),

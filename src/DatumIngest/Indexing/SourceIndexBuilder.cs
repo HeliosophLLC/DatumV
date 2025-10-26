@@ -24,6 +24,7 @@ public sealed class SourceIndexBuilder
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
+    private readonly bool _computeCardinality;
 
     /// <summary>
     /// Creates a builder with the specified chunk size and optional column-specific indexes.
@@ -31,10 +32,15 @@ public sealed class SourceIndexBuilder
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for no bloom filters.</param>
     /// <param name="indexColumns">Column names to build sorted value indexes for, or <c>null</c> for no sorted indexes.</param>
+    /// <param name="computeCardinality">
+    /// When <c>true</c> (default), maintains HyperLogLog cardinality estimates per column.
+    /// When <c>false</c>, skips HLL updates entirely — reported cardinality is 0.
+    /// </param>
     public SourceIndexBuilder(
         int chunkSize = IndexConstants.DefaultChunkSize,
         IReadOnlySet<string>? bloomColumns = null,
-        IReadOnlySet<string>? indexColumns = null)
+        IReadOnlySet<string>? indexColumns = null,
+        bool computeCardinality = true)
     {
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
@@ -42,6 +48,7 @@ public sealed class SourceIndexBuilder
         _bloomAllColumns = false;
         _indexAllColumns = false;
         _autoIndexColumns = false;
+        _computeCardinality = computeCardinality;
     }
 
     /// <summary>
@@ -54,11 +61,16 @@ public sealed class SourceIndexBuilder
     /// When <c>true</c> and <paramref name="indexAllColumns"/> is <c>false</c>,
     /// automatically selects compact columns for sorted indexing based on their data kind.
     /// </param>
+    /// <param name="computeCardinality">
+    /// When <c>true</c> (default), maintains HyperLogLog cardinality estimates per column.
+    /// When <c>false</c>, skips HLL updates entirely — reported cardinality is 0.
+    /// </param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
-        bool autoIndexColumns = false)
+        bool autoIndexColumns = false,
+        bool computeCardinality = true)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
@@ -66,6 +78,7 @@ public sealed class SourceIndexBuilder
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
+        _computeCardinality = computeCardinality;
     }
 
     /// <summary>
@@ -83,7 +96,8 @@ public sealed class SourceIndexBuilder
         return new IncrementalIndexBuilder(
             _chunkSize, fingerprint,
             _bloomColumns, _indexColumns,
-            _bloomAllColumns, _indexAllColumns, _autoIndexColumns);
+            _bloomAllColumns, _indexAllColumns, _autoIndexColumns,
+            _computeCardinality);
     }
 
     /// <summary>
@@ -198,25 +212,25 @@ public sealed class SourceIndexBuilder
         return new Schema(columns);
     }
 
-    internal static Dictionary<string, ChunkAccumulator> CreateAccumulators(Row row)
+    internal static Dictionary<string, ChunkAccumulator> CreateAccumulators(Row row, bool computeCardinality = true)
     {
         Dictionary<string, ChunkAccumulator> accumulators = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string name in row.ColumnNames)
         {
-            accumulators[name] = new ChunkAccumulator();
+            accumulators[name] = new ChunkAccumulator(computeCardinality);
         }
 
         return accumulators;
     }
 
-    internal static Dictionary<string, ChunkAccumulator> CreateAccumulators(Schema schema)
+    internal static Dictionary<string, ChunkAccumulator> CreateAccumulators(Schema schema, bool computeCardinality = true)
     {
         Dictionary<string, ChunkAccumulator> accumulators = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (ColumnInfo column in schema.Columns)
         {
-            accumulators[column.Name] = new ChunkAccumulator();
+            accumulators[column.Name] = new ChunkAccumulator(computeCardinality);
         }
 
         return accumulators;

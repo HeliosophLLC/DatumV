@@ -20,6 +20,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
+    private readonly bool _computeCardinality;
     private IReadOnlySet<string>? _effectiveBloomColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
@@ -68,7 +69,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
         IReadOnlySet<string>? indexColumns = null,
         bool bloomAllColumns = false,
         bool indexAllColumns = false,
-        bool autoIndexColumns = false)
+        bool autoIndexColumns = false,
+        bool computeCardinality = true)
     {
         _chunkSize = chunkSize;
         _fingerprint = fingerprint;
@@ -77,6 +79,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
+        _computeCardinality = computeCardinality;
         bool needsBloom = bloomAllColumns || (bloomColumns is not null && bloomColumns.Count > 0);
         bool needsIndex = indexAllColumns || (indexColumns is not null && indexColumns.Count > 0) || autoIndexColumns;
         _allChunkBloomFilters = needsBloom ? new() : null;
@@ -337,12 +340,12 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
     private void InitializeAccumulators(Row row)
     {
-        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(row);
+        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(row, _computeCardinality);
     }
 
     private void InitializeAccumulatorsFromSchema()
     {
-        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(_schema!);
+        _currentAccumulators = SourceIndexBuilder.CreateAccumulators(_schema!, _computeCardinality);
     }
 
     /// <summary>

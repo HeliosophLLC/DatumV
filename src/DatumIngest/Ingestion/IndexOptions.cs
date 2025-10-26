@@ -47,6 +47,15 @@ public sealed record IndexOptions
     /// </summary>
     public int ChunkSize { get; init; } = IndexConstants.DefaultChunkSize;
 
+    /// <summary>
+    /// When <c>true</c> (default), maintains per-column HyperLogLog cardinality estimates
+    /// and writes them into the chunk statistics. When <c>false</c>, HLL updates are skipped
+    /// entirely and reported cardinality is 0. No engine path currently reads this value for
+    /// planning, so disabling is a safe wall-clock win on large ingests; re-enable when a
+    /// consumer starts using the estimate (e.g. the roadmapped dictionary-encoding gate).
+    /// </summary>
+    public bool ComputeCardinality { get; init; } = true;
+
     /// <summary>Default options: maximum throughput, highest peak memory.</summary>
     public static IndexOptions Default { get; } = new();
 

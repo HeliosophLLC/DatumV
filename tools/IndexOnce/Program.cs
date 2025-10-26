@@ -22,6 +22,10 @@ IndexOptions indexOptions = args.Length > 3
     ? IndexOptions.MultiTenantServer
     : IndexOptions.Default;
 
+// No downstream path currently consumes ChunkColumnStatistics.EstimatedCardinality for
+// planning. Skipping the HLL updates shaves ~20s off a Chicago-scale build.
+indexOptions = indexOptions with { ComputeCardinality = false };
+
 if (!File.Exists(sourcePath))
 {
     Console.Error.WriteLine($"Source file not found: {sourcePath}");
