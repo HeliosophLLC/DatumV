@@ -65,12 +65,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     public Schema GetSchema() => Reader.Schema;
 
     /// <inheritdoc/>
-    public Manifest.QueryResultsManifest? GetManifest()
-        => throw new NotSupportedException("DatumFileTableProvider does not support manifests.");
+    public Manifest.QueryResultsManifest? GetManifest() => null;
 
     /// <inheritdoc/>
-    public Indexing.SourceIndex? GetSourceIndex()
-        => throw new NotSupportedException("DatumFileTableProvider does not support source indices.");
+    public Indexing.SourceIndex? GetSourceIndex() => null;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(

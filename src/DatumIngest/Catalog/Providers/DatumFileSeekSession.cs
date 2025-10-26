@@ -94,8 +94,6 @@ internal sealed class DatumFileSeekSession : ISeekSession
             int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
             int sliceEnd = (int)Math.Min(endRow - cumulativeRow, rgRowCount);
 
-            IReadOnlyList<DataValue[]> columns = _columnBatch.Columns;
-
             for (int rowIndex = sliceStart; rowIndex < sliceEnd && emitted < count; rowIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
