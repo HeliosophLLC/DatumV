@@ -138,7 +138,10 @@ internal static class BPlusTreePageCodec
     {
         byte[] uncompressed;
 
-        using (MemoryStream buffer = new())
+        // Pre-size to page capacity; the fallback only fires when the rented buffer
+        // estimate was too low, so some growth is expected but we avoid the 0 → 256 → …
+        // ladder of small memcpys.
+        using (MemoryStream buffer = new(BPlusTreeConstants.PageSize))
         {
             using BufferedWriter writer = new(buffer);
 
@@ -234,11 +237,12 @@ internal static class BPlusTreePageCodec
         ReadOnlySpan<DataValue> keys,
         ReadOnlySpan<uint> childPageIndexes)
     {
-        // Use a growable stream so that oversized payloads are detected by the
-        // size check below rather than causing a NotSupportedException from a
-        // fixed-capacity MemoryStream. FindMaxInternalKeys relies on catching
-        // InvalidOperationException to probe the maximum key count per page.
-        using MemoryStream stream = new();
+        // Pre-size to page capacity so geometric doubling doesn't fire on every
+        // page (0 → 256 → 512 → ... → 8192, with a memcpy per grow). The stream is
+        // still growable, so oversized payloads grow past page size and are caught
+        // by the explicit size check below — FindMaxInternalKeys relies on catching
+        // that InvalidOperationException to probe the max key count per page.
+        using MemoryStream stream = new(BPlusTreeConstants.PageSize);
         using BufferedWriter writer = new(stream);
 
         // Common header.
