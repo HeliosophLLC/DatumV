@@ -155,6 +155,42 @@
 				"panel": "dedicated"
 			}
 		},
+		{
+			"label": "Debug: Build ExplainOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/ExplainOnce",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
+			"label": "Run: ExplainOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project", "tools/ExplainOnce",
+				"-c", "Debug",
+				"--no-build",
+				"--",
+				"${input:datumPath}",
+				"${input:explainSql}"
+			],
+			"dependsOn": "Debug: Build ExplainOnce",
+			"problemMatcher": [],
+			"group": "test",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
 	],
 	"inputs": [
 		{
@@ -173,6 +209,16 @@
 			"id": "indexColumn",
 			"type": "promptString",
 			"description": "Column name to extract"
+		},
+		{
+			"id": "datumPath",
+			"type": "promptString",
+			"description": "Path to .datum file"
+		},
+		{
+			"id": "explainSql",
+			"type": "promptString",
+			"description": "SQL to explain (quote spaces)"
 		}
 	]
 }
