@@ -158,7 +158,12 @@ public sealed class DatumFileReader : IDisposable
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
         DatumDecoderContext context = new() {
-            DatumFilePath = _filePath
+            DatumFilePath = _filePath,
+            // Route arena-backed string payloads into the batch's shared arena.
+            // Previously the context defaulted Store to a fresh `new Arena()` that was
+            // never Disposed — its backing MemoryMappedFile got finalized per row group,
+            // costing tens of seconds of finalizer-thread time on large ingests.
+            Store = columnBatch.Arena,
         };
 
         columnBatch.SetRowCount(rowCount);
