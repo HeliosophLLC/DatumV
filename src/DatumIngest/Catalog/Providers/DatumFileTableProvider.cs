@@ -2,9 +2,12 @@ using System.Buffers;
 using System.Runtime.CompilerServices;
 using DatumIngest.DatumFile;
 using DatumIngest.Execution;
+using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
+using DatumIngest.Serialization;
 
 namespace DatumIngest.Catalog.Providers;
 
@@ -17,8 +20,16 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
+    private readonly QueryResultsManifest? _manifest;
+    private readonly MappedSourceIndexSet? _mappedIndexSet;
+    private readonly SourceIndex? _sourceIndex;
+
     /// <summary>
-    /// Initializes the provider with the given descriptor and pool.
+    /// Initializes the provider with the given descriptor and pool. Auto-discovers
+    /// <c>.datum-manifest</c> and <c>.datum-index</c> sidecars alongside the source
+    /// file and caches them so <see cref="GetManifest"/> and <see cref="GetSourceIndex"/>
+    /// return live data without re-parsing on every call. The source index is held via
+    /// a <see cref="MappedSourceIndexSet"/> so multiple scans share the mmap.
     /// </summary>
     /// <param name="descriptor">The table descriptor containing metadata and file path.</param>
     /// <param name="pool">The resource pool for managing provider resources.</param>
@@ -27,6 +38,9 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
         Descriptor = descriptor;
         Reader = DatumFileReader.Open(descriptor.FilePath);
         Pool = pool;
+
+        _manifest = TryLoadManifest(descriptor);
+        (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
     }
 
     private DatumFileReader Reader { get; }
@@ -65,10 +79,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     public Schema GetSchema() => Reader.Schema;
 
     /// <inheritdoc/>
-    public Manifest.QueryResultsManifest? GetManifest() => null;
+    public QueryResultsManifest? GetManifest() => _manifest;
 
     /// <inheritdoc/>
-    public Indexing.SourceIndex? GetSourceIndex() => null;
+    public SourceIndex? GetSourceIndex() => _sourceIndex;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
@@ -237,7 +251,94 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _mappedIndexSet?.Dispose();
+        Reader.Dispose();
+    }
+
+    /// <summary>
+    /// Attempts to load a <c>.datum-manifest</c> sidecar alongside the source file.
+    /// Returns the per-table <see cref="QueryResultsManifest"/> matching this provider's
+    /// table name, or <c>null</c> when the sidecar is absent or contains no entry for
+    /// this table. A malformed sidecar throws (corruption should be visible, not swallowed).
+    /// </summary>
+    private static QueryResultsManifest? TryLoadManifest(TableDescriptor descriptor)
+    {
+        string path = PathDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-manifest";
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        string json = File.ReadAllText(path);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        if (sourceManifest is null)
+        {
+            return null;
+        }
+
+        return ResolveSidecarEntry(sourceManifest.Tables, descriptor.Name, descriptor.FilePath);
+    }
+
+    /// <summary>
+    /// Attempts to memory-map a <c>.datum-index</c> sidecar alongside the source file.
+    /// Returns the owning <see cref="MappedSourceIndexSet"/> (so the mapping outlives this
+    /// call) and the resolved <see cref="SourceIndex"/> for this table, or <c>(null, null)</c>
+    /// when the sidecar is absent or has no entry for this table. Multiple scan operators
+    /// share the single mapped view via the <see cref="MappedSourceIndexSet"/> the provider holds.
+    /// </summary>
+    private static (MappedSourceIndexSet? Mapped, SourceIndex? Index) TryLoadSourceIndex(TableDescriptor descriptor)
+    {
+        string path = PathDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-index";
+        if (!File.Exists(path))
+        {
+            return (null, null);
+        }
+
+        MappedSourceIndexSet mapped = UnifiedIndexReader.Open(path);
+        try
+        {
+            SourceIndex? index = ResolveSidecarEntry(mapped.IndexSet.Tables, descriptor.Name, descriptor.FilePath);
+            if (index is null)
+            {
+                mapped.Dispose();
+                return (null, null);
+            }
+
+            return (mapped, index);
+        }
+        catch
+        {
+            mapped.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a sidecar entry by the registered catalog table name, falling back to the
+    /// file-convention-derived name. Handles the common case where a sidecar was written
+    /// with the auto-derived name (e.g. <c>orders_csv</c>) while the catalog registers
+    /// a different logical name, and the reverse.
+    /// </summary>
+    private static T? ResolveSidecarEntry<T>(
+        IReadOnlyDictionary<string, T> entries, string tableName, string sourceFilePath)
+        where T : class
+    {
+        if (entries.TryGetValue(tableName, out T? value))
+        {
+            return value;
+        }
+
+        string derivedName = PathDetector.DeriveTableName(sourceFilePath);
+        if (!string.Equals(derivedName, tableName, StringComparison.Ordinal)
+            && entries.TryGetValue(derivedName, out value))
+        {
+            return value;
+        }
+
+        return null;
+    }
 
     private static ColumnLookup ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)
     {

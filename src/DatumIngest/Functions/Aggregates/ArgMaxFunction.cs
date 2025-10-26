@@ -127,7 +127,7 @@ public sealed class ArgMaxFunction : IAggregateFunction
         /// </summary>
         private bool IsBetter(DataValue candidate, DataValue current)
         {
-            int comparison = CompareKeys(candidate, current);
+            int comparison = DataValueComparer.Compare(candidate, current);
             return _findMaximum ? comparison > 0 : comparison < 0;
         }
     }
