@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Parsing;
 /// Tests for <see cref="SqlParser.TryParseRecovering"/> — clause-level error
 /// recovery that collects multiple parse errors and produces partial ASTs.
 /// </summary>
-public sealed class ErrorRecoveryTests
+public sealed class ErrorRecoveryTests : ServiceTestBase
 {
     // ───────────────────── Valid SQL (fast path) ─────────────────────
 

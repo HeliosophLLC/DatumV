@@ -4,7 +4,7 @@ using Superpower.Model;
 
 namespace DatumIngest.Tests.Parsing;
 
-public class SqlTokenizerTests
+public class SqlTokenizerTests : ServiceTestBase
 {
     private static Token<SqlToken>[] Tokenize(string input)
     {

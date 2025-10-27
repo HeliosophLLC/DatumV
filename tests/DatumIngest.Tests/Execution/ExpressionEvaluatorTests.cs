@@ -7,7 +7,7 @@ using SkiaSharp;
 
 namespace DatumIngest.Tests.Execution;
 
-public class ExpressionEvaluatorTests
+public class ExpressionEvaluatorTests : ServiceTestBase
 {
     private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault());
 

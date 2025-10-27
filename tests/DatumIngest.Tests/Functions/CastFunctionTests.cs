@@ -4,7 +4,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class CastFunctionTests
+public class CastFunctionTests : ServiceTestBase
 {
     private readonly CastFunction _function = new();
 

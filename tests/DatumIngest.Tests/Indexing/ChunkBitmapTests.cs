@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="ChunkBitmap"/> — bitset creation, bit manipulation,
 /// compression round-trips, population count, and edge cases.
 /// </summary>
-public sealed class ChunkBitmapTests
+public sealed class ChunkBitmapTests : ServiceTestBase
 {
     // ───────────────────────── Creation ─────────────────────────
 

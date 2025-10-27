@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DateDiffFunction"/>.
 /// </summary>
-public class DateDiffFunctionTests
+public class DateDiffFunctionTests : ServiceTestBase
 {
     private readonly DateDiffFunction _function = new();
 

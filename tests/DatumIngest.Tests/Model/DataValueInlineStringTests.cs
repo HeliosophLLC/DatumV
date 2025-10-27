@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Model;
 /// <see cref="DataKind.String"/> and <see cref="DataKind.JsonValue"/> values
 /// whose UTF-8 form fits in 16 bytes.
 /// </summary>
-public sealed class DataValueInlineStringTests
+public sealed class DataValueInlineStringTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
 

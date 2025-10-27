@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="MakeDateFunction"/> and <see cref="MakeTimestampFunction"/>.
 /// </summary>
-public class MakeDateTimeFunctionTests
+public class MakeDateTimeFunctionTests : ServiceTestBase
 {
     // ───────────────────── make_date() ─────────────────────
 

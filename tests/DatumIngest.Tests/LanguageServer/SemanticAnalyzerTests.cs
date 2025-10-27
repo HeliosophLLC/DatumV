@@ -7,7 +7,7 @@ using DatumIngest.Manifest;
 /// Tests for <see cref="SemanticAnalyzer"/> — semantic diagnostics for unknown
 /// tables, columns, and functions against a <see cref="LanguageServerManifest"/>.
 /// </summary>
-public sealed class SemanticAnalyzerTests
+public sealed class SemanticAnalyzerTests : ServiceTestBase
 {
     /// <summary>Builds a minimal manifest with the specified tables and functions.</summary>
     private static LanguageServerManifest CreateManifest(

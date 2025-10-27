@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Indexing;
 /// value so that adding a new kind without updating the serializers produces
 /// a test failure rather than a silent runtime crash.
 /// </summary>
-public sealed class IndexWriterRoundTripTests
+public sealed class IndexWriterRoundTripTests : ServiceTestBase
 {
     /// <summary>
     /// Kinds that are intentionally unsupported by the index serializer because

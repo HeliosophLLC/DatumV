@@ -6,7 +6,7 @@ using DatumIngest.Manifest;
 /// <summary>
 /// Tests for <see cref="CompletionProvider"/> — context-aware SQL completion generation.
 /// </summary>
-public sealed class CompletionProviderTests
+public sealed class CompletionProviderTests : ServiceTestBase
 {
     private static LanguageServerManifest CreateTestManifest()
     {

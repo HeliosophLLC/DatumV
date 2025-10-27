@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Indexing;
 /// adapter over <see cref="BPlusTreeReader"/>. Verifies the full contract: exact
 /// lookup, range queries, chunk-based predicates, and traversal.
 /// </summary>
-public sealed class BPlusTreeColumnIndexTests
+public sealed class BPlusTreeColumnIndexTests : ServiceTestBase
 {
     // ───────────────────────── FindExact ─────────────────────────
 

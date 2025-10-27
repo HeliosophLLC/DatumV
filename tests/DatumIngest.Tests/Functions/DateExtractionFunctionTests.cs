@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Functions;
 /// <see cref="SecondFunction"/>, <see cref="QuarterFunction"/>, <see cref="DayOfWeekFunction"/>,
 /// and <see cref="DayOfYearFunction"/>.
 /// </summary>
-public class DateExtractionFunctionTests
+public class DateExtractionFunctionTests : ServiceTestBase
 {
     private static readonly DateOnly SampleDate = new(2026, 3, 16);
     private static readonly DateTimeOffset SampleDateTime = new(2026, 3, 16, 14, 30, 45, TimeSpan.Zero);

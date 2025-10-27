@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Indexing;
 /// in <see cref="ScanOperator"/>. Verifies that equality predicates
 /// on bitmap-indexed columns eliminate chunks and individual rows.
 /// </summary>
-public sealed class BitmapPruningTests
+public sealed class BitmapPruningTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
     private static readonly byte[] DummyHash = new byte[32];

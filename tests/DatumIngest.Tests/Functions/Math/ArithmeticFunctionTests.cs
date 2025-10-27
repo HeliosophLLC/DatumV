@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class ArithmeticFunctionTests
+public class ArithmeticFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Abs_Scalar_Positive()

@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// and NOT EXISTS (SELECT ...) subquery support, covering uncorrelated constant-folding,
 /// correlated decorrelation into semi-joins, and SQL-standard NULL semantics.
 /// </summary>
-public sealed class SemiJoinSubqueryTests
+public sealed class SemiJoinSubqueryTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

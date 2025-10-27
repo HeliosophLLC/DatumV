@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Execution;
 /// (<c>streamingSorted: true</c>), which emits groups one at a time from
 /// pre-sorted input, enabling LIMIT short-circuit.
 /// </summary>
-public sealed class StreamingGroupByTests
+public sealed class StreamingGroupByTests : ServiceTestBase
 {
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {

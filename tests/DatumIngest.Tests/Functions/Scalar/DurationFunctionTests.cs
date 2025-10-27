@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// <see cref="DateOffsetFunction"/>.
 /// Also covers Duration cast paths and Duration → Scalar widening.
 /// </summary>
-public class DurationFunctionTests
+public class DurationFunctionTests : ServiceTestBase
 {
     // ───────────────── MakeDurationFunction ─────────────────
 

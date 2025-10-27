@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// <summary>
 /// Tests for categorical encoding functions: one_hot, one_hot_unk, label_encode, label_encode_unk, hash_encode.
 /// </summary>
-public class CategoricalEncodingFunctionTests
+public class CategoricalEncodingFunctionTests : ServiceTestBase
 {
     // ── one_hot ────────────────────────────────────────────
 

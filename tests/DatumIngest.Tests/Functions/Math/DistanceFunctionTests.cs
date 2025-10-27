@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class DistanceFunctionTests
+public class DistanceFunctionTests : ServiceTestBase
 {
     [Fact]
     public void CosineSimilarity_Identical()

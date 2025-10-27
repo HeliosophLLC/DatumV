@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Execution;
 /// queue grows proportionally to total row count, consuming memory outside any
 /// operator's budget.
 /// </summary>
-public sealed class OperatorBufferReturnTests
+public sealed class OperatorBufferReturnTests : ServiceTestBase
 {
     /// <summary>
     /// Number of rows to push through the pipeline. Must be large enough to

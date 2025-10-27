@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Model;
 /// Tests for <see cref="ColumnNameResolver"/> covering raw name derivation
 /// from expressions and deduplication of colliding auto-generated names.
 /// </summary>
-public class ColumnNameResolverTests
+public class ColumnNameResolverTests : ServiceTestBase
 {
     // ───────────────────── GetRawName ─────────────────────
 

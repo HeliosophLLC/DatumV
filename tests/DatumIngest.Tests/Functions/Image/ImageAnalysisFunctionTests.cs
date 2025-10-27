@@ -11,7 +11,7 @@ using SkiaSharp;
 /// <see cref="ImageBrightnessHistogramFunction"/>, <see cref="DetectBlurFunction"/>,
 /// and <see cref="CompressionArtifactScoreFunction"/>.
 /// </summary>
-public sealed class ImageAnalysisFunctionTests
+public sealed class ImageAnalysisFunctionTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

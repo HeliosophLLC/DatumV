@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Execution;
 /// expressions computed once per row. Covers parsing, end-to-end execution,
 /// chaining, memoization, output visibility, clause interactions, and error cases.
 /// </summary>
-public sealed class LetBindingTests
+public sealed class LetBindingTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

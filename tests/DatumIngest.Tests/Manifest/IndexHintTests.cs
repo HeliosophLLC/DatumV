@@ -12,11 +12,15 @@ using DatumIngest.Statistics.Accumulators;
 /// Tests for <see cref="ColumnIndexHint"/> generation in <see cref="ManifestBuilder"/>
 /// and consumption in <see cref="SourceIndexBuilder"/>.
 /// </summary>
-public sealed class IndexHintTests : IDisposable
+public sealed class IndexHintTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
     // ───────────────── ManifestBuilder hint generation ─────────────────
 
     [Fact]

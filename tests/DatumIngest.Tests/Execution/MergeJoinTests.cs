@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for the <see cref="MergeJoinOperator"/> which joins two pre-sorted
 /// input streams using a two-pointer algorithm.
 /// </summary>
-public sealed class MergeJoinTests
+public sealed class MergeJoinTests : ServiceTestBase
 {
     /// <summary>
     /// INNER merge join with unique keys on both sides produces only matched rows.

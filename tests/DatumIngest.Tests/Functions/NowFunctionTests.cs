@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="NowFunction"/>.
 /// </summary>
-public class NowFunctionTests
+public class NowFunctionTests : ServiceTestBase
 {
     private readonly NowFunction _function = new();
 

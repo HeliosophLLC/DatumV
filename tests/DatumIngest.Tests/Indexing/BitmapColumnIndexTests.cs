@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="BitmapColumnIndex"/> — multi-value, multi-chunk bitmap index
 /// with on-demand decompression, chunk containment checks, and chunk finding.
 /// </summary>
-public sealed class BitmapColumnIndexTests
+public sealed class BitmapColumnIndexTests : ServiceTestBase
 {
     // ───────────────────────── GetChunkBitmap ─────────────────────────
 

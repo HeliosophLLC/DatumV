@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class PowerFunctionTests
+public class PowerFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Sqrt_Scalar()

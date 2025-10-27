@@ -5,7 +5,7 @@ using DatumIngest.LanguageServer;
 /// <summary>
 /// Tests for <see cref="DiagnosticsProvider"/> — SQL parse error detection.
 /// </summary>
-public sealed class DiagnosticsProviderTests
+public sealed class DiagnosticsProviderTests : ServiceTestBase
 {
     // ───────────────────── Valid SQL ─────────────────────
 

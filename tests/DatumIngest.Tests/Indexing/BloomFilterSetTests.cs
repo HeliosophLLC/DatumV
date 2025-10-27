@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="BloomFilterSet"/> — collection of bloom filters
 /// keyed by column name and chunk index.
 /// </summary>
-public sealed class BloomFilterSetTests
+public sealed class BloomFilterSetTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
 

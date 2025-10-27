@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for the <see cref="ArrayAggregateFunction"/> aggregate function.
 /// </summary>
-public class ArrayAggregateTests
+public class ArrayAggregateTests : ServiceTestBase
 {
     // ─────────────── VALIDATION ───────────────
 

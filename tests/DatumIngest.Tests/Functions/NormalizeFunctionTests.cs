@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class NormalizeFunctionTests
+public class NormalizeFunctionTests : ServiceTestBase
 {
     private readonly MinMaxNormalizeFunction _function = new();
 

@@ -6,11 +6,15 @@ using DatumIngest.Model;
 /// <summary>
 /// Tests for <see cref="ColumnRoleClassifier"/>.
 /// </summary>
-public sealed class ColumnRoleClassifierTests : IDisposable
+public sealed class ColumnRoleClassifierTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
     // ─────────────── Identifier ───────────────
 
     [Fact]

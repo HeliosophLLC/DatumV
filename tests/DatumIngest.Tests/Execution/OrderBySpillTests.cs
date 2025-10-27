@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="OrderByOperator"/> spill-to-disk external sort
 /// when <see cref="ExecutionContext.MemoryBudgetBytes"/> is set.
 /// </summary>
-public sealed class OrderBySpillTests
+public sealed class OrderBySpillTests : ServiceTestBase
 {
     /// <summary>Tiny memory budget that forces spilling for even a few rows.</summary>
     private const long TinyBudget = 256;

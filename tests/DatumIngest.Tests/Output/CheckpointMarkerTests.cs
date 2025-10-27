@@ -6,7 +6,7 @@ using DatumIngest.Output.Checkpoint;
 /// Tests for <see cref="CheckpointMarker"/>, <see cref="SourceFingerprint"/>,
 /// and <see cref="CheckpointSerializer"/>.
 /// </summary>
-public sealed class CheckpointMarkerTests
+public sealed class CheckpointMarkerTests : ServiceTestBase
 {
     [Fact]
     public void Serialize_RoundTrip_PreservesAllFields()

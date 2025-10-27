@@ -6,11 +6,15 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class ImageStatsAccumulatorTests : IDisposable
+public sealed class ImageStatsAccumulatorTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
 
     // Minimal valid JPEG: SOI + SOF0 marker with 3 channels, 480×640
     private static byte[] MakeJpegHeader(int width, int height, int channels)

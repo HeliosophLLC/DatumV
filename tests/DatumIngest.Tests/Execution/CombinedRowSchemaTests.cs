@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="JoinOperator.CombinedRowSchema"/> to verify that
 /// unqualified column shortcuts are preserved through join row merging.
 /// </summary>
-public sealed class CombinedRowSchemaTests
+public sealed class CombinedRowSchemaTests : ServiceTestBase
 {
     /// <summary>
     /// When only one side has a column, the unqualified name should resolve in the

@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Tests for <see cref="ExecutionContext"/> cloning and property propagation.
 /// </summary>
-public sealed class ExecutionContextTests
+public sealed class ExecutionContextTests : ServiceTestBase
 {
     /// <summary>
     /// Verifies that <see cref="ExecutionContext.WithOuterRow"/> propagates all

@@ -2,7 +2,7 @@ using DatumIngest.Indexing;
 
 namespace DatumIngest.Tests.Indexing;
 
-public sealed class SourceFingerprintTests
+public sealed class SourceFingerprintTests : ServiceTestBase
 {
     [Fact]
     public async Task ComputeAsync_ProducesConsistentHash()

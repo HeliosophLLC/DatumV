@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class SchemaTests
+public class SchemaTests : ServiceTestBase
 {
     [Fact]
     public void SchemaStoresColumns()

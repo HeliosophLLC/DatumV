@@ -7,7 +7,7 @@ using DatumIngest.Manifest;
 /// Tests for <see cref="FunctionDocumentation"/> — the static registry of
 /// built-in function signatures for language server autocomplete and hover.
 /// </summary>
-public sealed class FunctionDocumentationTests
+public sealed class FunctionDocumentationTests : ServiceTestBase
 {
     // ───────────────────── Lookup ─────────────────────
 

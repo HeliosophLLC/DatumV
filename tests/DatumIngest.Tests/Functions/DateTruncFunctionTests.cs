@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DateTruncFunction"/>.
 /// </summary>
-public class DateTruncFunctionTests
+public class DateTruncFunctionTests : ServiceTestBase
 {
     private readonly DateTruncFunction _function = new();
 

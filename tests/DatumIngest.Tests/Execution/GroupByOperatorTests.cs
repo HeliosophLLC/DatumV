@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="GroupByOperator"/> covering single-key grouping,
 /// composite-key grouping, global aggregation, and various aggregate functions.
 /// </summary>
-public class GroupByOperatorTests
+public class GroupByOperatorTests : ServiceTestBase
 {
     private static ExecutionContext CreateContext()
     {

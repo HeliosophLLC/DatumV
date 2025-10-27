@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Tests for <see cref="ParallelismBudget"/>.
 /// </summary>
-public sealed class ParallelismBudgetTests
+public sealed class ParallelismBudgetTests : ServiceTestBase
 {
     /// <summary>
     /// Verifies that the constructor rejects zero or negative max workers.

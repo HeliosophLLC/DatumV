@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Indexing;
 
-public sealed class ChunkColumnStatisticsTests
+public sealed class ChunkColumnStatisticsTests : ServiceTestBase
 {
     [Fact]
     public void ToColumnStatisticsRange_MapsAllFields()

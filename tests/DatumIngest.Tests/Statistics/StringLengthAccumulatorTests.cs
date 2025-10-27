@@ -5,11 +5,15 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class StringLengthAccumulatorTests : IDisposable
+public sealed class StringLengthAccumulatorTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
 
     [Fact]
     public void Add_StringValues_TracksMinMaxLength()

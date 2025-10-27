@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// Each test uses a memory budget small enough to force spilling, then verifies
 /// the results match the expected output for each join type.
 /// </summary>
-public sealed class GraceHashJoinTests
+public sealed class GraceHashJoinTests : ServiceTestBase
 {
     /// <summary>
     /// Memory budget small enough to force spilling even for a few rows.

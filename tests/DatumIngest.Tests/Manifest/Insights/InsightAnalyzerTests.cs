@@ -8,7 +8,7 @@ using DatumIngest.Model;
 /// Integration tests for <see cref="InsightAnalyzer"/> — verifies that the full pipeline
 /// (rules → clustering → action routing → sorting) works end-to-end with realistic manifests.
 /// </summary>
-public sealed class InsightAnalyzerTests
+public sealed class InsightAnalyzerTests : ServiceTestBase
 {
     [Fact]
     public void Analyze_ConstantColumn_ProducesDropInsight()

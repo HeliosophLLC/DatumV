@@ -8,11 +8,15 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// functions. All tests use an Arena-backed IValueStore to exercise the
 /// <c>Execute(args, IValueStore store)</c> overloads.
 /// </summary>
-public class ScalarFunctionStoreAwareBatch2Tests : IDisposable
+public class ScalarFunctionStoreAwareBatch2Tests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
 
     private DataValue S(string value) => DataValue.FromString(value, _arena);
     private DataValue J(string value) => DataValue.FromJsonValue(value, _arena);

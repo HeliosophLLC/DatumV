@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class DenormalizeFunctionTests
+public class DenormalizeFunctionTests : ServiceTestBase
 {
     private readonly DenormalizeFunction _function = new();
 

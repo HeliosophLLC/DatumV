@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Functions.Math;
 /// <summary>
 /// Verifies that all 88 math functions are properly registered in the default FunctionRegistry.
 /// </summary>
-public class MathFunctionRegistrationTests
+public class MathFunctionRegistrationTests : ServiceTestBase
 {
     private readonly FunctionRegistry _registry = FunctionRegistry.CreateDefault();
 

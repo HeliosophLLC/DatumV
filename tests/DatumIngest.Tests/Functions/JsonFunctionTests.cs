@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class JsonFunctionTests
+public class JsonFunctionTests : ServiceTestBase
 {
     // ───────────────── JsonValueFunction ─────────────────
 

@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="ColumnReferenceCollector"/>, verifying that
 /// all expression types are traversed and column references are collected.
 /// </summary>
-public class ColumnReferenceCollectorTests
+public class ColumnReferenceCollectorTests : ServiceTestBase
 {
     // ─────────────── Single references ───────────────
 

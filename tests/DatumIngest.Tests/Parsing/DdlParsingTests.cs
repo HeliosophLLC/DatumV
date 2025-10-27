@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Parsing;
 /// Tests for DDL and DML statement parsing: CREATE TEMP TABLE, DROP TABLE,
 /// INSERT INTO, UPDATE, ALTER TABLE, and multi-statement batch parsing.
 /// </summary>
-public class DdlParsingTests
+public class DdlParsingTests : ServiceTestBase
 {
     // ───────────────────── CREATE TEMP TABLE ─────────────────────
 

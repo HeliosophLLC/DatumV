@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions.Math;
 /// <see cref="RandomRangeFunction"/>, <see cref="RandomNormalFunction"/>,
 /// and <see cref="RandomBooleanFunction"/>.
 /// </summary>
-public sealed class RandomFunctionTests
+public sealed class RandomFunctionTests : ServiceTestBase
 {
     // ──────────────────── hash_split ────────────────────
 

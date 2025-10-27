@@ -4,7 +4,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Ingestion;
 
-public sealed class SchemaDetectorTests
+public sealed class SchemaDetectorTests : ServiceTestBase
 {
     private static RowBatch MakeBatch(Pool pool, IReadOnlyList<string> names, params DataValue[][] rows)
     {

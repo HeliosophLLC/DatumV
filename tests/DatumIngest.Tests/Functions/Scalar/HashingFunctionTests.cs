@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// Tests for hashing and encoding scalar functions: md5, sha256, sha512, crc32,
 /// base64_encode, base64_decode, hex_encode, hex_decode, bytes_concat, bytes_slice, and bytes.
 /// </summary>
-public class HashingFunctionTests
+public class HashingFunctionTests : ServiceTestBase
 {
     // ───────────────── Md5TextFunction (PG-compatible, returns hex string) ─────────────────
 

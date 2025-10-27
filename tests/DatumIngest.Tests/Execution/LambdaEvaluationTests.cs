@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Execution;
 /// dispatch → <see cref="IHigherOrderFunction"/> execution → lambda body evaluation
 /// with closure semantics.
 /// </summary>
-public class LambdaEvaluationTests
+public class LambdaEvaluationTests : ServiceTestBase
 {
     private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault());
 

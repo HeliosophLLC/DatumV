@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Verifies that B+Tree sections survive serialization and remain
 /// queryable after deserialization.
 /// </summary>
-public sealed class BPlusTreeRoundTripTests
+public sealed class BPlusTreeRoundTripTests : ServiceTestBase
 {
     // ───────────────────────── Single column ─────────────────────────
 

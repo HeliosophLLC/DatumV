@@ -12,7 +12,7 @@ using SkiaSharp;
 /// <see cref="AffineTransformFunction"/>, <see cref="ElasticDeformFunction"/>,
 /// and <see cref="PerspectiveWarpFunction"/>.
 /// </summary>
-public sealed class ImageTransformFunctionExtendedTests
+public sealed class ImageTransformFunctionExtendedTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

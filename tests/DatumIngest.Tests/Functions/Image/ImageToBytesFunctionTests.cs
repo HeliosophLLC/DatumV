@@ -8,7 +8,7 @@ using SkiaSharp;
 /// <summary>
 /// Tests for <see cref="ImageToBytesFunction"/>.
 /// </summary>
-public sealed class ImageToBytesFunctionTests
+public sealed class ImageToBytesFunctionTests : ServiceTestBase
 {
     private readonly ImageToBytesFunction _function = new();
 

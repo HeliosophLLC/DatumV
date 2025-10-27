@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DateBinFunction"/> — PostgreSQL-compatible date_bin().
 /// </summary>
-public class DateBinFunctionTests
+public class DateBinFunctionTests : ServiceTestBase
 {
     private readonly DateBinFunction _function = new();
 

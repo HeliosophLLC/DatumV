@@ -6,7 +6,7 @@ using DatumIngest.LanguageServer;
 /// Tests for <see cref="CompletionContext"/> — cursor position classification
 /// within SQL fragments for determining completion zones.
 /// </summary>
-public sealed class CompletionContextTests
+public sealed class CompletionContextTests : ServiceTestBase
 {
     // ───────────────────── Empty / null input ─────────────────────
 

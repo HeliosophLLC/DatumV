@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="StrftimeFunction"/> and <see cref="IsDateFunction"/>.
 /// </summary>
-public class DateFormattingFunctionTests
+public class DateFormattingFunctionTests : ServiceTestBase
 {
     // ───────────────────── strftime() ─────────────────────
 

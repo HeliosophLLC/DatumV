@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="QueryMeter"/>, verifying accumulation,
 /// budget enforcement, and thread-safety semantics.
 /// </summary>
-public class QueryMeterTests
+public class QueryMeterTests : ServiceTestBase
 {
     /// <summary>
     /// A newly created meter with no calls should report zero Query Units.

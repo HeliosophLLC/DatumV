@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Serialization;
 /// detection, logical path derivation, temp-file materialization on first
 /// <c>OpenAsync</c>, size-cap enforcement, and end-to-end <c>.csv.gz</c> ingestion.
 /// </summary>
-public sealed class GzipSupportTests
+public sealed class GzipSupportTests : ServiceTestBase
 {
     // ──────────────── Path derivation ────────────────
 

@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class TrigFunctionTests
+public class TrigFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Sin_Zero() => Assert.Equal(0f, new SinFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);

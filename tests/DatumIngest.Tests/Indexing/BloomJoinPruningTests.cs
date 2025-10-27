@@ -19,7 +19,7 @@ namespace DatumIngest.Tests.Indexing;
 /// to the probe-side <see cref="ScanOperator"/> via bloom filters, skipping
 /// chunks where no build-side key could possibly match.
 /// </summary>
-public sealed class BloomJoinPruningTests
+public sealed class BloomJoinPruningTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
 

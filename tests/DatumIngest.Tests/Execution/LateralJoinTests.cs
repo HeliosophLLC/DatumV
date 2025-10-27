@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// covering table-valued function sources and subquery sources with
 /// correlated column references.
 /// </summary>
-public sealed class LateralJoinTests
+public sealed class LateralJoinTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// clauses inside a brace-delimited block directly after SELECT. Covers parsing
 /// equivalence with inline LET/ASSERT, execution correctness, and edge cases.
 /// </summary>
-public sealed class DefineBlockTests
+public sealed class DefineBlockTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

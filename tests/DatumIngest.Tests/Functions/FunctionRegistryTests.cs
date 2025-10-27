@@ -5,7 +5,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class FunctionRegistryTests
+public class FunctionRegistryTests : ServiceTestBase
 {
     [Fact]
     public void CreateDefault_RegistersAllScalarFunctions()

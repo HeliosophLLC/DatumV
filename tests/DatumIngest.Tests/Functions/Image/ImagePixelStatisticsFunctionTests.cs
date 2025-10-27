@@ -9,7 +9,7 @@ using SkiaSharp;
 /// Tests for per-channel pixel statistics functions:
 /// <see cref="ImagePixelMeanFunction"/> and <see cref="ImagePixelStandardDeviationFunction"/>.
 /// </summary>
-public sealed class ImagePixelStatisticsFunctionTests
+public sealed class ImagePixelStatisticsFunctionTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

@@ -4,7 +4,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class StringFunctionTests
+public class StringFunctionTests : ServiceTestBase
 {
     // ───────────────── LenFunction ─────────────────
 

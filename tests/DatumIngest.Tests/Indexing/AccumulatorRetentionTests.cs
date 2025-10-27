@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Indexing;
 /// only inline strings (≤16 UTF-8 bytes) and fixed-size scalars are retained; non-inline
 /// reference-type values cause the column to be dropped from the index.
 /// </summary>
-public sealed class AccumulatorRetentionTests
+public sealed class AccumulatorRetentionTests : ServiceTestBase
 {
     // ───────────────────── ChunkAccumulator min/max ─────────────────────
 

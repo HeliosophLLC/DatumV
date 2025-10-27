@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class TensorIntrospectionFunctionTests
+public class TensorIntrospectionFunctionTests : ServiceTestBase
 {
     // ─────────────────────────── rank() ───────────────────────────
 

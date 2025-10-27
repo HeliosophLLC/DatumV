@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class TypeCoercionTests
+public class TypeCoercionTests : ServiceTestBase
 {
     [Fact]
     public void UInt8WidensToInt16()

@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Execution;
 /// eliminates the need for subquery wrappers around window functions.
 /// Covers parsing, planning, and end-to-end execution.
 /// </summary>
-public sealed class QualifyTests
+public sealed class QualifyTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

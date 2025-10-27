@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class DataKindTests
+public class DataKindTests : ServiceTestBase
 {
     [Fact]
     public void AllExpectedKindsAreDefined()

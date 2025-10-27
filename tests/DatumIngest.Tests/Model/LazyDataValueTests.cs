@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class LazyDataValueTests
+public class LazyDataValueTests : ServiceTestBase
 {
     [Fact]
     public void ValueIsNotForcedOnConstruction()

@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class ReductionFunctionTests
+public class ReductionFunctionTests : ServiceTestBase
 {
     [Fact]
     public void VecSum_Vector()

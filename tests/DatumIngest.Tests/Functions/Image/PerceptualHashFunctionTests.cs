@@ -8,7 +8,7 @@ using SkiaSharp;
 /// <summary>
 /// Tests for <see cref="PerceptualHashFunction"/>.
 /// </summary>
-public sealed class PerceptualHashFunctionTests
+public sealed class PerceptualHashFunctionTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

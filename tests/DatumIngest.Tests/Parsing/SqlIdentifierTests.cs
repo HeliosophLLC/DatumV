@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Parsing;
 /// <summary>
 /// Tests for <see cref="SqlIdentifier"/> quoting and unquoting utilities.
 /// </summary>
-public class SqlIdentifierTests
+public class SqlIdentifierTests : ServiceTestBase
 {
     // ───────────────────── NeedsQuoting ─────────────────────
 

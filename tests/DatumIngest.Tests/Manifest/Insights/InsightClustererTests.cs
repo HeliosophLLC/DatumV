@@ -7,7 +7,7 @@ using DatumIngest.Manifest.Insights;
 /// Tests for <see cref="InsightClusterer"/> — action routing, apply mode derivation,
 /// conflict resolution, and syndrome detection.
 /// </summary>
-public sealed class InsightClustererTests
+public sealed class InsightClustererTests : ServiceTestBase
 {
     // ── ApplyMode derivation ──
 

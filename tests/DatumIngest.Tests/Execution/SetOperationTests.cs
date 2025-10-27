@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Execution;
 /// set operation strategies (UNION/INTERSECT/EXCEPT × ALL/DISTINCT)
 /// plus parser integration and edge cases.
 /// </summary>
-public sealed class SetOperationTests
+public sealed class SetOperationTests : ServiceTestBase
 {
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {

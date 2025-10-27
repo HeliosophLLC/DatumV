@@ -3,7 +3,7 @@ namespace DatumIngest.Tests.Statistics.Interactions;
 using DatumIngest.Model;
 using DatumIngest.Statistics.Interactions;
 
-public sealed class PearsonAccumulatorTests
+public sealed class PearsonAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_PerfectPositiveCorrelation_ReturnsOne()
@@ -91,7 +91,7 @@ public sealed class PearsonAccumulatorTests
     }
 }
 
-public sealed class SpearmanAccumulatorTests
+public sealed class SpearmanAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_MonotonicIncreasing_ReturnsOne()
@@ -162,7 +162,7 @@ public sealed class SpearmanAccumulatorTests
     }
 }
 
-public sealed class CramerVAccumulatorTests
+public sealed class CramerVAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_PerfectAssociation_ReturnsOne()
@@ -243,7 +243,7 @@ public sealed class CramerVAccumulatorTests
     }
 }
 
-public sealed class AnovaAccumulatorTests
+public sealed class AnovaAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_SameGroupMeans_ReturnsNearZero()
@@ -312,7 +312,7 @@ public sealed class AnovaAccumulatorTests
     }
 }
 
-public sealed class MutualInformationAccumulatorTests
+public sealed class MutualInformationAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_IndependentNumericColumns_ReturnsNearZero()
@@ -381,7 +381,7 @@ public sealed class MutualInformationAccumulatorTests
     }
 }
 
-public sealed class TheilUTests
+public sealed class TheilUTests : ServiceTestBase
 {
     [Fact]
     public void GetDetailedValue_PerfectPrediction_ReturnsOne()
@@ -517,7 +517,7 @@ public sealed class TheilUTests
     }
 }
 
-public sealed class MissingnessCorrelationAccumulatorTests
+public sealed class MissingnessCorrelationAccumulatorTests : ServiceTestBase
 {
     [Fact]
     public void GetValue_BothColumnsAlwaysNull_ReturnsNaN()

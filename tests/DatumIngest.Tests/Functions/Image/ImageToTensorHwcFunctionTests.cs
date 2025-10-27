@@ -8,7 +8,7 @@ using SkiaSharp;
 /// <summary>
 /// Tests for <see cref="ImageToTensorHwcFunction"/>.
 /// </summary>
-public sealed class ImageToTensorHwcFunctionTests
+public sealed class ImageToTensorHwcFunctionTests : ServiceTestBase
 {
     private readonly ImageToTensorHwcFunction _function = new();
 

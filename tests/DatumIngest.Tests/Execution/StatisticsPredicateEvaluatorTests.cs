@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="StatisticsPredicateEvaluator"/>, verifying that
 /// partition pruning decisions are correct for all supported predicate shapes.
 /// </summary>
-public class StatisticsPredicateEvaluatorTests
+public class StatisticsPredicateEvaluatorTests : ServiceTestBase
 {
     private static readonly Arena TestStore = new();
 

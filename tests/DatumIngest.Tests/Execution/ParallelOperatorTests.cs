@@ -18,7 +18,7 @@ namespace DatumIngest.Tests.Execution;
 /// the estimated row count is <c>null</c>, which satisfies the activation
 /// threshold <c>estimatedRows is null or &gt;= 100_000</c>.
 /// </summary>
-public sealed class ParallelOperatorTests
+public sealed class ParallelOperatorTests : ServiceTestBase
 {
     private static ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
     {

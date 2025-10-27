@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// <see cref="SecondFunction"/>, <see cref="TimeDiffFunction"/>.
 /// Also covers Time cast paths in <see cref="CastFunction"/>.
 /// </summary>
-public class TimeFunctionTests
+public class TimeFunctionTests : ServiceTestBase
 {
     // ───────────────── MakeTimeFunction ─────────────────
 

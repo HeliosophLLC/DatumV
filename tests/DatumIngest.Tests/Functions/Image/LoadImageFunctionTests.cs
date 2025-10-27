@@ -8,7 +8,7 @@ using SkiaSharp;
 /// <summary>
 /// Tests for <see cref="LoadImageFunction"/>.
 /// </summary>
-public sealed class LoadImageFunctionTests
+public sealed class LoadImageFunctionTests : ServiceTestBase
 {
     private readonly LoadImageFunction _function = new();
 

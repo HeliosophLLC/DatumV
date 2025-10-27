@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class ActivationFunctionTests
+public class ActivationFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Sigmoid_Zero()

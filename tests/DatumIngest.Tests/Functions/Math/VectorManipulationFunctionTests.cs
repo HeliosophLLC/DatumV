@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class VectorManipulationFunctionTests
+public class VectorManipulationFunctionTests : ServiceTestBase
 {
     [Fact]
     public void VecSlice_Middle()

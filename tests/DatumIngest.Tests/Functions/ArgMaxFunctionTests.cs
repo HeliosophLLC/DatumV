@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="ArgMaxFunction"/> (ARG_MAX and ARG_MIN aggregates).
 /// </summary>
-public class ArgMaxFunctionTests
+public class ArgMaxFunctionTests : ServiceTestBase
 {
     // ─────────────── ARG_MAX ───────────────
 

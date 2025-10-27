@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.DatumFile;
 /// Validates that <see cref="DatumFileReader"/> rejects corrupted <c>.datum</c> files
 /// with clean exceptions rather than undefined behavior or crashes.
 /// </summary>
-public sealed class DatumFileCorruptionTests : IDisposable
+public sealed class DatumFileCorruptionTests : ServiceTestBase
 {
     private readonly string _tempDirectory;
 
@@ -19,12 +19,13 @@ public sealed class DatumFileCorruptionTests : IDisposable
     }
 
     /// <summary>Removes the temporary directory.</summary>
-    public void Dispose()
+    public override void Dispose()
     {
         if (Directory.Exists(_tempDirectory))
         {
             Directory.Delete(_tempDirectory, recursive: true);
         }
+        base.Dispose();
     }
 
     [Fact]

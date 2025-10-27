@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Execution;
 /// behavior, and end-to-end SQL execution including sessionization, EMA,
 /// streaks, tuple accumulators, and PREV() pseudo-function.
 /// </summary>
-public sealed class FoldScanTests
+public sealed class FoldScanTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

@@ -1,4 +1,7 @@
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -46,6 +49,34 @@ public abstract class ServiceTestBase : IDisposable
     /// <summary>Resolves a service from the test provider.</summary>
     protected T GetService<T>() where T : notnull
         => Services.GetRequiredService<T>();
+
+    /// <summary>
+    /// Creates an empty <see cref="TableCatalog"/> backed by a <see cref="Pool"/>
+    /// resolved from the test's DI container. Each test instance gets its own
+    /// <see cref="PoolBacking"/> (ServiceCollection is per-test), so catalogs
+    /// are isolated across tests without sharing pool state.
+    /// </summary>
+    protected TableCatalog CreateCatalog()
+    {
+        return new TableCatalog(GetService<Pool>());
+    }
+
+    /// <summary>
+    /// Creates a <see cref="TableCatalog"/> pre-populated with
+    /// <see cref="InMemoryTableProvider"/> entries for each supplied
+    /// <c>(name, rows)</c> pair.
+    /// </summary>
+    protected TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        foreach ((string name, Row[] rows) in tables)
+        {
+            catalog.Add(new InMemoryTableProvider(name, rows));
+        }
+
+        return catalog;
+    }
 
     public virtual void Dispose()
     {

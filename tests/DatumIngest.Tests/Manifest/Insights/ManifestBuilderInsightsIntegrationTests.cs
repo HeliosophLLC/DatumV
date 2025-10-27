@@ -10,11 +10,15 @@ using DatumIngest.Statistics;
 /// <see cref="InsightAnalyzer"/> and <see cref="QuerySynthesizer"/> when
 /// <see cref="InsightThresholds"/> are provided.
 /// </summary>
-public sealed class ManifestBuilderInsightsIntegrationTests : IDisposable
+public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
     [Fact]
     public void Build_WithInsightThresholds_PopulatesInsights()
     {

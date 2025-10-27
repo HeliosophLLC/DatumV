@@ -8,7 +8,7 @@ using SkiaSharp;
 /// Tests for the <see cref="ImageHandle"/> class: lazy decode/encode,
 /// format propagation, and disposal behavior.
 /// </summary>
-public sealed class ImageHandleTests
+public sealed class ImageHandleTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

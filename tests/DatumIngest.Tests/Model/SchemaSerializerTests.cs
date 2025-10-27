@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Model;
 /// Tests for <see cref="SchemaSerializer"/> JSON round-trip serialization
 /// and <see cref="SourceSchema"/> construction.
 /// </summary>
-public sealed class SchemaSerializerTests
+public sealed class SchemaSerializerTests : ServiceTestBase
 {
     [Fact]
     public void RoundTrip_SingleTable_PreservesSchema()

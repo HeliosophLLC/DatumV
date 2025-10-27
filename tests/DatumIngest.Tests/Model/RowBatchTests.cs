@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Model;
 /// <summary>
 /// Tests for the <see cref="RowBatch"/> pooled row-major batch.
 /// </summary>
-public class RowBatchTests
+public class RowBatchTests : ServiceTestBase
 {
     private static Row MakeRow(string name, float value)
     {

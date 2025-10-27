@@ -20,7 +20,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="IndexNestedLoopJoinExecutor"/> — both direct executor tests
 /// and integration tests through <see cref="JoinOperator"/> dispatch.
 /// </summary>
-public sealed class IndexNestedLoopJoinTests
+public sealed class IndexNestedLoopJoinTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

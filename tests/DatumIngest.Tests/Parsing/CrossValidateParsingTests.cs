@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Parsing;
 /// Parser tests for the CROSS VALIDATE clause:
 /// <c>CROSS VALIDATE(k = N [, seed = S]) ON key [STRATIFY BY col] [GROUP BY col] AS alias</c>.
 /// </summary>
-public sealed class CrossValidateParsingTests
+public sealed class CrossValidateParsingTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

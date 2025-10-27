@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Model;
 /// <summary>
 /// Tests for <see cref="Arena"/> string operations — append, retrieve, materialise, copy, and disposal.
 /// </summary>
-public class StringArenaTests
+public class StringArenaTests : ServiceTestBase
 {
     [Fact]
     public void AppendAndRetrieveUtf8Bytes()

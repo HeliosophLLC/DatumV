@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Parsing;
 /// <summary>
 /// Tests for parameterized query support: lexing, parsing, binding, and value parsing.
 /// </summary>
-public sealed class ParameterTests
+public sealed class ParameterTests : ServiceTestBase
 {
     // ───────────────────── Tokenizer ─────────────────────
 

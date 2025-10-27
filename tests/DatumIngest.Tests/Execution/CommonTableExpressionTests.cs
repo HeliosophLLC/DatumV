@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Execution;
 /// planning, non-recursive execution, recursive execution, materialization,
 /// column renaming, and spill-to-disk behavior.
 /// </summary>
-public sealed class CommonTableExpressionTests
+public sealed class CommonTableExpressionTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

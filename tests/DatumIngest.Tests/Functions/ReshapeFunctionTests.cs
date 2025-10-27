@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class ReshapeFunctionTests
+public class ReshapeFunctionTests : ServiceTestBase
 {
     private readonly ReshapeFunction _function = new();
 

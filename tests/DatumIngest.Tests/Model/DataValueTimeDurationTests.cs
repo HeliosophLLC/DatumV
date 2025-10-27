@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Model;
 /// Tests for <see cref="DataValue"/> Time and Duration factory methods,
 /// accessors, equality, hashing, and display formatting.
 /// </summary>
-public class DataValueTimeDurationTests
+public class DataValueTimeDurationTests : ServiceTestBase
 {
     // ───────────────── FromTime / AsTime ─────────────────
 

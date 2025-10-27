@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Parsing;
 /// <summary>
 /// Parser tests for the TABLESAMPLE clause: <c>TABLESAMPLE BERNOULLI|SYSTEM(percentage) [REPEATABLE(seed)]</c>.
 /// </summary>
-public sealed class TablesampleParsingTests
+public sealed class TablesampleParsingTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

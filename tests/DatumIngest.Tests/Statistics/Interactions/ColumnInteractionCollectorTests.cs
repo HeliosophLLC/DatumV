@@ -3,7 +3,7 @@ namespace DatumIngest.Tests.Statistics.Interactions;
 using DatumIngest.Model;
 using DatumIngest.Statistics.Interactions;
 
-public sealed class ColumnInteractionCollectorTests
+public sealed class ColumnInteractionCollectorTests : ServiceTestBase
 {
     [Fact]
     public void GetInteractions_NumericPair_ProducesPearsonSpearmanMI()

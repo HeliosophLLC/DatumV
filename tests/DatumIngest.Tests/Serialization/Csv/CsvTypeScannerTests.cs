@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Serialization.Csv;
 /// narrowing, leading-zero preservation, date-format detection, and decision
 /// logging.
 /// </summary>
-public sealed class CsvTypeScannerTests
+public sealed class CsvTypeScannerTests : ServiceTestBase
 {
     // ──────────────── Integer narrowing ────────────────
 

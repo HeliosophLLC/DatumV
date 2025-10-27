@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Functions;
 /// (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD) and
 /// the <see cref="AggregateWindowAdapter"/>.
 /// </summary>
-public class WindowFunctionTests
+public class WindowFunctionTests : ServiceTestBase
 {
     private static ExpressionEvaluator CreateEvaluator()
     {

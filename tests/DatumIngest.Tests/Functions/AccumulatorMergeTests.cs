@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Functions;
 /// feeds disjoint partitions of data, merges them, and verifies the result
 /// matches a single accumulator that saw all data.
 /// </summary>
-public class AccumulatorMergeTests
+public class AccumulatorMergeTests : ServiceTestBase
 {
     // ─────────────── COUNT ───────────────
 

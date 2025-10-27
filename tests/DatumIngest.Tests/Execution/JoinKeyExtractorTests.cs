@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="JoinKeyExtractor"/>, verifying extraction of
 /// equi-join key pairs and residual conditions from ON expressions.
 /// </summary>
-public class JoinKeyExtractorTests
+public class JoinKeyExtractorTests : ServiceTestBase
 {
     // ─────────────── Null and empty ───────────────
 

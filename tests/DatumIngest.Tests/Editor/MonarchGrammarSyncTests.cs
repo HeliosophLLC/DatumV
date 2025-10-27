@@ -14,7 +14,7 @@ using DatumIngest.Model;
 /// If a function or type is added without updating the grammar, these
 /// tests will fail.
 /// </summary>
-public sealed class MonarchGrammarSyncTests
+public sealed class MonarchGrammarSyncTests : ServiceTestBase
 {
     // ───────────────────── Type name sync ─────────────────────
 

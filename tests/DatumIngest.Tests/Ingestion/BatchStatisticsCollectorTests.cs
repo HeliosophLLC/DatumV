@@ -5,7 +5,7 @@ using DatumIngest.Statistics;
 
 namespace DatumIngest.Tests.Ingestion;
 
-public sealed class BatchStatisticsCollectorTests
+public sealed class BatchStatisticsCollectorTests : ServiceTestBase
 {
     private static RowBatch MakeBatch(Pool pool, string[] names, params DataValue[][] rows)
     {

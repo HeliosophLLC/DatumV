@@ -8,7 +8,7 @@ using DatumIngest.Manifest;
 /// Tests for <see cref="LanguageService"/> — the top-level facade coordinating
 /// completions, diagnostics, and hover through a single entry point.
 /// </summary>
-public sealed class LanguageServiceTests
+public sealed class LanguageServiceTests : ServiceTestBase
 {
     private static string CreateTestManifestJson()
     {

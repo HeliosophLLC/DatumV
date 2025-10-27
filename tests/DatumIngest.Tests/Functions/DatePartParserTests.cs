@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DatePartParser"/>.
 /// </summary>
-public class DatePartParserTests
+public class DatePartParserTests : ServiceTestBase
 {
     [Theory]
     [InlineData("year", "year")]

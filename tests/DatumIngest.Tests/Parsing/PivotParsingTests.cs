@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Parsing;
 /// <summary>
 /// Parser tests for PIVOT and UNPIVOT clauses.
 /// </summary>
-public class PivotParsingTests
+public class PivotParsingTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

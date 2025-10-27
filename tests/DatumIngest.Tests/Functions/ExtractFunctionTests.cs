@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// Tests for the PostgreSQL EXTRACT(field FROM source) syntax,
 /// which desugars to <c>date_part('field', source)</c> at parse time.
 /// </summary>
-public class ExtractFunctionTests
+public class ExtractFunctionTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

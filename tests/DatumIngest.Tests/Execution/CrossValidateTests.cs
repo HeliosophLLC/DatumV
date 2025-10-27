@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// End-to-end tests for CROSS VALIDATE fold assignment.
 /// </summary>
-public sealed class CrossValidateTests
+public sealed class CrossValidateTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

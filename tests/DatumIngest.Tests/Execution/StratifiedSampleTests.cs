@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Unit tests for <see cref="StratifiedSampleOperator"/> and <see cref="BalancedSampleOperator"/>.
 /// </summary>
-public sealed class StratifiedSampleTests
+public sealed class StratifiedSampleTests : ServiceTestBase
 {
     private static ExecutionContext CreateContext(int? maxStratifyClasses = null)
     {

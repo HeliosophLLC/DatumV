@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class SoftmaxFunctionTests
+public class SoftmaxFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Softmax_SumsToOne()

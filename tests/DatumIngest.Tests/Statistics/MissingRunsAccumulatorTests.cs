@@ -5,11 +5,15 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class MissingRunsAccumulatorTests : IDisposable
+public sealed class MissingRunsAccumulatorTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
 
     [Fact]
     public void Add_NoValues_ReturnsZeroRuns()

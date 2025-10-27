@@ -3,7 +3,7 @@ using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Tests.Parsing;
 
-public class SqlParserTests
+public class SqlParserTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

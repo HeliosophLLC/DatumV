@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Tests for <see cref="SkipOperator"/>.
 /// </summary>
-public sealed class SkipOperatorTests
+public sealed class SkipOperatorTests : ServiceTestBase
 {
     [Fact]
     public async Task Skip0_YieldsAllRows()

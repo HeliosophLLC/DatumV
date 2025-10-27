@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions.Math;
 /// <see cref="RandomExponentialFunction"/>, <see cref="RandomBetaFunction"/>,
 /// <see cref="RandomPoissonFunction"/>, and <see cref="RandomCategoricalFunction"/>.
 /// </summary>
-public sealed class RandomDistributionFunctionTests
+public sealed class RandomDistributionFunctionTests : ServiceTestBase
 {
     // ──────────────────── random_truncated_normal ────────────────────
 

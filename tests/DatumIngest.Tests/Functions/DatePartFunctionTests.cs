@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DatePartFunction"/>.
 /// </summary>
-public class DatePartFunctionTests
+public class DatePartFunctionTests : ServiceTestBase
 {
     private readonly DatePartFunction _function = new();
 

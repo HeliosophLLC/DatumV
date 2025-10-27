@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="ToEpochFunction"/>.
 /// </summary>
-public class ToEpochFunctionTests
+public class ToEpochFunctionTests : ServiceTestBase
 {
     private readonly ToEpochFunction _function = new();
 

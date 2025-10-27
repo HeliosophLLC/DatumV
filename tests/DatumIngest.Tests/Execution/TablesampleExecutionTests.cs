@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Execution;
 /// End-to-end tests for <c>TABLESAMPLE BERNOULLI|SYSTEM(percentage) [REPEATABLE(seed)]</c>
 /// execution, verifying approximate row counts and deterministic sampling.
 /// </summary>
-public sealed class TablesampleExecutionTests
+public sealed class TablesampleExecutionTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

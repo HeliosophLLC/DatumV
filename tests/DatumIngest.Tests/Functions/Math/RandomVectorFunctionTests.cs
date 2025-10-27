@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions.Math;
 /// Tests for <see cref="RandomVectorFunction"/>, <see cref="RandomNormalVectorFunction"/>,
 /// <see cref="RandomPermutationFunction"/>, and <see cref="RandomChoiceFunction"/>.
 /// </summary>
-public sealed class RandomVectorFunctionTests
+public sealed class RandomVectorFunctionTests : ServiceTestBase
 {
     // ──────────────────── random_vector ────────────────────
 

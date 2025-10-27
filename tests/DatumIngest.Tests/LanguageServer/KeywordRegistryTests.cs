@@ -8,7 +8,7 @@ using DatumIngest.Parsing.Tokens;
 /// mapped in the registry and appears in at least one completion zone. When a new
 /// <see cref="SqlToken"/> keyword is added, these tests fail until it is registered.
 /// </summary>
-public sealed class KeywordRegistryTests
+public sealed class KeywordRegistryTests : ServiceTestBase
 {
     /// <summary>
     /// Every <see cref="SqlToken"/> keyword (value below <see cref="SqlToken.Identifier"/>)

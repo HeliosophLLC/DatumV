@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// <see cref="UuidStrFunction"/>, <see cref="UuidBytesFunction"/>,
 /// <see cref="UuidExtractVersionFunction"/>, and <see cref="UuidExtractTimestampFunction"/>.
 /// </summary>
-public class UuidFunctionTests
+public class UuidFunctionTests : ServiceTestBase
 {
     // ───────────────── Uuidv4Function ─────────────────
 

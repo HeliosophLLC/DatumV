@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// (plan-time constant folding) and correlated (per-row ScalarSubqueryOperator)
 /// subqueries.
 /// </summary>
-public sealed class ScalarSubqueryTests
+public sealed class ScalarSubqueryTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

@@ -7,7 +7,7 @@ using DatumIngest.Model;
 /// Tests for <see cref="SamplePreviewCollector"/>, covering reservoir sampling,
 /// value conversion for all <see cref="DataKind"/> types, and round-trip serialisation.
 /// </summary>
-public sealed class SamplePreviewCollectorTests
+public sealed class SamplePreviewCollectorTests : ServiceTestBase
 {
     private static readonly string[] SingleColumnNames = ["value"];
     private static readonly Dictionary<string, int> SingleColumnIndex = new(StringComparer.OrdinalIgnoreCase)

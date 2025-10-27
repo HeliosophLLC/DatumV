@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="TemporalConstantFolder"/> — the plan-time pass that resolves
 /// CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, now(), and current_time() to constants.
 /// </summary>
-public class TemporalConstantFolderTests
+public class TemporalConstantFolderTests : ServiceTestBase
 {
     private static readonly DateTimeOffset TestClock =
         new(2026, 4, 15, 14, 30, 45, 500, TimeSpan.Zero);

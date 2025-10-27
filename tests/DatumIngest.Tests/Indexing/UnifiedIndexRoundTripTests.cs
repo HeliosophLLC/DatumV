@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Indexing;
 /// (fingerprint, schema, chunks, bloom filters, sorted indexes, B+Tree pages,
 /// bitmap indexes) survive the cycle.
 /// </summary>
-public sealed class UnifiedIndexRoundTripTests : IDisposable
+public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
     private readonly string _tempDirectory;
@@ -29,12 +29,13 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
     }
 
     /// <summary>Cleans up test files.</summary>
-    public void Dispose()
+    public override void Dispose()
     {
         if (Directory.Exists(_tempDirectory))
         {
             Directory.Delete(_tempDirectory, recursive: true);
         }
+        base.Dispose();
     }
 
     // ────────────────────── Header / structure ──────────────────────

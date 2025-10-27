@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Functions;
 /// Verifies that every registered scalar function has a valid Query Unit cost
 /// and that representative functions from each tier report the expected cost.
 /// </summary>
-public class QueryUnitCostTests
+public class QueryUnitCostTests : ServiceTestBase
 {
     /// <summary>
     /// Every scalar function in the default registry must have a positive Query Unit cost.

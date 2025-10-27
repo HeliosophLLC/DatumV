@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Validates that <see cref="BPlusTreePageCodec"/> rejects corrupted page data
 /// with clean exceptions rather than undefined behavior or crashes.
 /// </summary>
-public sealed class BPlusTreePageCorruptionTests
+public sealed class BPlusTreePageCorruptionTests : ServiceTestBase
 {
     /// <summary>Standard B+Tree page size.</summary>
     private const int PageSize = 8192;

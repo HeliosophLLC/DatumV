@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// skip, or warn on predicate failures. Covers parsing, planning, and end-to-end
 /// execution with all three failure modes.
 /// </summary>
-public sealed class AssertClauseTests
+public sealed class AssertClauseTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

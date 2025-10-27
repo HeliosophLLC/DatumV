@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class DataValueTests
+public class DataValueTests : ServiceTestBase
 {
     [Fact]
     public void DataValue_Is20Bytes()

@@ -9,7 +9,7 @@ using DatumIngest.Model;
 /// <see cref="ImageChannelsFunction"/>, <see cref="ImagePixelCountFunction"/>,
 /// and <see cref="ImageDimensionsFunction"/>.
 /// </summary>
-public sealed class ImageMetadataFunctionTests
+public sealed class ImageMetadataFunctionTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

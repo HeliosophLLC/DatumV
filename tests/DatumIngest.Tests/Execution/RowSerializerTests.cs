@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Execution;
 /// Round-trip tests for <see cref="RowSerializer"/>, verifying that every
 /// <see cref="DataKind"/> plus null values survive binary serialization.
 /// </summary>
-public class RowSerializerTests
+public class RowSerializerTests : ServiceTestBase
 {
     /// <summary>
     /// Every <see cref="DataKind"/> must survive a write→read round-trip through

@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class UtilityFunctionTests
+public class UtilityFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Nullif_EqualValues_ReturnsNull()

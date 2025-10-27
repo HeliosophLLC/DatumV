@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="BitmapComposer"/> — SIMD-accelerated bitwise AND, OR, NOT,
 /// PopCount, and EnumerateSetBits operations on byte spans.
 /// </summary>
-public sealed class BitmapComposerTests
+public sealed class BitmapComposerTests : ServiceTestBase
 {
     // ───────────────────────── AND ─────────────────────────
 

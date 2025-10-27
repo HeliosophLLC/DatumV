@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Execution;
 /// (build) and the right side is streamed (probe), but output column order is preserved
 /// as [left | right].
 /// </summary>
-public sealed class FlippedJoinTests
+public sealed class FlippedJoinTests : ServiceTestBase
 {
     /// <summary>
     /// Memory budget small enough to force spilling through the Grace path.

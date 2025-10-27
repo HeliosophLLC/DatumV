@@ -9,11 +9,15 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// <see cref="Arena"/>-backed value store. This validates that the span-based
 /// implementations produce identical results to the original string-based paths.
 /// </summary>
-public class StringFunctionStoreAwareTests : IDisposable
+public class StringFunctionStoreAwareTests : ServiceTestBase
 {
     private readonly Arena _arena = new();
 
-    public void Dispose() => _arena.Dispose();
+    public override void Dispose()
+    {
+        _arena.Dispose();
+        base.Dispose();
+    }
 
     private DataValue S(string value) => DataValue.FromString(value, _arena);
     private DataValue NullStr => DataValue.Null(DataKind.String);

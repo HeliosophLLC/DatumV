@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="WordCountFunction"/> — whitespace-separated word counting.
 /// </summary>
-public sealed class WordCountFunctionTests
+public sealed class WordCountFunctionTests : ServiceTestBase
 {
     private readonly WordCountFunction _function = new();
 

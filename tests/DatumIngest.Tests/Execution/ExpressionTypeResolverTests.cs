@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Execution;
 /// <summary>
 /// Tests for <see cref="ExpressionTypeResolver"/> covering all expression kinds.
 /// </summary>
-public sealed class ExpressionTypeResolverTests
+public sealed class ExpressionTypeResolverTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

@@ -7,7 +7,7 @@ using DatumIngest.Manifest.Insights;
 /// Tests for <see cref="QuerySynthesizer"/> — query generation, bundle atomicity,
 /// conflict resolution, and annotation generation.
 /// </summary>
-public sealed class QuerySynthesizerTests
+public sealed class QuerySynthesizerTests : ServiceTestBase
 {
     private static readonly QuerySynthesisOptions DefaultOptions = new();
     private static readonly IReadOnlyList<string> ThreeColumns = ["age", "income", "status"];

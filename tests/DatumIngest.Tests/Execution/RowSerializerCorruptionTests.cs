@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Validates that <see cref="RowSerializer"/> rejects corrupted spill-file streams
 /// with clean exceptions rather than undefined behavior or crashes.
 /// </summary>
-public sealed class RowSerializerCorruptionTests
+public sealed class RowSerializerCorruptionTests : ServiceTestBase
 {
     [Fact]
     public void ReadDataValue_UnknownDataKind_ThrowsInvalidDataException()

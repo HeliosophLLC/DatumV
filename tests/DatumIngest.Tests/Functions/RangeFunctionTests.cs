@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Unit tests for the <see cref="RangeFunction"/> table-valued function.
 /// </summary>
-public class RangeFunctionTests
+public class RangeFunctionTests : ServiceTestBase
 {
     private readonly RangeFunction _function = new();
 

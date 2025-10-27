@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="WindowOperator"/> covering partitioning, ordering,
 /// and end-to-end computation of window functions.
 /// </summary>
-public class WindowOperatorTests
+public class WindowOperatorTests : ServiceTestBase
 {
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

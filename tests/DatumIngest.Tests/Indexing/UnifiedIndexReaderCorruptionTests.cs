@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Validates that <see cref="UnifiedIndexReader"/> rejects corrupted v5 unified
 /// <c>.datum-index</c> files with clean exceptions rather than undefined behavior.
 /// </summary>
-public sealed class UnifiedIndexReaderCorruptionTests : IDisposable
+public sealed class UnifiedIndexReaderCorruptionTests : ServiceTestBase
 {
     private readonly string _tempDirectory;
 
@@ -21,12 +21,13 @@ public sealed class UnifiedIndexReaderCorruptionTests : IDisposable
     }
 
     /// <summary>Removes the temporary directory and all test files.</summary>
-    public void Dispose()
+    public override void Dispose()
     {
         if (Directory.Exists(_tempDirectory))
         {
             Directory.Delete(_tempDirectory, recursive: true);
         }
+        base.Dispose();
     }
 
     // ─────────────────────── Header corruption ───────────────────────

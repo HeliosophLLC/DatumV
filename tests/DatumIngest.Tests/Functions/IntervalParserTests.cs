@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="IntervalParser"/> — PostgreSQL-style interval string parsing.
 /// </summary>
-public class IntervalParserTests
+public class IntervalParserTests : ServiceTestBase
 {
     // ───────────────────── Simple units ─────────────────────
 

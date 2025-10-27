@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Model;
 /// <summary>
 /// Tests for <see cref="Arena"/> float and byte operations — append, retrieval, materialisation, and copy.
 /// </summary>
-public class DataArenaTests
+public class DataArenaTests : ServiceTestBase
 {
     [Fact]
     public void AppendAndRetrieveFloats()

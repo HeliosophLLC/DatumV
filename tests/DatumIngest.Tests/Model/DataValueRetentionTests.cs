@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Model;
 /// reference-type <see cref="DataValue"/> payloads into a retention store so the
 /// resulting value remains valid beyond the original source's lifetime.
 /// </summary>
-public sealed class DataValueRetentionTests
+public sealed class DataValueRetentionTests : ServiceTestBase
 {
     // ───────────────────── Self-contained values pass through unchanged ─────────────────────
 

@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class UnnestFunctionTests
+public class UnnestFunctionTests : ServiceTestBase
 {
     private readonly UnnestFunction _function = new();
 

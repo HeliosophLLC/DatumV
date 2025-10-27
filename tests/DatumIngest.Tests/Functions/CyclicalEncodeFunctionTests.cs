@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="CyclicalEncodeFunction"/>.
 /// </summary>
-public class CyclicalEncodeFunctionTests
+public class CyclicalEncodeFunctionTests : ServiceTestBase
 {
     private readonly CyclicalEncodeFunction _function = new();
 

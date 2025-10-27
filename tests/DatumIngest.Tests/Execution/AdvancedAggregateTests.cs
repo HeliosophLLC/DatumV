@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for advanced aggregate functions: PERCENTILE_DISC, MODE, CORR,
 /// COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, and ARRAY_AGG.
 /// </summary>
-public class AdvancedAggregateTests
+public class AdvancedAggregateTests : ServiceTestBase
 {
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {

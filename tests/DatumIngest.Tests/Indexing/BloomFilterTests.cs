@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="BloomFilter"/> — probabilistic membership filter
 /// using double hashing (Kirsch–Mitzenmacker technique).
 /// </summary>
-public sealed class BloomFilterTests
+public sealed class BloomFilterTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
 

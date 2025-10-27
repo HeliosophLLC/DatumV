@@ -11,7 +11,7 @@ using SkiaSharp;
 /// <see cref="GrayscaleImageFunction"/>, <see cref="RotateImageFunction"/>,
 /// <see cref="NoiseImageFunction"/>, and <see cref="BlurImageFunction"/>.
 /// </summary>
-public sealed class ImageTransformFunctionTests
+public sealed class ImageTransformFunctionTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

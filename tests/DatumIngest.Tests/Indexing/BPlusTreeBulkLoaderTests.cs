@@ -10,7 +10,7 @@ namespace DatumIngest.Tests.Indexing;
 /// entries, section header serialization, and structural correctness of the
 /// resulting B+Tree.
 /// </summary>
-public sealed class BPlusTreeBulkLoaderTests
+public sealed class BPlusTreeBulkLoaderTests : ServiceTestBase
 {
     // ───────────────────────── Empty input ─────────────────────────
 

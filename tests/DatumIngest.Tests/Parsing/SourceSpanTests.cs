@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Parsing;
 /// Verifies that <see cref="SourceSpan"/> values are populated on AST nodes
 /// that carry identifiers (tables, columns, functions) during parsing.
 /// </summary>
-public sealed class SourceSpanTests
+public sealed class SourceSpanTests : ServiceTestBase
 {
     private static SelectStatement Parse(string sql)
     {

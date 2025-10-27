@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions;
 
-public class ClampFunctionTests
+public class ClampFunctionTests : ServiceTestBase
 {
     private readonly ClampFunction _function = new();
 

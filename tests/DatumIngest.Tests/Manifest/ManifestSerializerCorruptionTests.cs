@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Manifest;
 /// gracefully — either returning <c>null</c> or throwing a clean
 /// <see cref="System.Text.Json.JsonException"/> — without crashing or corrupting state.
 /// </summary>
-public sealed class ManifestSerializerCorruptionTests
+public sealed class ManifestSerializerCorruptionTests : ServiceTestBase
 {
     [Fact]
     public void Deserialize_EmptyString_Throws()

@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for statistical aggregate functions: VARIANCE, VAR_SAMP, VAR_POP,
 /// STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, and PERCENTILE_CONT.
 /// </summary>
-public class StatisticalAggregateTests
+public class StatisticalAggregateTests : ServiceTestBase
 {
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {

@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Execution;
 /// Query Unit costs on the attached <see cref="QueryMeter"/> when evaluating
 /// scalar function calls.
 /// </summary>
-public class QueryMeteringTests
+public class QueryMeteringTests : ServiceTestBase
 {
     /// <summary>
     /// Evaluating a single scalar function call adds its QU cost to the meter.

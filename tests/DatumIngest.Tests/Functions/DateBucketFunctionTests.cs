@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Functions;
 /// <summary>
 /// Tests for <see cref="DateBucketFunction"/>.
 /// </summary>
-public class DateBucketFunctionTests
+public class DateBucketFunctionTests : ServiceTestBase
 {
     private readonly DateBucketFunction _function = new();
 

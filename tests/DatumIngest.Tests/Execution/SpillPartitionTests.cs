@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="SpillPartition"/>, verifying in-memory lifecycle,
 /// spill-to-disk round-trips, and temporary file cleanup.
 /// </summary>
-public sealed class SpillPartitionTests : IDisposable
+public sealed class SpillPartitionTests : ServiceTestBase
 {
     private readonly string _spillDirectory;
 
@@ -20,12 +20,13 @@ public sealed class SpillPartitionTests : IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose()
+    public override void Dispose()
     {
         if (Directory.Exists(_spillDirectory))
         {
             Directory.Delete(_spillDirectory, recursive: true);
         }
+        base.Dispose();
     }
 
     /// <summary>

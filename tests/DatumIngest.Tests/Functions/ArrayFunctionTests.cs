@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Functions;
 /// <see cref="ArraySumFunction"/>, and <see cref="ArrayAvgFunction"/>.
 /// Also tests <see cref="LenFunction"/> Array support.
 /// </summary>
-public class ArrayFunctionTests
+public class ArrayFunctionTests : ServiceTestBase
 {
     // ───────── helper ─────────
 

@@ -13,7 +13,7 @@ using SkiaSharp;
 /// Verifies the <see cref="ICostAwareFunction"/> interface, <see cref="ImageCostHelper"/>
 /// formula, and end-to-end metering through <see cref="ExpressionEvaluator"/>.
 /// </summary>
-public sealed class ImageCostAwareTests
+public sealed class ImageCostAwareTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 

@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Ingestion;
 /// Verifies the full ingestion pipeline wires up correctly and the output is
 /// readable by the .datum reader.
 /// </summary>
-public sealed class IngesterEndToEndTests
+public sealed class IngesterEndToEndTests : ServiceTestBase
 {
     [Fact]
     public async Task CsvToDatum_BasicTypes_RoundTripsViaDatumFileReader()

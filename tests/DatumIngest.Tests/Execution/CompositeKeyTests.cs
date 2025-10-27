@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="CompositeKey"/>, verifying value-equality semantics
 /// and hash code consistency for compound join keys.
 /// </summary>
-public class CompositeKeyTests
+public class CompositeKeyTests : ServiceTestBase
 {
     [Fact]
     public void Equals_IdenticalSinglePart_ReturnsTrue()

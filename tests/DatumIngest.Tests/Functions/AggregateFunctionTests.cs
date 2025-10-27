@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions;
 /// Tests for the built-in aggregate function implementations
 /// (COUNT, SUM, AVG, MIN, MAX, MEDIAN, VARIANCE, STDDEV, CORR, COVAR).
 /// </summary>
-public class AggregateFunctionTests
+public class AggregateFunctionTests : ServiceTestBase
 {
     // ─────────────── COUNT ───────────────
 

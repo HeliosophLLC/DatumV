@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Indexing;
 /// <summary>
 /// Tests for <see cref="BitmapIndexSet"/> — column-keyed lookup of bitmap indexes.
 /// </summary>
-public sealed class BitmapIndexSetTests
+public sealed class BitmapIndexSetTests : ServiceTestBase
 {
     [Fact]
     public void TryGetIndex_ExistingColumn_ReturnsTrue()

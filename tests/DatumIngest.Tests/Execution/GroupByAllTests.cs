@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <c>GROUP BY ALL</c> — projection-derived grouping that infers
 /// group keys from non-aggregate columns in the SELECT list.
 /// </summary>
-public sealed class GroupByAllTests
+public sealed class GroupByAllTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

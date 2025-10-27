@@ -6,7 +6,7 @@ namespace DatumIngest.Tests.Model;
 /// Tests for <see cref="DataValue"/> factory methods and behavior
 /// for <see cref="DataKind.Uuid"/> and <see cref="DataKind.Boolean"/> kinds.
 /// </summary>
-public class DataValueUuidBooleanTests
+public class DataValueUuidBooleanTests : ServiceTestBase
 {
     // ───────────────── FromUuid ─────────────────
 

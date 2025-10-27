@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="BPlusTreePageCodec"/> — leaf and internal page
 /// encoding/decoding round-trips plus structural invariants.
 /// </summary>
-public sealed class BPlusTreePageCodecTests
+public sealed class BPlusTreePageCodecTests : ServiceTestBase
 {
     // ───────────────────────── Leaf page round-trips ─────────────────────────
 

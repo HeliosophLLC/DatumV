@@ -6,7 +6,7 @@ using DatumIngest.Manifest;
 /// Tests for <see cref="LanguageServerManifestSerializer"/> — round-trip JSON serialization
 /// of the language server manifest using source-generated System.Text.Json.
 /// </summary>
-public sealed class LanguageServerManifestSerializerTests
+public sealed class LanguageServerManifestSerializerTests : ServiceTestBase
 {
     private static LanguageServerManifest CreateManifest()
     {

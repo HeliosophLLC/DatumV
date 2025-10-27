@@ -2,7 +2,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
-public class RowTests
+public class RowTests : ServiceTestBase
 {
     [Fact]
     public void RowStoresNamedValues()

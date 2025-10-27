@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// contains, starts_with, ends_with, position, replace, concat, repeat, reverse,
 /// left, right, lpad, and rpad.
 /// </summary>
-public class StringFunctionTests
+public class StringFunctionTests : ServiceTestBase
 {
     // ───────────────── UpperFunction ─────────────────
 

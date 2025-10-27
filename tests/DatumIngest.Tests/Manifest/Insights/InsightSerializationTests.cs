@@ -8,7 +8,7 @@ using DatumIngest.Model;
 /// Tests that <see cref="DatasetInsight"/> and related types survive JSON round-trip
 /// via <see cref="ManifestSerializer"/>.
 /// </summary>
-public sealed class InsightSerializationTests
+public sealed class InsightSerializationTests : ServiceTestBase
 {
     [Fact]
     public void RoundTrip_ManifestWithInsights_PreservesInsights()

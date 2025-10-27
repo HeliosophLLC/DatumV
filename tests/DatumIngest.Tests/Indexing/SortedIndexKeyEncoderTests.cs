@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Indexing;
 /// Tests for <see cref="SortedIndexKeyEncoder"/> verifying round-trip correctness,
 /// sort-order preservation under byte comparison, and edge-case handling.
 /// </summary>
-public sealed class SortedIndexKeyEncoderTests
+public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
 {
     [Theory]
     [InlineData(DataKind.Boolean, 1)]

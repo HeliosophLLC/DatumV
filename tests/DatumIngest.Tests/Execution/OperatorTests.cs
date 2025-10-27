@@ -72,7 +72,7 @@ internal sealed class CountingOperator : IQueryOperator
     }
 }
 
-public class OperatorTests
+public class OperatorTests : ServiceTestBase
 {
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

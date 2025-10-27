@@ -3,7 +3,7 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Functions.Math;
 
-public class RoundingFunctionTests
+public class RoundingFunctionTests : ServiceTestBase
 {
     [Fact]
     public void Ceil_RoundsUp()

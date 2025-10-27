@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Indexing;
 /// automatically accumulate bitmap indexes for low-cardinality auto-indexable columns
 /// and abandon tracking when cardinality exceeds the threshold.
 /// </summary>
-public sealed class BitmapBuildPipelineTests
+public sealed class BitmapBuildPipelineTests : ServiceTestBase
 {
     private static readonly Arena Store = new();
 

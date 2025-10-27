@@ -22,7 +22,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for <see cref="IndexScanOperator"/> sorted iteration and
 /// <see cref="QueryPlanner"/> substitution of ORDER BY with index scan.
 /// </summary>
-public sealed class IndexScanOperatorTests
+public sealed class IndexScanOperatorTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 

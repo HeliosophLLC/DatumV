@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// Tests for the new PostgreSQL-aligned string functions: concat_ws, split_part,
 /// initcap, regexp_replace, translate, ascii, chr, and btrim.
 /// </summary>
-public class NewStringFunctionTests
+public class NewStringFunctionTests : ServiceTestBase
 {
     // ───────────────── ConcatWsFunction ─────────────────
 

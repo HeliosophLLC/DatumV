@@ -6,7 +6,7 @@ using DatumIngest.Manifest;
 /// <summary>
 /// Tests for <see cref="HoverProvider"/> — hover information for SQL tokens.
 /// </summary>
-public sealed class HoverProviderTests
+public sealed class HoverProviderTests : ServiceTestBase
 {
     private static LanguageServerManifest CreateTestManifest()
     {
