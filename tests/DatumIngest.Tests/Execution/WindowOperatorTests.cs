@@ -302,7 +302,7 @@ public class WindowOperatorTests : ServiceTestBase
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(), new LocalBufferPool(), meter);
+            CreateCatalog(), new LocalBufferPool(), meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(window, context));
@@ -338,7 +338,7 @@ public class WindowOperatorTests : ServiceTestBase
         ExecutionContext context = new(
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(), new LocalBufferPool());
+            CreateCatalog(), new LocalBufferPool());
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(window, context));

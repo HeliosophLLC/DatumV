@@ -23,7 +23,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool(),
             memoryBudgetBytes: 512)
         {

@@ -1,7 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Catalog.Providers;
 
@@ -16,6 +18,7 @@ public sealed class InMemoryTableProvider : ITableProvider
 {
     private const int DefaultBatchSize = 64;
 
+    private Pool? _pool;
     private readonly string[] _columns;
     private readonly Row[] _rows;
     private readonly Schema _schema;
@@ -25,14 +28,16 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// row's <see cref="Row.ColumnNames"/>; schema kinds are inferred from the first row's
     /// values. When <paramref name="rows"/> is empty, a single <c>"empty"</c> column is used.
     /// </summary>
+    /// <param name="pool">The buffer pool to use for row batches.</param>
     /// <param name="name">The name of the table.</param>
     /// <param name="rows">The rows to serve.</param>
-    public InMemoryTableProvider(string name, Row[] rows)
+    public InMemoryTableProvider(Pool pool, string name, Row[] rows)
     {
+        _pool = pool;
         Name = name;
         _rows = rows;
         _columns = rows.Length == 0
-            ? Array.Empty<string>()
+            ? []
             : rows[0].ColumnNames.ToArray();
         _schema = BuildSchema(_columns, _rows);
     }
@@ -41,11 +46,13 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// Creates a provider from explicit column names and rows. Use this when the first
     /// row's column names might not represent the full schema.
     /// </summary>
+    /// <param name="pool">The buffer pool to use for row batches.</param>
     /// <param name="name">The name of the table.</param>
     /// <param name="columns">Column names for the schema.</param>
     /// <param name="rows">The rows to serve. Each row must have values in <paramref name="columns"/> order.</param>
-    public InMemoryTableProvider(string name, string[] columns, Row[] rows)
+    public InMemoryTableProvider(Pool pool, string name, string[] columns, Row[] rows)
     {
+        _pool = pool;
         this.Name = name;
         _columns = columns;
         _rows = rows;
@@ -58,8 +65,21 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// <inheritdoc/>
     public bool Seekable => true;
 
+    /// <summary>
+    /// Gets whether <see cref="Dispose"/> has been called on this provider.
+    /// </summary>
+    [MemberNotNullWhen(false, nameof(_pool))]
+    public bool Disposed { get; private set;}
+
     /// <inheritdoc/>
-    public void Dispose() { }
+    public void Dispose()
+    {
+        if (Disposed) return;
+
+        _pool = null;
+
+        Disposed = true;
+    }
 
     /// <inheritdoc/>
     public long GetRowCount() => _rows.Length;

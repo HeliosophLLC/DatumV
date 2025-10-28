@@ -554,7 +554,7 @@ public sealed class GraceHashJoinTests : ServiceTestBase
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes)
         {

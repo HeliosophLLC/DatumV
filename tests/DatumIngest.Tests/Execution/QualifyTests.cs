@@ -275,7 +275,7 @@ public sealed class QualifyTests : ServiceTestBase
             MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(40f))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, score, ROW_NUMBER() OVER (PARTITION BY category ORDER BY score DESC) AS rn " +
@@ -310,7 +310,7 @@ public sealed class QualifyTests : ServiceTestBase
             MakeRow(("name", DataValue.FromString("dave")), ("score", DataValue.FromFloat32(40f))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name, score FROM data " +
@@ -343,7 +343,7 @@ public sealed class QualifyTests : ServiceTestBase
             MakeRow(("department", DataValue.FromString("hr")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(50f))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("employees", employees));
+        TableCatalog catalog = CreateCatalog(("employees", employees));
 
         // WHERE filters to active only → GROUP BY department →
         // HAVING COUNT(*) > 1 → ROW_NUMBER by department name → QUALIFY rn = 1
@@ -381,7 +381,7 @@ public sealed class QualifyTests : ServiceTestBase
             MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(3f))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT DISTINCT category, value FROM data " +

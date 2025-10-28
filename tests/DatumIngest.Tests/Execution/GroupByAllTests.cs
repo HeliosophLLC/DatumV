@@ -35,7 +35,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("department", "A"), ("region", "South"), ("amount", 30f)),
             MakeRow(("department", "B"), ("region", "North"), ("amount", 40f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("sales", data));
+        TableCatalog catalog = CreateCatalog(("sales", data));
 
         List<Row> allResults = await ExecuteQueryAsync(
             "SELECT department, region, SUM(amount) AS total FROM sales GROUP BY ALL",
@@ -63,7 +63,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("category", "X"), ("value", 2f)),
             MakeRow(("category", "Y"), ("value", 3f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, COUNT(*) AS n FROM t GROUP BY ALL",
@@ -92,7 +92,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("a", "Y"), ("b", "P"), ("v", 3f)),
             MakeRow(("a", "Y"), ("b", "P"), ("v", 4f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         // Three non-aggregate columns (a, b) and two aggregates.
         List<Row> results = await ExecuteQueryAsync(
@@ -120,7 +120,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("region", "East"), ("sales", 20f)),
             MakeRow(("region", "West"), ("sales", 30f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT region, COUNT(*) AS n, SUM(sales) AS total, AVG(sales) AS avg_sales FROM t GROUP BY ALL",
@@ -147,7 +147,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("category", "A"), ("value", 10f)),
             MakeRow(("category", "B"), ("value", 1f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, SUM(value) AS total FROM t GROUP BY ALL HAVING SUM(value) > 5",
@@ -172,7 +172,7 @@ public sealed class GroupByAllTests : ServiceTestBase
             MakeRow(("category", "B"), ("value", 10f)),
             MakeRow(("category", "C"), ("value", 20f)),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, SUM(value) AS total FROM t GROUP BY ALL ORDER BY total DESC LIMIT 2",

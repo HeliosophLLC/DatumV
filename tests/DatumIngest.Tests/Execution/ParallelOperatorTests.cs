@@ -25,7 +25,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool())
         {
             DegreeOfParallelism = degreeOfParallelism,
@@ -570,7 +570,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool())
         {
             DegreeOfParallelism = 2,

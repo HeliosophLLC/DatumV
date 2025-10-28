@@ -222,7 +222,7 @@ public sealed class FlippedJoinTests : ServiceTestBase
         context ??= new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool());
 
         return await op.CollectRowsAsync(context);

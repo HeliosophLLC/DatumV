@@ -356,7 +356,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             MakeRow(("prices", MakeScalarArray(10f, 20f, 30f))),
             MakeRow(("prices", MakeScalarArray(5f, 15f))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_transform(prices, p -> p * 2) AS doubled FROM t",
@@ -382,7 +382,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         [
             MakeRow(("scores", MakeScalarArray(10f, 60f, 30f, 80f))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_filter(scores, s -> s > 50) AS high FROM t",
@@ -402,7 +402,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         [
             MakeRow(("nums", MakeScalarArray(1f, 2f, 3f, 4f, 5f))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_filter(array_transform(nums, x -> x * 10), y -> y > 25) AS result FROM t",
@@ -425,7 +425,7 @@ public class LambdaEvaluationTests : ServiceTestBase
                 ("prices", MakeScalarArray(100f, 200f)),
                 ("factor", DataValue.FromFloat32(1.5f))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_transform(prices, p -> p * factor) AS adjusted FROM t",
@@ -444,7 +444,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         [
             MakeRow(("nums", MakeScalarArray(2f, 4f, 6f))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_transform(nums, (x) -> x + 1) AS incremented FROM t",
@@ -463,7 +463,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     public async Task FullStack_ArrayLiteral_DesugarsToArrayFunction()
     {
         Row[] data = [MakeRow(("id", DataValue.FromFloat32(1f)))];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT [10, 20, 30] AS nums FROM t",
@@ -481,7 +481,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     public async Task FullStack_ArrayLiteral_WithLambda()
     {
         Row[] data = [MakeRow(("id", DataValue.FromFloat32(1f)))];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT array_filter([5, 15, 25, 35], x -> x > 20) AS big FROM t",
@@ -498,7 +498,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     public async Task FullStack_ArrayLiteral_Empty()
     {
         Row[] data = [MakeRow(("id", DataValue.FromFloat32(1f)))];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT [] AS empty_arr FROM t",

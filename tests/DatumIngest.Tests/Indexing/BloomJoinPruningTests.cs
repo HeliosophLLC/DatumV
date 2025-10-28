@@ -85,10 +85,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
         // Create ScanOperator for the left side with the source index.
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-           new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
@@ -156,10 +153,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
@@ -209,10 +203,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
@@ -287,10 +278,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
@@ -377,10 +365,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema orderIndexSchema = new(orderSchema, 4);
         SourceIndex orderSourceIndex = new(orderFingerprint, orderIndexSchema, orderChunks, orderBloomSet);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("orders", orderRows)
-        };
+        TableCatalog catalog = CreateCatalog(("orders", orderRows));
         ScanOperator orderScan = new(catalog["orders"], null, orderRows.Length);
         orderScan.SetSourceIndex(orderSourceIndex);
 
@@ -435,9 +420,9 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
     [Fact]
     public void CollectScanOperators_FindsAllScansInNestedJoinTree()
     {
-        InMemoryTableProvider t1 = new("t1", []);
-        InMemoryTableProvider t2 = new("t2", []);
-        InMemoryTableProvider t3 = new("t3", []);
+        InMemoryTableProvider t1 = CreateInMemoryProvider("t1", []);
+        InMemoryTableProvider t2 = CreateInMemoryProvider("t2", []);
+        InMemoryTableProvider t3 = CreateInMemoryProvider("t3", []);
 
         ScanOperator scan1 = new(t1, null, 123);
         ScanOperator scan2 = new(t2, null, 234);
@@ -512,10 +497,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema indexSchema = new(schema, 6);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 
@@ -593,10 +575,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing))
-        {
-            new InMemoryTableProvider("left", leftRows)
-        };
+        TableCatalog catalog = CreateCatalog(("left", leftRows));
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
         scanOperator.SetSourceIndex(sourceIndex);
 

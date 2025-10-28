@@ -230,7 +230,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(10))),
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(20))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
 
         List<Row> result = await ExecuteQueryAsync(
             "SELECT id, amount FROM orders ASSERT amount > 0", catalog);
@@ -250,7 +250,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(10))),
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
 
         await Assert.ThrowsAsync<AssertionAbortException>(() =>
             ExecuteQueryAsync("SELECT id, amount FROM orders ASSERT amount > 0", catalog));
@@ -268,7 +268,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
             MakeRow(("id", DataValue.FromInt32(3)), ("amount", DataValue.FromInt32(20))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(
@@ -290,7 +290,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(10))),
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(
@@ -311,7 +311,7 @@ public sealed class AssertClauseTests : ServiceTestBase
         [
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(-5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         await ExecuteQueryAsync(
@@ -334,7 +334,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
             MakeRow(("id", DataValue.FromInt32(3)), ("amount", DataValue.FromInt32(20))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(
@@ -361,7 +361,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
             MakeRow(("id", DataValue.FromInt32(3)), ("amount", DataValue.FromInt32(20))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(
@@ -386,7 +386,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("order_id", DataValue.FromInt32(1)), ("reordered", DataValue.FromBoolean(false))),
             MakeRow(("order_id", DataValue.FromInt32(2)), ("reordered", DataValue.FromBoolean(true))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(
@@ -414,7 +414,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("order_id", DataValue.FromInt32(2)), ("product_id", DataValue.FromInt32(20)), ("reordered", DataValue.FromBoolean(true))),
             MakeRow(("order_id", DataValue.FromInt32(3)), ("product_id", DataValue.FromInt32(30)), ("reordered", DataValue.FromBoolean(true))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         // Replicate the exact CLI execution path: PlanWithSubqueriesAsync + shared ExecutionContext.
@@ -446,7 +446,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("price", DataValue.FromInt32(100)), ("qty", DataValue.FromInt32(2))),
             MakeRow(("price", DataValue.FromInt32(0)),   ("qty", DataValue.FromInt32(5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("sales", rows));
+        TableCatalog catalog = CreateCatalog(("sales", rows));
         AssertionDiagnostics diagnostics = new();
 
         // total = price * qty; ASSERT total > 0 should skip the row where price = 0.
@@ -470,7 +470,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
             MakeRow(("id", DataValue.Null(DataKind.Int32)), ("amount", DataValue.FromInt32(50))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("t", rows));
+        TableCatalog catalog = CreateCatalog(("t", rows));
         AssertionDiagnostics diagnostics = new();
 
         // First assertion: id IS NOT NULL (SKIP mode)
@@ -502,7 +502,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(10))),
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
 
         await Assert.ThrowsAsync<AssertionAbortException>(
             () => ExecuteQueryAsync(
@@ -519,7 +519,7 @@ public sealed class AssertClauseTests : ServiceTestBase
         [
             MakeRow(("id", DataValue.FromInt32(1)), ("amount", DataValue.FromInt32(-5))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog((("orders", rows)));
+        TableCatalog catalog = CreateCatalog((("orders", rows)));
 
         AssertionAbortException exception = await Assert.ThrowsAsync<AssertionAbortException>(
             () => ExecuteQueryAsync(
@@ -541,7 +541,7 @@ public sealed class AssertClauseTests : ServiceTestBase
             MakeRow(("id", DataValue.FromInt32(2)), ("amount", DataValue.FromInt32(-5))),
             MakeRow(("id", DataValue.FromInt32(3)), ("amount", DataValue.FromInt32(20))),
         ];
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", rows));
+        TableCatalog catalog = CreateCatalog(("orders", rows));
         AssertionDiagnostics diagnostics = new();
 
         List<Row> result = await ExecuteQueryAsync(

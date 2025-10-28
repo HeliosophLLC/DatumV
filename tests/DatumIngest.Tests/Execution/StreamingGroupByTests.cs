@@ -214,7 +214,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            TestTableCatalog.Create(),
+            CreateCatalog(),
             new LocalBufferPool())
         {
             BatchSize = 8,

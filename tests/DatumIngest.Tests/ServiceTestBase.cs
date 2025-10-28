@@ -72,11 +72,14 @@ public abstract class ServiceTestBase : IDisposable
 
         foreach ((string name, Row[] rows) in tables)
         {
-            catalog.Add(new InMemoryTableProvider(name, rows));
+            catalog.Add(new InMemoryTableProvider(GetService<Pool>(), name, rows));
         }
 
         return catalog;
     }
+
+    protected InMemoryTableProvider CreateInMemoryProvider(string name, Row[] rows)
+        => new(GetService<Pool>(), name, rows);
 
     public virtual void Dispose()
     {

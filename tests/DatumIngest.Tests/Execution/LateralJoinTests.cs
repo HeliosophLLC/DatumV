@@ -34,7 +34,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("name", DataValue.FromString("bob")), ("scores", DataValue.FromVector([10f, 20f]))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -63,7 +63,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("name", DataValue.FromString("alice")), ("scores", DataValue.FromVector([1f, 2f]))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS APPLY UNNEST(data.scores) AS s",
             catalog);
@@ -89,7 +89,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("name", DataValue.FromString("carol")), ("scores", DataValue.FromVector([5f]))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data LEFT JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -121,7 +121,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("name", DataValue.FromString("bob")), ("scores", DataValue.FromVector([]))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog(("data", data));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data OUTER APPLY UNNEST(data.scores) AS s",
             catalog);
@@ -156,7 +156,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("order_id", DataValue.FromFloat32(3f)), ("product", DataValue.FromString("doohickey"))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", orders), ("items", items));
+        TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.customer, sub.product " +
             "FROM orders " +
@@ -193,7 +193,7 @@ public sealed class LateralJoinTests : ServiceTestBase
             MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("widget"))),
         ];
 
-        TableCatalog catalog = TestTableCatalog.CreateCatalog(("orders", orders), ("items", items));
+        TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.customer, sub.product " +
             "FROM orders " +
