@@ -81,6 +81,41 @@ public abstract class ServiceTestBase : IDisposable
     protected InMemoryTableProvider CreateInMemoryProvider(string name, Row[] rows)
         => new(GetService<Pool>(), name, rows);
 
+    /// <summary>
+    /// Creates a catalog with a single in-memory table from positional <c>object[]</c> rows.
+    /// Cells can be CLR primitives (<c>int</c>, <c>string</c>, <c>bool</c>, <see cref="DateTimeOffset"/>,
+    /// <see cref="Guid"/>, <c>byte[]</c>, etc.), <see cref="DataValue"/> instances for explicit
+    /// control, or <c>null</c>. String cells are stored into the batch's arena at scan time.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// TableCatalog catalog = CreateCatalog("orders",
+    ///     columns: ["id", "name", "amount"],
+    ///     [1, "alice", 100.0],
+    ///     [2, "bob",   200.0]);
+    /// </code>
+    /// </example>
+    protected TableCatalog CreateCatalog(
+        string tableName,
+        string[] columns,
+        params object?[][] rows)
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(new InMemoryTableProvider(GetService<Pool>(), tableName, columns, rows));
+        return catalog;
+    }
+
+    /// <summary>
+    /// Creates a standalone <see cref="InMemoryTableProvider"/> from positional
+    /// <c>object[]</c> rows. Use when wiring a provider into a non-catalog structure
+    /// (e.g. directly into a <c>ScanOperator</c>).
+    /// </summary>
+    protected InMemoryTableProvider CreateProvider(
+        string tableName,
+        string[] columns,
+        params object?[][] rows)
+        => new(GetService<Pool>(), tableName, columns, rows);
+
     public virtual void Dispose()
     {
         _provider?.Dispose();

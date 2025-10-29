@@ -28,14 +28,12 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_InfersKeysFromNonAggregateColumns()
     {
-        Row[] data =
-        [
-            MakeRow(("department", "A"), ("region", "North"), ("amount", 10f)),
-            MakeRow(("department", "A"), ("region", "North"), ("amount", 20f)),
-            MakeRow(("department", "A"), ("region", "South"), ("amount", 30f)),
-            MakeRow(("department", "B"), ("region", "North"), ("amount", 40f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("sales", data));
+        TableCatalog catalog = CreateCatalog("sales",
+            columns: ["department", "region", "amount"],
+            ["A", "North", 10f],
+            ["A", "North", 20f],
+            ["A", "South", 30f],
+            ["B", "North", 40f]);
 
         List<Row> allResults = await ExecuteQueryAsync(
             "SELECT department, region, SUM(amount) AS total FROM sales GROUP BY ALL",
@@ -57,13 +55,11 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_SingleGroupKey()
     {
-        Row[] data =
-        [
-            MakeRow(("category", "X"), ("value", 1f)),
-            MakeRow(("category", "X"), ("value", 2f)),
-            MakeRow(("category", "Y"), ("value", 3f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["category", "value"],
+            ["X", 1f],
+            ["X", 2f],
+            ["Y", 3f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, COUNT(*) AS n FROM t GROUP BY ALL",
@@ -85,14 +81,12 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_WithMixedColumnsAndAggregates()
     {
-        Row[] data =
-        [
-            MakeRow(("a", "X"), ("b", "P"), ("v", 1f)),
-            MakeRow(("a", "X"), ("b", "Q"), ("v", 2f)),
-            MakeRow(("a", "Y"), ("b", "P"), ("v", 3f)),
-            MakeRow(("a", "Y"), ("b", "P"), ("v", 4f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b", "v"],
+            ["X", "P", 1f],
+            ["X", "Q", 2f],
+            ["Y", "P", 3f],
+            ["Y", "P", 4f]);
 
         // Three non-aggregate columns (a, b) and two aggregates.
         List<Row> results = await ExecuteQueryAsync(
@@ -114,13 +108,11 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_MultipleAggregates()
     {
-        Row[] data =
-        [
-            MakeRow(("region", "East"), ("sales", 10f)),
-            MakeRow(("region", "East"), ("sales", 20f)),
-            MakeRow(("region", "West"), ("sales", 30f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["region", "sales"],
+            ["East", 10f],
+            ["East", 20f],
+            ["West", 30f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT region, COUNT(*) AS n, SUM(sales) AS total, AVG(sales) AS avg_sales FROM t GROUP BY ALL",
@@ -141,13 +133,11 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_WithHaving()
     {
-        Row[] data =
-        [
-            MakeRow(("category", "A"), ("value", 5f)),
-            MakeRow(("category", "A"), ("value", 10f)),
-            MakeRow(("category", "B"), ("value", 1f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["category", "value"],
+            ["A", 5f],
+            ["A", 10f],
+            ["B", 1f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, SUM(value) AS total FROM t GROUP BY ALL HAVING SUM(value) > 5",
@@ -166,13 +156,11 @@ public sealed class GroupByAllTests : ServiceTestBase
     [Fact]
     public async Task GroupByAll_WithOrderByAndLimit()
     {
-        Row[] data =
-        [
-            MakeRow(("category", "A"), ("value", 30f)),
-            MakeRow(("category", "B"), ("value", 10f)),
-            MakeRow(("category", "C"), ("value", 20f)),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["category", "value"],
+            ["A", 30f],
+            ["B", 10f],
+            ["C", 20f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, SUM(value) AS total FROM t GROUP BY ALL ORDER BY total DESC LIMIT 2",
@@ -184,18 +172,6 @@ public sealed class GroupByAllTests : ServiceTestBase
     }
 
     // ─────────────── Helpers ───────────────
-
-    private static Row MakeRow(params (string Name, object Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value switch
-        {
-            float f => DataValue.FromFloat32(f),
-            string s => DataValue.FromString(s),
-            _ => throw new ArgumentException($"Unsupported test value type: {c.Value.GetType()}")
-        }).ToArray();
-        return new Row(names, values);
-    }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {

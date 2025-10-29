@@ -28,13 +28,10 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task CrossJoinLateral_Unnest_ExpandsVectorPerRow()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("scores", DataValue.FromVector([1f, 2f, 3f]))),
-            MakeRow(("name", DataValue.FromString("bob")), ("scores", DataValue.FromVector([10f, 20f]))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["name", "scores"],
+            ["alice", DataValue.FromVector([1f, 2f, 3f])],
+            ["bob", DataValue.FromVector([10f, 20f])]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -58,12 +55,9 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task CrossApply_BehavesAsCrossJoinLateral()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("scores", DataValue.FromVector([1f, 2f]))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["name", "scores"],
+            ["alice", DataValue.FromVector([1f, 2f])]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS APPLY UNNEST(data.scores) AS s",
             catalog);
@@ -82,14 +76,11 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task LeftJoinLateral_PreservesUnmatchedOuterRows()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("scores", DataValue.FromVector([1f, 2f]))),
-            MakeRow(("name", DataValue.FromString("bob")), ("scores", DataValue.FromVector([]))),
-            MakeRow(("name", DataValue.FromString("carol")), ("scores", DataValue.FromVector([5f]))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["name", "scores"],
+            ["alice", DataValue.FromVector([1f, 2f])],
+            ["bob", DataValue.FromVector([])],
+            ["carol", DataValue.FromVector([5f])]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data LEFT JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -115,13 +106,10 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task OuterApply_BehavesAsLeftJoinLateral()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("scores", DataValue.FromVector([1f]))),
-            MakeRow(("name", DataValue.FromString("bob")), ("scores", DataValue.FromVector([]))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["name", "scores"],
+            ["alice", DataValue.FromVector([1f])],
+            ["bob", DataValue.FromVector([])]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data OUTER APPLY UNNEST(data.scores) AS s",
             catalog);
@@ -142,21 +130,17 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task LeftJoinLateral_CorrelatedSubquery()
     {
-        Row[] orders =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("customer", DataValue.FromString("carol"))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("widget"))),
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("gadget"))),
-            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("product", DataValue.FromString("doohickey"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("orders",
+            columns: ["id", "customer"],
+            [1f, "alice"],
+            [2f, "bob"],
+            [3f, "carol"]));
+        catalog.Add(CreateProvider("items",
+            columns: ["order_id", "product"],
+            [1f, "widget"],
+            [1f, "gadget"],
+            [3f, "doohickey"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.customer, sub.product " +
             "FROM orders " +
@@ -182,18 +166,14 @@ public sealed class LateralJoinTests : ServiceTestBase
     [Fact]
     public async Task CrossJoinLateral_CorrelatedSubquery_ExcludesUnmatchedRows()
     {
-        Row[] orders =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer", DataValue.FromString("bob"))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("widget"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("orders",
+            columns: ["id", "customer"],
+            [1f, "alice"],
+            [2f, "bob"]));
+        catalog.Add(CreateProvider("items",
+            columns: ["order_id", "product"],
+            [1f, "widget"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.customer, sub.product " +
             "FROM orders " +
@@ -207,13 +187,6 @@ public sealed class LateralJoinTests : ServiceTestBase
     }
 
     // ───────────────── Helper infrastructure ─────────────────
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {

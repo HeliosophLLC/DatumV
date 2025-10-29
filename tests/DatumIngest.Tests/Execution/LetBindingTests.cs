@@ -203,12 +203,10 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_PositionalDestructuring_FromArray()
     {
-        Row[] data =
-        [
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(10f), DataValue.FromFloat32(20f), DataValue.FromFloat32(30f)])))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr"],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(10f), DataValue.FromFloat32(20f), DataValue.FromFloat32(30f)])]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (first, second, third) = arr, first AS a, second AS b, third AS c FROM t",
@@ -231,11 +229,9 @@ public sealed class LetBindingTests : ServiceTestBase
         // month = 3, period = 12  →  sin(2π·3/12) = sin(π/2) = 1.0, cos = 0.0
         // Pass period as a Float32 column — SQL numeric literals are Float64
         // and cyclical_encode requires Float32 arguments.
-        Row[] data =
-        [
-            MakeRow(("month", DataValue.FromFloat32(3f)), ("period", DataValue.FromFloat32(12f)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["month", "period"],
+            [3f, 12f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (sin_v, cos_v) = cyclical_encode(month, period), sin_v AS s, cos_v AS c FROM t",
@@ -254,8 +250,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_PositionalDestructuring_FromStructLiteral()
     {
-        Row[] data = [MakeRow(("x", DataValue.FromFloat32(0f)))];  // dummy row
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [0f]);  // dummy row
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (p, q) = {alpha: 7.0, beta: 8.0}, p AS pv, q AS qv FROM t",
@@ -274,8 +271,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_NamedDestructuring_FromStructLiteral_OrderIndependent()
     {
-        Row[] data = [MakeRow(("x", DataValue.FromFloat32(0f)))];  // dummy row
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [0f]);  // dummy row
 
         // Note: {beta: 8.0, alpha: 7.0} — reverse order, extracted in {alpha, beta} order.
         List<Row> results = await ExecuteQueryAsync(
@@ -296,8 +294,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_NamedDestructuring_FromLetAlias_FollowsChain()
     {
-        Row[] data = [MakeRow(("dummy", DataValue.FromFloat32(0f)))];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["dummy"],
+            [0f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET x = {a: 'hello', b: 42.0}, LET {a, b} = x, a AS av, b AS bv FROM t",
@@ -314,12 +313,10 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_Destructuring_ChainedInSubsequentLet()
     {
-        Row[] data =
-        [
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr"],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (a, b) = arr, LET hyp = a * a + b * b, hyp AS result FROM t",
@@ -335,11 +332,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_Destructuring_NamesUsedInOutputColumns()
     {
-        Row[] data =
-        [
-            MakeRow(("v", DataValue.FromVector([5f, 6f])))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["v"],
+            [DataValue.FromVector([5f, 6f])]);
 
         // sin_v, cos_v appear both as LET names and directly as output columns
         List<Row> results = await ExecuteQueryAsync(
@@ -362,13 +357,11 @@ public sealed class LetBindingTests : ServiceTestBase
         // If the source were evaluated per-name, sin² + cos² would still equal 1 but the
         // values would match. The memoization proof is that both references produce the SAME
         // DataValue instance — verified by checking consistency across all rows.
-        Row[] data =
-        [
-            MakeRow(("m", DataValue.FromFloat32(1f)), ("p", DataValue.FromFloat32(12f))),
-            MakeRow(("m", DataValue.FromFloat32(4f)), ("p", DataValue.FromFloat32(12f))),
-            MakeRow(("m", DataValue.FromFloat32(7f)), ("p", DataValue.FromFloat32(12f)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["m", "p"],
+            [1f, 12f],
+            [4f, 12f],
+            [7f, 12f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (s, c) = cyclical_encode(m, p), " +
@@ -390,11 +383,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_PositionalDestructuring_OutOfBoundsReturnsNull()
     {
-        Row[] data =
-        [
-            MakeRow(("v", DataValue.FromVector([1f, 2f])))  // only 2 elements
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["v"],
+            [DataValue.FromVector([1f, 2f])]);  // only 2 elements
 
         // LET (a, b, c) = v — c is out of bounds
         List<Row> results = await ExecuteQueryAsync(
@@ -415,8 +406,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_NamedDestructuring_OnVector_ThrowsDescriptiveError()
     {
-        Row[] data = [MakeRow(("v", DataValue.FromVector([1f, 2f])))];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["v"],
+            [DataValue.FromVector([1f, 2f])]);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteQueryAsync("SELECT LET {a, b} = v, a AS x, b AS y FROM t", catalog));
@@ -432,12 +424,10 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_NamedDestructuring_OnArray_ThrowsDescriptiveError()
     {
-        Row[] data =
-        [
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)])))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr"],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)])]);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteQueryAsync("SELECT LET {a, b} = arr, a AS x, b AS y FROM t", catalog));
@@ -454,12 +444,10 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_BasicLetBinding_ProducesCorrectValue()
     {
-        Row[] data =
-        [
-            MakeRow(("a", DataValue.FromFloat32(10)), ("b", DataValue.FromFloat32(3))),
-            MakeRow(("a", DataValue.FromFloat32(20)), ("b", DataValue.FromFloat32(7)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b"],
+            [10f, 3f],
+            [20f, 7f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET s = a + b, s AS result FROM t", catalog);
@@ -475,11 +463,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetBindingNotInOutput_WhenNoAlias()
     {
-        Row[] data =
-        [
-            MakeRow(("a", DataValue.FromFloat32(5)), ("b", DataValue.FromFloat32(2)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b"],
+            [5f, 2f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET s = a + b, s * 2 AS doubled FROM t", catalog);
@@ -495,11 +481,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetBindingWithAlias_AppearsInOutput()
     {
-        Row[] data =
-        [
-            MakeRow(("a", DataValue.FromFloat32(10)), ("b", DataValue.FromFloat32(3)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b"],
+            [10f, 3f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET s = a + b AS \"sum\", s * 2 AS doubled FROM t", catalog);
@@ -516,11 +500,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetChaining_LaterBindingReferencesEarlier()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(4)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [4f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET a = x + 1, LET b = a * 3, b AS result FROM t", catalog);
@@ -538,11 +520,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_Memoization_UuidStableAcrossReferences()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [1f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET u = uuidv4(), uuid_str(u) AS first, uuid_str(u) AS second FROM t",
@@ -561,11 +541,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_StarDoesNotIncludeLetBindings()
     {
-        Row[] data =
-        [
-            MakeRow(("a", DataValue.FromFloat32(1)), ("b", DataValue.FromFloat32(2)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b"],
+            [1f, 2f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET s = a + b AS \"sum\", * FROM t", catalog);
@@ -585,13 +563,11 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetWithGroupBy_AggregateExpression()
     {
-        Row[] data =
-        [
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(20))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(30)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["category", "value"],
+            ["A", 10f],
+            ["A", 20f],
+            ["B", 30f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET total = SUM(value), category, total AS group_total FROM t GROUP BY category",
@@ -610,13 +586,11 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetAliasUsedInOrderBy()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(3))),
-            MakeRow(("x", DataValue.FromFloat32(1))),
-            MakeRow(("x", DataValue.FromFloat32(2)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [3f],
+            [1f],
+            [2f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET doubled = x * 2 AS \"doubled\", x FROM t ORDER BY doubled",
@@ -634,11 +608,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_MixedVisibility_AliasedAndHidden()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(10)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [10f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET a = x + 5 AS \"visible\", LET b = a * 2, b AS result FROM t",
@@ -656,11 +628,9 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_LetWithFunctionCall()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(-7)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [-7f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET magnitude = ABS(x), magnitude AS result FROM t",
@@ -677,13 +647,11 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_MultipleRows_IndependentLetValues()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(2))),
-            MakeRow(("x", DataValue.FromFloat32(5))),
-            MakeRow(("x", DataValue.FromFloat32(10)))
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [2f],
+            [5f],
+            [10f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET sq = x * x, sq AS squared FROM t", catalog);
@@ -699,13 +667,6 @@ public sealed class LetBindingTests : ServiceTestBase
     private static SelectStatement ParseStatement(string sql)
     {
         return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)

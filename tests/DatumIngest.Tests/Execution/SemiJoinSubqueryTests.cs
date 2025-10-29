@@ -27,20 +27,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedIn_FiltersToMatchingRows()
     {
-        Row[] employees =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(3f))),
-        ];
-
-        Row[] activeDepartments =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(3f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees), ("active_departments", activeDepartments));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("employees",
+            columns: ["name", "department_id"],
+            ["alice", 1f],
+            ["bob", 2f],
+            ["carol", 3f]));
+        catalog.Add(CreateProvider("active_departments",
+            columns: ["id"],
+            [1f],
+            [3f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name FROM employees WHERE department_id IN (SELECT id FROM active_departments)",
             catalog);
@@ -56,19 +52,15 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedNotIn_FiltersOutMatchingRows()
     {
-        Row[] employees =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(3f))),
-        ];
-
-        Row[] excludedDepartments =
-        [
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees), ("excluded_departments", excludedDepartments));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("employees",
+            columns: ["name", "department_id"],
+            ["alice", 1f],
+            ["bob", 2f],
+            ["carol", 3f]));
+        catalog.Add(CreateProvider("excluded_departments",
+            columns: ["id"],
+            [2f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name FROM employees WHERE department_id NOT IN (SELECT id FROM excluded_departments)",
             catalog);
@@ -84,15 +76,13 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedIn_EmptySubquery_ReturnsNoRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] empty = [];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("empty_table", empty));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("empty_table",
+            columns: ["x"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE x IN (SELECT x FROM empty_table)",
             catalog);
@@ -106,15 +96,13 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedNotIn_EmptySubquery_ReturnsAllRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] empty = [];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("empty_table", empty));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("empty_table",
+            columns: ["x"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE x NOT IN (SELECT x FROM empty_table)",
             catalog);
@@ -130,18 +118,14 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedExists_NonEmpty_ReturnsAllRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] settings =
-        [
-            MakeRow(("flag", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("settings", settings));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("settings",
+            columns: ["flag"],
+            [1f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE EXISTS (SELECT flag FROM settings)",
             catalog);
@@ -155,15 +139,13 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedExists_Empty_ReturnsNoRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] empty = [];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("empty_table", empty));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("empty_table",
+            columns: ["x"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE EXISTS (SELECT x FROM empty_table)",
             catalog);
@@ -177,15 +159,13 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedNotExists_Empty_ReturnsAllRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] empty = [];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("empty_table", empty));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("empty_table",
+            columns: ["x"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE NOT EXISTS (SELECT x FROM empty_table)",
             catalog);
@@ -199,18 +179,14 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedNotExists_NonEmpty_ReturnsNoRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] settings =
-        [
-            MakeRow(("flag", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("settings", settings));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("settings",
+            columns: ["flag"],
+            [1f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE NOT EXISTS (SELECT flag FROM settings)",
             catalog);
@@ -227,20 +203,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedIn_SemiJoinFiltersCorrectly()
     {
-        Row[] employees =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("east"))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("east"))),
-        ];
-
-        Row[] activeDepartments =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("west"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees), ("active_departments", activeDepartments));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("employees",
+            columns: ["name", "department_id", "region"],
+            ["alice", 1f, "west"],
+            ["bob", 2f, "east"],
+            ["carol", 1f, "east"]));
+        catalog.Add(CreateProvider("active_departments",
+            columns: ["id", "region"],
+            [1f, "west"],
+            [2f, "west"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name FROM employees " +
             "WHERE department_id IN (SELECT id FROM active_departments " +
@@ -260,20 +232,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedNotIn_AntiSemiJoinFiltersCorrectly()
     {
-        Row[] orders =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer_id", DataValue.FromFloat32(10f))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer_id", DataValue.FromFloat32(20f))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("customer_id", DataValue.FromFloat32(30f))),
-        ];
-
-        Row[] returns =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("customer_id", DataValue.FromFloat32(10f))),
-            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("customer_id", DataValue.FromFloat32(30f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders", orders), ("returns", returns));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("orders",
+            columns: ["id", "customer_id"],
+            [1f, 10f],
+            [2f, 20f],
+            [3f, 30f]));
+        catalog.Add(CreateProvider("returns",
+            columns: ["order_id", "customer_id"],
+            [1f, 10f],
+            [3f, 30f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.id FROM orders " +
             "WHERE orders.id NOT IN (SELECT order_id FROM returns " +
@@ -293,20 +261,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedExists_SemiJoinFiltersCorrectly()
     {
-        Row[] customers =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
-        ];
-
-        Row[] orders =
-        [
-            MakeRow(("customer_id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
-            MakeRow(("customer_id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(200f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("customers", customers), ("orders", orders));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("customers",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"],
+            [3f, "carol"]));
+        catalog.Add(CreateProvider("orders",
+            columns: ["customer_id", "total"],
+            [1f, 100f],
+            [3f, 200f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT customers.name FROM customers " +
             "WHERE EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = customers.id)",
@@ -323,20 +287,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedNotExists_AntiSemiJoinFiltersCorrectly()
     {
-        Row[] customers =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
-        ];
-
-        Row[] orders =
-        [
-            MakeRow(("customer_id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
-            MakeRow(("customer_id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(200f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("customers", customers), ("orders", orders));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("customers",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"],
+            [3f, "carol"]));
+        catalog.Add(CreateProvider("orders",
+            columns: ["customer_id", "total"],
+            [1f, 100f],
+            [3f, 200f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT customers.name FROM customers " +
             "WHERE NOT EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = customers.id)",
@@ -355,20 +315,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task NotIn_NullInSubquery_ReturnsNoRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-        ];
-
-        Row[] subqueryValues =
-        [
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.Null(DataKind.Float32))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("subquery_values", subqueryValues));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f],
+            [2f],
+            [3f]));
+        catalog.Add(CreateProvider("subquery_values",
+            columns: ["val"],
+            [1f],
+            [null]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE x NOT IN (SELECT val FROM subquery_values)",
             catalog);
@@ -386,17 +342,13 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task InSubquery_MultipleColumns_Throws()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] multi =
-        [
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("multi", multi));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f]));
+        catalog.Add(CreateProvider("multi",
+            columns: ["a", "b"],
+            [1f, 2f]));
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ExecuteQueryAsync(
@@ -415,19 +367,15 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     [Fact]
     public async Task InSubquery_CombinedWithOtherPredicates()
     {
-        Row[] employees =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(0f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(2f)), ("active", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] departments =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees), ("departments", departments));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("employees",
+            columns: ["name", "department_id", "active"],
+            ["alice", 1f, 1f],
+            ["bob", 1f, 0f],
+            ["carol", 2f, 1f]));
+        catalog.Add(CreateProvider("departments",
+            columns: ["id"],
+            [1f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name FROM employees " +
             "WHERE department_id IN (SELECT id FROM departments) AND active = 1",
@@ -519,14 +467,6 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
     }
 
     // ─────────────── Helper infrastructure ───────────────
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {

@@ -19,13 +19,6 @@ public sealed class DefineBlockTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
     private static async Task<List<Row>> ExecuteQueryAsync(
         string sql, TableCatalog catalog, AssertionDiagnostics? diagnostics = null)
     {
@@ -184,10 +177,10 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineLet_EquivalentToInlineLet()
     {
-        TableCatalog catalog = CreateCatalog(("sales", [
-            MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(3))),
-            MakeRow(("price", DataValue.FromInt32(5)),  ("qty", DataValue.FromInt32(4))),
-        ]));
+        TableCatalog catalog = CreateCatalog("sales",
+            columns: ["price", "qty"],
+            [10, 3],
+            [5, 4]);
 
         List<Row> defineRows = await ExecuteQueryAsync(
             "SELECT DEFINE { LET total = price * qty; } total FROM sales",
@@ -210,10 +203,10 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineAssertAbort_ThrowsOnFailure()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
-            MakeRow(("x", DataValue.FromInt32(5))),
-            MakeRow(("x", DataValue.FromInt32(-1))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [5],
+            [-1]);
 
         await Assert.ThrowsAsync<AssertionAbortException>(() =>
             ExecuteQueryAsync("SELECT DEFINE { ASSERT x > 0; } x FROM t", catalog));
@@ -225,11 +218,11 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineAssertSkip_FiltersFailingRows()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
-            MakeRow(("x", DataValue.FromInt32(1))),
-            MakeRow(("x", DataValue.FromInt32(-2))),
-            MakeRow(("x", DataValue.FromInt32(3))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [1],
+            [-2],
+            [3]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { ASSERT x > 0 ON FAIL SKIP; } x FROM t",
@@ -246,10 +239,10 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_AssertReferencesLetFromSameDefineBlock_Works()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
-            MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(5))),
-            MakeRow(("price", DataValue.FromInt32(10)), ("qty", DataValue.FromInt32(0))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["price", "qty"],
+            [10, 5],
+            [10, 0]);
 
         AssertionDiagnostics diagnostics = new();
         List<Row> rows = await ExecuteQueryAsync(
@@ -266,11 +259,11 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineAssertAndTrailingAssert_BothApplied()
     {
-        TableCatalog catalog = CreateCatalog(("t", [
-            MakeRow(("a", DataValue.FromInt32(1)), ("b", DataValue.FromInt32(1))),
-            MakeRow(("a", DataValue.FromInt32(-1)), ("b", DataValue.FromInt32(1))),
-            MakeRow(("a", DataValue.FromInt32(1)), ("b", DataValue.FromInt32(-1))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["a", "b"],
+            [1, 1],
+            [-1, 1],
+            [1, -1]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { ASSERT a > 0 ON FAIL SKIP; } a, b FROM t ASSERT b > 0 ON FAIL SKIP",
@@ -325,13 +318,12 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefinePositionalDestructuring_ProducesComponents()
     {
-        TableCatalog catalog = CreateCatalog(("t",
-        [
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]))),
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)]))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr"],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)])],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { LET (x, y) = arr; } x AS x_out, y AS y_out FROM t",
@@ -351,10 +343,9 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineNamedDestructuring_ProducesNamedFields()
     {
-        TableCatalog catalog = CreateCatalog(("t",
-        [
-            MakeRow(("dummy", DataValue.FromFloat32(0f))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["dummy"],
+            [0f]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { LET {alpha, beta} = {alpha: 10.0, beta: 20.0}; } alpha AS av, beta AS bv FROM t",
@@ -373,13 +364,12 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_AssertReferencesPositionalDestructuringNames_Works()
     {
-        TableCatalog catalog = CreateCatalog(("t",
-        [
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(5f), DataValue.FromFloat32(10f)]))),
-            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(-1f), DataValue.FromFloat32(10f)]))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr"],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(5f), DataValue.FromFloat32(10f)])],
+            [DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(-1f), DataValue.FromFloat32(10f)])]);
 
         AssertionDiagnostics diagnostics = new();
         List<Row> rows = await ExecuteQueryAsync(
@@ -398,13 +388,13 @@ public sealed class DefineBlockTests : ServiceTestBase
     [Fact]
     public async Task Execute_DefineMixedDestructuringAndScalarLet_AllColumnsAvailable()
     {
-        TableCatalog catalog = CreateCatalog(("t",
-        [
-            MakeRow(
-                ("arr", DataValue.FromArray(DataKind.Float32,
-                    [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])),
-                ("scale", DataValue.FromFloat32(10f))),
-        ]));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["arr", "scale"],
+            [
+                DataValue.FromArray(DataKind.Float32,
+                    [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)]),
+                10f,
+            ]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { LET (dx, dy) = arr; LET mag = dx * dx + dy * dy; } mag AS m, dx AS x FROM t",

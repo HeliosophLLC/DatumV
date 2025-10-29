@@ -18,6 +18,9 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 
+    private static readonly string[] RowColumns = ["id", "value"];
+    private static readonly string[] ClassColumns = ["id", "label"];
+
     // ───────────────────── Bernoulli ─────────────────────
 
     /// <summary>
@@ -28,8 +31,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Bernoulli_ReturnsApproximatePercentage()
     {
         const int totalRows = 1000;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(50) REPEATABLE(42)",
@@ -46,8 +49,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Bernoulli_100Percent_ReturnsAllRows()
     {
         const int totalRows = 100;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(100)",
@@ -63,8 +66,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Bernoulli_0Percent_ReturnsNoRows()
     {
         const int totalRows = 100;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(0)",
@@ -82,8 +85,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Repeatable_ProducesDeterministicResults()
     {
         const int totalRows = 500;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> first = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(30) REPEATABLE(12345)",
@@ -107,8 +110,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task DifferentSeeds_ProduceDifferentResults()
     {
         const int totalRows = 500;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> seed1 = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(30) REPEATABLE(1)",
@@ -138,8 +141,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task System_ReturnsApproximatePercentage()
     {
         const int totalRows = 1000;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE SYSTEM(50) REPEATABLE(42)",
@@ -157,8 +160,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Tablesample_WithAlias_WorksCorrectly()
     {
         const int totalRows = 100;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT d.id FROM data TABLESAMPLE BERNOULLI(100) AS d",
@@ -176,8 +179,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     public async Task Bernoulli_SmallPercentage_ProducesFewRows()
     {
         const int totalRows = 1000;
-        Row[] data = GenerateRows(totalRows);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(totalRows);
+        TableCatalog catalog = CreateCatalog("data", columns: RowColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BERNOULLI(1) REPEATABLE(42)",
@@ -195,8 +198,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     [Fact]
     public async Task Stratified_E2E_PreservesDistribution()
     {
-        Row[] data = GenerateClassRows(("cat", 300), ("dog", 300), ("bird", 300));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateClassRows(("cat", 300), ("dog", 300), ("bird", 300));
+        TableCatalog catalog = CreateCatalog("data", columns: ClassColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE STRATIFIED(50) ON label REPEATABLE(42)",
@@ -223,8 +226,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     [Fact]
     public async Task Balanced_E2E_ExactCountPerClass()
     {
-        Row[] data = GenerateClassRows(("cat", 300), ("dog", 200), ("bird", 100));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateClassRows(("cat", 300), ("dog", 200), ("bird", 100));
+        TableCatalog catalog = CreateCatalog("data", columns: ClassColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
@@ -247,8 +250,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     [Fact]
     public async Task Balanced_E2E_SmallClass()
     {
-        Row[] data = GenerateClassRows(("cat", 100), ("dog", 3));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateClassRows(("cat", 100), ("dog", 3));
+        TableCatalog catalog = CreateCatalog("data", columns: ClassColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
@@ -267,8 +270,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     [Fact]
     public async Task Balanced_E2E_Deterministic()
     {
-        Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateClassRows(("cat", 200), ("dog", 200));
+        TableCatalog catalog = CreateCatalog("data", columns: ClassColumns, rows: data);
 
         List<Row> result1 = await ExecuteQueryAsync(
             "SELECT * FROM data TABLESAMPLE BALANCED(20) ON label REPEATABLE(42)",
@@ -290,8 +293,8 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
     [Fact]
     public async Task Stratified_E2E_WithWhereClause()
     {
-        Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateClassRows(("cat", 200), ("dog", 200));
+        TableCatalog catalog = CreateCatalog("data", columns: ClassColumns, rows: data);
 
         // WHERE id >= 100 filters to ~300 rows, then sample 100%.
         List<Row> results = await ExecuteQueryAsync(
@@ -304,41 +307,30 @@ public sealed class TablesampleExecutionTests : ServiceTestBase
 
     // ───────────────────── Helpers ─────────────────────
 
-    private static Row[] GenerateClassRows(params (string label, int count)[] classes)
+    private static object?[][] GenerateClassRows(params (string label, int count)[] classes)
     {
-        List<Row> rows = [];
+        List<object?[]> rows = [];
         int id = 1;
         foreach ((string label, int count) in classes)
         {
             for (int i = 0; i < count; i++)
             {
-                rows.Add(MakeRow(
-                    ("id", DataValue.FromFloat32(id++)),
-                    ("label", DataValue.FromString(label))));
+                rows.Add([(float)(id++), label]);
             }
         }
 
         return rows.ToArray();
     }
 
-    private static Row[] GenerateRows(int count)
+    private static object?[][] GenerateRows(int count)
     {
-        Row[] rows = new Row[count];
+        object?[][] rows = new object?[count][];
         for (int i = 0; i < count; i++)
         {
-            rows[i] = MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("value", DataValue.FromFloat32(i * 10f)));
+            rows[i] = [(float)i, i * 10f];
         }
 
         return rows;
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)

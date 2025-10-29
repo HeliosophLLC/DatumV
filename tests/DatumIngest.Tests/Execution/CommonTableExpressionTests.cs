@@ -137,16 +137,13 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteWithLimit_RestrictsRows()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [1f],
+            [2f],
+            [3f],
+            [4f],
+            [5f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH sample AS (SELECT x FROM t LIMIT 3) SELECT * FROM sample",
@@ -161,16 +158,19 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_MultipleCtes_EachWithLimit_ProducesCorrectCounts()
     {
-        Row[] data =
+        string[] columns = ["x"];
+        object?[][] rows =
         [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))),
+            [1f],
+            [2f],
+            [3f],
+            [4f],
+            [5f],
         ];
 
-        TableCatalog catalog = CreateCatalog(("t1", data), ("t2", data));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("t1", columns, rows));
+        catalog.Add(CreateProvider("t2", columns, rows));
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH a AS (SELECT x FROM t1 LIMIT 2), " +
@@ -229,14 +229,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_SimpleCte_ReturnsExpectedRows()
     {
-        Row[] orders =
-        [
-            MakeRow(("user_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("user_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("user_id", DataValue.FromFloat32(2f)), ("amount", DataValue.FromFloat32(50f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders", orders));
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["user_id", "amount"],
+            [1f, 100f],
+            [1f, 200f],
+            [2f, 50f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH totals AS (SELECT user_id, SUM(amount) AS total FROM orders GROUP BY user_id) " +
@@ -252,12 +249,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteWithColumnNames_RenamesColumns()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f)), ("y", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x", "y"],
+            [1f, 2f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH renamed(a, b) AS (SELECT x, y FROM t) SELECT a, b FROM renamed",
@@ -274,13 +268,10 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteReferencedTwice_AutoMaterializes()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("val", DataValue.FromFloat32(20f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "val"],
+            [1f, 10f],
+            [2f, 20f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH shared AS (SELECT id, val FROM t) " +
@@ -296,13 +287,10 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_NotMaterializedCte_ReExecutesPerReference()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id"],
+            [1f],
+            [2f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH inline_cte AS NOT MATERIALIZED (SELECT id FROM t) " +
@@ -318,14 +306,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteWithOuterFilter_FiltersCorrectly()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromFloat32(90f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromFloat32(50f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromFloat32(75f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("students", data));
+        TableCatalog catalog = CreateCatalog("students",
+            columns: ["name", "score"],
+            ["alice", 90f],
+            ["bob", 50f],
+            ["carol", 75f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH high_scorers AS (SELECT name, score FROM students WHERE score >= 75) " +
@@ -344,17 +329,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task SchemaResolver_CteWithNarrowProjection_ReturnsOnlyCteColumns()
     {
-        Row[] orders =
-        [
-            MakeRow(
-                ("order_id", DataValue.FromFloat32(1f)),
-                ("user_id", DataValue.FromFloat32(1f)),
-                ("eval_set", DataValue.FromString("train")),
-                ("order_number", DataValue.FromFloat32(11f)),
-                ("order_dow", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders_csv", orders));
+        TableCatalog catalog = CreateCatalog("orders_csv",
+            columns: ["order_id", "user_id", "eval_set", "order_number", "order_dow"],
+            [1f, 1f, "train", 11f, 1f]);
         QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
 
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
@@ -384,12 +361,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     public async Task Execute_RecursiveCte_GeneratesSequence()
     {
         // We need a single-row table to seed the anchor.
-        Row[] dual =
-        [
-            MakeRow(("dummy", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("dual", dual));
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH RECURSIVE nums AS (" +
@@ -422,12 +396,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_RecursiveCte_ExceedingMaxDepth_Throws()
     {
-        Row[] dual =
-        [
-            MakeRow(("dummy", DataValue.FromFloat32(1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("dual", dual));
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
 
         // Set very low recursion limit.
         ExecutionContext context = new(
@@ -550,8 +521,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public void Plan_WithCte_CreatesCteOperator()
     {
-        Row[] data = [MakeRow(("x", DataValue.FromFloat32(1f)))];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x"],
+            [1f]);
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
@@ -571,13 +543,10 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteInMultipleJoins_ProducesCorrectResults()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("b"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "name"],
+            [1f, "a"],
+            [2f, "b"]);
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH items AS (SELECT id, name FROM t) " +
@@ -596,20 +565,16 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteWithQualifiedWildcardJoin_AggregatesWithUnqualifiedColumnNames()
     {
-        Row[] orderProducts =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(20f))),
-            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(10f))),
-        ];
-
-        Row[] orders =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("user_id", DataValue.FromFloat32(100f))),
-            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("user_id", DataValue.FromFloat32(200f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("order_products", orderProducts), ("orders", orders));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("order_products",
+            ["order_id", "product_id"],
+            [1f, 10f],
+            [1f, 20f],
+            [2f, 10f]));
+        catalog.Add(CreateProvider("orders",
+            ["order_id", "user_id"],
+            [1f, 100f],
+            [2f, 200f]));
 
         // items_with_user joins order_products with orders to add user_id.
         // product_events selects pw.* (all columns from items_with_user aliased as pw) via a join.
@@ -664,18 +629,14 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_NonRecursiveCteWithUnionAll_ReturnsBothBranches()
     {
-        Row[] firstTable =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("value", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("value", DataValue.FromString("b"))),
-        ];
-
-        Row[] secondTable =
-        [
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("value", DataValue.FromString("c"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t1", firstTable), ("t2", secondTable));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("t1",
+            ["id", "value"],
+            [1f, "a"],
+            [2f, "b"]));
+        catalog.Add(CreateProvider("t2",
+            ["id", "value"],
+            [3f, "c"]));
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH combined AS (" +
@@ -692,23 +653,17 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_NonRecursiveCteWithUnionAll_JoinedWithOtherTable()
     {
-        Row[] orders1 =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
-        ];
-
-        Row[] orders2 =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(20f))),
-        ];
-
-        Row[] products =
-        [
-            MakeRow(("product_id", DataValue.FromFloat32(10f)), ("name", DataValue.FromString("Widget"))),
-            MakeRow(("product_id", DataValue.FromFloat32(20f)), ("name", DataValue.FromString("Gadget"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t1", orders1), ("t2", orders2), ("products", products));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("t1",
+            ["order_id", "product_id"],
+            [1f, 10f]));
+        catalog.Add(CreateProvider("t2",
+            ["order_id", "product_id"],
+            [2f, 20f]));
+        catalog.Add(CreateProvider("products",
+            ["product_id", "name"],
+            [10f, "Widget"],
+            [20f, "Gadget"]));
 
         List<Row> results = await ExecuteQueryAsync(
             "WITH all_orders AS (" +
@@ -731,12 +686,9 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task SchemaResolver_CteReference_ResolvesWithoutCatalogLookup()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("value", DataValue.FromString("a"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, "a"]);
         QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
 
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
@@ -756,22 +708,16 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task SchemaResolver_CteWithUnionAllInJoin_ResolvesCorrectly()
     {
-        Row[] data1 =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
-        ];
-
-        Row[] data2 =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(20f))),
-        ];
-
-        Row[] orders =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("Alice"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t1", data1), ("t2", data2), ("orders", orders));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("t1",
+            ["order_id", "product_id"],
+            [1f, 10f]));
+        catalog.Add(CreateProvider("t2",
+            ["order_id", "product_id"],
+            [2f, 20f]));
+        catalog.Add(CreateProvider("orders",
+            ["order_id", "customer"],
+            [1f, "Alice"]));
         QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
 
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
@@ -797,14 +743,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_AggregateNestedInsideScalarFunction_RewritesCorrectly()
     {
-        Row[] rows =
-        [
-            MakeRow(("x", DataValue.FromFloat32(10)), ("y", DataValue.FromFloat32(1))),
-            MakeRow(("x", DataValue.FromFloat32(20)), ("y", DataValue.FromFloat32(2))),
-            MakeRow(("x", DataValue.FromFloat32(30)), ("y", DataValue.FromFloat32(3))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", rows));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["x", "y"],
+            [10f, 1f],
+            [20f, 2f],
+            [30f, 3f]);
 
         // ROUND wraps MIN and MAX — these are aggregates nested inside a scalar function.
         List<Row> result = await ExecuteQueryAsync(
@@ -822,14 +765,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task Execute_CteWithAggregateInsideScalarFunction_Succeeds()
     {
-        Row[] rows =
-        [
-            MakeRow(("v", DataValue.FromFloat32(5))),
-            MakeRow(("v", DataValue.FromFloat32(15))),
-            MakeRow(("v", DataValue.FromFloat32(25))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", rows));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["v"],
+            [5f],
+            [15f],
+            [25f]);
 
         List<Row> result = await ExecuteQueryAsync(
             "WITH stats AS (SELECT ROUND(MIN(v), 0) AS lo, ROUND(MAX(v), 0) AS hi FROM t) " +

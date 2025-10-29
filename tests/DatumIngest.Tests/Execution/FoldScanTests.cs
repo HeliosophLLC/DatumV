@@ -133,12 +133,10 @@ public sealed class FoldScanTests : ServiceTestBase
     {
         // Regression test: SCAN output alias must be the column name when other columns
         // precede the SCAN in the SELECT list.
-        Row[] data =
-        [
-            MakeRow(("grp", DataValue.FromInt32(1)), ("id", DataValue.FromFloat32(1f)), ("fare", DataValue.FromFloat32(100f))),
-            MakeRow(("grp", DataValue.FromInt32(1)), ("id", DataValue.FromFloat32(2f)), ("fare", DataValue.FromFloat32(40f))),
-        ];
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["grp", "id", "fare"],
+            [1, 1f, 100f],
+            [1, 2f, 40f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT grp, id, fare, SCAN ema = 0.15 * fare + 0.85 * ema INIT fare " +
@@ -159,14 +157,11 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_RunningSum()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
-            MakeRow(("id", DataValue.FromFloat32(3)), ("value", DataValue.FromFloat32(30))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 10f],
+            [2f, 20f],
+            [3f, 30f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t",
@@ -185,7 +180,7 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_EmptyInput()
     {
-        TableCatalog catalog = CreateCatalog(("t", []));
+        TableCatalog catalog = CreateCatalog("t", columns: ["id"]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + 1 INIT 0 OVER (ORDER BY id) AS rn FROM t",
@@ -197,12 +192,9 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_SingleRow()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(42))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 42f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS total FROM t",
@@ -216,15 +208,12 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_MultiplePartitions()
     {
-        Row[] data =
-        [
-            MakeRow(("grp", DataValue.FromString("A")), ("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("grp", DataValue.FromString("A")), ("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
-            MakeRow(("grp", DataValue.FromString("B")), ("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(100))),
-            MakeRow(("grp", DataValue.FromString("B")), ("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(200))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["grp", "id", "value"],
+            ["A", 1f, 10f],
+            ["A", 2f, 20f],
+            ["B", 1f, 100f],
+            ["B", 2f, 200f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT grp, SCAN s = s + value INIT 0 OVER (PARTITION BY grp ORDER BY id) AS total FROM t",
@@ -248,14 +237,11 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_ExponentialMovingAverage()
     {
-        Row[] data =
-        [
-            MakeRow(("date", DataValue.FromFloat32(1)), ("price", DataValue.FromFloat32(100))),
-            MakeRow(("date", DataValue.FromFloat32(2)), ("price", DataValue.FromFloat32(110))),
-            MakeRow(("date", DataValue.FromFloat32(3)), ("price", DataValue.FromFloat32(105))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["date", "price"],
+            [1f, 100f],
+            [2f, 110f],
+            [3f, 105f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN ema = 0.1 * price + 0.9 * ema INIT price OVER (ORDER BY date) AS ema_10 FROM t",
@@ -273,14 +259,11 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_Sessionization_WithPrev()
     {
-        Row[] data =
-        [
-            MakeRow(("user_id", DataValue.FromString("u1")), ("ts", DataValue.FromFloat32(100))),
-            MakeRow(("user_id", DataValue.FromString("u1")), ("ts", DataValue.FromFloat32(110))),
-            MakeRow(("user_id", DataValue.FromString("u1")), ("ts", DataValue.FromFloat32(200))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["user_id", "ts"],
+            ["u1", 100f],
+            ["u1", 110f],
+            ["u1", 200f]);
 
         // Session increments when gap > 50
         List<Row> results = await ExecuteQueryAsync(
@@ -301,15 +284,12 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_StreakDetection()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("won", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("won", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(3)), ("won", DataValue.FromFloat32(0))),
-            MakeRow(("id", DataValue.FromFloat32(4)), ("won", DataValue.FromFloat32(1))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "won"],
+            [1f, 1f],
+            [2f, 1f],
+            [3f, 0f],
+            [4f, 1f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN streak = CASE WHEN won = 1 THEN streak + 1 ELSE 0 END " +
@@ -326,13 +306,10 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_ScanWithLetBinding()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 10f],
+            [2f, 20f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET total = SCAN s = s + value INIT 0 OVER (ORDER BY id) AS _total, " +
@@ -347,15 +324,12 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_TupleScan_EpisodeAndStep()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("gap", DataValue.FromFloat32(0))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("gap", DataValue.FromFloat32(10))),
-            MakeRow(("id", DataValue.FromFloat32(3)), ("gap", DataValue.FromFloat32(100))),
-            MakeRow(("id", DataValue.FromFloat32(4)), ("gap", DataValue.FromFloat32(5))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "gap"],
+            [1f, 0f],
+            [2f, 10f],
+            [3f, 100f],
+            [4f, 5f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT SCAN (episode, step) = " +
@@ -383,13 +357,10 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_ScanPreservesOriginalColumns()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 10f],
+            [2f, 20f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT id, value, SCAN s = s + value INIT 0 OVER (ORDER BY id) AS total FROM t",
@@ -404,14 +375,11 @@ public sealed class FoldScanTests : ServiceTestBase
     [Fact]
     public async Task E2E_ScanAndWindowSameOver()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1)), ("value", DataValue.FromFloat32(10))),
-            MakeRow(("id", DataValue.FromFloat32(2)), ("value", DataValue.FromFloat32(20))),
-            MakeRow(("id", DataValue.FromFloat32(3)), ("value", DataValue.FromFloat32(30))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("t", data));
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 10f],
+            [2f, 20f],
+            [3f, 30f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT ROW_NUMBER() OVER (ORDER BY id) AS rn, " +
@@ -430,13 +398,6 @@ public sealed class FoldScanTests : ServiceTestBase
     private static SelectStatement ParseStatement(string sql)
     {
         return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)

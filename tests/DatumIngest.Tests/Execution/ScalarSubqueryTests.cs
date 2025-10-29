@@ -28,19 +28,15 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_InWhere_FiltersCorrectly()
     {
-        Row[] employees =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("salary", DataValue.FromFloat32(50_000f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("salary", DataValue.FromFloat32(80_000f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("salary", DataValue.FromFloat32(60_000f))),
-        ];
-
-        Row[] thresholds =
-        [
-            MakeRow(("min_salary", DataValue.FromFloat32(55_000f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees), ("thresholds", thresholds));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("employees",
+            columns: ["name", "salary"],
+            ["alice", 50_000f],
+            ["bob", 80_000f],
+            ["carol", 60_000f]));
+        catalog.Add(CreateProvider("thresholds",
+            columns: ["min_salary"],
+            [55_000f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name FROM employees WHERE salary > (SELECT min_salary FROM thresholds)",
             catalog);
@@ -57,18 +53,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_InSelect_AddsComputedColumn()
     {
-        Row[] items =
-        [
-            MakeRow(("name", DataValue.FromString("widget")), ("price", DataValue.FromFloat32(10f))),
-            MakeRow(("name", DataValue.FromString("gadget")), ("price", DataValue.FromFloat32(20f))),
-        ];
-
-        Row[] settings =
-        [
-            MakeRow(("tax_rate", DataValue.FromFloat32(0.1f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("items", items), ("settings", settings));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("items",
+            columns: ["name", "price"],
+            ["widget", 10f],
+            ["gadget", 20f]));
+        catalog.Add(CreateProvider("settings",
+            columns: ["tax_rate"],
+            [0.1f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name, price * (SELECT tax_rate FROM settings) AS tax FROM items",
             catalog);
@@ -84,14 +76,12 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_EmptyResult_ReturnsNull()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] empty = [];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("empty_table", empty));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f]));
+        catalog.Add(CreateProvider("empty_table",
+            columns: ["x"]));
 
         // The subquery returns zero rows → NULL → the comparison "x > NULL" should filter out all rows.
         List<Row> results = await ExecuteQueryAsync(
@@ -107,18 +97,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_MultipleRows_Throws()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] multi =
-        [
-            MakeRow(("val", DataValue.FromFloat32(10f))),
-            MakeRow(("val", DataValue.FromFloat32(20f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("multi", multi));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f]));
+        catalog.Add(CreateProvider("multi",
+            columns: ["val"],
+            [10f],
+            [20f]));
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ExecuteQueryAsync(
@@ -134,17 +120,13 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_MultipleColumns_Throws()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] wide =
-        [
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("wide", wide));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [1f]));
+        catalog.Add(CreateProvider("wide",
+            columns: ["a", "b"],
+            [1f, 2f]));
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ExecuteQueryAsync(
@@ -161,17 +143,18 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task UncorrelatedSubquery_MultipleSameQuery_BothFolded()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-            MakeRow(("x", DataValue.FromFloat32(15f))),
-            MakeRow(("x", DataValue.FromFloat32(25f))),
-        ];
-
-        Row[] lo = [MakeRow(("val", DataValue.FromFloat32(10f)))];
-        Row[] hi = [MakeRow(("val", DataValue.FromFloat32(20f)))];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("lo", lo), ("hi", hi));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["x"],
+            [5f],
+            [15f],
+            [25f]));
+        catalog.Add(CreateProvider("lo",
+            columns: ["val"],
+            [10f]));
+        catalog.Add(CreateProvider("hi",
+            columns: ["val"],
+            [20f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT x FROM data WHERE x > (SELECT val FROM lo) AND x < (SELECT val FROM hi)",
             catalog);
@@ -189,21 +172,17 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedSubquery_InWhere_ExecutesPerRow()
     {
-        Row[] orders =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("total", DataValue.FromFloat32(200f))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(50f))),
-        ];
-
-        Row[] thresholds =
-        [
-            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("min_total", DataValue.FromFloat32(150f))),
-            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("min_total", DataValue.FromFloat32(150f))),
-            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("min_total", DataValue.FromFloat32(150f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("orders", orders), ("thresholds", thresholds));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("orders",
+            columns: ["id", "total"],
+            [1f, 100f],
+            [2f, 200f],
+            [3f, 50f]));
+        catalog.Add(CreateProvider("thresholds",
+            columns: ["order_id", "min_total"],
+            [1f, 150f],
+            [2f, 150f],
+            [3f, 150f]));
 
         // For each order, check if its total exceeds the threshold for that order_id.
         // Only order 2 (total=200) exceeds its threshold (min_total=150).
@@ -223,19 +202,15 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedSubquery_InSelect_ComputesPerRow()
     {
-        Row[] products =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("widget"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("gadget"))),
-        ];
-
-        Row[] prices =
-        [
-            MakeRow(("product_id", DataValue.FromFloat32(1f)), ("price", DataValue.FromFloat32(9.99f))),
-            MakeRow(("product_id", DataValue.FromFloat32(2f)), ("price", DataValue.FromFloat32(19.99f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("products", products), ("prices", prices));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("products",
+            columns: ["id", "name"],
+            [1f, "widget"],
+            [2f, "gadget"]));
+        catalog.Add(CreateProvider("prices",
+            columns: ["product_id", "price"],
+            [1f, 9.99f],
+            [2f, 19.99f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT products.name, " +
             "(SELECT price FROM prices WHERE prices.product_id = products.id) AS price " +
@@ -256,18 +231,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedSubquery_NoMatch_ReturnsNull()
     {
-        Row[] outer =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(99f))),
-        ];
-
-        Row[] inner =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("outer_table",
+            columns: ["id"],
+            [1f],
+            [99f]));
+        catalog.Add(CreateProvider("inner_table",
+            columns: ["ref_id", "val"],
+            [1f, 42f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT outer_table.id, " +
             "(SELECT val FROM inner_table WHERE inner_table.ref_id = outer_table.id) AS lookup " +
@@ -285,18 +256,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task CorrelatedSubquery_MultipleRows_Throws()
     {
-        Row[] outer =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] inner =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(20f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("outer_table",
+            columns: ["id"],
+            [1f]));
+        catalog.Add(CreateProvider("inner_table",
+            columns: ["ref_id", "val"],
+            [1f, 10f],
+            [1f, 20f]));
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ExecuteQueryAsync(
@@ -317,23 +284,19 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_Max_ProducesCorrectResults()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
-        ];
-
-        Row[] lookup =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("weight", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("weight", DataValue.FromFloat32(30f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("weight", DataValue.FromFloat32(20f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("weight", DataValue.FromFloat32(50f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(3f)), ("weight", DataValue.FromFloat32(5f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("lookup", lookup));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"],
+            [3f, "carol"]));
+        catalog.Add(CreateProvider("lookup",
+            columns: ["ref_id", "weight"],
+            [1f, 10f],
+            [1f, 30f],
+            [2f, 20f],
+            [2f, 50f],
+            [3f, 5f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, data.name, " +
             "(SELECT MAX(weight) FROM lookup WHERE lookup.ref_id = data.id) AS max_weight " +
@@ -352,21 +315,17 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_Min_ProducesCorrectResults()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-        ];
-
-        Row[] scores =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(90f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(70f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(85f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"]));
+        catalog.Add(CreateProvider("scores",
+            columns: ["ref_id", "score"],
+            [1f, 90f],
+            [1f, 70f],
+            [2f, 85f],
+            [2f, 60f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT MIN(score) FROM scores WHERE scores.ref_id = data.id) AS min_score " +
@@ -384,20 +343,16 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_Sum_ProducesCorrectResults()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-        ];
-
-        Row[] amounts =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("amount", DataValue.FromFloat32(50f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("amounts", amounts));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"]));
+        catalog.Add(CreateProvider("amounts",
+            columns: ["ref_id", "amount"],
+            [1f, 100f],
+            [1f, 200f],
+            [2f, 50f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT SUM(amount) FROM amounts WHERE amounts.ref_id = data.id) AS total " +
@@ -415,21 +370,17 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_Avg_ProducesCorrectResults()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-        ];
-
-        Row[] scores =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(80f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(100f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(40f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"]));
+        catalog.Add(CreateProvider("scores",
+            columns: ["ref_id", "score"],
+            [1f, 80f],
+            [1f, 100f],
+            [2f, 60f],
+            [2f, 40f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT AVG(score) FROM scores WHERE scores.ref_id = data.id) AS avg_score " +
@@ -448,21 +399,17 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_Count_ReturnsZeroForNoMatch()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-            MakeRow(("id", DataValue.FromFloat32(99f))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(20f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("val", DataValue.FromFloat32(30f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id"],
+            [1f],
+            [2f],
+            [99f]));
+        catalog.Add(CreateProvider("items",
+            columns: ["ref_id", "val"],
+            [1f, 10f],
+            [1f, 20f],
+            [2f, 30f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT COUNT(val) FROM items WHERE items.ref_id = data.id) AS item_count " +
@@ -482,18 +429,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_MaxNoMatch_ReturnsNull()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(99f))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id"],
+            [1f],
+            [99f]));
+        catalog.Add(CreateProvider("items",
+            columns: ["ref_id", "val"],
+            [1f, 42f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT MAX(val) FROM items WHERE items.ref_id = data.id) AS max_val " +
@@ -512,26 +455,18 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_MultiKeyCorrelation_GroupsByAllKeys()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("east"))),
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("east"))),
-        ];
-
-        Row[] metrics =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromFloat32(20f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("west")),
-                ("value", DataValue.FromFloat32(5f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromFloat32(100f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("metrics", metrics));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "region"],
+            [1f, "east"],
+            [1f, "west"],
+            [2f, "east"]));
+        catalog.Add(CreateProvider("metrics",
+            columns: ["ref_id", "ref_region", "value"],
+            [1f, "east", 10f],
+            [1f, "east", 20f],
+            [1f, "west", 5f],
+            [2f, "east", 100f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, data.region, " +
             "(SELECT SUM(value) FROM metrics " +
@@ -552,20 +487,16 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_InequalityCorrelation_FallsBackToPerRow()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(10f))),
-            MakeRow(("id", DataValue.FromFloat32(20f))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(5f)), ("val", DataValue.FromFloat32(1f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(15f)), ("val", DataValue.FromFloat32(2f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(25f)), ("val", DataValue.FromFloat32(3f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id"],
+            [10f],
+            [20f]));
+        catalog.Add(CreateProvider("items",
+            columns: ["ref_id", "val"],
+            [5f, 1f],
+            [15f, 2f],
+            [25f, 3f]));
 
         // ref_id < data.id: for id=10, matches ref_id=5 (count=1). For id=20, matches ref_id=5,15 (count=2).
         List<Row> results = await ExecuteQueryAsync(
@@ -586,17 +517,13 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_NonAggregate_FallsBackToPerRow()
     {
-        Row[] outer =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] inner =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("outer_table",
+            columns: ["id"],
+            [1f]));
+        catalog.Add(CreateProvider("inner_table",
+            columns: ["ref_id", "val"],
+            [1f, 42f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT outer_table.id, " +
             "(SELECT val FROM inner_table WHERE inner_table.ref_id = outer_table.id) AS lookup " +
@@ -614,20 +541,14 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_ExistingGroupBy_FallsBackToPerRow()
     {
-        Row[] outer =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-        ];
-
-        Row[] inner =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("category", DataValue.FromString("a")),
-                ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("category", DataValue.FromString("a")),
-                ("val", DataValue.FromFloat32(20f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("outer_table",
+            columns: ["id"],
+            [1f]));
+        catalog.Add(CreateProvider("inner_table",
+            columns: ["ref_id", "category", "val"],
+            [1f, "a", 10f],
+            [1f, "a", 20f]));
 
         // Has GROUP BY already → cannot decorrelate. But still returns correct result.
         // SUM(val) grouped by category where ref_id=1 → category 'a' has 30.
@@ -649,26 +570,20 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_MixedDecorrelatableAndNot_BothCorrect()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
-        ];
-
-        Row[] scores =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(80f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
-        ];
-
-        Row[] labels =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("label", DataValue.FromString("senior"))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("label", DataValue.FromString("junior"))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores), ("labels", labels));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id", "name"],
+            [1f, "alice"],
+            [2f, "bob"]));
+        catalog.Add(CreateProvider("scores",
+            columns: ["ref_id", "score"],
+            [1f, 80f],
+            [1f, 95f],
+            [2f, 60f]));
+        catalog.Add(CreateProvider("labels",
+            columns: ["ref_id", "label"],
+            [1f, "senior"],
+            [2f, "junior"]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT MAX(score) FROM scores WHERE scores.ref_id = data.id) AS best, " +
@@ -690,23 +605,16 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task DecorrelatedSubquery_WithNonCorrelatedFilter_PreservesFilter()
     {
-        Row[] data =
-        [
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-        ];
-
-        Row[] items =
-        [
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(1f)),
-                ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(0f)),
-                ("val", DataValue.FromFloat32(999f))),
-            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("active", DataValue.FromFloat32(1f)),
-                ("val", DataValue.FromFloat32(20f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("data",
+            columns: ["id"],
+            [1f],
+            [2f]));
+        catalog.Add(CreateProvider("items",
+            columns: ["ref_id", "active", "val"],
+            [1f, 1f, 10f],
+            [1f, 0f, 999f],
+            [2f, 1f, 20f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.id, " +
             "(SELECT SUM(val) FROM items WHERE items.ref_id = data.id AND items.active = 1) AS active_total " +
@@ -727,13 +635,10 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     [Fact]
     public async Task NoSubquery_WorksThroughSubqueryPath()
     {
-        Row[] data =
-        [
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["x"],
+            [1f],
+            [2f]);
         List<Row> results = await ExecuteQueryAsync("SELECT x FROM data WHERE x > 1", catalog);
 
         Assert.Single(results);
@@ -741,13 +646,6 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
     }
 
     // ─────────────── Helper infrastructure ───────────────
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {

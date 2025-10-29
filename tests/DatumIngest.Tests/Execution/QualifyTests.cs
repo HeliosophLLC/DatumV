@@ -266,16 +266,13 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_EndToEnd_TopNPerGroup_ViaAlias()
     {
-        Row[] data =
-        [
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(10f))),
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(30f))),
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(20f))),
-            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(50f))),
-            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(40f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["category", "score"],
+            ["A", 10f],
+            ["A", 30f],
+            ["A", 20f],
+            ["B", 50f],
+            ["B", 40f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT category, score, ROW_NUMBER() OVER (PARTITION BY category ORDER BY score DESC) AS rn " +
@@ -302,15 +299,12 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_EndToEnd_InlineWindowExpression()
     {
-        Row[] data =
-        [
-            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromFloat32(10f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromFloat32(30f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromFloat32(20f))),
-            MakeRow(("name", DataValue.FromString("dave")), ("score", DataValue.FromFloat32(40f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["name", "score"],
+            ["alice", 10f],
+            ["bob", 30f],
+            ["carol", 20f],
+            ["dave", 40f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT name, score FROM data " +
@@ -333,17 +327,14 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_EndToEnd_WithGroupByAndHaving()
     {
-        Row[] employees =
-        [
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(100f))),
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(200f))),
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("inactive")), ("salary", DataValue.FromFloat32(300f))),
-            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(150f))),
-            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(250f))),
-            MakeRow(("department", DataValue.FromString("hr")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(50f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("employees", employees));
+        TableCatalog catalog = CreateCatalog("employees",
+            columns: ["department", "status", "salary"],
+            ["eng", "active", 100f],
+            ["eng", "active", 200f],
+            ["eng", "inactive", 300f],
+            ["sales", "active", 150f],
+            ["sales", "active", 250f],
+            ["hr", "active", 50f]);
 
         // WHERE filters to active only → GROUP BY department →
         // HAVING COUNT(*) > 1 → ROW_NUMBER by department name → QUALIFY rn = 1
@@ -373,15 +364,12 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_EndToEnd_WithDistinct()
     {
-        Row[] data =
-        [
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(3f))),
-        ];
-
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["category", "value"],
+            ["A", 1f],
+            ["A", 1f],
+            ["A", 2f],
+            ["B", 3f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT DISTINCT category, value FROM data " +

@@ -17,13 +17,15 @@ public sealed class CrossValidateTests : ServiceTestBase
 {
     private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
 
+    private static readonly string[] DataColumns = ["id", "value", "label"];
+
     // ───────────────────── Basic fold assignment ─────────────────────
 
     [Fact]
     public async Task BasicFoldAssignment_ProducesKDistinctFolds()
     {
-        Row[] data = GenerateRows(100);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(100);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 5) ON id AS fold",
@@ -40,8 +42,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task FoldDistribution_ApproximatelyUniform()
     {
-        Row[] data = GenerateRows(10000);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(10000);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 5, seed = 42) ON id AS fold",
@@ -63,8 +65,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task DeterministicWithSeed_SameKeysSameFolds()
     {
-        Row[] data = GenerateRows(100);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(100);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> result1 = await ExecuteQueryAsync(
             "SELECT id, fold FROM data CROSS VALIDATE(k = 5, seed = 42) ON id AS fold",
@@ -83,8 +85,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task DifferentSeeds_DifferentAssignments()
     {
-        Row[] data = GenerateRows(200);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(200);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> result1 = await ExecuteQueryAsync(
             "SELECT id, fold FROM data CROSS VALIDATE(k = 5, seed = 1) ON id AS fold",
@@ -112,8 +114,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task FoldRange_AlwaysZeroToKMinusOne()
     {
-        Row[] data = GenerateRows(500);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(500);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 3) ON id AS fold",
@@ -129,8 +131,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task FoldColumn_IsInt32()
     {
-        Row[] data = GenerateRows(10);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(10);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 5) ON id AS fold",
@@ -145,13 +147,11 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task CompositeKey_DifferentCombinationsGetDifferentFolds()
     {
-        Row[] data =
-        [
-            MakeRow(("user_id", DataValue.FromFloat32(1)), ("session_id", DataValue.FromFloat32(100))),
-            MakeRow(("user_id", DataValue.FromFloat32(1)), ("session_id", DataValue.FromFloat32(200))),
-            MakeRow(("user_id", DataValue.FromFloat32(2)), ("session_id", DataValue.FromFloat32(100))),
-        ];
-        TableCatalog catalog = CreateCatalog(("data", data));
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["user_id", "session_id"],
+            [1f, 100f],
+            [1f, 200f],
+            [2f, 100f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 100, seed = 42) ON (user_id, session_id) AS fold",
@@ -167,8 +167,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task WithWhere_FoldsAssignedAfterFilter()
     {
-        Row[] data = GenerateRows(100);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(100);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data WHERE id >= 50 CROSS VALIDATE(k = 5) ON id AS fold",
@@ -183,8 +183,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task WithGroupByFold_GroupsByFoldCorrectly()
     {
-        Row[] data = GenerateRows(500);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(500);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT fold, COUNT(*) AS cnt FROM data CROSS VALIDATE(k = 5, seed = 42) ON id AS fold GROUP BY fold ORDER BY fold",
@@ -209,8 +209,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task WithGroupByFoldAndLabel_GroupsByBoth()
     {
-        Row[] data = GenerateRows(300);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(300);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT fold, label, COUNT(*) AS cnt FROM data CROSS VALIDATE(k = 3, seed = 42) ON id AS fold GROUP BY fold, label ORDER BY fold, label",
@@ -224,12 +224,12 @@ public sealed class CrossValidateTests : ServiceTestBase
     public async Task WithBalancedAndGroupByFold_Works()
     {
         // Use column names that match the user's Instacart scenario (product_id, department_id)
-        Row[] data = Enumerable.Range(0, 300).Select(i => MakeRow(
-            ("product_id", DataValue.FromFloat32(i)),
-            ("department_id", DataValue.FromFloat32(i % 5)),
-            ("name", DataValue.FromString($"product_{i}"))
-        )).ToArray();
-        TableCatalog catalog = CreateCatalog(("products", data));
+        object?[][] data = Enumerable.Range(0, 300)
+            .Select(i => new object?[] { (float)i, (float)(i % 5), $"product_{i}" })
+            .ToArray();
+        TableCatalog catalog = CreateCatalog("products",
+            columns: ["product_id", "department_id", "name"],
+            rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT fold, department_id, COUNT(*) AS cnt FROM products TABLESAMPLE BALANCED(30) ON department_id REPEATABLE(42) CROSS VALIDATE(k = 3, seed = 7) ON product_id AS fold GROUP BY fold, department_id ORDER BY fold, department_id",
@@ -245,8 +245,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task WithOrderByFold_SortsByFoldCorrectly()
     {
-        Row[] data = GenerateRows(100);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(100);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT *, fold FROM data CROSS VALIDATE(k = 5, seed = 42) ON id AS fold ORDER BY fold",
@@ -264,8 +264,8 @@ public sealed class CrossValidateTests : ServiceTestBase
     [Fact]
     public async Task DefaultSeed_IsZero()
     {
-        Row[] data = GenerateRows(100);
-        TableCatalog catalog = CreateCatalog(("data", data));
+        object?[][] data = GenerateRows(100);
+        TableCatalog catalog = CreateCatalog("data", columns: DataColumns, rows: data);
 
         // No seed specified — should behave as seed = 0.
         List<Row> noSeed = await ExecuteQueryAsync(
@@ -284,25 +284,19 @@ public sealed class CrossValidateTests : ServiceTestBase
 
     // ───────────────────── Helpers ─────────────────────
 
-    private static Row[] GenerateRows(int count)
+    private static object?[][] GenerateRows(int count)
     {
-        Row[] rows = new Row[count];
+        object?[][] rows = new object?[count][];
         for (int i = 0; i < count; i++)
         {
-            rows[i] = MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("value", DataValue.FromFloat32(i * 10f)),
-                ("label", DataValue.FromString(i % 3 == 0 ? "cat" : i % 3 == 1 ? "dog" : "bird")));
+            rows[i] = [
+                (float)i,
+                i * 10f,
+                i % 3 == 0 ? "cat" : i % 3 == 1 ? "dog" : "bird",
+            ];
         }
 
         return rows;
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
