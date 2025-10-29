@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -24,12 +25,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
         };
     }
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] ClassColumns = ["id", "label"];
 
     private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
@@ -40,17 +36,15 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     /// <summary>
     /// Generates test rows with the given class distribution.
     /// </summary>
-    private static Row[] GenerateClassRows(params (string label, int count)[] classes)
+    private static object?[][] GenerateClassRows(params (string label, int count)[] classes)
     {
-        List<Row> rows = [];
+        List<object?[]> rows = [];
         int id = 1;
         foreach ((string label, int count) in classes)
         {
             for (int i = 0; i < count; i++)
             {
-                rows.Add(MakeRow(
-                    ("id", DataValue.FromFloat32(id++)),
-                    ("label", DataValue.FromString(label))));
+                rows.Add([(float)(id++), label]);
             }
         }
 
@@ -62,8 +56,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Stratified_PreservesClassDistribution()
     {
-        Row[] rows = GenerateClassRows(("cat", 500), ("dog", 500));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 500), ("dog", 500));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         StratifiedSampleOperator op = new(source, 50.0, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -82,8 +76,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Stratified_100Percent_ReturnsAll()
     {
-        Row[] rows = GenerateClassRows(("cat", 10), ("dog", 10));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 10), ("dog", 10));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         StratifiedSampleOperator op = new(source, 100.0, ["label"], seed: 1);
         List<Row> result = await CollectAsync(op);
@@ -94,8 +88,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Stratified_0Percent_ReturnsNone()
     {
-        Row[] rows = GenerateClassRows(("cat", 10), ("dog", 10));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 10), ("dog", 10));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         StratifiedSampleOperator op = new(source, 0.0, ["label"], seed: 1);
         List<Row> result = await CollectAsync(op);
@@ -106,10 +100,11 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Stratified_Repeatable_IsDeterministic()
     {
-        Row[] rows = GenerateClassRows(("cat", 100), ("dog", 100));
+        object?[][] rows = GenerateClassRows(("cat", 100), ("dog", 100));
+        InMemoryTableProvider provider = CreateProvider("mock", ClassColumns, rows);
 
-        StratifiedSampleOperator op1 = new(new MockOperator(rows), 50.0, ["label"], seed: 42);
-        StratifiedSampleOperator op2 = new(new MockOperator(rows), 50.0, ["label"], seed: 42);
+        StratifiedSampleOperator op1 = new(CreateMockOperator(provider), 50.0, ["label"], seed: 42);
+        StratifiedSampleOperator op2 = new(CreateMockOperator(provider), 50.0, ["label"], seed: 42);
 
         List<Row> result1 = await CollectAsync(op1);
         List<Row> result2 = await CollectAsync(op2);
@@ -124,10 +119,11 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Stratified_DifferentSeeds_ProduceDifferentResults()
     {
-        Row[] rows = GenerateClassRows(("cat", 200), ("dog", 200));
+        object?[][] rows = GenerateClassRows(("cat", 200), ("dog", 200));
+        InMemoryTableProvider provider = CreateProvider("mock", ClassColumns, rows);
 
-        StratifiedSampleOperator op1 = new(new MockOperator(rows), 50.0, ["label"], seed: 1);
-        StratifiedSampleOperator op2 = new(new MockOperator(rows), 50.0, ["label"], seed: 99);
+        StratifiedSampleOperator op1 = new(CreateMockOperator(provider), 50.0, ["label"], seed: 1);
+        StratifiedSampleOperator op2 = new(CreateMockOperator(provider), 50.0, ["label"], seed: 99);
 
         List<Row> result1 = await CollectAsync(op1);
         List<Row> result2 = await CollectAsync(op2);
@@ -151,7 +147,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public void Stratified_DescribeForExplain_IncludesColumns()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(ClassColumns);
         StratifiedSampleOperator op = new(source, 10.0, ["label"], seed: 42);
 
         OperatorPlanDescription desc = op.DescribeForExplain();
@@ -168,8 +164,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_ReturnsExactCountPerClass()
     {
-        Row[] rows = GenerateClassRows(("cat", 500), ("dog", 200), ("bird", 100));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 500), ("dog", 200), ("bird", 100));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         BalancedSampleOperator op = new(source, countPerClass: 50, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -189,8 +185,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_SmallClass_ReturnsAll()
     {
-        Row[] rows = GenerateClassRows(("cat", 100), ("dog", 5));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 100), ("dog", 5));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         BalancedSampleOperator op = new(source, countPerClass: 50, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -205,7 +201,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_EmptyInput_ReturnsEmpty()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(ClassColumns);
 
         BalancedSampleOperator op = new(source, countPerClass: 10, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -216,8 +212,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_SingleClass_ReturnsReservoir()
     {
-        Row[] rows = GenerateClassRows(("cat", 100));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 100));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         BalancedSampleOperator op = new(source, countPerClass: 10, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -229,10 +225,11 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_Repeatable_IsDeterministic()
     {
-        Row[] rows = GenerateClassRows(("cat", 100), ("dog", 100));
+        object?[][] rows = GenerateClassRows(("cat", 100), ("dog", 100));
+        InMemoryTableProvider provider = CreateProvider("mock", ClassColumns, rows);
 
-        BalancedSampleOperator op1 = new(new MockOperator(rows), countPerClass: 10, ["label"], seed: 42);
-        BalancedSampleOperator op2 = new(new MockOperator(rows), countPerClass: 10, ["label"], seed: 42);
+        BalancedSampleOperator op1 = new(CreateMockOperator(provider), countPerClass: 10, ["label"], seed: 42);
+        BalancedSampleOperator op2 = new(CreateMockOperator(provider), countPerClass: 10, ["label"], seed: 42);
 
         List<Row> result1 = await CollectAsync(op1);
         List<Row> result2 = await CollectAsync(op2);
@@ -248,15 +245,13 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     public async Task Balanced_ExceedsMaxClasses_Throws()
     {
         // Create rows with many distinct classes.
-        List<Row> rows = [];
+        object?[][] rows = new object?[20][];
         for (int i = 0; i < 20; i++)
         {
-            rows.Add(MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("label", DataValue.FromString($"class_{i}"))));
+            rows[i] = [(float)i, $"class_{i}"];
         }
 
-        MockOperator source = new(rows.ToArray());
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
         BalancedSampleOperator op = new(source, countPerClass: 5, ["label"], seed: 42);
 
         // Set a very low max to trigger the error.
@@ -272,23 +267,14 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public async Task Balanced_CompositeKey_StratifiesCorrectly()
     {
-        Row[] rows =
+        object?[][] rows =
         [
-            .. Enumerable.Range(1, 20).Select(i => MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("label", DataValue.FromString("cat")),
-                ("split", DataValue.FromString("train")))),
-            .. Enumerable.Range(21, 10).Select(i => MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("label", DataValue.FromString("cat")),
-                ("split", DataValue.FromString("test")))),
-            .. Enumerable.Range(31, 15).Select(i => MakeRow(
-                ("id", DataValue.FromFloat32(i)),
-                ("label", DataValue.FromString("dog")),
-                ("split", DataValue.FromString("train")))),
+            .. Enumerable.Range(1, 20).Select(i => new object?[] { (float)i, "cat", "train" }),
+            .. Enumerable.Range(21, 10).Select(i => new object?[] { (float)i, "cat", "test" }),
+            .. Enumerable.Range(31, 15).Select(i => new object?[] { (float)i, "dog", "train" }),
         ];
 
-        MockOperator source = new(rows);
+        MockOperator source = CreateMockOperator(["id", "label", "split"], rows);
         BalancedSampleOperator op = new(source, countPerClass: 5, ["label", "split"], seed: 42);
         List<Row> result = await CollectAsync(op);
 
@@ -309,8 +295,8 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     public async Task Balanced_EmitsClassFirstOrder()
     {
         // cat rows first, then dog rows in the input.
-        Row[] rows = GenerateClassRows(("cat", 10), ("dog", 10));
-        MockOperator source = new(rows);
+        object?[][] rows = GenerateClassRows(("cat", 10), ("dog", 10));
+        MockOperator source = CreateMockOperator(ClassColumns, rows);
 
         BalancedSampleOperator op = new(source, countPerClass: 5, ["label"], seed: 42);
         List<Row> result = await CollectAsync(op);
@@ -332,7 +318,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
     [Fact]
     public void Balanced_DescribeForExplain_IncludesCountAndColumns()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(ClassColumns);
         BalancedSampleOperator op = new(source, countPerClass: 100, ["label", "split"], seed: 7);
 
         OperatorPlanDescription desc = op.DescribeForExplain();

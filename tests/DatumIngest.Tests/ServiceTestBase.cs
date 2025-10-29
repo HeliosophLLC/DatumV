@@ -116,6 +116,34 @@ public abstract class ServiceTestBase : IDisposable
         params object?[][] rows)
         => new(GetService<Pool>(), tableName, columns, rows);
 
+    /// <summary>
+    /// Creates a <see cref="Execution.MockOperator"/> that yields the supplied rows.
+    /// Backed by an <see cref="InMemoryTableProvider"/> so batches are pool-rented
+    /// and carry a valid <see cref="Arena"/> — matching production scan semantics.
+    /// </summary>
+    protected Execution.MockOperator CreateMockOperator(string[] columns, params object?[][] rows)
+        => new(CreateProvider("mock", columns, rows));
+
+    /// <summary>
+    /// Wraps an existing provider in a <see cref="Execution.MockOperator"/>. Use when
+    /// the same row set must feed multiple operators (e.g. running two parallel
+    /// operators over identical data for determinism checks).
+    /// </summary>
+    protected Execution.MockOperator CreateMockOperator(InMemoryTableProvider provider)
+        => new(provider);
+
+    /// <summary>
+    /// Creates a <see cref="Execution.CountingOperator"/> that fires
+    /// <paramref name="onRowYielded"/> once per row pulled from the underlying
+    /// <see cref="InMemoryTableProvider"/>. Used to verify consumers don't
+    /// over-read (e.g. LIMIT correctness).
+    /// </summary>
+    protected Execution.CountingOperator CreateCountingOperator(
+        Action onRowYielded,
+        string[] columns,
+        params object?[][] rows)
+        => new(CreateProvider("mock", columns, rows), onRowYielded);
+
     public virtual void Dispose()
     {
         _provider?.Dispose();

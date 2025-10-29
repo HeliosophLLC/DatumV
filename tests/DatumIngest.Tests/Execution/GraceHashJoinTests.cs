@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -28,14 +29,16 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task InnerJoin_WithSpill_ProducesCorrectMatches()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f],
+            [3f, 87f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -60,12 +63,14 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task LeftJoin_WithSpill_IncludesUnmatchedLeft()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -90,12 +95,14 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task RightJoin_WithSpill_IncludesUnmatchedRight()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f],
+            [2f, 70f]);
 
         JoinOperator join = new(left, right, JoinType.Right,
             new BinaryExpression(
@@ -121,13 +128,15 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task FullOuterJoin_WithSpill_IncludesBothUnmatched()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(60f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f],
+            [3f, 60f]);
 
         JoinOperator join = new(left, right, JoinType.FullOuter,
             new BinaryExpression(
@@ -158,11 +167,13 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task NullKeys_NeverMatch_WithSpill()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Ghost"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [DataValue.Null(DataKind.Float32), "Ghost"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(0f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [DataValue.Null(DataKind.Float32), 0f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -181,13 +192,15 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task CompositeKey_InnerJoin_WithSpill()
     {
-        MockOperator left = new(
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(10f))),
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromFloat32(20f))));
+        MockOperator left = CreateMockOperator(
+            ["l.a", "l.b", "l.val"],
+            [1f, "x", 10f],
+            [1f, "y", 20f]);
 
-        MockOperator right = new(
-            MakeRow(("r.a", DataValue.FromFloat32(1f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromFloat32(100f))),
-            MakeRow(("r.a", DataValue.FromFloat32(2f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromFloat32(200f))));
+        MockOperator right = CreateMockOperator(
+            ["r.a", "r.b", "r.val"],
+            [1f, "x", 100f],
+            [2f, "x", 200f]);
 
         // Join on l.a = r.a AND l.b = r.b
         Expression onCondition = new BinaryExpression(
@@ -217,17 +230,16 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     public async Task LargerDataset_SpillMatchesInMemory()
     {
         // Generate 100 left rows and 80 right rows with overlapping keys.
-        Row[] leftRows = Enumerable.Range(0, 100)
-            .Select(index => MakeRow(
-                ("l.id", DataValue.FromFloat32((float)index)),
-                ("l.data", DataValue.FromString($"left_{index}"))))
+        object?[][] leftRows = Enumerable.Range(0, 100)
+            .Select(index => new object?[] { (float)index, $"left_{index}" })
             .ToArray();
 
-        Row[] rightRows = Enumerable.Range(20, 80)
-            .Select(index => MakeRow(
-                ("r.id", DataValue.FromFloat32((float)index)),
-                ("r.data", DataValue.FromString($"right_{index}"))))
+        object?[][] rightRows = Enumerable.Range(20, 80)
+            .Select(index => new object?[] { (float)index, $"right_{index}" })
             .ToArray();
+
+        InMemoryTableProvider leftProvider = CreateProvider("left", ["l.id", "l.data"], leftRows);
+        InMemoryTableProvider rightProvider = CreateProvider("right", ["r.id", "r.data"], rightRows);
 
         Expression onCondition = new BinaryExpression(
             new ColumnReference("l", "id"),
@@ -235,11 +247,11 @@ public sealed class GraceHashJoinTests : ServiceTestBase
             new ColumnReference("r", "id"));
 
         // Run in-memory (no budget).
-        JoinOperator inMemoryJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        JoinOperator inMemoryJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Inner, onCondition);
         List<Row> inMemoryResults = await CollectAsync(inMemoryJoin);
 
         // Run with spilling (tiny budget).
-        JoinOperator spillJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        JoinOperator spillJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Inner, onCondition);
         List<Row> spillResults = await CollectAsync(spillJoin, CreateContext(TinyBudget));
 
         Assert.Equal(inMemoryResults.Count, spillResults.Count);
@@ -257,13 +269,15 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task BuildDuplicates_ProduceMultipleMatches_WithSpill()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.label", DataValue.FromString("probe"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.label"],
+            [1f, "probe"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("a"))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("b"))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("c"))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.tag"],
+            [1f, "a"],
+            [1f, "b"],
+            [1f, "c"]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -284,10 +298,11 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task EmptyBuildSide_InnerJoin_ProducesNoResults()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"]);
 
-        MockOperator right = new();
+        MockOperator right = CreateMockOperator(["r.id", "r.score"]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -306,10 +321,11 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task EmptyBuildSide_LeftJoin_EmitsUnmatchedProbe()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"]);
 
-        MockOperator right = new();
+        MockOperator right = CreateMockOperator(["r.id", "r.score"]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -329,27 +345,26 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task LeftJoin_SpillMatchesInMemory()
     {
-        Row[] leftRows = Enumerable.Range(0, 50)
-            .Select(index => MakeRow(
-                ("l.id", DataValue.FromFloat32((float)index)),
-                ("l.data", DataValue.FromString($"left_{index}"))))
+        object?[][] leftRows = Enumerable.Range(0, 50)
+            .Select(index => new object?[] { (float)index, $"left_{index}" })
             .ToArray();
 
-        Row[] rightRows = Enumerable.Range(25, 25)
-            .Select(index => MakeRow(
-                ("r.id", DataValue.FromFloat32((float)index)),
-                ("r.data", DataValue.FromString($"right_{index}"))))
+        object?[][] rightRows = Enumerable.Range(25, 25)
+            .Select(index => new object?[] { (float)index, $"right_{index}" })
             .ToArray();
+
+        InMemoryTableProvider leftProvider = CreateProvider("left", ["l.id", "l.data"], leftRows);
+        InMemoryTableProvider rightProvider = CreateProvider("right", ["r.id", "r.data"], rightRows);
 
         Expression onCondition = new BinaryExpression(
             new ColumnReference("l", "id"),
             BinaryOperator.Equal,
             new ColumnReference("r", "id"));
 
-        JoinOperator inMemoryJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Left, onCondition);
+        JoinOperator inMemoryJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Left, onCondition);
         List<Row> inMemoryResults = await CollectAsync(inMemoryJoin);
 
-        JoinOperator spillJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Left, onCondition);
+        JoinOperator spillJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Left, onCondition);
         List<Row> spillResults = await CollectAsync(spillJoin, CreateContext(TinyBudget));
 
         // LEFT JOIN: all left rows should appear.
@@ -375,18 +390,21 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     public async Task HybridProbe_WithLimit_TerminatesEarlyWithoutReadingAllProbeRows()
     {
         // Build side: 10 rows, all with distinct id values 0..9.
-        Row[] buildRows = Enumerable.Range(0, 10)
-            .Select(i => MakeRow(("r.id", DataValue.FromFloat32((float)i)), ("r.val", DataValue.FromFloat32((float)i * 10))))
+        object?[][] buildRows = Enumerable.Range(0, 10)
+            .Select(i => new object?[] { (float)i, (float)(i * 10) })
             .ToArray();
 
         // Probe side: 1 000 rows, each matching a build row so yield is guaranteed early.
         // Track how many rows were actually consumed from the probe stream.
         int probeRowsConsumed = 0;
-        Row[] probeRows = Enumerable.Range(0, 1000)
-            .Select(i => MakeRow(("l.id", DataValue.FromFloat32((float)(i % 10))), ("l.seq", DataValue.FromFloat32((float)i))))
+        object?[][] probeRows = Enumerable.Range(0, 1000)
+            .Select(i => new object?[] { (float)(i % 10), (float)i })
             .ToArray();
 
-        CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);
+        CountingOperator probeOperator = CreateCountingOperator(
+            () => probeRowsConsumed++,
+            ["l.id", "l.seq"],
+            probeRows);
 
         // Memory budget large enough that NO partitions spill — all are in-memory,
         // so the hybrid streaming path fires for every probe row.
@@ -397,7 +415,7 @@ public sealed class GraceHashJoinTests : ServiceTestBase
 
         JoinOperator join = new(
             probeOperator,
-            new MockOperator(buildRows),
+            CreateMockOperator(["r.id", "r.val"], buildRows),
             JoinType.Inner,
             new BinaryExpression(
                 new ColumnReference("l", "id"),
@@ -441,23 +459,26 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     [Fact]
     public async Task HybridProbe_NoSpill_ProducesSameResultsAsInMemory()
     {
-        Row[] leftRows = Enumerable.Range(0, 20)
-            .Select(i => MakeRow(("l.id", DataValue.FromFloat32((float)i)), ("l.v", DataValue.FromString($"L{i}"))))
+        object?[][] leftRows = Enumerable.Range(0, 20)
+            .Select(i => new object?[] { (float)i, $"L{i}" })
             .ToArray();
 
-        Row[] rightRows = Enumerable.Range(10, 10)
-            .Select(i => MakeRow(("r.id", DataValue.FromFloat32((float)i)), ("r.v", DataValue.FromString($"R{i}"))))
+        object?[][] rightRows = Enumerable.Range(10, 10)
+            .Select(i => new object?[] { (float)i, $"R{i}" })
             .ToArray();
+
+        InMemoryTableProvider leftProvider = CreateProvider("left", ["l.id", "l.v"], leftRows);
+        InMemoryTableProvider rightProvider = CreateProvider("right", ["r.id", "r.v"], rightRows);
 
         Expression onCondition = new BinaryExpression(
             new ColumnReference("l", "id"),
             BinaryOperator.Equal,
             new ColumnReference("r", "id"));
 
-        JoinOperator inMemoryJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        JoinOperator inMemoryJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Inner, onCondition);
         List<Row> inMemoryResults = await CollectAsync(inMemoryJoin);
 
-        JoinOperator hybridJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        JoinOperator hybridJoin = new(CreateMockOperator(leftProvider), CreateMockOperator(rightProvider), JoinType.Inner, onCondition);
         List<Row> hybridResults = await CollectAsync(hybridJoin, CreateContext(1024 * 1024));
 
         Assert.Equal(inMemoryResults.Count, hybridResults.Count);
@@ -482,21 +503,20 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     public async Task BorderlineBudget_DoesNotCascadeSpillAllPartitions()
     {
         // Build: 100 rows, 2 scalar columns → ~136 bytes/row → ~13,600 bytes total.
-        Row[] buildRows = Enumerable.Range(0, 100)
-            .Select(index => MakeRow(
-                ("r.id", DataValue.FromFloat32((float)index)),
-                ("r.val", DataValue.FromFloat32((float)(index * 10)))))
+        object?[][] buildRows = Enumerable.Range(0, 100)
+            .Select(index => new object?[] { (float)index, (float)(index * 10) })
             .ToArray();
 
         // Probe: 500 rows, all matching some build row.
         int probeRowsConsumed = 0;
-        Row[] probeRows = Enumerable.Range(0, 500)
-            .Select(index => MakeRow(
-                ("l.id", DataValue.FromFloat32((float)(index % 100))),
-                ("l.seq", DataValue.FromFloat32((float)index))))
+        object?[][] probeRows = Enumerable.Range(0, 500)
+            .Select(index => new object?[] { (float)(index % 100), (float)index })
             .ToArray();
 
-        CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);
+        CountingOperator probeOperator = CreateCountingOperator(
+            () => probeRowsConsumed++,
+            ["l.id", "l.seq"],
+            probeRows);
 
         // Budget is ~88% of build size — borderline, not catastrophically small.
         // With correct in-memory accounting, only ~1 of 4 partitions needs to spill.
@@ -507,7 +527,7 @@ public sealed class GraceHashJoinTests : ServiceTestBase
 
         JoinOperator join = new(
             probeOperator,
-            new MockOperator(buildRows),
+            CreateMockOperator(["r.id", "r.val"], buildRows),
             JoinType.Inner,
             new BinaryExpression(
                 new ColumnReference("l", "id"),
@@ -560,13 +580,6 @@ public sealed class GraceHashJoinTests : ServiceTestBase
         {
             BatchSize = batchSize,
         };
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(column => column.Name).ToArray();
-        DataValue[] values = columns.Select(column => column.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)

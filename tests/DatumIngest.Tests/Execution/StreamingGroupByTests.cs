@@ -16,12 +16,7 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class StreamingGroupByTests : ServiceTestBase
 {
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] KeyValColumns = ["key", "val"];
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
@@ -39,12 +34,13 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     public async Task SingleKey_Streaming_ProducesCorrectGroups()
     {
         // Input sorted by "category".
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(
+            ["category", "value"],
+            ["A", 1f],
+            ["A", 3f],
+            ["A", 5f],
+            ["B", 2f],
+            ["B", 4f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -79,14 +75,14 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task SingleKey_StreamingMatchesHashResult()
     {
-        Row[] rows =
+        object?[][] rows =
         [
-            MakeRow(("key", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("key", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(20f))),
-            MakeRow(("key", DataValue.FromFloat32(2f)), ("val", DataValue.FromFloat32(30f))),
-            MakeRow(("key", DataValue.FromFloat32(3f)), ("val", DataValue.FromFloat32(40f))),
-            MakeRow(("key", DataValue.FromFloat32(3f)), ("val", DataValue.FromFloat32(50f))),
-            MakeRow(("key", DataValue.FromFloat32(3f)), ("val", DataValue.FromFloat32(60f))),
+            [1f, 10f],
+            [1f, 20f],
+            [2f, 30f],
+            [3f, 40f],
+            [3f, 50f],
+            [3f, 60f],
         ];
 
         IReadOnlyList<Expression> groupByKeys = [new ColumnReference("key")];
@@ -97,13 +93,13 @@ public sealed class StreamingGroupByTests : ServiceTestBase
         ];
 
         GroupByOperator hashGroupBy = new(
-            new MockOperator(rows.Select(r => r.Clone()).ToArray()),
+            CreateMockOperator(KeyValColumns, rows),
             groupByKeys,
             aggregates,
             streamingSorted: false);
 
         GroupByOperator streamingGroupBy = new(
-            new MockOperator(rows.Select(r => r.Clone()).ToArray()),
+            CreateMockOperator(KeyValColumns, rows),
             groupByKeys,
             aggregates,
             streamingSorted: true);
@@ -133,11 +129,12 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     public async Task CompositeKey_Streaming_ProducesCorrectGroups()
     {
         // Input sorted by (dept, status).
-        MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))));
+        MockOperator source = CreateMockOperator(
+            ["dept", "status", "amount"],
+            ["X", "active", 100f],
+            ["X", "active", 300f],
+            ["X", "inactive", 200f],
+            ["Y", "active", 50f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -182,18 +179,19 @@ public sealed class StreamingGroupByTests : ServiceTestBase
         int rowsRead = 0;
 
         // 100 groups × 10 rows each = 1000 rows total. All sorted by "group_id".
-        Row[] allRows = new Row[1000];
+        object?[][] allRows = new object?[1000][];
         for (int group = 0; group < 100; group++)
         {
             for (int row = 0; row < 10; row++)
             {
-                allRows[group * 10 + row] = MakeRow(
-                    ("group_id", DataValue.FromFloat32(group)),
-                    ("value", DataValue.FromFloat32(row)));
+                allRows[group * 10 + row] = [(float)group, (float)row];
             }
         }
 
-        CountingOperator source = new(allRows, () => rowsRead++);
+        CountingOperator source = CreateCountingOperator(
+            () => rowsRead++,
+            ["group_id", "value"],
+            allRows);
 
         GroupByOperator groupBy = new(
             source,
@@ -247,8 +245,9 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task Streaming_SingleRow_ProducesOneGroup()
     {
-        MockOperator source = new(
-            MakeRow(("key", DataValue.FromString("only")), ("val", DataValue.FromFloat32(42f))));
+        MockOperator source = CreateMockOperator(
+            KeyValColumns,
+            ["only", 42f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -272,7 +271,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task Streaming_EmptyInput_ProducesNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(KeyValColumns);
 
         GroupByOperator groupBy = new(
             source,
@@ -294,10 +293,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task Streaming_AllUniqueKeys_ProducesOneGroupPerRow()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-            MakeRow(("id", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(["id"], [1f], [2f], [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -320,10 +316,11 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task Streaming_NullKeys_GroupedTogether()
     {
-        MockOperator source = new(
-            MakeRow(("key", DataValue.Null(DataKind.String)), ("val", DataValue.FromFloat32(1f))),
-            MakeRow(("key", DataValue.Null(DataKind.String)), ("val", DataValue.FromFloat32(2f))),
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(
+            KeyValColumns,
+            [DataValue.Null(DataKind.String), 1f],
+            [DataValue.Null(DataKind.String), 2f],
+            ["A", 3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -351,11 +348,12 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public async Task Streaming_MinMax_Aggregates()
     {
-        MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(5f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(15f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("group", DataValue.FromString("G2")), ("val", DataValue.FromFloat32(100f))));
+        MockOperator source = CreateMockOperator(
+            ["group", "val"],
+            ["G1", 5f],
+            ["G1", 15f],
+            ["G1", 10f],
+            ["G2", 100f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -384,7 +382,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public void DescribeForExplain_StreamingMode_ShowsStreamingName()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(["key"]);
 
         GroupByOperator groupBy = new(
             source,
@@ -408,7 +406,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
     [Fact]
     public void DescribeForExplain_HashMode_ShowsWarning()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(["key"]);
 
         GroupByOperator groupBy = new(
             source,

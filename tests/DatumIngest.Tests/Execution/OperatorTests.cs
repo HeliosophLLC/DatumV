@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -10,47 +11,49 @@ using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 namespace DatumIngest.Tests.Execution;
 
 /// <summary>
-/// A simple in-memory operator that yields pre-defined rows.
-/// Used as a mock data source in operator tests.
+/// A simple mock data-source operator backed by an <see cref="InMemoryTableProvider"/>.
+/// Used in operator unit tests that want to feed a known row set into a downstream
+/// operator without going through the catalog/planner path.
 /// </summary>
+/// <remarks>
+/// Construct via <see cref="ServiceTestBase.CreateMockOperator(string[], object[][])"/>
+/// so the provider is backed by the test's DI-resolved <see cref="Pooling.Pool"/>. The
+/// operator delegates scanning to <see cref="InMemoryTableProvider.ScanAsync"/>, so
+/// batches are pool-rented and carry an arena — matching production scan semantics.
+/// </remarks>
 internal sealed class MockOperator : IQueryOperator
 {
-    private readonly Row[] _rows;
+    private readonly InMemoryTableProvider _provider;
 
-    public MockOperator(params Row[] rows)
+    public MockOperator(InMemoryTableProvider provider)
     {
-        _rows = rows;
+        _provider = provider;
     }
 
     public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
-    {
-        RowBatch? outputBatch = null;
-        foreach (Row row in _rows)
-        {
-            outputBatch ??= RowBatch.Rent(64);
-            outputBatch.Add(row.Clone());
-            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-        }
-
-        if (outputBatch is not null) yield return outputBatch;
-        await Task.CompletedTask;
-    }
+    public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.CancellationToken);
 }
 
 /// <summary>
-/// An in-memory operator that invokes a callback each time a row is yielded.
-/// Used to verify that a consumer does not read more rows than necessary (e.g., with LIMIT).
+/// A mock data-source operator that invokes a callback for each row yielded.
+/// Used to verify a consumer does not read more rows than necessary (e.g. LIMIT).
 /// </summary>
+/// <remarks>
+/// Construct via <see cref="ServiceTestBase.CreateCountingOperator"/>. The callback
+/// fires per row as batches are pulled from the underlying
+/// <see cref="InMemoryTableProvider"/>; when the consumer stops pulling, no further
+/// rows are materialized — preserving the original CountingOperator semantics.
+/// </remarks>
 internal sealed class CountingOperator : IQueryOperator
 {
-    private readonly Row[] _rows;
+    private readonly InMemoryTableProvider _provider;
     private readonly Action _onRowYielded;
 
-    public CountingOperator(Row[] rows, Action onRowYielded)
+    public CountingOperator(InMemoryTableProvider provider, Action onRowYielded)
     {
-        _rows = rows;
+        _provider = provider;
         _onRowYielded = onRowYielded;
     }
 
@@ -58,29 +61,25 @@ internal sealed class CountingOperator : IQueryOperator
 
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        RowBatch? outputBatch = null;
-        foreach (Row row in _rows)
+        await foreach (RowBatch batch in _provider.ScanAsync(
+            requiredColumns: null, filterHint: null, context.CancellationToken))
         {
-            _onRowYielded();
-            outputBatch ??= RowBatch.Rent(64);
-            outputBatch.Add(row.Clone());
-            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+            for (int i = 0; i < batch.Count; i++)
+            {
+                _onRowYielded();
+            }
+            yield return batch;
         }
-
-        if (outputBatch is not null) yield return outputBatch;
-        await Task.CompletedTask;
     }
 }
 
 public class OperatorTests : ServiceTestBase
 {
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] AgeColumns = ["age"];
+    private static readonly string[] XColumns = ["x"];
+    private static readonly string[] ValColumns = ["val"];
+    private static readonly string[] XyColumns = ["x", "y"];
+    private static readonly string[] GroupValColumns = ["group", "val"];
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
@@ -93,10 +92,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Filter_PassesMatchingRows()
     {
-        MockOperator source = new(
-            MakeRow(("age", DataValue.FromFloat32(25f))),
-            MakeRow(("age", DataValue.FromFloat32(15f))),
-            MakeRow(("age", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(AgeColumns, [25f], [15f], [30f]);
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -114,9 +110,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Filter_RemovesAllRows()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(XColumns, [1f], [2f]);
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -131,10 +125,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Filter_WithAnd()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(5f)), ("y", DataValue.FromFloat32(10f))),
-            MakeRow(("x", DataValue.FromFloat32(15f)), ("y", DataValue.FromFloat32(10f))),
-            MakeRow(("x", DataValue.FromFloat32(5f)), ("y", DataValue.FromFloat32(20f))));
+        MockOperator source = CreateMockOperator(XyColumns, [5f, 10f], [15f, 10f], [5f, 20f]);
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -158,8 +149,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStar()
     {
-        MockOperator source = new(
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x"))));
+        MockOperator source = CreateMockOperator(["a", "b"], [1f, "x"]);
 
         ProjectOperator project = new(source, [new SelectAllColumns()]);
 
@@ -173,11 +163,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStarExcept_ExcludesNamedColumns()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("a", DataValue.FromFloat32(1f)),
-                ("b", DataValue.FromString("x")),
-                ("c", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(["a", "b", "c"], [1f, "x", 3f]);
 
         ProjectOperator project = new(source, [new SelectAllColumns(ExcludedColumns: ["b"])]);
 
@@ -191,12 +177,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStarExcept_MultipleExclusions()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("a", DataValue.FromFloat32(1f)),
-                ("b", DataValue.FromFloat32(2f)),
-                ("c", DataValue.FromFloat32(3f)),
-                ("d", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(["a", "b", "c", "d"], [1f, 2f, 3f, 4f]);
 
         ProjectOperator project = new(source, [new SelectAllColumns(ExcludedColumns: ["a", "c"])]);
 
@@ -210,11 +191,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectTableStarExcept_ExcludesNamedColumns()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("t.a", DataValue.FromFloat32(1f)),
-                ("t.b", DataValue.FromString("x")),
-                ("t.c", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(["t.a", "t.b", "t.c"], [1f, "x", 3f]);
 
         ProjectOperator project = new(source, [new SelectTableColumns("t", ExcludedColumns: ["b"])]);
 
@@ -230,11 +207,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStarReplace_ReplacesColumnValue()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("a", DataValue.FromFloat32(10f)),
-                ("b", DataValue.FromFloat32(20f)),
-                ("c", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(["a", "b", "c"], [10f, 20f, 30f]);
 
         ProjectOperator project = new(source,
             [new SelectAllColumns(
@@ -256,11 +229,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStarReplace_MultipleReplacements()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("a", DataValue.FromFloat32(5f)),
-                ("b", DataValue.FromFloat32(10f)),
-                ("c", DataValue.FromFloat32(15f))));
+        MockOperator source = CreateMockOperator(["a", "b", "c"], [5f, 10f, 15f]);
 
         ProjectOperator project = new(source,
             [new SelectAllColumns(
@@ -289,11 +258,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStarExceptAndReplace_Combined()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("id", DataValue.FromFloat32(1f)),
-                ("price", DataValue.FromFloat32(500f)),
-                ("name", DataValue.FromString("widget"))));
+        MockOperator source = CreateMockOperator(["id", "price", "name"], [1f, 500f, "widget"]);
 
         ProjectOperator project = new(source,
             [new SelectAllColumns(
@@ -315,10 +280,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectTableStarReplace_ReplacesColumnValue()
     {
-        MockOperator source = new(
-            MakeRow(
-                ("t.x", DataValue.FromFloat32(100f)),
-                ("t.y", DataValue.FromFloat32(200f))));
+        MockOperator source = CreateMockOperator(["t.x", "t.y"], [100f, 200f]);
 
         ProjectOperator project = new(source,
             [new SelectTableColumns("t",
@@ -339,8 +301,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_NamedColumns()
     {
-        MockOperator source = new(
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(["a", "b"], [1f, 2f]);
 
         ProjectOperator project = new(source,
         [
@@ -363,8 +324,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_WithAlias()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(42f))));
+        MockOperator source = CreateMockOperator(XColumns, [42f]);
 
         ProjectOperator project = new(source,
         [
@@ -378,8 +338,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_FunctionCall()
     {
-        MockOperator source = new(
-            MakeRow(("name", DataValue.FromString("hello"))));
+        MockOperator source = CreateMockOperator(["name"], ["hello"]);
 
         ProjectOperator project = new(source,
         [
@@ -395,8 +354,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_DuplicateFunctionNames_Deduplicated()
     {
-        MockOperator source = new(
-            MakeRow(("name", DataValue.FromString("hello"))));
+        MockOperator source = CreateMockOperator(["name"], ["hello"]);
 
         ProjectOperator project = new(source,
         [
@@ -415,8 +373,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_UnaliasedFunctionName_UsedAsColumnName()
     {
-        MockOperator source = new(
-            MakeRow(("name", DataValue.FromString("hello"))));
+        MockOperator source = CreateMockOperator(["name"], ["hello"]);
 
         ProjectOperator project = new(source,
         [
@@ -431,8 +388,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_UnaliasedExpression_NamedExpression()
     {
-        MockOperator source = new(
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(["a", "b"], [1f, 2f]);
 
         ProjectOperator project = new(source,
         [
@@ -452,14 +408,16 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task InnerJoin_MatchingRows()
     {
-        MockOperator left = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
-            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(
+            ["id", "name"],
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))),
-            MakeRow(("id", DataValue.FromFloat32(3f)), ("score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(
+            ["id", "score"],
+            [1f, 95f],
+            [3f, 87f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -479,13 +437,15 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task InnerJoin_HashJoin_QualifiedKeys()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f],
+            [3f, 87f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -503,12 +463,14 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task LeftJoin_IncludesUnmatchedLeft()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -530,14 +492,9 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task CrossJoin_CartesianProduct()
     {
-        MockOperator left = new(
-            MakeRow(("a", DataValue.FromFloat32(1f))),
-            MakeRow(("a", DataValue.FromFloat32(2f))));
+        MockOperator left = CreateMockOperator(["a"], [1f], [2f]);
 
-        MockOperator right = new(
-            MakeRow(("b", DataValue.FromString("x"))),
-            MakeRow(("b", DataValue.FromString("y"))),
-            MakeRow(("b", DataValue.FromString("z"))));
+        MockOperator right = CreateMockOperator(["b"], ["x"], ["y"], ["z"]);
 
         JoinOperator join = new(left, right, JoinType.Cross, onCondition: null);
 
@@ -548,11 +505,9 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task CrossJoin_PreservesColumnValues()
     {
-        MockOperator left = new(
-            MakeRow(("a", DataValue.FromFloat32(10f))));
+        MockOperator left = CreateMockOperator(["a"], [10f]);
 
-        MockOperator right = new(
-            MakeRow(("b", DataValue.FromFloat32(20f))));
+        MockOperator right = CreateMockOperator(["b"], [20f]);
 
         JoinOperator join = new(left, right, JoinType.Cross, onCondition: null);
 
@@ -565,11 +520,13 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task NullKeys_NeverMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Ghost"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.name"],
+            [DataValue.Null(DataKind.Float32), "Ghost"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(0f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.score"],
+            [DataValue.Null(DataKind.Float32), 0f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -586,10 +543,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_Ascending()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns, [3f], [1f], [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -605,10 +559,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_Descending()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns, [1f], [3f], [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -624,10 +575,10 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_MultiKey()
     {
-        MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))));
+        MockOperator source = CreateMockOperator(GroupValColumns,
+            ["B", 2f],
+            ["A", 3f],
+            ["A", 1f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -646,10 +597,10 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_NullsLast()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.Null(DataKind.Float32))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [1f],
+            [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -667,12 +618,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Limit_TakesSpecifiedCount()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(XColumns, [1f], [2f], [3f], [4f], [5f]);
 
         LimitOperator limit = new(source, 3);
         List<Row> rows = await CollectAsync(limit);
@@ -685,12 +631,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Limit_WithOffset()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(XColumns, [1f], [2f], [3f], [4f], [5f]);
 
         LimitOperator limit = new(source, 2, offset: 2);
         List<Row> rows = await CollectAsync(limit);
@@ -703,8 +644,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Limit_FewerRowsThanLimit()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))));
+        MockOperator source = CreateMockOperator(XColumns, [1f]);
 
         LimitOperator limit = new(source, 10);
         List<Row> rows = await CollectAsync(limit);
@@ -715,8 +655,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Limit_ZeroReturnsNothing()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))));
+        MockOperator source = CreateMockOperator(XColumns, [1f]);
 
         LimitOperator limit = new(source, 0);
         List<Row> rows = await CollectAsync(limit);
@@ -729,12 +668,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderByThenLimit_TopN()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(5f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))),
-            MakeRow(("val", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(ValColumns, [5f], [1f], [3f], [2f], [4f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -753,12 +687,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_OnlyKeepsNRows()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(5f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))),
-            MakeRow(("val", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(ValColumns, [5f], [1f], [3f], [2f], [4f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -776,12 +705,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_Descending()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(5f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))),
-            MakeRow(("val", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(ValColumns, [5f], [1f], [3f], [2f], [4f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -799,12 +723,7 @@ public class OperatorTests : ServiceTestBase
     public async Task OrderBy_BoundedTopN_WithOffset()
     {
         // topNRows = limit + offset = 2 + 1 = 3, then LimitOperator skips 1.
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(5f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))),
-            MakeRow(("val", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(ValColumns, [5f], [1f], [3f], [2f], [4f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -822,11 +741,11 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_MultiKey()
     {
-        MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))),
-            MakeRow(("group", DataValue.FromString("C")), ("val", DataValue.FromFloat32(0f))));
+        MockOperator source = CreateMockOperator(GroupValColumns,
+            ["B", 2f],
+            ["A", 3f],
+            ["A", 1f],
+            ["C", 0f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -846,9 +765,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_FewerRowsThanN()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(2f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))));
+        MockOperator source = CreateMockOperator(ValColumns, [2f], [1f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -865,11 +782,11 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_NullsLast()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.Null(DataKind.Float32))),
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [3f],
+            [1f],
+            [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -893,10 +810,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BudgetExceeded_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns, [3f], [1f], [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -921,10 +835,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_BoundedTopN_BudgetExceeded_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(3f))),
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns, [3f], [1f], [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -948,9 +859,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_CancellationToken_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns, [1f], [2f]);
 
         OrderByOperator orderBy = new(source,
         [
@@ -971,8 +880,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Alias_PrefixesColumnNames()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("test"))));
+        MockOperator source = CreateMockOperator(["id", "name"], [1f, "test"]);
 
         AliasOperator alias = new(source, "t");
         List<Row> rows = await CollectAsync(alias);
@@ -999,10 +907,8 @@ public class OperatorTests : ServiceTestBase
         // AliasOperator produces only qualified column names (l.id, l.name)
         // while keeping unqualified names in the lookup index.
         // JoinOperator concatenates both sides: l.id, l.name, r.id, r.score.
-        MockOperator left = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))));
-        MockOperator right = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))));
+        MockOperator left = CreateMockOperator(["id", "name"], [1f, "Alice"]);
+        MockOperator right = CreateMockOperator(["id", "score"], [1f, 95f]);
 
         AliasOperator aliasLeft = new(left, "l");
         AliasOperator aliasRight = new(right, "r");
@@ -1036,8 +942,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Project_SelectStar_NoAliases_EmitsAllColumns()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))));
+        MockOperator source = CreateMockOperator(["id", "name"], [1f, "Alice"]);
 
         ProjectOperator project = new(source, [new SelectAllColumns()]);
 
@@ -1055,14 +960,16 @@ public class OperatorTests : ServiceTestBase
     {
         // Simulates GET_FILENAME(z.file_name) = i.file_name
         // Left side has full paths, right side has just filenames.
-        MockOperator left = new(
-            MakeRow(("l.file_name", DataValue.FromString("images/cat.jpg")), ("l.data", DataValue.FromFloat32(1f))),
-            MakeRow(("l.file_name", DataValue.FromString("images/dog.png")), ("l.data", DataValue.FromFloat32(2f))),
-            MakeRow(("l.file_name", DataValue.FromString("images/bird.jpg")), ("l.data", DataValue.FromFloat32(3f))));
+        MockOperator left = CreateMockOperator(
+            ["l.file_name", "l.data"],
+            ["images/cat.jpg", 1f],
+            ["images/dog.png", 2f],
+            ["images/bird.jpg", 3f]);
 
-        MockOperator right = new(
-            MakeRow(("r.file_name", DataValue.FromString("cat.jpg")), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.file_name", DataValue.FromString("bird.jpg")), ("r.score", DataValue.FromFloat32(80f))));
+        MockOperator right = CreateMockOperator(
+            ["r.file_name", "r.score"],
+            ["cat.jpg", 95f],
+            ["bird.jpg", 80f]);
 
         // ON GET_FILENAME(l.file_name) = r.file_name
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -1081,14 +988,16 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_CompoundKeys_MatchesOnBothKeys()
     {
-        MockOperator left = new(
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(10f))),
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromFloat32(20f))),
-            MakeRow(("l.a", DataValue.FromFloat32(2f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(30f))));
+        MockOperator left = CreateMockOperator(
+            ["l.a", "l.b", "l.val"],
+            [1f, "x", 10f],
+            [1f, "y", 20f],
+            [2f, "x", 30f]);
 
-        MockOperator right = new(
-            MakeRow(("r.a", DataValue.FromFloat32(1f)), ("r.b", DataValue.FromString("x")), ("r.info", DataValue.FromString("match1"))),
-            MakeRow(("r.a", DataValue.FromFloat32(2f)), ("r.b", DataValue.FromString("y")), ("r.info", DataValue.FromString("no_match"))));
+        MockOperator right = CreateMockOperator(
+            ["r.a", "r.b", "r.info"],
+            [1f, "x", "match1"],
+            [2f, "y", "no_match"]);
 
         // ON l.a = r.a AND l.b = r.b
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -1113,13 +1022,15 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_ResidualFilter_AppliedAfterHashMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.val", DataValue.FromFloat32(100f))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.val", DataValue.FromFloat32(200f))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.val"],
+            [1f, 100f],
+            [2f, 200f]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.threshold", DataValue.FromFloat32(150f))),
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.threshold", DataValue.FromFloat32(150f))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.threshold"],
+            [1f, 150f],
+            [2f, 150f]);
 
         // ON l.id = r.id AND l.val > r.threshold
         // The equality is extracted as hash key; the > becomes residual.
@@ -1145,11 +1056,13 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_NullExpressionKey_NeverMatches()
     {
-        MockOperator left = new(
-            MakeRow(("l.path", DataValue.Null(DataKind.String))));
+        MockOperator left = CreateMockOperator(
+            ["l.path"],
+            [DataValue.Null(DataKind.String)]);
 
-        MockOperator right = new(
-            MakeRow(("r.name", DataValue.Null(DataKind.String))));
+        MockOperator right = CreateMockOperator(
+            ["r.name"],
+            [DataValue.Null(DataKind.String)]);
 
         // ON GET_FILENAME(l.path) = r.name — both null
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -1166,13 +1079,15 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_DuplicateKeys_ProducesAllCombinations()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.tag", DataValue.FromString("A"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.tag", DataValue.FromString("B"))));
+        MockOperator left = CreateMockOperator(
+            ["l.id", "l.tag"],
+            [1f, "A"],
+            [1f, "B"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.info", DataValue.FromString("X"))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.info", DataValue.FromString("Y"))));
+        MockOperator right = CreateMockOperator(
+            ["r.id", "r.info"],
+            [1f, "X"],
+            [1f, "Y"]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -1189,12 +1104,14 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task LeftJoin_ExpressionKey_IncludesUnmatchedRows()
     {
-        MockOperator left = new(
-            MakeRow(("l.path", DataValue.FromString("a/file1.txt")), ("l.size", DataValue.FromFloat32(100f))),
-            MakeRow(("l.path", DataValue.FromString("b/file2.txt")), ("l.size", DataValue.FromFloat32(200f))));
+        MockOperator left = CreateMockOperator(
+            ["l.path", "l.size"],
+            ["a/file1.txt", 100f],
+            ["b/file2.txt", 200f]);
 
-        MockOperator right = new(
-            MakeRow(("r.name", DataValue.FromString("file1.txt")), ("r.label", DataValue.FromString("doc"))));
+        MockOperator right = CreateMockOperator(
+            ["r.name", "r.label"],
+            ["file1.txt", "doc"]);
 
         // ON GET_FILENAME(l.path) = r.name
         JoinOperator join = new(left, right, JoinType.Left,
@@ -1217,8 +1134,7 @@ public class OperatorTests : ServiceTestBase
     [Fact]
     public async Task Subquery_PassesThroughRows()
     {
-        MockOperator inner = new(
-            MakeRow(("x", DataValue.FromFloat32(42f))));
+        MockOperator inner = CreateMockOperator(XColumns, [42f]);
 
         SubqueryOperator subquery = new(inner, "sub");
         List<Row> rows = await CollectAsync(subquery);

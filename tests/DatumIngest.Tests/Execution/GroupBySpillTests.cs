@@ -25,30 +25,21 @@ public sealed class GroupBySpillTests : ServiceTestBase
         return TestExecutionContext.Create(memoryBudgetBytes: memoryBudgetBytes);
     }
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] KeyValColumns = ["key", "val"];
 
     /// <summary>
-    /// Builds 100 groups × 5 rows = 500 rows with independent <see cref="DataValue"/>
-    /// arrays. Each call returns a fresh set so that two operators do not share
-    /// backing arrays through <see cref="GlobalBufferPool"/>.
+    /// Builds 100 groups × 5 rows = 500 rows as raw <c>object?[]</c> tuples.
     /// </summary>
-    private static Row[] BuildManyGroupRows()
+    private static object?[][] BuildManyGroupRows()
     {
-        Row[] rows = new Row[500];
+        object?[][] rows = new object?[500][];
         int index = 0;
 
         for (int groupIndex = 0; groupIndex < 100; groupIndex++)
         {
             for (int rowIndex = 1; rowIndex <= 5; rowIndex++)
             {
-                rows[index++] = MakeRow(
-                    ("key", DataValue.FromString($"G{groupIndex}")),
-                    ("val", DataValue.FromFloat32((float)rowIndex)));
+                rows[index++] = [$"G{groupIndex}", (float)rowIndex];
             }
         }
 
@@ -69,17 +60,18 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task SingleKey_WithSpill_CountAndSum()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(6f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(7f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(8f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(9f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(10f))));
+        MockOperator source = CreateMockOperator(
+            ["category", "value"],
+            ["A", 1f],
+            ["B", 2f],
+            ["A", 3f],
+            ["B", 4f],
+            ["A", 5f],
+            ["C", 6f],
+            ["C", 7f],
+            ["A", 8f],
+            ["B", 9f],
+            ["C", 10f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -120,11 +112,11 @@ public sealed class GroupBySpillTests : ServiceTestBase
         // Build 100 groups with 5 rows each = 500 rows.
         // Each operator gets its own copy so data returned to GlobalBufferPool
         // by the first operator cannot corrupt the second operator's input.
-        Row[] spillRows = BuildManyGroupRows();
-        Row[] unboundedRows = BuildManyGroupRows();
+        object?[][] spillRows = BuildManyGroupRows();
+        object?[][] unboundedRows = BuildManyGroupRows();
 
         GroupByOperator spillGroupBy = new(
-            new MockOperator(spillRows),
+            CreateMockOperator(KeyValColumns, spillRows),
             groupByExpressions: [new ColumnReference("key")],
             aggregateColumns:
             [
@@ -136,7 +128,7 @@ public sealed class GroupBySpillTests : ServiceTestBase
             ]);
 
         GroupByOperator unboundedGroupBy = new(
-            new MockOperator(unboundedRows),
+            CreateMockOperator(KeyValColumns, unboundedRows),
             groupByExpressions: [new ColumnReference("key")],
             aggregateColumns:
             [
@@ -175,15 +167,16 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task CompositeKey_WithSpill_ProducesCorrectResults()
     {
-        MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(75f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(150f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(25f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(500f))));
+        MockOperator source = CreateMockOperator(
+            ["dept", "status", "amount"],
+            ["X", "active", 100f],
+            ["X", "inactive", 200f],
+            ["X", "active", 300f],
+            ["Y", "active", 50f],
+            ["Y", "inactive", 75f],
+            ["X", "inactive", 150f],
+            ["Y", "active", 25f],
+            ["X", "active", 500f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -231,10 +224,7 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task GlobalAggregation_WithBudget_StillWorks()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(["x"], [1f], [2f], [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -264,10 +254,11 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task NoBudget_InMemory_ProducesCorrectResults()
     {
-        MockOperator source = new(
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromFloat32(20f))),
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(
+            KeyValColumns,
+            ["A", 10f],
+            ["B", 20f],
+            ["A", 30f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -299,15 +290,16 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task MinMax_WithSpill()
     {
-        MockOperator source = new(
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(5f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(15f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(10f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(100f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(50f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(75f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(1f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(200f))));
+        MockOperator source = CreateMockOperator(
+            ["grp", "v"],
+            ["G1", 5f],
+            ["G1", 15f],
+            ["G1", 10f],
+            ["G2", 100f],
+            ["G2", 50f],
+            ["G2", 75f],
+            ["G1", 1f],
+            ["G2", 200f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -345,10 +337,11 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task Dispose_CleansUpSpillDirectory()
     {
-        MockOperator source = new(
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))),
-            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(
+            KeyValColumns,
+            ["A", 1f],
+            ["B", 2f],
+            ["A", 3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -374,7 +367,7 @@ public sealed class GroupBySpillTests : ServiceTestBase
     [Fact]
     public async Task EmptySource_WithBudget_ProducesNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(KeyValColumns);
 
         GroupByOperator groupBy = new(
             source,
