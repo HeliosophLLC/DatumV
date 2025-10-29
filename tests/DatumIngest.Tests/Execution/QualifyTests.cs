@@ -1,9 +1,6 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Functions.Window;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
@@ -13,36 +10,20 @@ using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 namespace DatumIngest.Tests.Execution;
 
 /// <summary>
-/// Tests for the QUALIFY clause — a post-window-function filter that
+/// Tests for the QUALIFY clause - a post-window-function filter that
 /// eliminates the need for subquery wrappers around window functions.
 /// Covers parsing, planning, and end-to-end execution.
 /// </summary>
 public sealed class QualifyTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
+    private static readonly string[] NameScoreColumns = ["name", "score"];
+    private static readonly string[] CategoryItemScoreColumns = ["category", "item", "score"];
+    private static readonly string[] ValColumns = ["val"];
 
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
+    private async Task<List<Row>> CollectAsync(IQueryOperator operatorNode, ExecutionContext? context = null)
     {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
-    private static async Task<List<Row>> CollectAsync(IQueryOperator operatorNode, ExecutionContext? context = null)
-    {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await operatorNode.CollectRowsAsync(context);
-    }
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = TestExecutionContext.Create(catalog: catalog);
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
     }
 
     // ─────────────── Parsing ───────────────
@@ -158,10 +139,10 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_FiltersAfterWindowComputation()
     {
-        MockOperator source = new(
-            MakeRow(("name", DataValue.FromString("a")), ("score", DataValue.FromFloat32(10f))),
-            MakeRow(("name", DataValue.FromString("b")), ("score", DataValue.FromFloat32(30f))),
-            MakeRow(("name", DataValue.FromString("c")), ("score", DataValue.FromFloat32(20f))));
+        MockOperator source = CreateMockOperator(NameScoreColumns,
+            ["a", 10f],
+            ["b", 30f],
+            ["c", 20f]);
 
         WindowSpecification specification = new(
             PartitionBy: null,
@@ -191,13 +172,13 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_TopNPerGroup()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x1")), ("score", DataValue.FromFloat32(10f))),
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x2")), ("score", DataValue.FromFloat32(30f))),
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x3")), ("score", DataValue.FromFloat32(20f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y1")), ("score", DataValue.FromFloat32(50f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y2")), ("score", DataValue.FromFloat32(40f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y3")), ("score", DataValue.FromFloat32(60f))));
+        MockOperator source = CreateMockOperator(CategoryItemScoreColumns,
+            ["X", "x1", 10f],
+            ["X", "x2", 30f],
+            ["X", "x3", 20f],
+            ["Y", "y1", 50f],
+            ["Y", "y2", 40f],
+            ["Y", "y3", 60f]);
 
         WindowSpecification specification = new(
             PartitionBy: [new ColumnReference("category")],
@@ -234,9 +215,9 @@ public sealed class QualifyTests : ServiceTestBase
     [Fact]
     public async Task Qualify_NoMatchingRows_ReturnsEmpty()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [1f],
+            [2f]);
 
         WindowSpecification specification = new(
             PartitionBy: null,

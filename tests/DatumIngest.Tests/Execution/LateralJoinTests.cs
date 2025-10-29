@@ -1,12 +1,6 @@
-using System.Runtime.CompilerServices;
+
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -17,10 +11,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class LateralJoinTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
-
-    // ───────────────── CROSS JOIN LATERAL with TVF ─────────────────
-
     /// <summary>
     /// CROSS JOIN LATERAL UNNEST expands a vector column per row, producing
     /// one output row per element. Rows with no elements are excluded.
@@ -184,22 +174,5 @@ public sealed class LateralJoinTests : ServiceTestBase
         Assert.Single(results);
         Assert.Equal("alice", results[0]["customer"].AsString());
         Assert.Equal("widget", results[0]["product"].AsString());
-    }
-
-    // ───────────────── Helper infrastructure ─────────────────
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog, new LocalBufferPool());
-
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-        return await plan.CollectRowsAsync(context);
     }
 }

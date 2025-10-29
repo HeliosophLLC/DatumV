@@ -15,6 +15,8 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class QueryMeteringTests : ServiceTestBase
 {
+    private static readonly string[] XColumns = ["x"];
+
     /// <summary>
     /// Evaluating a single scalar function call adds its QU cost to the meter.
     /// </summary>
@@ -135,12 +137,12 @@ public class QueryMeteringTests : ServiceTestBase
     public async Task GroupByOperator_AggregateCalls_AccumulateQueryUnits()
     {
         QueryMeter meter = new();
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
-        MockOperator source = new(
-            new Row(["x"], [DataValue.FromFloat32(1f)]),
-            new Row(["x"], [DataValue.FromFloat32(2f)]),
-            new Row(["x"], [DataValue.FromFloat32(3f)]));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         // SELECT SUM(x) — global aggregation (no GROUP BY).
         GroupByOperator groupBy = new(
@@ -171,13 +173,13 @@ public class QueryMeteringTests : ServiceTestBase
     public async Task GroupByOperator_HeavyAggregate_AccumulatesHigherCost()
     {
         QueryMeter meter = new();
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
-        MockOperator source = new(
-            new Row(["x"], [DataValue.FromFloat32(4f)]),
-            new Row(["x"], [DataValue.FromFloat32(1f)]),
-            new Row(["x"], [DataValue.FromFloat32(3f)]),
-            new Row(["x"], [DataValue.FromFloat32(2f)]));
+        MockOperator source = CreateMockOperator(XColumns,
+            [4f],
+            [1f],
+            [3f],
+            [2f]);
 
         // SELECT MEDIAN(x) — QU cost 2 per accumulation.
         GroupByOperator groupBy = new(
@@ -208,12 +210,12 @@ public class QueryMeteringTests : ServiceTestBase
     public async Task WindowOperator_WindowFunctionCalls_AccumulateQueryUnits()
     {
         QueryMeter meter = new();
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
-        MockOperator source = new(
-            new Row(["x"], [DataValue.FromFloat32(1f)]),
-            new Row(["x"], [DataValue.FromFloat32(2f)]),
-            new Row(["x"], [DataValue.FromFloat32(3f)]));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         IWindowFunction rowNumber = FunctionRegistry.CreateDefault().TryGetWindow("ROW_NUMBER")!;
         WindowOperator window = new(

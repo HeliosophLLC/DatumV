@@ -1,7 +1,5 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -14,20 +12,23 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class MergeJoinTests : ServiceTestBase
 {
+    private static readonly string[] LeftNameColumns = ["l.id", "l.name"];
+    private static readonly string[] RightScoreColumns = ["r.id", "r.score"];
+    private static readonly string[] RightValColumns = ["r.id", "r.val"];
     /// <summary>
     /// INNER merge join with unique keys on both sides produces only matched rows.
     /// </summary>
     [Fact]
     public async Task InnerMergeJoin_UniqueKeys_ProducesMatchedRows()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [3f, 87f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -48,14 +49,14 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task InnerMergeJoin_ManyToMany_ProducesCrossProduct()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("A1"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("A2"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("B"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "A1"],
+            [1f, "A2"],
+            [2f, "B"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("X"))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("Y"))));
+        MockOperator right = CreateMockOperator(RightValColumns,
+            [1f, "X"],
+            [1f, "Y"]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -75,13 +76,13 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task LeftMergeJoin_EmitsUnmatchedLeftRows()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [2f, 70f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Left);
 
@@ -105,13 +106,13 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task RightMergeJoin_EmitsUnmatchedRightRows()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [2f, 70f],
+            [3f, 87f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Right);
 
@@ -135,13 +136,13 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task FullOuterMergeJoin_EmitsAllRows()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [2f, 70f],
+            [3f, 87f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.FullOuter);
 
@@ -169,13 +170,13 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_NullKeys_NeverMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Null1"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [DataValue.Null(DataKind.Float32), "Null1"],
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(99f))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [DataValue.Null(DataKind.Float32), 99f],
+            [1f, 95f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Left);
 
@@ -198,13 +199,12 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_ResidualFilter_FiltersAfterKeyMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [1f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.target", DataValue.FromString("Alice")),
-                ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(["r.id", "r.target", "r.score"],
+            [1f, "Alice", 95f]);
 
         // ON l.id = r.id AND l.name = r.target
         JoinKeyExtractionResult extraction = JoinKeyExtractor.TryExtract(
@@ -249,9 +249,9 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_EmptyLeftInput_InnerProducesNothing()
     {
-        MockOperator left = new();
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator left = CreateMockOperator(LeftNameColumns);
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -267,11 +267,11 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_EmptyRightInput_LeftJoinEmitsAllLeft()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new();
+        MockOperator right = CreateMockOperator(RightScoreColumns);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Left);
 
@@ -289,8 +289,8 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_BothEmpty_ProducesNothing()
     {
-        MockOperator left = new();
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(LeftNameColumns);
+        MockOperator right = CreateMockOperator(RightScoreColumns);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -305,11 +305,11 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_SingleRowInputs_ProducesMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -326,11 +326,11 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task MergeJoin_PreservesColumnOrder()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -351,10 +351,10 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public async Task RightMergeJoin_EmptyLeftInput_EmitsAllRight()
     {
-        MockOperator left = new();
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))));
+        MockOperator left = CreateMockOperator(LeftNameColumns);
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [2f, 70f]);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Right);
 
@@ -370,8 +370,8 @@ public sealed class MergeJoinTests : ServiceTestBase
     [Fact]
     public void DescribeForExplain_ShowsMergeJoinProperties()
     {
-        MockOperator left = new();
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(LeftNameColumns);
+        MockOperator right = CreateMockOperator(RightScoreColumns);
 
         MergeJoinOperator join = CreateMergeJoin(left, right, JoinType.Inner);
 
@@ -399,16 +399,9 @@ public sealed class MergeJoinTests : ServiceTestBase
         return new MergeJoinOperator(left, right, joinType, extraction, "id", "id");
     }
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        string[] names = columns.Select(column => column.Name).ToArray();
-        DataValue[] values = columns.Select(column => column.Value).ToArray();
-        return new Row(names, values);
-    }
-
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
-    {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
 
         return await op.CollectRowsAsync(context);
     }

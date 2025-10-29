@@ -1,6 +1,4 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
@@ -11,13 +9,15 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class SkipOperatorTests : ServiceTestBase
 {
+    private static readonly string[] IdColumns = ["id"];
+
     [Fact]
     public async Task Skip0_YieldsAllRows()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(2))),
-            MakeRow(("id", DataValue.FromFloat32(3))));
+        MockOperator source = CreateMockOperator(IdColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         SkipOperator skip = new(source, 0);
         List<Row> result = await CollectAsync(skip);
@@ -31,12 +31,12 @@ public sealed class SkipOperatorTests : ServiceTestBase
     [Fact]
     public async Task SkipN_YieldsRemainingRows()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(2))),
-            MakeRow(("id", DataValue.FromFloat32(3))),
-            MakeRow(("id", DataValue.FromFloat32(4))),
-            MakeRow(("id", DataValue.FromFloat32(5))));
+        MockOperator source = CreateMockOperator(IdColumns,
+            [1f],
+            [2f],
+            [3f],
+            [4f],
+            [5f]);
 
         SkipOperator skip = new(source, 3);
         List<Row> result = await CollectAsync(skip);
@@ -49,9 +49,9 @@ public sealed class SkipOperatorTests : ServiceTestBase
     [Fact]
     public async Task SkipMoreThanAvailable_YieldsNothing()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(2))));
+        MockOperator source = CreateMockOperator(IdColumns,
+            [1f],
+            [2f]);
 
         SkipOperator skip = new(source, 100);
         List<Row> result = await CollectAsync(skip);
@@ -62,10 +62,10 @@ public sealed class SkipOperatorTests : ServiceTestBase
     [Fact]
     public async Task SkipExactCount_YieldsNothing()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1))),
-            MakeRow(("id", DataValue.FromFloat32(2))),
-            MakeRow(("id", DataValue.FromFloat32(3))));
+        MockOperator source = CreateMockOperator(IdColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         SkipOperator skip = new(source, 3);
         List<Row> result = await CollectAsync(skip);
@@ -73,16 +73,9 @@ public sealed class SkipOperatorTests : ServiceTestBase
         Assert.Empty(result);
     }
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op)
     {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op)
-    {
-        ExecutionContext context = TestExecutionContext.Create();
+        ExecutionContext context = CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 }

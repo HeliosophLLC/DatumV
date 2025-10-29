@@ -1,4 +1,3 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -6,6 +5,7 @@ using DatumIngest.Functions.Aggregates;
 using DatumIngest.Functions.Window;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -16,17 +16,14 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class WindowOperatorTests : ServiceTestBase
 {
+    private static readonly string[] IdColumns = ["id"];
+    private static readonly string[] CategoryValColumns = ["category", "val"];
+    private static readonly string[] ScoreColumns = ["score"];
+    private static readonly string[] ValColumns = ["val"];
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
-    {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -35,10 +32,10 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_RowNumber_NoPartition()
     {
-        MockOperator source = new(
-            MakeRow(("id", DataValue.FromFloat32(1f))),
-            MakeRow(("id", DataValue.FromFloat32(2f))),
-            MakeRow(("id", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(IdColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -67,12 +64,12 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_RowNumber_WithPartitionBy()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("val", DataValue.FromFloat32(10f))),
-            MakeRow(("category", DataValue.FromString("B")), ("val", DataValue.FromFloat32(20f))),
-            MakeRow(("category", DataValue.FromString("A")), ("val", DataValue.FromFloat32(30f))),
-            MakeRow(("category", DataValue.FromString("B")), ("val", DataValue.FromFloat32(40f))),
-            MakeRow(("category", DataValue.FromString("A")), ("val", DataValue.FromFloat32(50f))));
+        MockOperator source = CreateMockOperator(CategoryValColumns,
+            ["A", 10f],
+            ["B", 20f],
+            ["A", 30f],
+            ["B", 40f],
+            ["A", 50f]);
 
         WindowSpecification spec = new(
             PartitionBy: [new ColumnReference("category")],
@@ -113,11 +110,11 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_Rank_WithTies()
     {
-        MockOperator source = new(
-            MakeRow(("score", DataValue.FromFloat32(100f))),
-            MakeRow(("score", DataValue.FromFloat32(90f))),
-            MakeRow(("score", DataValue.FromFloat32(100f))),
-            MakeRow(("score", DataValue.FromFloat32(80f))));
+        MockOperator source = CreateMockOperator(ScoreColumns,
+            [100f],
+            [90f],
+            [100f],
+            [80f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -153,10 +150,10 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_Sum_RunningTotal()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(10f))),
-            MakeRow(("val", DataValue.FromFloat32(20f))),
-            MakeRow(("val", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [10f],
+            [20f],
+            [30f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -189,7 +186,7 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_EmptySource_YieldsNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(ValColumns);
 
         WindowSpecification spec = new(null, null, null);
         WindowColumn column = new(
@@ -209,10 +206,10 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_MultipleColumns_SameSpec()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(10f))),
-            MakeRow(("val", DataValue.FromFloat32(20f))),
-            MakeRow(("val", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [10f],
+            [20f],
+            [30f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -244,10 +241,10 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_Lag_ProducesPreviousValues()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(10f))),
-            MakeRow(("val", DataValue.FromFloat32(20f))),
-            MakeRow(("val", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [10f],
+            [20f],
+            [30f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -278,9 +275,9 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_BudgetExceeded_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [1f],
+            [2f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -299,10 +296,14 @@ public class WindowOperatorTests : ServiceTestBase
         QueryMeter meter = new(budget: 5);
         meter.Add(6);
 
+        Pool pool = GetService<Pool>();
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            CreateCatalog(), new LocalBufferPool(), meter);
+            CreateCatalog(),
+            new LocalBufferPool(),
+            pool,
+            meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(window, context));
@@ -315,9 +316,9 @@ public class WindowOperatorTests : ServiceTestBase
     [Fact]
     public async Task WindowOperator_CancellationToken_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("val", DataValue.FromFloat32(1f))),
-            MakeRow(("val", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(ValColumns,
+            [1f],
+            [2f]);
 
         WindowSpecification spec = new(
             PartitionBy: null,
@@ -335,10 +336,13 @@ public class WindowOperatorTests : ServiceTestBase
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
+        Pool pool = GetService<Pool>();
         ExecutionContext context = new(
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
-            CreateCatalog(), new LocalBufferPool());
+            CreateCatalog(),
+            new LocalBufferPool(),
+            pool);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(window, context));

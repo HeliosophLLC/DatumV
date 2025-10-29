@@ -1,12 +1,5 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -15,8 +8,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class CrossValidateTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
-
     private static readonly string[] DataColumns = ["id", "value", "label"];
 
     // ───────────────────── Basic fold assignment ─────────────────────
@@ -297,20 +288,5 @@ public sealed class CrossValidateTests : ServiceTestBase
         }
 
         return rows;
-    }
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog, new LocalBufferPool());
-
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-        return await plan.CollectRowsAsync(context);
     }
 }

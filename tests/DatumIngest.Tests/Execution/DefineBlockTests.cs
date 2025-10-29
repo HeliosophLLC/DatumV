@@ -1,12 +1,8 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -17,23 +13,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class DefineBlockTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
-
-    private static async Task<List<Row>> ExecuteQueryAsync(
-        string sql, TableCatalog catalog, AssertionDiagnostics? diagnostics = null)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(
-            CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
-        {
-            AssertionDiagnostics = diagnostics,
-        };
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
-    }
-
     private static SelectStatement ParseStatement(string sql)
     {
         SelectQueryExpression query = Assert.IsType<SelectQueryExpression>(SqlParser.Parse(sql));

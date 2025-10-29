@@ -1,77 +1,10 @@
-using System.Runtime.CompilerServices;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
-
-/// <summary>
-/// A simple mock data-source operator backed by an <see cref="InMemoryTableProvider"/>.
-/// Used in operator unit tests that want to feed a known row set into a downstream
-/// operator without going through the catalog/planner path.
-/// </summary>
-/// <remarks>
-/// Construct via <see cref="ServiceTestBase.CreateMockOperator(string[], object[][])"/>
-/// so the provider is backed by the test's DI-resolved <see cref="Pooling.Pool"/>. The
-/// operator delegates scanning to <see cref="InMemoryTableProvider.ScanAsync"/>, so
-/// batches are pool-rented and carry an arena — matching production scan semantics.
-/// </remarks>
-internal sealed class MockOperator : IQueryOperator
-{
-    private readonly InMemoryTableProvider _provider;
-
-    public MockOperator(InMemoryTableProvider provider)
-    {
-        _provider = provider;
-    }
-
-    public OperatorPlanDescription DescribeForExplain() => new("Mock");
-
-    public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
-        => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.CancellationToken);
-}
-
-/// <summary>
-/// A mock data-source operator that invokes a callback for each row yielded.
-/// Used to verify a consumer does not read more rows than necessary (e.g. LIMIT).
-/// </summary>
-/// <remarks>
-/// Construct via <see cref="ServiceTestBase.CreateCountingOperator"/>. The callback
-/// fires per row as batches are pulled from the underlying
-/// <see cref="InMemoryTableProvider"/>; when the consumer stops pulling, no further
-/// rows are materialized — preserving the original CountingOperator semantics.
-/// </remarks>
-internal sealed class CountingOperator : IQueryOperator
-{
-    private readonly InMemoryTableProvider _provider;
-    private readonly Action _onRowYielded;
-
-    public CountingOperator(InMemoryTableProvider provider, Action onRowYielded)
-    {
-        _provider = provider;
-        _onRowYielded = onRowYielded;
-    }
-
-    public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
-
-    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
-    {
-        await foreach (RowBatch batch in _provider.ScanAsync(
-            requiredColumns: null, filterHint: null, context.CancellationToken))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                _onRowYielded();
-            }
-            yield return batch;
-        }
-    }
-}
 
 public class OperatorTests : ServiceTestBase
 {
@@ -81,9 +14,9 @@ public class OperatorTests : ServiceTestBase
     private static readonly string[] XyColumns = ["x", "y"];
     private static readonly string[] GroupValColumns = ["group", "val"];
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -821,7 +754,7 @@ public class OperatorTests : ServiceTestBase
         QueryMeter meter = new(budget: 5);
         meter.Add(6);
 
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -846,7 +779,7 @@ public class OperatorTests : ServiceTestBase
         QueryMeter meter = new(budget: 5);
         meter.Add(6);
 
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -869,7 +802,7 @@ public class OperatorTests : ServiceTestBase
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = TestExecutionContext.Create();
+        ExecutionContext context = CreateExecutionContext();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(orderBy, context));

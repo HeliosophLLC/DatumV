@@ -1,4 +1,3 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -15,16 +14,13 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class StatisticalAggregateTests : ServiceTestBase
 {
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] XColumns = ["x"];
+    private static readonly string[] CatXColumns = ["cat", "x"];
+    private static readonly string[] XpColumns = ["x", "p"];
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -33,11 +29,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task VarianceSample_Global()
     {
-        // Values: {2, 4, 6} → mean = 4, sample variance = ((2-4)² + (4-4)² + (6-4)²) / (3-1) = 8/2 = 4.0
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(6f))));
+        // Values: {2, 4, 6} -> mean = 4, sample variance = 4.0
+        MockOperator source = CreateMockOperator(XColumns,
+            [2f],
+            [4f],
+            [6f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -59,11 +55,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task VariancePopulation_Global()
     {
-        // Values: {2, 4, 6} → mean = 4, pop variance = 8/3 ≈ 2.667
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(6f))));
+        // Values: {2, 4, 6} -> mean = 4, pop variance = 8/3 ~ 2.667
+        MockOperator source = CreateMockOperator(XColumns,
+            [2f],
+            [4f],
+            [6f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -85,8 +81,8 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task VarianceSample_SingleValue_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -108,8 +104,8 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task VariancePopulation_SingleValue_ReturnsZero()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -131,9 +127,9 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Variance_AllNull_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [DataValue.Null(DataKind.Float32)]);
 
         GroupByOperator groupBy = new(
             source,
@@ -155,14 +151,14 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Variance_PerGroup()
     {
-        // Group A: {1, 3, 5} → sample variance = 4.0
-        // Group B: {10, 10} → sample variance = 0.0
-        MockOperator source = new(
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(1f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(10f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(3f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(10f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(5f))));
+        // Group A: {1, 3, 5} -> sample variance = 4.0
+        // Group B: {10, 10}  -> sample variance = 0.0
+        MockOperator source = CreateMockOperator(CatXColumns,
+            ["A", 1f],
+            ["B", 10f],
+            ["A", 3f],
+            ["B", 10f],
+            ["A", 5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -191,11 +187,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task StdDevSample_Global()
     {
-        // Values: {2, 4, 6} → sample variance = 4.0, sample stddev = 2.0
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(6f))));
+        // Values: {2, 4, 6} -> sample variance = 4.0, sample stddev = 2.0
+        MockOperator source = CreateMockOperator(XColumns,
+            [2f],
+            [4f],
+            [6f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -217,11 +213,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task StdDevPopulation_Global()
     {
-        // Values: {2, 4, 6} → pop variance = 2.667, pop stddev ≈ 1.633
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(6f))));
+        // Values: {2, 4, 6} -> pop variance = 2.667, pop stddev ~ 1.633
+        MockOperator source = CreateMockOperator(XColumns,
+            [2f],
+            [4f],
+            [6f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -243,8 +239,8 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task StdDevSample_SingleValue_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(42f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [42f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -266,9 +262,9 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task StdDev_AllNull_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [DataValue.Null(DataKind.Float32)]);
 
         GroupByOperator groupBy = new(
             source,
@@ -292,11 +288,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_OddCount()
     {
-        // {1, 3, 5} → median = 3
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))));
+        // {1, 3, 5} -> median = 3
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f],
+            [1f],
+            [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -318,12 +314,12 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_EvenCount()
     {
-        // {1, 3, 5, 7} → median = (3 + 5) / 2 = 4
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(7f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))));
+        // {1, 3, 5, 7} -> median = (3 + 5) / 2 = 4
+        MockOperator source = CreateMockOperator(XColumns,
+            [7f],
+            [1f],
+            [5f],
+            [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -345,8 +341,8 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_SingleValue()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(42f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [42f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -368,9 +364,9 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_AllNull_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [DataValue.Null(DataKind.Float32)]);
 
         GroupByOperator groupBy = new(
             source,
@@ -392,16 +388,16 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_PerGroup()
     {
-        // Group A: {10, 20, 30} → median = 20
-        // Group B: {1, 2, 3, 4} → median = 2.5
-        MockOperator source = new(
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(30f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(4f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(10f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(1f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(20f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(2f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(3f))));
+        // Group A: {10, 20, 30}  -> median = 20
+        // Group B: {1, 2, 3, 4}  -> median = 2.5
+        MockOperator source = CreateMockOperator(CatXColumns,
+            ["A", 30f],
+            ["B", 4f],
+            ["A", 10f],
+            ["B", 1f],
+            ["A", 20f],
+            ["B", 2f],
+            ["B", 3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -428,12 +424,12 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task Median_SkipsNullValues()
     {
-        // Non-null values: {1, 5, 9} → median = 5
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.FromFloat32(9f))),
-            MakeRow(("x", DataValue.FromFloat32(5f))));
+        // Non-null values: {1, 5, 9} -> median = 5
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [DataValue.Null(DataKind.Float32)],
+            [9f],
+            [5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -457,13 +453,13 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_Median()
     {
-        // P50 of {1, 2, 3, 4, 5} → 3 (same as median for odd count)
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(3f)), ("p", DataValue.FromFloat32(0.5f))),
-            MakeRow(("x", DataValue.FromFloat32(1f)), ("p", DataValue.FromFloat32(0.5f))),
-            MakeRow(("x", DataValue.FromFloat32(5f)), ("p", DataValue.FromFloat32(0.5f))),
-            MakeRow(("x", DataValue.FromFloat32(2f)), ("p", DataValue.FromFloat32(0.5f))),
-            MakeRow(("x", DataValue.FromFloat32(4f)), ("p", DataValue.FromFloat32(0.5f))));
+        // P50 of {1, 2, 3, 4, 5} -> 3 (same as median for odd count)
+        MockOperator source = CreateMockOperator(XpColumns,
+            [3f, 0.5f],
+            [1f, 0.5f],
+            [5f, 0.5f],
+            [2f, 0.5f],
+            [4f, 0.5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -485,11 +481,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_P0_ReturnsMinimum()
     {
-        // P0 of {10, 20, 30} → 10
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(30f)), ("p", DataValue.FromFloat32(0f))),
-            MakeRow(("x", DataValue.FromFloat32(10f)), ("p", DataValue.FromFloat32(0f))),
-            MakeRow(("x", DataValue.FromFloat32(20f)), ("p", DataValue.FromFloat32(0f))));
+        // P0 of {10, 20, 30} -> 10
+        MockOperator source = CreateMockOperator(XpColumns,
+            [30f, 0f],
+            [10f, 0f],
+            [20f, 0f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -511,11 +507,11 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_P100_ReturnsMaximum()
     {
-        // P100 of {10, 20, 30} → 30
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(30f)), ("p", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(10f)), ("p", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(20f)), ("p", DataValue.FromFloat32(1f))));
+        // P100 of {10, 20, 30} -> 30
+        MockOperator source = CreateMockOperator(XpColumns,
+            [30f, 1f],
+            [10f, 1f],
+            [20f, 1f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -537,13 +533,13 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_Interpolation()
     {
-        // P30 of {1, 2, 3, 4} → row = 0.3 * 3 = 0.9, lower=0(val=1), upper=1(val=2)
+        // P30 of {1, 2, 3, 4} -> row = 0.3 * 3 = 0.9, lower=0(val=1), upper=1(val=2)
         // interpolated = 1 + (2 - 1) * 0.9 = 1.9
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(4f)), ("p", DataValue.FromFloat32(0.3f))),
-            MakeRow(("x", DataValue.FromFloat32(2f)), ("p", DataValue.FromFloat32(0.3f))),
-            MakeRow(("x", DataValue.FromFloat32(1f)), ("p", DataValue.FromFloat32(0.3f))),
-            MakeRow(("x", DataValue.FromFloat32(3f)), ("p", DataValue.FromFloat32(0.3f))));
+        MockOperator source = CreateMockOperator(XpColumns,
+            [4f, 0.3f],
+            [2f, 0.3f],
+            [1f, 0.3f],
+            [3f, 0.3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -565,13 +561,13 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_Quartiles()
     {
-        // {1, 2, 3, 4, 5} → P25: row=1.0 → val=2, P75: row=3.0 → val=4
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
-            MakeRow(("x", DataValue.FromFloat32(2f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
-            MakeRow(("x", DataValue.FromFloat32(3f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
-            MakeRow(("x", DataValue.FromFloat32(4f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
-            MakeRow(("x", DataValue.FromFloat32(5f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))));
+        // {1, 2, 3, 4, 5} -> P25: row=1.0 -> val=2, P75: row=3.0 -> val=4
+        MockOperator source = CreateMockOperator(["x", "p25", "p75"],
+            [1f, 0.25f, 0.75f],
+            [2f, 0.25f, 0.75f],
+            [3f, 0.25f, 0.75f],
+            [4f, 0.25f, 0.75f],
+            [5f, 0.25f, 0.75f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -598,9 +594,9 @@ public class StatisticalAggregateTests : ServiceTestBase
     [Fact]
     public async Task PercentileCont_AllNull_ReturnsNull()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Float32)), ("p", DataValue.FromFloat32(0.5f))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32)), ("p", DataValue.FromFloat32(0.5f))));
+        MockOperator source = CreateMockOperator(XpColumns,
+            [DataValue.Null(DataKind.Float32), 0.5f],
+            [DataValue.Null(DataKind.Float32), 0.5f]);
 
         GroupByOperator groupBy = new(
             source,

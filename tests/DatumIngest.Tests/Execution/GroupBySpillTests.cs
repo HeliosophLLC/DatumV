@@ -20,9 +20,9 @@ public sealed class GroupBySpillTests : ServiceTestBase
 
     // ─────────────── Helpers ───────────────
 
-    private static ExecutionContext CreateContext(long? memoryBudgetBytes = null)
+    private ExecutionContext CreateContext(long? memoryBudgetBytes = null)
     {
-        return TestExecutionContext.Create(memoryBudgetBytes: memoryBudgetBytes);
+        return CreateExecutionContext(memoryBudgetBytes: memoryBudgetBytes);
     }
 
     private static readonly string[] KeyValColumns = ["key", "val"];

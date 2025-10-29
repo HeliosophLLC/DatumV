@@ -1,7 +1,5 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -14,6 +12,10 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class OrderBySpillTests : ServiceTestBase
 {
+    private static readonly string[] XColumns = ["x"];
+    private static readonly string[] AbColumns = ["a", "b"];
+    private static readonly string[] NameColumns = ["name"];
+
     /// <summary>Tiny memory budget that forces spilling for even a few rows.</summary>
     private const long TinyBudget = 256;
 
@@ -23,19 +25,15 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_Ascending_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(8f))),
-            MakeRow(("x", DataValue.FromFloat32(6f))),
-            MakeRow(("x", DataValue.FromFloat32(7f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f],
+            [1f],
+            [3f],
+            [2f],
+            [4f],
+            [8f],
+            [6f],
+            [7f]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
@@ -56,15 +54,11 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_Descending_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(XColumns,
+            [3f],
+            [1f],
+            [4f],
+            [2f]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Descending)]);
@@ -84,17 +78,13 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_MultipleColumns_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(2f))),
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(3f))),
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(1f))),
-            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(1f))),
-            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
-            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(3f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(AbColumns,
+            [2f, 2f],
+            [1f, 3f],
+            [1f, 1f],
+            [2f, 1f],
+            [1f, 2f],
+            [2f, 3f]);
         OrderByOperator orderBy = new(
             source,
             [
@@ -121,15 +111,11 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_StringColumn_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("name", DataValue.FromString("delta"))),
-            MakeRow(("name", DataValue.FromString("alpha"))),
-            MakeRow(("name", DataValue.FromString("charlie"))),
-            MakeRow(("name", DataValue.FromString("bravo"))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(NameColumns,
+            ["delta"],
+            ["alpha"],
+            ["charlie"],
+            ["bravo"]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("name"), SortDirection.Ascending)]);
@@ -149,16 +135,12 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_NullsSortLast()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.Null(DataKind.Float32))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(XColumns,
+            [DataValue.Null(DataKind.Float32)],
+            [2f],
+            [1f],
+            [DataValue.Null(DataKind.Float32)],
+            [3f]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
@@ -180,14 +162,10 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_NoBudget_InMemorySort_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(XColumns,
+            [3f],
+            [1f],
+            [2f]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
@@ -207,16 +185,12 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_TopN_WithBudget_ProducesCorrectOrder()
     {
-        Row[] sourceRows =
-        [
-            MakeRow(("x", DataValue.FromFloat32(5f))),
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))),
-        ];
-
-        MockOperator source = new(sourceRows);
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f],
+            [1f],
+            [3f],
+            [2f],
+            [4f]);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)],
@@ -236,7 +210,7 @@ public sealed class OrderBySpillTests : ServiceTestBase
     [Fact]
     public async Task OrderBy_WithSpill_EmptySource_ProducesNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(XColumns);
         OrderByOperator orderBy = new(
             source,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
@@ -253,21 +227,18 @@ public sealed class OrderBySpillTests : ServiceTestBase
     public async Task OrderBy_WithSpill_ManyRows_MatchesInMemorySort()
     {
         const int rowCount = 500;
-        Row[] sourceRows = new Row[rowCount];
+        object?[][] sourceRows = Enumerable.Range(0, rowCount)
+            .Select(index => new object?[] { (float)(rowCount - index) })
+            .ToArray();
 
-        for (int index = 0; index < rowCount; index++)
-        {
-            sourceRows[index] = MakeRow(("x", DataValue.FromFloat32((float)(rowCount - index))));
-        }
-
-        MockOperator source1 = new(sourceRows);
+        MockOperator source1 = CreateMockOperator(XColumns, rows: sourceRows);
         OrderByOperator spillSort = new(
             source1,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
 
         List<Row> spillResult = await CollectAsync(spillSort, CreateContext(TinyBudget));
 
-        MockOperator source2 = new(sourceRows);
+        MockOperator source2 = CreateMockOperator(XColumns, rows: sourceRows);
         OrderByOperator memorySort = new(
             source2,
             [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
@@ -284,20 +255,13 @@ public sealed class OrderBySpillTests : ServiceTestBase
         }
     }
 
-    private static ExecutionContext CreateContext(long? memoryBudgetBytes = null)
+    private ExecutionContext CreateContext(long? memoryBudgetBytes = null)
     {
-        return TestExecutionContext.Create(memoryBudgetBytes: memoryBudgetBytes);
+        return CreateExecutionContext(memoryBudgetBytes: memoryBudgetBytes);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
     {
         return await op.CollectRowsAsync(context);
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 }

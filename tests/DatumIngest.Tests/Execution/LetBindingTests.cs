@@ -668,14 +668,4 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
     }
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
-    }
 }

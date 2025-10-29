@@ -16,23 +16,13 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class SetOperationTests : ServiceTestBase
 {
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(column => column.Name).ToArray();
-        DataValue[] values = columns.Select(column => column.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] XColumns = ["x"];
 
-    private static async Task<List<Row>> CollectAsync(
+    private async Task<List<Row>> CollectAsync(
         IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
-    }
-
-    private static Row R(float value)
-    {
-        return MakeRow(("x", DataValue.FromFloat32(value)));
     }
 
     // ─────────────── Parsing ───────────────
@@ -162,8 +152,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_ConcatenatesBothSources()
     {
-        MockOperator left = new(R(1), R(2));
-        MockOperator right = new(R(3), R(4));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [3f], [4f]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -178,8 +168,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_PreservesDuplicates()
     {
-        MockOperator left = new(R(1), R(2), R(1));
-        MockOperator right = new(R(2), R(3));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [3f]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -190,8 +180,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_EmptyLeft()
     {
-        MockOperator left = new();
-        MockOperator right = new(R(1), R(2));
+        MockOperator left = CreateMockOperator(XColumns);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -202,8 +192,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_EmptyRight()
     {
-        MockOperator left = new(R(1), R(2));
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -214,8 +204,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_BothEmpty()
     {
-        MockOperator left = new();
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -228,8 +218,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionDistinct_RemovesDuplicates()
     {
-        MockOperator left = new(R(1), R(2), R(1));
-        MockOperator right = new(R(2), R(3));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [3f]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -242,8 +232,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionDistinct_AllDuplicates()
     {
-        MockOperator left = new(R(1), R(1));
-        MockOperator right = new(R(1), R(1));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [1f]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -254,12 +244,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionDistinct_MultiColumn()
     {
-        Row r1 = MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")));
-        Row r2 = MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromString("y")));
-        Row r1Dup = MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")));
-
-        MockOperator left = new(r1, r2);
-        MockOperator right = new(r1Dup);
+        MockOperator left = CreateMockOperator(["a", "b"], [1f, "x"], [2f, "y"]);
+        MockOperator right = CreateMockOperator(["a", "b"], [1f, "x"]);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -272,8 +258,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task IntersectDistinct_ReturnsCommonRows()
     {
-        MockOperator left = new(R(1), R(2), R(3));
-        MockOperator right = new(R(2), R(3), R(4));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [3f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [3f], [4f]);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -286,8 +272,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task IntersectDistinct_NoOverlap()
     {
-        MockOperator left = new(R(1), R(2));
-        MockOperator right = new(R(3), R(4));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [3f], [4f]);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -298,8 +284,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task IntersectDistinct_EmptyRight()
     {
-        MockOperator left = new(R(1), R(2));
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -310,8 +296,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task IntersectDistinct_DuplicatesInLeftYieldOnce()
     {
-        MockOperator left = new(R(1), R(1), R(2));
-        MockOperator right = new(R(1), R(2));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -326,8 +312,8 @@ public sealed class SetOperationTests : ServiceTestBase
     {
         // Left has 1 three times, 2 once. Right has 1 twice, 2 twice.
         // Result: 1 twice, 2 once.
-        MockOperator left = new(R(1), R(1), R(1), R(2));
-        MockOperator right = new(R(1), R(1), R(2), R(2));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [1f], [2f], [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -342,8 +328,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task IntersectAll_NoOverlap()
     {
-        MockOperator left = new(R(1));
-        MockOperator right = new(R(2));
+        MockOperator left = CreateMockOperator(XColumns, [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -356,8 +342,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptDistinct_RemovesRightRows()
     {
-        MockOperator left = new(R(1), R(2), R(3));
-        MockOperator right = new(R(2), R(4));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [3f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [4f]);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -370,8 +356,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptDistinct_EmptyRight_ReturnsDistinctLeft()
     {
-        MockOperator left = new(R(1), R(1), R(2));
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -382,8 +368,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptDistinct_AllRemoved()
     {
-        MockOperator left = new(R(1), R(2));
-        MockOperator right = new(R(1), R(2));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -394,8 +380,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptDistinct_DuplicatesInLeftStillSingle()
     {
-        MockOperator left = new(R(1), R(1), R(1));
-        MockOperator right = new(R(2));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f]);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
 
         List<Row> results = await CollectAsync(op);
@@ -411,8 +397,8 @@ public sealed class SetOperationTests : ServiceTestBase
     {
         // Left has 1 three times, 2 once. Right has 1 once.
         // Result: 1 twice, 2 once.
-        MockOperator left = new(R(1), R(1), R(1), R(2));
-        MockOperator right = new(R(1));
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f]);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -425,8 +411,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptAll_EmptyRight_ReturnsAllLeft()
     {
-        MockOperator left = new(R(1), R(1), R(2));
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [2f]);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -437,8 +423,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task ExceptAll_MoreInRightThanLeft()
     {
-        MockOperator left = new(R(1));
-        MockOperator right = new(R(1), R(1), R(1));
+        MockOperator left = CreateMockOperator(XColumns, [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [1f], [1f]);
         SetOperationOperator op = new(left, right, SetOperationType.Except, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -451,10 +437,10 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public async Task UnionAll_LargeDataset()
     {
-        Row[] leftRows = Enumerable.Range(0, 1000).Select(index => R(index)).ToArray();
-        Row[] rightRows = Enumerable.Range(500, 1000).Select(index => R(index)).ToArray();
-        MockOperator left = new(leftRows);
-        MockOperator right = new(rightRows);
+        object?[][] leftRows = Enumerable.Range(0, 1000).Select(index => new object?[] { (float)index }).ToArray();
+        object?[][] rightRows = Enumerable.Range(500, 1000).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: true);
 
         List<Row> results = await CollectAsync(op);
@@ -466,13 +452,13 @@ public sealed class SetOperationTests : ServiceTestBase
     public async Task UnionDistinct_WithSpill()
     {
         // Use a very small memory budget to force spill-to-disk.
-        Row[] leftRows = Enumerable.Range(0, 500).Select(index => R(index)).ToArray();
-        Row[] rightRows = Enumerable.Range(250, 500).Select(index => R(index)).ToArray();
-        MockOperator left = new(leftRows);
-        MockOperator right = new(rightRows);
+        object?[][] leftRows = Enumerable.Range(0, 500).Select(index => new object?[] { (float)index }).ToArray();
+        object?[][] rightRows = Enumerable.Range(250, 500).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
         SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
 
-        ExecutionContext context = TestExecutionContext.Create(memoryBudgetBytes: 1024);
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
         List<Row> results = await CollectAsync(op, context);
 
         // 0..499 UNION 250..749 → 0..749 = 750 distinct values
@@ -488,8 +474,8 @@ public sealed class SetOperationTests : ServiceTestBase
     [Fact]
     public void Properties_AreExposed()
     {
-        MockOperator left = new();
-        MockOperator right = new();
+        MockOperator left = CreateMockOperator(XColumns);
+        MockOperator right = CreateMockOperator(XColumns);
         SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
 
         Assert.Same(left, op.Left);

@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -25,6 +26,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
             new LocalBufferPool(),
+            GetService<Pool>(),
             memoryBudgetBytes: 512)
         {
             MaxRecursionDepth = 42,
@@ -54,7 +56,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     public void WithOuterRow_PreservesDefaultMaxRecursionDepth()
     {
         Row outerRow = new(["y"], [DataValue.FromFloat32(2f)]);
-        ExecutionContext original = TestExecutionContext.Create();
+        ExecutionContext original = CreateExecutionContext();
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);
 

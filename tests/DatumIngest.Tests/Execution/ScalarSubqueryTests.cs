@@ -17,8 +17,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class ScalarSubqueryTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
-
     // ─────────────── Uncorrelated scalar subqueries ───────────────
 
     /// <summary>
@@ -645,20 +643,4 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
         Assert.Equal(2f, results[0]["x"].AsFloat32());
     }
 
-    // ─────────────── Helper infrastructure ───────────────
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog, new LocalBufferPool());
-
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-        return await plan.CollectRowsAsync(context);
-    }
 }

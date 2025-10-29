@@ -571,21 +571,12 @@ public sealed class GraceHashJoinTests : ServiceTestBase
 
     private ExecutionContext CreateContext(long memoryBudgetBytes, int batchSize = 1024)
     {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes)
-        {
-            BatchSize = batchSize,
-        };
+        return CreateExecutionContext(memoryBudgetBytes: memoryBudgetBytes, batchSize: batchSize);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= TestExecutionContext.Create();
-
+        context ??= CreateExecutionContext();
 
         return await op.CollectRowsAsync(context);
     }

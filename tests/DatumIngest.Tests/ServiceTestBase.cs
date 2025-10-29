@@ -1,6 +1,10 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 using Microsoft.Extensions.DependencyInjection;
@@ -117,11 +121,42 @@ public abstract class ServiceTestBase : IDisposable
         => new(GetService<Pool>(), tableName, columns, rows);
 
     /// <summary>
+    /// Creates a minimal execution context suitable for most unit tests.
+    /// Uses a fresh <see cref="Arena"/> as the value store.
+    /// </summary>
+    protected DatumIngest.Execution.ExecutionContext CreateExecutionContext(
+        FunctionRegistry? functionRegistry = null,
+        TableCatalog? catalog = null,
+        long? memoryBudgetBytes = null,
+        QueryMeter? meter = null,
+        AssertionDiagnostics? diagnostics = null,
+        int? maxRecursionDepth = null,
+        int? batchSize = null,
+        int? maxStratifyClasses = null)
+    {
+        Pool pool = GetService<Pool>();
+        return new(
+            CancellationToken.None,
+            functionRegistry ?? FunctionRegistry.CreateDefault(),
+            catalog ?? new TableCatalog(pool),
+            new LocalBufferPool(),
+            pool,
+            queryMeter: meter,
+            memoryBudgetBytes: memoryBudgetBytes)
+        {
+            AssertionDiagnostics = diagnostics,
+            MaxRecursionDepth = maxRecursionDepth ?? 1000,
+            BatchSize = batchSize ?? 1024,
+            MaxStratifyClasses = maxStratifyClasses ?? 10000
+        };
+    }
+
+    /// <summary>
     /// Creates a <see cref="Execution.MockOperator"/> that yields the supplied rows.
     /// Backed by an <see cref="InMemoryTableProvider"/> so batches are pool-rented
     /// and carry a valid <see cref="Arena"/> — matching production scan semantics.
     /// </summary>
-    protected Execution.MockOperator CreateMockOperator(string[] columns, params object?[][] rows)
+    protected MockOperator CreateMockOperator(string[] columns, params object?[][] rows)
         => new(CreateProvider("mock", columns, rows));
 
     /// <summary>
@@ -129,7 +164,7 @@ public abstract class ServiceTestBase : IDisposable
     /// the same row set must feed multiple operators (e.g. running two parallel
     /// operators over identical data for determinism checks).
     /// </summary>
-    protected Execution.MockOperator CreateMockOperator(InMemoryTableProvider provider)
+    protected MockOperator CreateMockOperator(InMemoryTableProvider provider)
         => new(provider);
 
     /// <summary>
@@ -138,11 +173,26 @@ public abstract class ServiceTestBase : IDisposable
     /// <see cref="InMemoryTableProvider"/>. Used to verify consumers don't
     /// over-read (e.g. LIMIT correctness).
     /// </summary>
-    protected Execution.CountingOperator CreateCountingOperator(
+    protected CountingOperator CreateCountingOperator(
         Action onRowYielded,
         string[] columns,
         params object?[][] rows)
         => new(CreateProvider("mock", columns, rows), onRowYielded);
+
+    protected async Task<List<Row>> ExecuteQueryAsync(
+        string sql,
+        TableCatalog catalog,
+        AssertionDiagnostics? diagnostics = null)
+    {
+        QueryExpression query = SqlParser.Parse(sql);
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics);
+
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+
+        return await plan.CollectRowsAsync(context);
+    }
 
     public virtual void Dispose()
     {

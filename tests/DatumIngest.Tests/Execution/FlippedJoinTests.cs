@@ -1,7 +1,5 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -16,6 +14,9 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class FlippedJoinTests : ServiceTestBase
 {
+    private static readonly string[] LeftNameColumns = ["l.id", "l.name"];
+    private static readonly string[] RightScoreColumns = ["r.id", "r.score"];
+
     /// <summary>
     /// Memory budget small enough to force spilling through the Grace path.
     /// </summary>
@@ -28,12 +29,12 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedLeftJoin_ProducesCorrectResults()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -59,11 +60,11 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedLeftJoin_PreservesColumnOrder()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -91,12 +92,12 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedLeftJoin_NoMatches_EmitsAllLeftWithNullRight()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(99f)), ("r.score", DataValue.FromFloat32(50f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [99f, 50f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -120,12 +121,12 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedRightJoin_ProducesCorrectResults()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [2f, 70f]);
 
         JoinOperator join = new(left, right, JoinType.Right,
             new BinaryExpression(
@@ -153,14 +154,14 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedLeftJoin_GracePath_ProducesCorrectResults()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [3f, 87f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -169,7 +170,7 @@ public sealed class FlippedJoinTests : ServiceTestBase
                 new ColumnReference("r", "id")),
             flipped: true);
 
-        List<Row> rows = await CollectAsync(join, TestExecutionContext.Create(memoryBudgetBytes: TinyBudget));
+        List<Row> rows = await CollectAsync(join, CreateExecutionContext(memoryBudgetBytes: TinyBudget));
 
         Assert.Equal(3, rows.Count);
 
@@ -189,12 +190,12 @@ public sealed class FlippedJoinTests : ServiceTestBase
     [Fact]
     public async Task FlippedInnerJoin_ProducesSameResults()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -210,21 +211,9 @@ public sealed class FlippedJoinTests : ServiceTestBase
         Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
     }
 
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(column => column.Name).ToArray();
-        DataValue[] values = columns.Select(column => column.Value).ToArray();
-        return new Row(names, values);
-    }
-
     private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            new LocalBufferPool());
-
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 }

@@ -103,10 +103,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         // Act
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
@@ -169,10 +166,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
@@ -219,10 +213,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
@@ -298,10 +289,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
@@ -398,10 +386,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("product_id")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         // Act
         List<Row> results = await outerJoin.ExecuteAsync(context).CollectRowsAsync();
@@ -514,10 +499,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
@@ -593,10 +575,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
                 BinaryOperator.Equal,
                 new ColumnReference("rid")));
 
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 

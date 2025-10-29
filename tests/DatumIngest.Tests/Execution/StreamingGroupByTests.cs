@@ -18,9 +18,9 @@ public sealed class StreamingGroupByTests : ServiceTestBase
 {
     private static readonly string[] KeyValColumns = ["key", "val"];
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= TestExecutionContext.Create();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -209,14 +209,7 @@ public sealed class StreamingGroupByTests : ServiceTestBase
         // source rows are consumed. With default BatchSize (1024) all 100 groups
         // fit in one batch and the entire input would be read before any output
         // is yielded.
-        ExecutionContext context = new(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            new LocalBufferPool())
-        {
-            BatchSize = 8,
-        };
+        ExecutionContext context = CreateExecutionContext(batchSize: 8);
 
         List<Row> results = await CollectAsync(limit, context);
 

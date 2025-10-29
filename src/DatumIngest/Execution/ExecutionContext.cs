@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
@@ -20,6 +21,7 @@ public sealed class ExecutionContext
         FunctionRegistry = context.FunctionRegistry;
         Catalog = context.Catalog;
         LocalBufferPool = context.LocalBufferPool;
+        Pool = context.Pool;
         Store = context.Store;
         QueryMeter = context.QueryMeter;
         MemoryBudgetBytes = context.MemoryBudgetBytes;
@@ -46,6 +48,7 @@ public sealed class ExecutionContext
   /// Pool for reusing <see cref="Model.Row"/> objects and their backing
   /// <see cref="Model.DataValue"/> arrays in join operators.
   /// </param>
+  /// <param name="pool">Pool for reusing buffers during query execution.</param>
   /// <param name="store">
   /// Optional value store for reference-type payloads. Defaults to a new <see cref="Model.Arena"/>
   /// if not provided.
@@ -55,6 +58,7 @@ public sealed class ExecutionContext
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
         LocalBufferPool localBufferPool,
+        Pool pool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
         Arena? store = null)
@@ -63,6 +67,7 @@ public sealed class ExecutionContext
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
         LocalBufferPool = localBufferPool;
+        Pool = pool;
         Store = store ?? new Arena();
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
@@ -155,6 +160,11 @@ public sealed class ExecutionContext
     public LocalBufferPool LocalBufferPool { get; }
 
     /// <summary>
+    /// Pool for reusing buffers during query execution.
+    /// </summary>
+    public Pool Pool { get; }
+
+    /// <summary>
     /// Returns a new context with the given outer row set for correlated subquery execution.
     /// All other properties are copied from the current context.
     /// </summary>
@@ -167,6 +177,7 @@ public sealed class ExecutionContext
             FunctionRegistry,
             Catalog,
             LocalBufferPool,
+            Pool,
             QueryMeter,
             MemoryBudgetBytes,
             Store)

@@ -1,7 +1,5 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -15,25 +13,16 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class GroupByOperatorTests : ServiceTestBase
 {
-    private ExecutionContext CreateContext()
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            new LocalBufferPool());
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    private static readonly string[] XColumns = ["x"];
+    private static readonly string[] PriceColumns = ["price"];
+    private static readonly string[] CategoryValueColumns = ["category", "value"];
+    private static readonly string[] DeptStatusAmountColumns = ["dept", "status", "amount"];
+    private static readonly string[] GroupValColumns = ["group", "val"];
+    private static readonly string[] CategoryPriceColumns = ["category", "price"];
 
     private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -42,10 +31,10 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GlobalAggregation_CountStar()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -64,10 +53,10 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GlobalAggregation_SumAndAvg()
     {
-        MockOperator source = new(
-            MakeRow(("price", DataValue.FromFloat32(10f))),
-            MakeRow(("price", DataValue.FromFloat32(20f))),
-            MakeRow(("price", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(PriceColumns,
+            [10f],
+            [20f],
+            [30f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -96,12 +85,12 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task SingleKey_GroupBy_WithCount()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(CategoryValueColumns,
+            ["A", 1f],
+            ["B", 2f],
+            ["A", 3f],
+            ["B", 4f],
+            ["A", 5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -135,11 +124,11 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task CompositeKey_GroupBy()
     {
-        MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))));
+        MockOperator source = CreateMockOperator(DeptStatusAmountColumns,
+            ["X", "active", 100f],
+            ["X", "inactive", 200f],
+            ["X", "active", 300f],
+            ["Y", "active", 50f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -173,10 +162,10 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GroupBy_MinMax()
     {
-        MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(5f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(15f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(10f))));
+        MockOperator source = CreateMockOperator(GroupValColumns,
+            ["G1", 5f],
+            ["G1", 15f],
+            ["G1", 10f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -205,7 +194,7 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GroupBy_EmptyInput_WithGroupBy_ReturnsNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(XColumns);
 
         GroupByOperator groupBy = new(
             source,
@@ -223,7 +212,7 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GlobalAggregation_EmptyInput_ReturnsOneRow()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(XColumns);
 
         GroupByOperator groupBy = new(
             source,
@@ -245,10 +234,10 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GroupBy_NullGroupKeyCreatesGroup()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(CategoryValueColumns,
+            [DataValue.Null(DataKind.String), 1f],
+            ["A", 2f],
+            [DataValue.Null(DataKind.String), 3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -271,8 +260,8 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task OutputRow_HasCorrectColumnNames()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("price", DataValue.FromFloat32(10f))));
+        MockOperator source = CreateMockOperator(CategoryPriceColumns,
+            ["A", 10f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -311,11 +300,11 @@ public class GroupByOperatorTests : ServiceTestBase
         // Budget of 1: after the first row, consumed = 1 (not exceeded because
         // IsBudgetExceeded uses >). After the second row, consumed = 2 > 1,
         // so the third row's pre-evaluation check triggers the exception.
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))),
-            MakeRow(("x", DataValue.FromFloat32(4f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f],
+            [3f],
+            [4f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -326,7 +315,7 @@ public class GroupByOperatorTests : ServiceTestBase
             ]);
 
         QueryMeter meter = new(budget: 1);
-        ExecutionContext context = TestExecutionContext.Create(meter: meter);
+        ExecutionContext context = CreateExecutionContext(meter: meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(groupBy, context));
@@ -340,9 +329,9 @@ public class GroupByOperatorTests : ServiceTestBase
     [Fact]
     public async Task GroupBy_CancellationToken_ThrowsDuringMaterialization()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -355,7 +344,7 @@ public class GroupByOperatorTests : ServiceTestBase
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = TestExecutionContext.Create();
+        ExecutionContext context = CreateExecutionContext();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(groupBy, context));

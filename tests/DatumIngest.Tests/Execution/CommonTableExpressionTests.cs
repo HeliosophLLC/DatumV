@@ -1,6 +1,4 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -401,13 +399,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             [1f]);
 
         // Set very low recursion limit.
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog, new LocalBufferPool())
-        {
-            MaxRecursionDepth = 3,
-        };
+        ExecutionContext context = CreateExecutionContext(catalog: catalog, maxRecursionDepth: 3);
 
         SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
             "WITH RECURSIVE nums AS (" +
@@ -445,7 +437,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
 
         CommonTableExpressionOperator cteOperator = new(inner, "test_cte", isMaterialized: false);
 
-        ExecutionContext context = CreateContext();
+        ExecutionContext context = CreateExecutionContext();
 
         // Execute twice.
         List<Row> first = await CollectAsync(cteOperator, context);
@@ -469,7 +461,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
 
         CommonTableExpressionOperator cteOperator = new(inner, "test_cte", isMaterialized: true);
 
-        ExecutionContext context = CreateContext();
+        ExecutionContext context = CreateExecutionContext();
 
         List<Row> first = await CollectAsync(cteOperator, context);
         List<Row> second = await CollectAsync(cteOperator, context);
@@ -495,12 +487,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         CommonTableExpressionOperator cteOperator = new(inner, "spill_test", isMaterialized: true);
 
         // Tiny budget to force spilling.
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            CreateCatalog(),
-            new LocalBufferPool(),
-            memoryBudgetBytes: 1);
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1);
 
         try
         {
@@ -788,31 +775,6 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         string[] names = columns.Select(column => column.Name).ToArray();
         DataValue[] values = columns.Select(column => column.Value).ToArray();
         return new Row(names, values);
-    }
-
-    private ExecutionContext CreateContext()
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            DefaultFunctions,
-            CreateCatalog(),
-            new LocalBufferPool());
-    }
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog,
-            new LocalBufferPool());
-
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)

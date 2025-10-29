@@ -1,13 +1,5 @@
-using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -17,10 +9,6 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class GroupByAllTests : ServiceTestBase
 {
-    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
-
-    // ─────────────── Basic resolution ───────────────
-
     /// <summary>
     /// GROUP BY ALL infers grouping keys from the two non-aggregate columns
     /// and produces the same result as an explicit GROUP BY.
@@ -169,17 +157,5 @@ public sealed class GroupByAllTests : ServiceTestBase
         Assert.Equal(2, results.Count);
         Assert.Equal("A", results[0]["category"].AsString());
         Assert.Equal("C", results[1]["category"].AsString());
-    }
-
-    // ─────────────── Helpers ───────────────
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
     }
 }

@@ -21,21 +21,6 @@ public sealed class AssertClauseTests : ServiceTestBase
 
     private static readonly string[] OrderColumns = ["id", "amount"];
 
-    private static async Task<List<Row>> ExecuteQueryAsync(
-        string sql, TableCatalog catalog, AssertionDiagnostics? diagnostics = null)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(
-            CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
-        {
-            AssertionDiagnostics = diagnostics,
-        };
-        IQueryOperator plan = planner.Plan(query);
-
-        return await plan.CollectRowsAsync(context);
-    }
-
     private static SelectStatement ParseStatement(string sql)
     {
         SelectQueryExpression query = Assert.IsType<SelectQueryExpression>(SqlParser.Parse(sql));
@@ -398,10 +383,7 @@ public sealed class AssertClauseTests : ServiceTestBase
         QueryExpression query = SqlParser.Parse(
             "SELECT DEFINE { let x = reordered } order_id, product_id, reordered FROM orders ASSERT x = FALSE MESSAGE 'test' ON FAIL WARN");
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
-        {
-            AssertionDiagnostics = diagnostics,
-        };
+        ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics);
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> result = await plan.CollectRowsAsync(context);

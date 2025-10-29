@@ -13,23 +13,12 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class StratifiedSampleTests : ServiceTestBase
 {
-    private ExecutionContext CreateContext(int? maxStratifyClasses = null)
-    {
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            new LocalBufferPool())
-        {
-            MaxStratifyClasses = maxStratifyClasses,
-        };
-    }
 
     private static readonly string[] ClassColumns = ["id", "label"];
 
     private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
-        context ??= CreateContext();
+        context ??= CreateExecutionContext();
         return await op.CollectRowsAsync(context);
     }
 
@@ -255,7 +244,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
         BalancedSampleOperator op = new(source, countPerClass: 5, ["label"], seed: 42);
 
         // Set a very low max to trigger the error.
-        ExecutionContext context = CreateContext(maxStratifyClasses: 10);
+        ExecutionContext context = CreateExecutionContext(maxStratifyClasses: 10);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await CollectAsync(op, context));

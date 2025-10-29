@@ -1,4 +1,3 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -20,24 +19,23 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class ParallelOperatorTests : ServiceTestBase
 {
+    private static readonly string[] XColumns = ["x"];
+    private static readonly string[] LeftNameColumns = ["l.id", "l.name"];
+    private static readonly string[] RightScoreColumns = ["r.id", "r.score"];
+
     private ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
     {
+        Pool pool = GetService<Pool>();
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool())
+            new LocalBufferPool(),
+            pool)
         {
             DegreeOfParallelism = degreeOfParallelism,
             ParallelismBudget = new ParallelismBudget(degreeOfParallelism),
         };
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
@@ -56,14 +54,14 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_InnerJoin_MatchesSequentialResult()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
-            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f],
+            [3f, 87f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -90,13 +88,13 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_LeftJoin_IncludesUnmatchedLeft()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [2f, "Bob"],
+            [3f, "Charlie"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -126,13 +124,13 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_InnerJoin_DuplicateBuildKeys()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Bob"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"],
+            [1f, "Bob"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("X"))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("Y"))));
+        MockOperator right = CreateMockOperator(["r.id", "r.val"],
+            [1f, "X"],
+            [1f, "Y"]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -153,13 +151,13 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_InnerJoin_NullKeysDoNotMatch()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Null"))),
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [null, "Null"],
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(0f))),
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [null, 0f],
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -181,14 +179,14 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_InnerJoin_CompoundKeys()
     {
-        MockOperator left = new(
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("X")), ("l.val", DataValue.FromFloat32(100f))),
-            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("Y")), ("l.val", DataValue.FromFloat32(200f))),
-            MakeRow(("l.a", DataValue.FromFloat32(2f)), ("l.b", DataValue.FromString("X")), ("l.val", DataValue.FromFloat32(300f))));
+        MockOperator left = CreateMockOperator(["l.a", "l.b", "l.val"],
+            [1f, "X", 100f],
+            [1f, "Y", 200f],
+            [2f, "X", 300f]);
 
-        MockOperator right = new(
-            MakeRow(("r.a", DataValue.FromFloat32(1f)), ("r.b", DataValue.FromString("X")), ("r.val", DataValue.FromFloat32(10f))),
-            MakeRow(("r.a", DataValue.FromFloat32(2f)), ("r.b", DataValue.FromString("Z")), ("r.val", DataValue.FromFloat32(20f))));
+        MockOperator right = CreateMockOperator(["r.a", "r.b", "r.val"],
+            [1f, "X", 10f],
+            [2f, "Z", 20f]);
 
         // l.a = r.a AND l.b = r.b
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -218,21 +216,17 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_InnerJoin_FourWorkers()
     {
-        Row[] leftRows = Enumerable.Range(0, 20)
-            .Select(i => MakeRow(
-                ("l.id", DataValue.FromFloat32(i)),
-                ("l.val", DataValue.FromFloat32(i * 10f))))
+        object?[][] leftRows = Enumerable.Range(0, 20)
+            .Select(i => new object?[] { (float)i, i * 10f })
             .ToArray();
 
-        Row[] rightRows = Enumerable.Range(0, 20)
+        object?[][] rightRows = Enumerable.Range(0, 20)
             .Where(i => i % 3 == 0) // 0, 3, 6, 9, 12, 15, 18
-            .Select(i => MakeRow(
-                ("r.id", DataValue.FromFloat32(i)),
-                ("r.name", DataValue.FromString($"R{i}"))))
+            .Select(i => new object?[] { (float)i, $"R{i}" })
             .ToArray();
 
-        MockOperator left = new(leftRows);
-        MockOperator right = new(rightRows);
+        MockOperator left = CreateMockOperator(["l.id", "l.val"], rows: leftRows);
+        MockOperator right = CreateMockOperator(["r.id", "r.name"], rows: rightRows);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -257,10 +251,10 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_GlobalCount()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))),
-            MakeRow(("x", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f],
+            [3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -284,10 +278,10 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_GlobalSumAndAvg()
     {
-        MockOperator source = new(
-            MakeRow(("price", DataValue.FromFloat32(10f))),
-            MakeRow(("price", DataValue.FromFloat32(20f))),
-            MakeRow(("price", DataValue.FromFloat32(30f))));
+        MockOperator source = CreateMockOperator(["price"],
+            [10f],
+            [20f],
+            [30f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -319,12 +313,12 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_SingleKey_GroupBy()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))));
+        MockOperator source = CreateMockOperator(["category", "value"],
+            ["A", 1f],
+            ["B", 2f],
+            ["A", 3f],
+            ["B", 4f],
+            ["A", 5f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -359,11 +353,11 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_CompositeKey_GroupBy()
     {
-        MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))));
+        MockOperator source = CreateMockOperator(["dept", "status", "amount"],
+            ["X", "active", 100f],
+            ["X", "inactive", 200f],
+            ["X", "active", 300f],
+            ["Y", "active", 50f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -399,10 +393,10 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_MinMax()
     {
-        MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(5f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(15f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(10f))));
+        MockOperator source = CreateMockOperator(["group", "val"],
+            ["G1", 5f],
+            ["G1", 15f],
+            ["G1", 10f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -434,7 +428,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_EmptyInput_WithGroupBy_ReturnsNoRows()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(XColumns);
 
         GroupByOperator groupBy = new(
             source,
@@ -457,7 +451,7 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_GlobalEmptyInput_ReturnsOneRow()
     {
-        MockOperator source = new();
+        MockOperator source = CreateMockOperator(XColumns);
 
         GroupByOperator groupBy = new(
             source,
@@ -480,10 +474,10 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_NullGroupKey_CreatesGroup()
     {
-        MockOperator source = new(
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(2f))),
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(3f))));
+        MockOperator source = CreateMockOperator(["category", "value"],
+            [null, 1f],
+            ["A", 2f],
+            [null, 3f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -512,13 +506,11 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     public async Task ParallelAggregate_FourWorkers_ManyGroups()
     {
         // 100 rows across 10 groups.
-        Row[] rows = Enumerable.Range(0, 100)
-            .Select(i => MakeRow(
-                ("group", DataValue.FromString($"G{i % 10}")),
-                ("value", DataValue.FromFloat32(i))))
+        object?[][] rows = Enumerable.Range(0, 100)
+            .Select(i => new object?[] { $"G{i % 10}", (float)i })
             .ToArray();
 
-        MockOperator source = new(rows);
+        MockOperator source = CreateMockOperator(["group", "value"], rows: rows);
 
         GroupByOperator groupBy = new(
             source,
@@ -554,9 +546,9 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelAggregate_ReleasesBudget()
     {
-        MockOperator source = new(
-            MakeRow(("x", DataValue.FromFloat32(1f))),
-            MakeRow(("x", DataValue.FromFloat32(2f))));
+        MockOperator source = CreateMockOperator(XColumns,
+            [1f],
+            [2f]);
 
         GroupByOperator groupBy = new(
             source,
@@ -567,11 +559,13 @@ public sealed class ParallelOperatorTests : ServiceTestBase
             ]);
 
         ParallelismBudget budget = new(4);
+        Pool pool = GetService<Pool>();
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool())
+            new LocalBufferPool(),
+            pool)
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,
@@ -593,11 +587,11 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     [Fact]
     public async Task ParallelProbe_ReleasesBudget()
     {
-        MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
+        MockOperator left = CreateMockOperator(LeftNameColumns,
+            [1f, "Alice"]);
 
-        MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
+        MockOperator right = CreateMockOperator(RightScoreColumns,
+            [1f, 95f]);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -606,11 +600,13 @@ public sealed class ParallelOperatorTests : ServiceTestBase
                 new ColumnReference("r", "id")));
 
         ParallelismBudget budget = new(4);
-        TableCatalog catalog = new(new Pool(GlobalPool.Backing));
+        Pool pool = GetService<Pool>();
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new LocalBufferPool())
+            CreateCatalog(),
+            new LocalBufferPool(),
+            pool)
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,
@@ -644,14 +640,11 @@ public sealed class ParallelOperatorTests : ServiceTestBase
         // 500 rows: 5 departments × 10 statuses = 50 distinct (dept, status) groups,
         // each with exactly 10 rows. Groups are constructed so both key columns vary
         // independently, giving 50 distinct composite keys with no aliasing.
-        Row[] inputRows = Enumerable.Range(0, 500)
-            .Select(i => MakeRow(
-                ("dept", DataValue.FromString($"D{i / 100}")),
-                ("status", DataValue.FromString($"S{(i % 100) / 10}")),
-                ("value", DataValue.FromFloat32(1f))))
+        object?[][] inputRows = Enumerable.Range(0, 500)
+            .Select(i => new object?[] { $"D{i / 100}", $"S{(i % 100) / 10}", 1f })
             .ToArray();
 
-        MockOperator source = new(inputRows);
+        MockOperator source = CreateMockOperator(["dept", "status", "value"], rows: inputRows);
 
         GroupByOperator groupBy = new(
             source,
@@ -695,13 +688,11 @@ public sealed class ParallelOperatorTests : ServiceTestBase
     public async Task ParallelAggregate_PartitionedRouting_SingleKey_MoreGroupsThanWorkers()
     {
         // 400 rows: 100 distinct groups, each with exactly 4 rows.
-        Row[] inputRows = Enumerable.Range(0, 400)
-            .Select(i => MakeRow(
-                ("group", DataValue.FromString($"G{i % 100}")),
-                ("value", DataValue.FromFloat32(i))))
+        object?[][] inputRows = Enumerable.Range(0, 400)
+            .Select(i => new object?[] { $"G{i % 100}", (float)i })
             .ToArray();
 
-        MockOperator source = new(inputRows);
+        MockOperator source = CreateMockOperator(["group", "value"], rows: inputRows);
 
         GroupByOperator groupBy = new(
             source,

@@ -465,21 +465,4 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
         Assert.Equal(3, inExpr.Values.Count);
         Assert.False(inExpr.Negated);
     }
-
-    // ─────────────── Helper infrastructure ───────────────
-
-    private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
-    {
-        QueryExpression query = SqlParser.Parse(sql);
-        QueryPlanner planner = new(catalog, DefaultFunctions);
-
-        ExecutionContext context = new(
-            CancellationToken.None,
-            DefaultFunctions,
-            catalog, new LocalBufferPool());
-
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-        return await plan.CollectRowsAsync(context);
-    }
 }

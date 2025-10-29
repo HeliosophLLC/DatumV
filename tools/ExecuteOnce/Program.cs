@@ -86,7 +86,7 @@ Console.CancelKeyPress += (_, e) => { cts.Cancel(); e.Cancel = true; };
 
 using LocalBufferPool localBufferPool = new(backing);
 DatumIngest.Execution.ExecutionContext executionContext = new(
-    cts.Token, functions, catalog, localBufferPool);
+    cts.Token, functions, catalog, localBufferPool, pool);
 
 Console.WriteLine($"Table:  {tableName}");
 Console.WriteLine($"Source: {opts.DatumPath}");

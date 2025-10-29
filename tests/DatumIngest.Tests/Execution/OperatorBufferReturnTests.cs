@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -284,21 +284,17 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         ExecutionContext context = CreateContext(pool, memoryBudgetBytes: tinyBudget);
 
         // Build side: small table.
-        Row[] buildRows = Enumerable.Range(0, 50)
-            .Select(i => MakeRow(
-                ("r.id", DataValue.FromFloat32(i)),
-                ("r.val", DataValue.FromString($"build_{i}"))))
+        object?[][] buildRows = Enumerable.Range(0, 50)
+            .Select(i => new object?[] { (float)i, $"build_{i}" })
             .ToArray();
 
         // Probe side: larger table to ensure many probe rows hit spilled partitions.
-        Row[] probeRows = Enumerable.Range(0, 2000)
-            .Select(i => MakeRow(
-                ("l.id", DataValue.FromFloat32(i % 50)),
-                ("l.data", DataValue.FromFloat32(i))))
+        object?[][] probeRows = Enumerable.Range(0, 2000)
+            .Select(i => new object?[] { (float)(i % 50), (float)i })
             .ToArray();
 
-        MockOperator left = new(probeRows);
-        MockOperator right = new(buildRows);
+        MockOperator left = CreateMockOperator(["l.id", "l.data"], rows: probeRows);
+        MockOperator right = CreateMockOperator(["r.id", "r.val"], rows: buildRows);
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -377,22 +373,17 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     private ExecutionContext CreateContext(
         LocalBufferPool pool, long? memoryBudgetBytes = null)
     {
+        Pool dataPool = GetService<Pool>();
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
             pool,
+            dataPool,
             memoryBudgetBytes: memoryBudgetBytes)
         {
             BatchSize = 1024,
         };
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
     }
 
     /// <summary>

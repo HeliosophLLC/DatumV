@@ -612,9 +612,9 @@ public sealed class BitmapPruningTests : ServiceTestBase
         return (scan, catalog);
     }
 
-    private static async Task<List<Row>> ExecuteScanAsync(ScanOperator scan, TableCatalog catalog)
+    private async Task<List<Row>> ExecuteScanAsync(ScanOperator scan, TableCatalog catalog)
     {
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
+        ExecutionContext context = CreateExecutionContext(catalog: catalog);
 
         return await scan.CollectRowsAsync(context);
     }
