@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class GroupByOperatorTests : ServiceTestBase
 {
-    private static ExecutionContext CreateContext()
+    private ExecutionContext CreateContext()
     {
         return new ExecutionContext(
             CancellationToken.None,
@@ -31,7 +31,7 @@ public class GroupByOperatorTests : ServiceTestBase
         return new Row(names, values);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateContext();
         return await op.CollectRowsAsync(context);

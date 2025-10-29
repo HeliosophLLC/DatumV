@@ -15,6 +15,11 @@ public sealed class BloomFilterSet
     /// <summary>Column names that have bloom filters.</summary>
     public IReadOnlyCollection<string> ColumnNames => _filters.Keys;
 
+    /// <summary>
+    /// Gets the number of columns with bloom filters.
+    /// </summary>
+    public int ColumnCount => _filters.Count;
+
     /// <summary>Number of chunks per column (all columns share the same chunk count).</summary>
     public int ChunkCount { get; }
 

@@ -20,7 +20,7 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class ParallelOperatorTests : ServiceTestBase
 {
-    private static ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
+    private ExecutionContext CreateParallelContext(int degreeOfParallelism = 2)
     {
         return new ExecutionContext(
             CancellationToken.None,

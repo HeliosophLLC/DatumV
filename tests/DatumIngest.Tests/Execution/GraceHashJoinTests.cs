@@ -549,7 +549,7 @@ public sealed class GraceHashJoinTests : ServiceTestBase
     // Arena-backed string storage doesn't intern, but the memory model is
     // fundamentally different (batch-scoped rather than query-scoped).
 
-    private static ExecutionContext CreateContext(long memoryBudgetBytes, int batchSize = 1024)
+    private ExecutionContext CreateContext(long memoryBudgetBytes, int batchSize = 1024)
     {
         return new ExecutionContext(
             CancellationToken.None,

@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class StratifiedSampleTests : ServiceTestBase
 {
-    private static ExecutionContext CreateContext(int? maxStratifyClasses = null)
+    private ExecutionContext CreateContext(int? maxStratifyClasses = null)
     {
         return new ExecutionContext(
             CancellationToken.None,
@@ -31,7 +31,7 @@ public sealed class StratifiedSampleTests : ServiceTestBase
         return new Row(names, values);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateContext();
         return await op.CollectRowsAsync(context);

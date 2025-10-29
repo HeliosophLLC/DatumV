@@ -217,7 +217,7 @@ public sealed class FlippedJoinTests : ServiceTestBase
         return new Row(names, values);
     }
 
-    private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
+    private async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
         context ??= new ExecutionContext(
             CancellationToken.None,

@@ -850,7 +850,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         return new Row(names, values);
     }
 
-    private static ExecutionContext CreateContext()
+    private ExecutionContext CreateContext()
     {
         return new ExecutionContext(
             CancellationToken.None,

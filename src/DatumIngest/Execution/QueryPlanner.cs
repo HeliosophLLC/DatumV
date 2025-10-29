@@ -3992,12 +3992,6 @@ public sealed class QueryPlanner
             scanOperator.ColumnStatistics = columnStatistics;
         }
 
-        // Attach source index for chunk-based pruning if one is registered.
-        if (provider.GetSourceIndex() is Indexing.SourceIndex sourceIndex)
-        {
-            scanOperator.SetSourceIndex(sourceIndex);
-        }
-
         IQueryOperator outOperator = scanOperator;
 
         // Apply TABLESAMPLE row/chunk sampling if the table reference includes a sampling clause.

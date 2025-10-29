@@ -7,6 +7,7 @@ using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Indexing.Bloom;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -23,7 +24,6 @@ public sealed class ScanOperator : IQueryOperator
 {
     private readonly IReadOnlySet<string>? _requiredColumns;
     private Expression? _filterHint;
-    private SourceIndex? _sourceIndex;
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _bloomPruningKeys;
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _sortedIndexPruningKeys;
 
@@ -67,7 +67,7 @@ public sealed class ScanOperator : IQueryOperator
     public IReadOnlyDictionary<string, FeatureManifest>? ColumnStatistics { get; set; }
 
     /// <summary>The source index for chunk-based pruning, or <c>null</c> if none is available.</summary>
-    public SourceIndex? SourceIndex => _sourceIndex;
+    public SourceIndex? SourceIndex => TableProvider.GetSourceIndex();
 
     /// <summary>Total number of index chunks considered during the last execution.</summary>
     public int TotalIndexChunks { get; private set; }
@@ -82,6 +82,27 @@ public sealed class ScanOperator : IQueryOperator
     public int? ExactSeekRowsFetched { get; private set; }
 
     /// <summary>
+    /// Gets a value indicating whether this scan operator has the necessary information
+    /// to apply index-based pruning during execution. This is true when a source index is
+    /// available and at least one of the following is present: a filter hint, bloom pruning keys,
+    /// sorted index pruning keys, bitmap indexes, or column indexes. When this property is true,
+    /// the operator can skip entire chunks of rows based on metadata without reading them from the source.
+    /// </summary>
+    [MemberNotNullWhen(true, nameof(SourceIndex))]
+    public bool HasIndexPruning
+    {
+        get
+        {
+            return SourceIndex is not null
+                && (_filterHint is not null || _bloomPruningKeys is not null
+                    || _sortedIndexPruningKeys is not null
+                    || SourceIndex.MappedSortedIndexes is not null
+                    || SourceIndex.BPlusTreeIndexes is not null
+                    || SourceIndex.BitmapIndexes is not null);
+        }
+    }
+
+    /// <summary>
     /// Adds an advisory filter predicate for statistics-based partition pruning.
     /// Multiple calls combine predicates with AND.
     /// </summary>
@@ -91,15 +112,6 @@ public sealed class ScanOperator : IQueryOperator
         _filterHint = _filterHint is null
             ? predicate
             : new BinaryExpression(_filterHint, BinaryOperator.And, predicate);
-    }
-
-    /// <summary>
-    /// Attaches a source index for chunk-based partition pruning.
-    /// </summary>
-    /// <param name="index">The source index to use during execution.</param>
-    public void SetSourceIndex(SourceIndex index)
-    {
-        _sourceIndex = index;
     }
 
     /// <summary>
@@ -131,6 +143,8 @@ public sealed class ScanOperator : IQueryOperator
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
+        SourceIndex? sourceIndex = TableProvider.GetSourceIndex();
+
         Dictionary<string, string> properties = new()
         {
             ["table"] = TableProvider.Name,
@@ -147,43 +161,34 @@ public sealed class ScanOperator : IQueryOperator
         // Build access strategy with pruning capabilities.
         List<PruningCapability> pruningCapabilities = [];
 
-        if (_filterHint is not null && _sourceIndex is not null)
+        if (_filterHint is not null && sourceIndex is not null)
         {
             pruningCapabilities.Add(new PruningCapability(
                 PruningTechnique.StatisticsPruning, [], pendingRuntime: false));
         }
 
-        if (_sourceIndex?.BloomFilters is not null)
-        {
-            List<string> bloomColumns = [.. _sourceIndex.BloomFilters.ColumnNames];
-            if (bloomColumns.Count > 0)
-            {
-                pruningCapabilities.Add(new PruningCapability(
-                    PruningTechnique.BloomFilterPruning, bloomColumns, pendingRuntime: true));
-            }
-        }
-
-        List<string>? sortedColumns = CollectSortedIndexColumnNames(_sourceIndex);
-        if (sortedColumns is { Count: > 0 })
+        if (sourceIndex?.BloomFilters is { ColumnCount: > 0 } bloomFilters)
         {
             pruningCapabilities.Add(new PruningCapability(
-                PruningTechnique.SortedIndexPruning, sortedColumns, pendingRuntime: false));
+                PruningTechnique.BloomFilterPruning, [.. bloomFilters.ColumnNames], pendingRuntime: true));
         }
 
-        if (_sourceIndex?.BitmapIndexes is { Count: > 0 } bitmapIndexes)
+        if (sourceIndex?.MappedSortedIndexes is { Count: > 0 } sortedColumns)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.SortedIndexPruning, [.. sortedColumns.Keys], pendingRuntime: false));
+        }
+
+        if (sourceIndex?.BitmapIndexes is { Count: > 0 } bitmapIndexes)
         {
             pruningCapabilities.Add(new PruningCapability(
                 PruningTechnique.BitmapPruning, [.. bitmapIndexes.ColumnNames], pendingRuntime: false));
         }
 
-        if (_sourceIndex?.BPlusTreeIndexes is { } bPlusTreeIndexes)
+        if (sourceIndex?.BPlusTreeIndexes is { Count: > 0 } bPlusTreeIndexes)
         {
-            List<string> btreeColumns = [.. bPlusTreeIndexes.ColumnNames];
-            if (btreeColumns.Count > 0)
-            {
-                pruningCapabilities.Add(new PruningCapability(
-                    PruningTechnique.BPlusTreeIndexPruning, btreeColumns, pendingRuntime: false));
-            }
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.BPlusTreeIndexPruning, [.. bPlusTreeIndexes.ColumnNames], pendingRuntime: false));
         }
 
         AccessStrategyDescription accessStrategy = new(
@@ -198,49 +203,19 @@ public sealed class ScanOperator : IQueryOperator
         };
     }
 
-    /// <summary>
-    /// Collects the memory-mapped sorted-index column names available on the given
-    /// source index. Returns <c>null</c> when no sorted indexes exist.
-    /// </summary>
-    /// <param name="sourceIndex">The source index, or <c>null</c>.</param>
-    /// <returns>A list of column names, or <c>null</c> if no sorted indexes exist.</returns>
-    internal static List<string>? CollectSortedIndexColumnNames(Indexing.SourceIndex? sourceIndex)
-    {
-        if (sourceIndex is null)
-        {
-            return null;
-        }
-
-        if (sourceIndex.MappedSortedIndexes is not { Count: > 0 } mappedSortedIndexes)
-        {
-            return null;
-        }
-
-        return [.. mappedSortedIndexes.Keys];
-    }
-
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        ExecutionTracer.Write($"SCAN start  table={TableProvider.Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
+        SourceIndex? sourceIndex = TableProvider.GetSourceIndex();
 
-        // When a source index is available and either a filter hint, bloom pruning
-        // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
-        // apply chunk-level pruning.
-        bool hasIndexPruning = _sourceIndex is not null
-            && (_filterHint is not null || _bloomPruningKeys is not null
-                || _sortedIndexPruningKeys is not null
-                || _sourceIndex.MappedSortedIndexes is not null
-                || _sourceIndex.BPlusTreeIndexes is not null
-                || _sourceIndex.BitmapIndexes is not null);
+        ExecutionTracer.Write($"SCAN start  table={TableProvider.Name}  hasIndex={sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
+        ExecutionTracer.Write($"SCAN path  table={TableProvider.Name}  indexPruning={HasIndexPruning}");
 
-        ExecutionTracer.Write($"SCAN path  table={TableProvider.Name}  indexPruning={hasIndexPruning}");
-
-        if (hasIndexPruning)
+        if (HasIndexPruning)
         {
             await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
-                TableProvider, context).ConfigureAwait(false))
+                TableProvider, SourceIndex, context).ConfigureAwait(false))
             {
                 yield return batch;
             }
@@ -257,11 +232,12 @@ public sealed class ScanOperator : IQueryOperator
 
     private async IAsyncEnumerable<RowBatch> ExecuteWithIndexPruningAsync(
         ITableProvider provider,
+        SourceIndex sourceIndex,
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
-        BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
+        IReadOnlyList<IndexChunk> chunks = sourceIndex.Chunks;
+        BloomFilterSet? bloomFilters = sourceIndex.BloomFilters;
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
         ExactSeekRowsFetched = null;
@@ -325,7 +301,7 @@ public sealed class ScanOperator : IQueryOperator
             {
                 foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _sortedIndexPruningKeys)
                 {
-                    if (_sourceIndex.TryGetColumnIndex(entry.Key, out IColumnIndex? index))
+                    if (sourceIndex.TryGetColumnIndex(entry.Key, out IColumnIndex? index))
                     {
                         bool anyPresent = false;
                         foreach (DataValue keyValue in entry.Value)
@@ -352,7 +328,7 @@ public sealed class ScanOperator : IQueryOperator
             // a column index exists, check whether the chunk contains the key.
             if (!pruned && _filterHint is not null)
             {
-                if (ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex))
+                if (ShouldPruneWithColumnIndexes(_filterHint, sourceIndex, chunkIndex))
                 {
                     if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.Name}");
                     pruned = true;
@@ -361,9 +337,9 @@ public sealed class ScanOperator : IQueryOperator
 
             // Bitmap-index-based pruning: for equality predicates on columns with
             // bitmap indexes, check whether the value appears in this chunk.
-            if (!pruned && _filterHint is not null && _sourceIndex.BitmapIndexes is not null)
+            if (!pruned && _filterHint is not null && sourceIndex.BitmapIndexes is not null)
             {
-                if (ShouldPruneWithBitmapIndexes(_filterHint, _sourceIndex.BitmapIndexes, chunkIndex))
+                if (ShouldPruneWithBitmapIndexes(_filterHint, sourceIndex.BitmapIndexes, chunkIndex))
                 {
                     if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.Name}");
                     pruned = true;
@@ -390,7 +366,7 @@ public sealed class ScanOperator : IQueryOperator
         if (provider.Seekable && _filterHint is not null)
         {
             List<long>? exactPositions = CollectExactSeekPositions(
-                _filterHint, _sourceIndex, chunks, activeChunkIndexes);
+                _filterHint, sourceIndex, chunks, activeChunkIndexes);
 
             if (exactPositions is not null)
             {
@@ -429,17 +405,17 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
-        // Open the source stream (needed for non-seekable fallback and no-pruning path).
-        IAsyncEnumerable<RowBatch>? rows = null;
 
         IAsyncEnumerable<RowBatch> OpenStream()
             => provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken);
 
         // If no chunks were pruned and no bitmap row filtering is needed, stream all rows.
         bool hasBitmapRowFilter = _filterHint is not null
-            && _sourceIndex.BitmapIndexes is not null
-            && _sourceIndex.BitmapIndexes.Count > 0;
+            && sourceIndex.BitmapIndexes is not null
+            && sourceIndex.BitmapIndexes.Count > 0;
 
+        // Open the source stream (needed for non-seekable fallback and no-pruning path).
+        IAsyncEnumerable<RowBatch>? rows;
         if (PrunedIndexChunks == 0 && !hasBitmapRowFilter)
         {
             rows = OpenStream();
@@ -460,7 +436,7 @@ public sealed class ScanOperator : IQueryOperator
             {
                 int count = (int)(end - start);
                 byte[]? bitmapMask = EvaluateBitmapFilter(
-                    _filterHint, _sourceIndex.BitmapIndexes, activeChunkIndex, count);
+                    _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count);
 
                 if (bitmapMask is not null)
                 {
@@ -532,7 +508,7 @@ public sealed class ScanOperator : IQueryOperator
         if (rangeIndex < activeRanges.Count)
         {
             fallbackBitmapMask = EvaluateBitmapFilter(
-                _filterHint, _sourceIndex.BitmapIndexes,
+                _filterHint, sourceIndex.BitmapIndexes,
                 activeRanges[rangeIndex].ChunkIndex,
                 (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
         }
@@ -552,7 +528,7 @@ public sealed class ScanOperator : IQueryOperator
                     if (rangeIndex < activeRanges.Count)
                     {
                         fallbackBitmapMask = EvaluateBitmapFilter(
-                            _filterHint, _sourceIndex.BitmapIndexes,
+                            _filterHint, sourceIndex.BitmapIndexes,
                             activeRanges[rangeIndex].ChunkIndex,
                             (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
                     }

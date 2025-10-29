@@ -73,7 +73,13 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     public string Name => Descriptor.Name;
 
     /// <inheritdoc/>
-    public bool Seekable => throw new Exception("TODO: Need to check if index side-cars are present for this file.");
+    /// <remarks>
+    /// The .datum format is intrinsically seekable — row group offsets live in the footer
+    /// and <see cref="DatumFileSeekSession"/> jumps to a row position without any external
+    /// index. Whether the engine actually seeks is a query-plan decision made by the operator
+    /// based on the presence of a filter hint or source index.
+    /// </remarks>
+    public bool Seekable => true;
 
     /// <inheritdoc/>
     public Schema GetSchema() => Reader.Schema;

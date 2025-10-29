@@ -374,7 +374,7 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
 
     // ────────────────── Helpers ──────────────────
 
-    private static ExecutionContext CreateContext(
+    private ExecutionContext CreateContext(
         LocalBufferPool pool, long? memoryBudgetBytes = null)
     {
         return new ExecutionContext(
