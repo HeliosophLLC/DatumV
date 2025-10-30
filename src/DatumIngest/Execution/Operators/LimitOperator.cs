@@ -10,8 +10,6 @@ namespace DatumIngest.Execution.Operators;
 public sealed class LimitOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
-    private readonly int _limit;
-    private readonly int _offset;
 
     /// <summary>
     /// Creates a limit operator.
@@ -22,37 +20,37 @@ public sealed class LimitOperator : IQueryOperator
     public LimitOperator(IQueryOperator source, int limit, int offset = 0)
     {
         _source = source;
-        _limit = limit;
-        _offset = offset;
+        Limit = limit;
+        Offset = offset;
     }
 
     /// <summary>The child operator producing rows.</summary>
     public IQueryOperator Source => _source;
 
     /// <summary>Maximum number of rows to emit.</summary>
-    public int Limit => _limit;
+    public int Limit { get; }
 
     /// <summary>Number of rows to skip before emitting.</summary>
-    public int Offset => _offset;
+    public int Offset { get; }
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
         Dictionary<string, string> properties = new()
         {
-            ["limit"] = _limit.ToString(),
+            ["limit"] = Limit.ToString(),
         };
 
-        if (_offset > 0)
+        if (Offset > 0)
         {
-            properties["offset"] = _offset.ToString();
+            properties["offset"] = Offset.ToString();
         }
 
         return new OperatorPlanDescription("Limit")
         {
             Properties = properties,
             Children = [(Source, null)],
-            EstimatedRows = _limit,
+            EstimatedRows = Limit,
         };
     }
 
@@ -61,16 +59,19 @@ public sealed class LimitOperator : IQueryOperator
     {
         // Propagate the row limit hint so downstream operators (e.g. join) can
         // choose cheaper strategies when only a small result set is needed.
-        ExecutionContext limitedContext = context.RowLimit is null || _limit + _offset < context.RowLimit
-            ? new ExecutionContext(context)
-              {
-                  OuterRow = context.OuterRow,
-                  MaxRecursionDepth = context.MaxRecursionDepth,
-                  RowLimit = _limit + _offset,
-                  DegreeOfParallelism = context.DegreeOfParallelism,
-                  ParallelismBudget = context.ParallelismBudget,
-              }
-            : context;
+        ExecutionContext limitedContext = context;
+        
+        if (context.RowLimit is null || Limit + Offset < context.RowLimit)
+        {
+            context = new ExecutionContext(context)
+            {
+                OuterRow = context.OuterRow,
+                MaxRecursionDepth = context.MaxRecursionDepth,
+                RowLimit = Limit + Offset,
+                DegreeOfParallelism = context.DegreeOfParallelism,
+                ParallelismBudget = context.ParallelismBudget,
+            };
+        }
 
         int skipped = 0;
         int emitted = 0;
@@ -78,40 +79,65 @@ public sealed class LimitOperator : IQueryOperator
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
         {
-            for (int index = 0; index < inputBatch.Count; index++)
+            // Fast path 1: the entire batch lies inside the skip region — drop it.
+            if (skipped + inputBatch.Count <= Offset)
             {
-                Row row = inputBatch[index];
+                skipped += inputBatch.Count;
+                context.Pool.ReturnRowBatch(inputBatch);
+                continue;
+            }
 
-                if (skipped < _offset)
+            // The skip region is behind us (fully or partially consumed by this batch).
+            int startIndex = Offset - skipped;
+            skipped = Offset;
+            int take = Math.Min(inputBatch.Count - startIndex, Limit - emitted);
+
+            // Fast path 2: no partial start, whole batch fits inside the remaining limit,
+            // and nothing pending in outputBatch that we'd have to merge with — pass the
+            // input batch straight through to the consumer without touching the arena.
+            if (outputBatch is null && startIndex == 0 && take == inputBatch.Count)
+            {
+                emitted += take;
+                yield return inputBatch;
+
+                if (emitted >= Limit) yield break;
+                continue;
+            }
+
+            // Mixed path: copy the [startIndex, startIndex + take) slice into outputBatch,
+            // stabilising each row into the output arena.
+            try
+            {
+                int end = startIndex + take;
+                for (int index = startIndex; index < end; index++)
                 {
-                    skipped++;
-                    continue;
-                }
+                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
-                if (emitted >= _limit)
-                {
-                    inputBatch.Return();
+                    context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
+                    
+                    emitted++;
 
-                    if (outputBatch is not null)
+                    if (outputBatch.IsFull)
                     {
                         yield return outputBatch;
+                        outputBatch = null;
                     }
-
-                    yield break;
                 }
+            }
+            finally
+            {
+                context.Pool.ReturnRowBatch(inputBatch);
+            }
 
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(row);
-                emitted++;
-
-                if (outputBatch.IsFull)
+            if (emitted >= Limit)
+            {
+                if (outputBatch is not null)
                 {
                     yield return outputBatch;
                     outputBatch = null;
                 }
+                yield break;
             }
-
-            inputBatch.Return();
         }
 
         if (outputBatch is not null)

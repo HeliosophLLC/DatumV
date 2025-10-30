@@ -20,7 +20,8 @@ internal sealed class SingleEmptyRowOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        yield return RowBatch.CreateSingleRow(new Row([], []));
+        RowBatch outputBatch = context.Pool.RentRowBatch(ColumnLookup.Empty, 1);
+
+        yield return outputBatch;
     }
 }

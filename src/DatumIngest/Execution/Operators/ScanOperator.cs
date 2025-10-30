@@ -28,12 +28,6 @@ public sealed class ScanOperator : IQueryOperator
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _sortedIndexPruningKeys;
 
     /// <summary>
-    /// Minimum estimated row count that activates the parallel partitioned scan path.
-    /// Below this threshold the Channel fan-out overhead exceeds the I/O savings.
-    /// </summary>
-    private const long ParallelScanMinRows = 100_000;
-
-    /// <summary>
     /// Creates a scan operator for the given table.
     /// </summary>
     /// <param name="tableProvider">The table provider identifying the data source.</param>
@@ -82,11 +76,13 @@ public sealed class ScanOperator : IQueryOperator
     public int? ExactSeekRowsFetched { get; private set; }
 
     /// <summary>
-    /// Gets a value indicating whether this scan operator has the necessary information
-    /// to apply index-based pruning during execution. This is true when a source index is
-    /// available and at least one of the following is present: a filter hint, bloom pruning keys,
-    /// sorted index pruning keys, bitmap indexes, or column indexes. When this property is true,
-    /// the operator can skip entire chunks of rows based on metadata without reading them from the source.
+    /// Gets a value indicating whether this scan operator has the inputs needed to
+    /// usefully apply index-based pruning. True when a source index is available and
+    /// at least one pruning input is present: a filter hint, bloom pruning keys, or
+    /// sorted index pruning keys. The mere presence of indexes on the source is not
+    /// enough — without a filter or build-side keys to probe them with, every chunk
+    /// would stay active and the pruning path would only add bookkeeping overhead
+    /// before falling through to a full stream.
     /// </summary>
     [MemberNotNullWhen(true, nameof(SourceIndex))]
     public bool HasIndexPruning
@@ -94,11 +90,23 @@ public sealed class ScanOperator : IQueryOperator
         get
         {
             return SourceIndex is not null
-                && (_filterHint is not null || _bloomPruningKeys is not null
-                    || _sortedIndexPruningKeys is not null
-                    || SourceIndex.MappedSortedIndexes is not null
-                    || SourceIndex.BPlusTreeIndexes is not null
-                    || SourceIndex.BitmapIndexes is not null);
+                && (_filterHint is not null
+                    || _bloomPruningKeys is not null
+                    || _sortedIndexPruningKeys is not null);
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether bitmap-index-based row filtering is possible during execution.
+    /// </summary>
+    [MemberNotNullWhen(true, nameof(SourceIndex))]
+    public bool HasBitmapRowFilter
+    {
+        get
+        {
+            return _filterHint is not null
+                && SourceIndex?.BitmapIndexes is not null
+                && SourceIndex.BitmapIndexes.Count > 0;
         }
     }
 
@@ -328,7 +336,7 @@ public sealed class ScanOperator : IQueryOperator
             // a column index exists, check whether the chunk contains the key.
             if (!pruned && _filterHint is not null)
             {
-                if (ShouldPruneWithColumnIndexes(_filterHint, sourceIndex, chunkIndex))
+                if (ShouldPruneWithColumnIndexes(_filterHint, sourceIndex, chunkIndex, context.Store))
                 {
                     if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={TableProvider.Name}");
                     pruned = true;
@@ -339,7 +347,7 @@ public sealed class ScanOperator : IQueryOperator
             // bitmap indexes, check whether the value appears in this chunk.
             if (!pruned && _filterHint is not null && sourceIndex.BitmapIndexes is not null)
             {
-                if (ShouldPruneWithBitmapIndexes(_filterHint, sourceIndex.BitmapIndexes, chunkIndex))
+                if (ShouldPruneWithBitmapIndexes(_filterHint, sourceIndex.BitmapIndexes, chunkIndex, context.Store))
                 {
                     if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={TableProvider.Name}");
                     pruned = true;
@@ -363,117 +371,28 @@ public sealed class ScanOperator : IQueryOperator
 
         // When the provider supports seeking and equality predicates have
         // index hits, seek directly to matching rows rather than reading entire chunks.
-        if (provider.Seekable && _filterHint is not null)
+        if (_filterHint is not null
+            && CollectExactSeekPositions(_filterHint, sourceIndex, chunks, activeChunkIndexes, context.Store) is List<long> exactPositions)
         {
-            List<long>? exactPositions = CollectExactSeekPositions(
-                _filterHint, sourceIndex, chunks, activeChunkIndexes);
+            ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
+            ExactSeekRowsFetched = exactPositions.Count;
 
-            if (exactPositions is not null)
-            {
-                ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
-                ExactSeekRowsFetched = exactPositions.Count;
-
-                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
-
-                foreach (long rowPosition in exactPositions)
-                {
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                        rowPosition, 1, cancellationToken).ConfigureAwait(false))
-                    {
-                        for (int i = 0; i < inputBatch.Count; i++)
-                        {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(inputBatch[i]);
-
-                            if (outputBatch.IsFull)
-                            {
-                                yield return outputBatch;
-                                outputBatch = null;
-                            }
-                        }
-
-                        inputBatch.Return();
-                    }
-                }
-
-                if (outputBatch is not null)
-                {
-                    yield return outputBatch;
-                }
-
-                yield break;
-            }
-        }
-
-
-        IAsyncEnumerable<RowBatch> OpenStream()
-            => provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken);
-
-        // If no chunks were pruned and no bitmap row filtering is needed, stream all rows.
-        bool hasBitmapRowFilter = _filterHint is not null
-            && sourceIndex.BitmapIndexes is not null
-            && sourceIndex.BitmapIndexes.Count > 0;
-
-        // Open the source stream (needed for non-seekable fallback and no-pruning path).
-        IAsyncEnumerable<RowBatch>? rows;
-        if (PrunedIndexChunks == 0 && !hasBitmapRowFilter)
-        {
-            rows = OpenStream();
-
-            await foreach (RowBatch batch in rows.ConfigureAwait(false))
-            {
-                yield return batch;
-            }
-
-            yield break;
-        }
-
-        if (provider.Seekable == true)
-        {
             using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
 
-            foreach ((long start, long end, int activeChunkIndex) in activeRanges)
+            foreach (long rowPosition in exactPositions)
             {
-                int count = (int)(end - start);
-                byte[]? bitmapMask = EvaluateBitmapFilter(
-                    _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count);
-
-                if (bitmapMask is not null)
+                await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                    rowPosition, 1, cancellationToken).ConfigureAwait(false))
                 {
-                    int rowInChunk = 0;
-
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                        start, count, cancellationToken).ConfigureAwait(false))
+                    try
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            if (IsBitmapBitSet(bitmapMask, rowInChunk))
-                            {
-                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                                outputBatch.Add(inputBatch[i]);
+                            outputBatch ??= context.Pool.RentRowBatch(
+                                inputBatch.ColumnLookup,
+                                context.BatchSize);
 
-                                if (outputBatch.IsFull)
-                                {
-                                    yield return outputBatch;
-                                    outputBatch = null;
-                                }
-                            }
-
-                            rowInChunk++;
-                        }
-
-                        inputBatch.Return();
-                    }
-                }
-                else
-                {
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                        start, count, cancellationToken).ConfigureAwait(false))
-                    {
-                        for (int i = 0; i < inputBatch.Count; i++)
-                        {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(inputBatch[i]);
+                            context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
                             {
@@ -481,8 +400,10 @@ public sealed class ScanOperator : IQueryOperator
                                 outputBatch = null;
                             }
                         }
-
-                        inputBatch.Return();
+                    }
+                    finally
+                    {
+                        context.Pool.ReturnRowBatch(inputBatch);
                     }
                 }
             }
@@ -494,74 +415,92 @@ public sealed class ScanOperator : IQueryOperator
 
             yield break;
         }
-        
-        // Fallback: stream all rows and skip those in pruned chunks by row index.
-        // When bitmap row filters apply, also skip non-matching rows within active chunks.
-        rows = OpenStream();
-        long rowIndex = 0;
-        int rangeIndex = 0;
-        byte[]? fallbackBitmapMask = null;
-        int fallbackRowInChunk = 0;
-        RowBatch? fallbackOutputBatch = null;
-
-        // Pre-compute bitmap mask for the first active chunk.
-        if (rangeIndex < activeRanges.Count)
+        else if (PrunedIndexChunks == 0 && !HasBitmapRowFilter)
         {
-            fallbackBitmapMask = EvaluateBitmapFilter(
-                _filterHint, sourceIndex.BitmapIndexes,
-                activeRanges[rangeIndex].ChunkIndex,
-                (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
-        }
-
-        await foreach (RowBatch inputBatch in rows.ConfigureAwait(false))
-        {
-            for (int i = 0; i < inputBatch.Count; i++)
+            // No pruning and no bitmap row filtering — stream all rows straight from the
+            // provider without the per-chunk seek machinery.
+            await foreach (RowBatch batch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
             {
-                Row row = inputBatch[i];
-
-                // Advance past ranges we've gone beyond.
-                while (rangeIndex < activeRanges.Count && rowIndex >= activeRanges[rangeIndex].End)
-                {
-                    rangeIndex++;
-                    fallbackRowInChunk = 0;
-
-                    if (rangeIndex < activeRanges.Count)
-                    {
-                        fallbackBitmapMask = EvaluateBitmapFilter(
-                            _filterHint, sourceIndex.BitmapIndexes,
-                            activeRanges[rangeIndex].ChunkIndex,
-                            (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
-                    }
-                }
-
-                if (rangeIndex < activeRanges.Count
-                    && rowIndex >= activeRanges[rangeIndex].Start
-                    && rowIndex < activeRanges[rangeIndex].End)
-                {
-                    if (fallbackBitmapMask is null || IsBitmapBitSet(fallbackBitmapMask, fallbackRowInChunk))
-                    {
-                        fallbackOutputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        fallbackOutputBatch.Add(row);
-
-                        if (fallbackOutputBatch.IsFull)
-                        {
-                            yield return fallbackOutputBatch;
-                            fallbackOutputBatch = null;
-                        }
-                    }
-
-                    fallbackRowInChunk++;
-                }
-
-                rowIndex++;
+                yield return batch;
             }
 
-            inputBatch.Return();
+            yield break;
         }
-
-        if (fallbackOutputBatch is not null)
+        else
         {
-            yield return fallbackOutputBatch;
+            using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
+
+            foreach ((long start, long end, int activeChunkIndex) in activeRanges)
+            {
+                int count = (int)(end - start);
+                byte[]? bitmapMask = EvaluateBitmapFilter(
+                    _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count, context.Store);
+
+                if (bitmapMask is not null)
+                {
+                    int rowInChunk = 0;
+
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                    {
+                        try
+                        {
+                            for (int i = 0; i < inputBatch.Count; i++)
+                            {
+                                if (IsBitmapBitSet(bitmapMask, rowInChunk))
+                                {
+                                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+                                    
+                                    if (outputBatch.IsFull)
+                                    {
+                                        yield return outputBatch;
+                                        outputBatch = null;
+                                    }
+                                }
+
+                                rowInChunk++;
+                            }
+                        }
+                        finally
+                        {
+                            context.Pool.ReturnRowBatch(inputBatch);
+                        }
+                    }
+                }
+                else
+                {
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                    {
+                        try
+                        {
+                            for (int i = 0; i < inputBatch.Count; i++)
+                            {
+                                outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                
+                                context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+
+                                if (outputBatch.IsFull)
+                                {
+                                    yield return outputBatch;
+                                    outputBatch = null;
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            context.Pool.ReturnRowBatch(inputBatch);
+                        }
+                    }
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
+            }
+
+            yield break;
         }
     }
 
@@ -571,12 +510,12 @@ public sealed class ScanOperator : IQueryOperator
     /// and checks the sorted index to see if the chunk contains any matching key.
     /// </summary>
     private static bool ShouldPruneWithColumnIndexes(
-        Expression filterHint, SourceIndex sourceIndex, int chunkIndex)
+        Expression filterHint, SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         // Walk the expression tree looking for equality comparisons of the form
         // column = literal. Each such predicate can rule out chunks that do not
         // contain the literal in their sorted index.
-        return CheckExpressionForPruning(filterHint, sourceIndex, chunkIndex);
+        return CheckExpressionForPruning(filterHint, sourceIndex, chunkIndex, arena);
     }
 
     /// <summary>
@@ -587,39 +526,39 @@ public sealed class ScanOperator : IQueryOperator
     /// require all branches to prove the chunk empty.
     /// </summary>
     private static bool ShouldPruneWithBitmapIndexes(
-        Expression filterHint, BitmapIndexSet bitmapIndexes, int chunkIndex)
+        Expression filterHint, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
     {
-        return CheckExpressionForBitmapPruning(filterHint, bitmapIndexes, chunkIndex);
+        return CheckExpressionForBitmapPruning(filterHint, bitmapIndexes, chunkIndex, arena);
     }
 
     private static bool CheckExpressionForBitmapPruning(
-        Expression expression, BitmapIndexSet bitmapIndexes, int chunkIndex)
+        Expression expression, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
     {
         if (expression is BinaryExpression binary)
         {
             if (binary.Operator == BinaryOperator.And)
             {
                 // AND: prune if either side proves the chunk empty.
-                return CheckExpressionForBitmapPruning(binary.Left, bitmapIndexes, chunkIndex)
-                    || CheckExpressionForBitmapPruning(binary.Right, bitmapIndexes, chunkIndex);
+                return CheckExpressionForBitmapPruning(binary.Left, bitmapIndexes, chunkIndex, arena)
+                    || CheckExpressionForBitmapPruning(binary.Right, bitmapIndexes, chunkIndex, arena);
             }
 
             if (binary.Operator == BinaryOperator.Equal)
             {
-                return CheckEqualityForBitmapPruning(binary.Left, binary.Right, bitmapIndexes, chunkIndex);
+                return CheckEqualityForBitmapPruning(binary.Left, binary.Right, bitmapIndexes, chunkIndex, arena);
             }
         }
 
         if (expression is InExpression inExpression && !inExpression.Negated)
         {
-            return CheckInForBitmapPruning(inExpression, bitmapIndexes, chunkIndex);
+            return CheckInForBitmapPruning(inExpression, bitmapIndexes, chunkIndex, arena);
         }
 
         return false;
     }
 
     private static bool CheckEqualityForBitmapPruning(
-        Expression left, Expression right, BitmapIndexSet bitmapIndexes, int chunkIndex)
+        Expression left, Expression right, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
     {
         string? columnName = null;
         object? rawLiteral = null;
@@ -645,12 +584,13 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
-        return !bitmapIndex.ChunkContainsValue(literalValue, chunkIndex);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
+        return literalValue.IsInline
+            && !bitmapIndex.ChunkContainsValue(literalValue, chunkIndex);
     }
 
     private static bool CheckInForBitmapPruning(
-        InExpression inExpression, BitmapIndexSet bitmapIndexes, int chunkIndex)
+        InExpression inExpression, BitmapIndexSet bitmapIndexes, int chunkIndex, Arena arena)
     {
         if (inExpression.Expression is not ColumnReference columnRef)
         {
@@ -670,9 +610,9 @@ public sealed class ScanOperator : IQueryOperator
                 return false;
             }
 
-            DataValue value = DataValue.FromLiteral(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value, arena);
 
-            if (bitmapIndex.ChunkContainsValue(value, chunkIndex))
+            if (value.IsInline && bitmapIndex.ChunkContainsValue(value, chunkIndex))
             {
                 return false;
             }
@@ -688,14 +628,14 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static byte[]? EvaluateBitmapFilter(
         Expression? filterHint, BitmapIndexSet? bitmapIndexes,
-        int chunkIndex, int rowCount)
+        int chunkIndex, int rowCount, Arena arena)
     {
         if (filterHint is null || bitmapIndexes is null || bitmapIndexes.Count == 0)
         {
             return null;
         }
 
-        return EvaluateBitmapExpression(filterHint, bitmapIndexes, chunkIndex, rowCount);
+        return EvaluateBitmapExpression(filterHint, bitmapIndexes, chunkIndex, rowCount, arena);
     }
 
     /// <summary>
@@ -705,14 +645,14 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static byte[]? EvaluateBitmapExpression(
         Expression expression, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount)
+        int chunkIndex, int rowCount, Arena arena)
     {
         if (expression is BinaryExpression binary)
         {
             if (binary.Operator == BinaryOperator.And)
             {
-                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount);
-                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount);
+                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount, arena);
+                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
 
                 if (leftBits is not null && rightBits is not null)
                 {
@@ -725,8 +665,8 @@ public sealed class ScanOperator : IQueryOperator
 
             if (binary.Operator == BinaryOperator.Or)
             {
-                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount);
-                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount);
+                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount, arena);
+                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
 
                 if (leftBits is not null && rightBits is not null)
                 {
@@ -739,13 +679,13 @@ public sealed class ScanOperator : IQueryOperator
 
             if (binary.Operator == BinaryOperator.Equal)
             {
-                return EvaluateBitmapEquality(binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount);
+                return EvaluateBitmapEquality(binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
             }
 
             if (binary.Operator == BinaryOperator.NotEqual)
             {
                 byte[]? equalBits = EvaluateBitmapEquality(
-                    binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount);
+                    binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount, arena);
 
                 if (equalBits is not null)
                 {
@@ -758,7 +698,7 @@ public sealed class ScanOperator : IQueryOperator
 
         if (expression is InExpression inExpression && !inExpression.Negated)
         {
-            return EvaluateBitmapIn(inExpression, bitmapIndexes, chunkIndex, rowCount);
+            return EvaluateBitmapIn(inExpression, bitmapIndexes, chunkIndex, rowCount, arena);
         }
 
         return null;
@@ -766,7 +706,7 @@ public sealed class ScanOperator : IQueryOperator
 
     private static byte[]? EvaluateBitmapEquality(
         Expression left, Expression right, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount)
+        int chunkIndex, int rowCount, Arena arena)
     {
         string? columnName = null;
         object? rawLiteral = null;
@@ -792,14 +732,19 @@ public sealed class ScanOperator : IQueryOperator
             return null;
         }
 
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
+        if (!literalValue.IsInline)
+        {
+            return null;
+        }
+
         ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(literalValue, chunkIndex);
         return bitmap.Bits.ToArray();
     }
 
     private static byte[]? EvaluateBitmapIn(
         InExpression inExpression, BitmapIndexSet bitmapIndexes,
-        int chunkIndex, int rowCount)
+        int chunkIndex, int rowCount, Arena arena)
     {
         if (inExpression.Expression is not ColumnReference columnRef)
         {
@@ -820,7 +765,12 @@ public sealed class ScanOperator : IQueryOperator
                 return null;
             }
 
-            DataValue value = DataValue.FromLiteral(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value, arena);
+            if (!value.IsInline)
+            {
+                return null;
+            }
+
             ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(value, chunkIndex);
 
             if (result is null)
@@ -848,45 +798,45 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     private static bool CheckExpressionForPruning(
-        Expression expression, SourceIndex sourceIndex, int chunkIndex)
+        Expression expression, SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         if (expression is BinaryExpression binary)
         {
             if (binary.Operator == BinaryOperator.And)
             {
                 // AND: prune if either side says we can prune.
-                return CheckExpressionForPruning(binary.Left, sourceIndex, chunkIndex)
-                    || CheckExpressionForPruning(binary.Right, sourceIndex, chunkIndex);
+                return CheckExpressionForPruning(binary.Left, sourceIndex, chunkIndex, arena)
+                    || CheckExpressionForPruning(binary.Right, sourceIndex, chunkIndex, arena);
             }
 
             if (binary.Operator == BinaryOperator.Equal)
             {
-                return CheckEqualityForPruning(binary.Left, binary.Right, sourceIndex, chunkIndex);
+                return CheckEqualityForPruning(binary.Left, binary.Right, sourceIndex, chunkIndex, arena);
             }
 
             if (binary.Operator is BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
                 or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
             {
                 return CheckComparisonForPruning(
-                    binary.Left, binary.Right, binary.Operator, sourceIndex, chunkIndex);
+                    binary.Left, binary.Right, binary.Operator, sourceIndex, chunkIndex, arena);
             }
         }
 
         if (expression is BetweenExpression between && !between.Negated)
         {
-            return CheckBetweenForPruning(between, sourceIndex, chunkIndex);
+            return CheckBetweenForPruning(between, sourceIndex, chunkIndex, arena);
         }
 
         if (expression is InExpression inExpression && !inExpression.Negated)
         {
-            return CheckInForPruning(inExpression, sourceIndex, chunkIndex);
+            return CheckInForPruning(inExpression, sourceIndex, chunkIndex, arena);
         }
 
         return false;
     }
 
     private static bool CheckEqualityForPruning(
-        Expression left, Expression right, SourceIndex sourceIndex, int chunkIndex)
+        Expression left, Expression right, SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         // Match: column = literal  or  literal = column
         string? columnName = null;
@@ -913,7 +863,13 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
+
+        if (!literalValue.IsInline)
+        {
+            return false;
+        }
+
         IReadOnlySet<int> matchingChunks = index.FindChunksContaining(literalValue);
         return !matchingChunks.Contains(chunkIndex);
     }
@@ -925,7 +881,7 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static bool CheckComparisonForPruning(
         Expression left, Expression right, BinaryOperator op,
-        SourceIndex sourceIndex, int chunkIndex)
+        SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         string? columnName = null;
         object? rawLiteral = null;
@@ -953,7 +909,12 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
+
+        if (!literalValue.IsInline)
+        {
+            return false;
+        }
 
         IReadOnlySet<int> matchingChunks = effectiveOperator switch
         {
@@ -988,7 +949,7 @@ public sealed class ScanOperator : IQueryOperator
     /// by looking up the inclusive range in a sorted index.
     /// </summary>
     private static bool CheckBetweenForPruning(
-        BetweenExpression between, SourceIndex sourceIndex, int chunkIndex)
+        BetweenExpression between, SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         if (between.Expression is not ColumnReference columnRef)
         {
@@ -1006,8 +967,14 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue low = DataValue.FromLiteral(lowLiteral.Value);
-        DataValue high = DataValue.FromLiteral(highLiteral.Value);
+        DataValue low = DataValue.FromLiteral(lowLiteral.Value, arena);
+        DataValue high = DataValue.FromLiteral(highLiteral.Value, arena);
+
+        if (!low.IsInline || !high.IsInline)
+        {
+            return false;
+        }
+
         IReadOnlySet<int> matchingChunks = index.FindChunksInRange(low, high);
         return !matchingChunks.Contains(chunkIndex);
     }
@@ -1017,7 +984,7 @@ public sealed class ScanOperator : IQueryOperator
     /// by looking up each value in a sorted index.
     /// </summary>
     private static bool CheckInForPruning(
-        InExpression inExpression, SourceIndex sourceIndex, int chunkIndex)
+        InExpression inExpression, SourceIndex sourceIndex, int chunkIndex, Arena arena)
     {
         if (inExpression.Expression is not ColumnReference columnRef)
         {
@@ -1037,7 +1004,12 @@ public sealed class ScanOperator : IQueryOperator
                 return false;
             }
 
-            DataValue value = DataValue.FromLiteral(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value, arena);
+            if (!value.IsInline)
+            {
+                return false;
+            }
+
             IReadOnlySet<int> matchingChunks = index.FindChunksContaining(value);
 
             if (matchingChunks.Contains(chunkIndex))
@@ -1062,13 +1034,13 @@ public sealed class ScanOperator : IQueryOperator
         Expression filterHint,
         SourceIndex sourceIndex,
         IReadOnlyList<IndexChunk> chunks,
-        HashSet<int> activeChunkIndexes)
+        HashSet<int> activeChunkIndexes, Arena arena)
     {
         List<long>? bestPositions = null;
 
         // Equality predicates: col = literal → FindExact
         List<(string Column, DataValue Value)> equalities = new();
-        ExtractTopLevelEqualities(filterHint, equalities);
+        ExtractTopLevelEqualities(filterHint, equalities, arena);
 
         foreach ((string column, DataValue value) in equalities)
         {
@@ -1088,7 +1060,7 @@ public sealed class ScanOperator : IQueryOperator
 
         // BETWEEN predicates: col BETWEEN low AND high → FindRange
         List<(string Column, DataValue Low, DataValue High)> betweens = new();
-        ExtractTopLevelBetweens(filterHint, betweens);
+        ExtractTopLevelBetweens(filterHint, betweens, arena);
 
         foreach ((string column, DataValue low, DataValue high) in betweens)
         {
@@ -1108,7 +1080,7 @@ public sealed class ScanOperator : IQueryOperator
 
         // IN predicates: col IN (v1, v2, ...) → union of FindExact per value
         List<(string Column, List<DataValue> Values)> inPredicates = new();
-        ExtractTopLevelIns(filterHint, inPredicates);
+        ExtractTopLevelIns(filterHint, inPredicates, arena);
 
         foreach ((string column, List<DataValue> values) in inPredicates)
         {
@@ -1172,14 +1144,14 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static void ExtractTopLevelEqualities(
         Expression expression,
-        List<(string Column, DataValue Value)> results)
+        List<(string Column, DataValue Value)> results, Arena arena)
     {
         if (expression is BinaryExpression binary)
         {
             if (binary.Operator == BinaryOperator.And)
             {
-                ExtractTopLevelEqualities(binary.Left, results);
-                ExtractTopLevelEqualities(binary.Right, results);
+                ExtractTopLevelEqualities(binary.Left, results, arena);
+                ExtractTopLevelEqualities(binary.Right, results, arena);
                 return;
             }
 
@@ -1203,8 +1175,11 @@ public sealed class ScanOperator : IQueryOperator
 
                 if (columnName is not null && rawLiteral is not null)
                 {
-                    results.Add((columnName, DataValue.FromLiteral(rawLiteral)));
+                    DataValue literalValue = DataValue.FromLiteral(rawLiteral, arena);
+                    if (!literalValue.IsInline) return;
+                    results.Add((columnName, literalValue));
                 }
+
             }
         }
     }
@@ -1215,12 +1190,12 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static void ExtractTopLevelBetweens(
         Expression expression,
-        List<(string Column, DataValue Low, DataValue High)> results)
+        List<(string Column, DataValue Low, DataValue High)> results, Arena arena)
     {
         if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
         {
-            ExtractTopLevelBetweens(binary.Left, results);
-            ExtractTopLevelBetweens(binary.Right, results);
+            ExtractTopLevelBetweens(binary.Left, results, arena);
+            ExtractTopLevelBetweens(binary.Right, results, arena);
             return;
         }
 
@@ -1229,10 +1204,12 @@ public sealed class ScanOperator : IQueryOperator
             && between.Low is LiteralExpression { Value: not null } lowLiteral
             && between.High is LiteralExpression { Value: not null } highLiteral)
         {
-            results.Add((
-                columnRef.ColumnName,
-                DataValue.FromLiteral(lowLiteral.Value),
-                DataValue.FromLiteral(highLiteral.Value)));
+            DataValue low = DataValue.FromLiteral(lowLiteral.Value, arena);
+            DataValue high = DataValue.FromLiteral(highLiteral.Value, arena);
+
+            if (!low.IsInline || !high.IsInline) return;
+
+            results.Add((columnRef.ColumnName, low, high));
         }
     }
 
@@ -1242,12 +1219,12 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static void ExtractTopLevelIns(
         Expression expression,
-        List<(string Column, List<DataValue> Values)> results)
+        List<(string Column, List<DataValue> Values)> results, Arena arena)
     {
         if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
         {
-            ExtractTopLevelIns(binary.Left, results);
-            ExtractTopLevelIns(binary.Right, results);
+            ExtractTopLevelIns(binary.Left, results, arena);
+            ExtractTopLevelIns(binary.Right, results, arena);
             return;
         }
 
@@ -1263,7 +1240,11 @@ public sealed class ScanOperator : IQueryOperator
                     return;
                 }
 
-                values.Add(DataValue.FromLiteral(literal.Value));
+                DataValue dv = DataValue.FromLiteral(literal.Value, arena);
+                
+                if (!dv.IsInline) return;
+
+                values.Add(dv);
             }
 
             results.Add((columnRef.ColumnName, values));

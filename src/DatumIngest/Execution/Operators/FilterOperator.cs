@@ -1,5 +1,6 @@
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -9,8 +10,6 @@ namespace DatumIngest.Execution.Operators;
 /// </summary>
 public sealed class FilterOperator : IQueryOperator
 {
-    private readonly IQueryOperator _source;
-    private readonly Expression _predicate;
 
     /// <summary>
     /// Creates a filter operator.
@@ -19,22 +18,22 @@ public sealed class FilterOperator : IQueryOperator
     /// <param name="predicate">The WHERE predicate expression.</param>
     public FilterOperator(IQueryOperator source, Expression predicate)
     {
-        _source = source;
-        _predicate = predicate;
+        Source = source;
+        Predicate = predicate;
     }
 
     /// <summary>The child operator producing rows.</summary>
-    public IQueryOperator Source => _source;
+    public IQueryOperator Source { get; }
 
     /// <summary>The filter predicate expression.</summary>
-    public Expression Predicate => _predicate;
+    public Expression Predicate { get; }
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
         List<string> warnings = [];
 
-        if (QueryExplainer.ContainsPatternMatch(_predicate))
+        if (QueryExplainer.ContainsPatternMatch(Predicate))
         {
             warnings.Add("LIKE/ILIKE pattern match — may scan all rows");
         }
@@ -43,7 +42,7 @@ public sealed class FilterOperator : IQueryOperator
         {
             Properties = new Dictionary<string, string>
             {
-                ["predicate"] = QueryExplainer.FormatExpression(_predicate),
+                ["predicate"] = QueryExplainer.FormatExpression(Predicate),
             },
             Children = [(Source, null)],
             Warnings = warnings,
@@ -54,19 +53,22 @@ public sealed class FilterOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
-        LocalBufferPool pool = context.LocalBufferPool;
+        Pool pool = context.Pool;
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in Source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            for (int index = 0; index < inputBatch.Count; index++)
+            try
             {
-                Row row = inputBatch[index];
-
-                if (evaluator.EvaluateAsBoolean(_predicate, row))
+                for (int index = 0, count = inputBatch.Count; index < count; index++)
                 {
-                    outputBatch ??= pool.RentBatch(context.BatchSize);
-                    outputBatch.Add(row);
+                    Row row = inputBatch[index];
+
+                    if (!evaluator.EvaluateAsBoolean(Predicate, row)) continue;
+                    
+                    outputBatch ??= pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                    pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
 
                     if (outputBatch.IsFull)
                     {
@@ -75,8 +77,10 @@ public sealed class FilterOperator : IQueryOperator
                     }
                 }
             }
-
-            inputBatch.Return();
+            finally
+            {
+                context.Pool.ReturnRowBatch(inputBatch);
+            }
         }
 
         if (outputBatch is not null)

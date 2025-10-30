@@ -7,6 +7,11 @@ namespace DatumIngest.Model;
 /// </summary>
 public sealed class ColumnLookup
 {
+    /// <summary>
+    /// A shared empty ColumnLookup instance that can be used for operators with no columns (e.g., SingleEmptyRowOperator).
+    /// </summary>
+    public static readonly ColumnLookup Empty = new(Array.Empty<string>());
+
     private readonly Dictionary<string, int> _nameIndex;
     private Dictionary<string, int>? _schemaIndex;
 

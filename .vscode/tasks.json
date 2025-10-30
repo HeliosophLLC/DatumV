@@ -171,6 +171,21 @@
 			"hide": true
 		},
 		{
+			"label": "Debug: Build ExecuteOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/ExecuteOnce",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
 			"label": "Run: ExplainOnce",
 			"type": "shell",
 			"command": "dotnet",

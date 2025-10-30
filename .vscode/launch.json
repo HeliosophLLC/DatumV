@@ -29,6 +29,21 @@
 			"stopAtEntry": false,
 			"preLaunchTask": "Debug: Build IngestOnce"
 		},
+		{
+			"name": "ExecuteOnce: Debug",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/tools/ExecuteOnce/bin/Debug/net10.0/execute-once.dll",
+			"args": [
+				"${input:executeDatumFile}",
+				"${input:executeSql}"
+			],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build ExecuteOnce"
+		},
 	],
 	"inputs": [
 		{
@@ -42,6 +57,18 @@
 			"type": "promptString",
 			"description": "Path to the source file to ingest (CSV, ZIP, IDX, etc.)",
 			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.csv"
+		},
+		{
+			"id": "executeDatumFile",
+			"type": "promptString",
+			"description": "Path to the .datum file to query",
+			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.datum"
+		},
+		{
+			"id": "executeSql",
+			"type": "promptString",
+			"description": "SQL to execute (quote spaces)",
+			"default": "SELECT * LIMIT 10"
 		}
 	]
 }

@@ -92,7 +92,7 @@ public static class StatisticsPredicateEvaluator
         }
 
         // Try to extract (column, literal, needsFlip) from the binary expression.
-        if (!TryExtractColumnAndLiteral(binary, out string? columnName, out DataValue literalValue, out bool flipped))
+        if (!TryExtractColumnAndLiteral(binary, arena, out string? columnName, out DataValue literalValue, out bool flipped))
         {
             return false;
         }
@@ -310,6 +310,7 @@ public static class StatisticsPredicateEvaluator
     /// </summary>
     private static bool TryExtractColumnAndLiteral(
         BinaryExpression binary,
+        Arena arena,
         [NotNullWhen(true)] out string? columnName,
         out DataValue literalValue,
         out bool flipped)
@@ -323,7 +324,7 @@ public static class StatisticsPredicateEvaluator
         {
             columnName = leftColumn.ColumnName;
             if (rightLiteral.Value is null) return false;
-            literalValue = DataValue.FromLiteral(rightLiteral.Value);
+            literalValue = DataValue.FromLiteral(rightLiteral.Value, arena);
             return true;
         }
 
@@ -332,7 +333,7 @@ public static class StatisticsPredicateEvaluator
         {
             columnName = rightColumn.ColumnName;
             if (leftLiteral.Value is null) return false;
-            literalValue = DataValue.FromLiteral(leftLiteral.Value);
+            literalValue = DataValue.FromLiteral(leftLiteral.Value, arena);
             flipped = true;
             return true;
         }

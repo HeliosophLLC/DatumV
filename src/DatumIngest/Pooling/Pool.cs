@@ -30,6 +30,52 @@ public sealed class Pool
     public DataValue[] RentDataValues(int length) => Backing.RentDataValues(length);
 
     /// <summary>
+    /// Rents a <see cref="DataValue"/> array to the pool for reuse and copies the specified source
+    /// values into it, stabilizing them in the process.
+    /// </summary>
+    /// <param name="row">The source values to copy.</param>
+    /// <param name="sourceArena">The arena containing the source values.</param>
+    /// <param name="targetArena">The arena to stabilize the values in.</param>
+    /// <returns>The rented and copied data value array.</returns>
+    public DataValue[] RentAndCopyDataValues(Row row, Arena sourceArena, Arena targetArena)
+        => RentAndCopyDataValues(row.RawValues, sourceArena, targetArena);
+
+    /// <summary>
+    /// Rents a <see cref="DataValue"/> array to the pool for reuse and copies the specified source
+    /// values into it, stabilizing them in the process, then adds the values as a new row to the
+    /// specified output batch.
+    /// </summary>
+    /// <param name="inputBatch">The input row batch.</param>
+    /// <param name="rowIndex">The index of the row to copy.</param>
+    /// <param name="outputBatch">The output row batch.</param>
+    public void RentAndCopyToOutput(RowBatch inputBatch, int rowIndex, RowBatch outputBatch)
+    {
+        DataValue[] values = RentAndCopyDataValues(inputBatch[rowIndex], inputBatch.Arena, outputBatch.Arena);
+
+        outputBatch.Add(values);
+    }
+
+    /// <summary>
+    /// Rents a <see cref="DataValue"/> array to the pool for reuse and copies the specified source
+    /// values into it, stabilizing them in the process.
+    /// </summary>
+    /// <param name="source">The source values to copy.</param>
+    /// <param name="sourceArena">The arena containing the source values.</param>
+    /// <param name="targetArena">The arena to stabilize the values in.</param>
+    /// <returns>The rented and copied data value array.</returns>
+    public DataValue[] RentAndCopyDataValues(ReadOnlySpan<DataValue> source, Arena sourceArena, Arena targetArena)
+    {
+        DataValue[] buffer = Backing.RentDataValues(source.Length);
+        
+        for (int i = 0; i < source.Length; i++)
+        {
+            buffer[i] = DataValueRetention.Stabilize(source[i], sourceArena, targetArena);
+        }
+
+        return buffer;
+    }
+
+    /// <summary>
     /// Rents a <see cref="RowBatch"/> with the specified capacity.
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity, Arena? arena = null)
@@ -79,18 +125,4 @@ public sealed class Pool
     /// </summary>
     /// <param name="groupState">The group state to return.</param>
     public void ReturnGroupState(GroupState groupState) => Backing.Return(groupState);
-
-    /// <summary>
-    /// Rents a <see cref="DataValue"/> array and copies the source values into it.
-    /// Used by caching operators (CTE, CrossValidate) that need to hold values
-    /// independently of the input batch lifecycle.
-    /// </summary>
-    /// <param name="source">The values to copy.</param>
-    /// <returns>A pool-rented array containing a copy of <paramref name="source"/>.</returns>
-    public DataValue[] RentCopyDataValues(ReadOnlySpan<DataValue> source)
-    {
-        DataValue[] buffer = RentDataValues(source.Length);
-        source.CopyTo(buffer);
-        return buffer;
-    }
 }

@@ -93,9 +93,20 @@ Console.WriteLine($"Source: {opts.DatumPath}");
 Console.WriteLine($"SQL:    {sql.Trim().ReplaceLineEndings(" ")}");
 Console.WriteLine();
 
+// Force a GC so the baseline isn't polluted by planner/parser allocations,
+// giving us a clean "allocated during execution" delta.
+GC.Collect();
+GC.WaitForPendingFinalizers();
+GC.Collect();
+
+using Process proc = Process.GetCurrentProcess();
+MemorySnapshot memStart = Snapshot(proc);
+long peakManagedHeap = memStart.ManagedHeapBytes;
+
 Stopwatch sw = Stopwatch.StartNew();
 long totalRows = 0;
 long printedRows = 0;
+long batchCount = 0;
 bool headerPrinted = false;
 bool truncated = false;
 
@@ -105,6 +116,8 @@ try
     {
         try
         {
+            batchCount++;
+
             for (int i = 0; i < batch.Count; i++)
             {
                 Row row = batch[i];
@@ -127,6 +140,10 @@ try
                     truncated = true;
                 }
             }
+
+            // Sample peak managed heap at batch boundaries — cheap (no Process.Refresh).
+            long heapNow = GC.GetTotalMemory(forceFullCollection: false);
+            if (heapNow > peakManagedHeap) peakManagedHeap = heapNow;
         }
         finally
         {
@@ -144,10 +161,15 @@ catch (Exception ex)
 {
     Console.Error.WriteLine();
     Console.Error.WriteLine($"Execution error: {ex.Message}");
+    Console.Error.WriteLine(ex.StackTrace);
     return 1;
 }
 
 sw.Stop();
+
+MemorySnapshot memEnd = Snapshot(proc);
+proc.Refresh();
+long peakWorkingSet = proc.PeakWorkingSet64;
 
 Console.WriteLine();
 if (!headerPrinted)
@@ -162,7 +184,13 @@ else
 {
     Console.WriteLine($"({totalRows:N0} rows)");
 }
-Console.WriteLine($"Elapsed: {sw.Elapsed.TotalSeconds:F3}s");
+Console.WriteLine($"Elapsed: {sw.Elapsed.TotalSeconds:F3}s  batches={batchCount:N0}");
+Console.WriteLine();
+Console.WriteLine("Memory:");
+Console.WriteLine($"  Managed heap:     start={FormatBytes(memStart.ManagedHeapBytes),10}   peak={FormatBytes(peakManagedHeap),10}   end={FormatBytes(memEnd.ManagedHeapBytes),10}");
+Console.WriteLine($"  Allocated during: {FormatBytes(memEnd.TotalAllocatedBytes - memStart.TotalAllocatedBytes)}");
+Console.WriteLine($"  GC collections:   gen0={memEnd.Gen0 - memStart.Gen0}  gen1={memEnd.Gen1 - memStart.Gen1}  gen2={memEnd.Gen2 - memStart.Gen2}");
+Console.WriteLine($"  Peak working set: {FormatBytes(peakWorkingSet)}");
 
 return 0;
 
@@ -204,6 +232,31 @@ static string FormatValue(DataValue value, Arena arena)
         _ => $"<{value.Kind}>",
     };
 }
+
+static MemorySnapshot Snapshot(Process proc)
+{
+    return new MemorySnapshot(
+        ManagedHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+        TotalAllocatedBytes: GC.GetTotalAllocatedBytes(),
+        Gen0: GC.CollectionCount(0),
+        Gen1: GC.CollectionCount(1),
+        Gen2: GC.CollectionCount(2));
+}
+
+static string FormatBytes(long bytes) => bytes switch
+{
+    < 1024 => $"{bytes} B",
+    < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+    < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+    _ => $"{bytes / (1024.0 * 1024 * 1024):F2} GB",
+};
+
+readonly record struct MemorySnapshot(
+    long ManagedHeapBytes,
+    long TotalAllocatedBytes,
+    int Gen0,
+    int Gen1,
+    int Gen2);
 
 sealed record Options(
     string DatumPath,
