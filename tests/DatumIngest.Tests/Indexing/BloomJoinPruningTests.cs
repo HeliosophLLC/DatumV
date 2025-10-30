@@ -86,8 +86,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
 
         // Create ScanOperator for the left side with the source index.
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         // Right (build) side: only has key value 3.0 — should match chunk 1 only.
         MockOperator rightSide = new(
@@ -151,8 +151,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
             MakeRow(("rid", DataValue.FromFloat32(1.0f))));
@@ -198,8 +198,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
             MakeRow(("rid", DataValue.FromFloat32(999.0f))));
@@ -270,8 +270,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         // Wrap in alias to test traversal.
         AliasOperator aliased = new(scanOperator, "a");
@@ -354,8 +354,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex orderSourceIndex = new(orderFingerprint, orderIndexSchema, orderChunks, orderBloomSet);
 
         TableCatalog catalog = CreateCatalog(("orders", orderRows));
+        ((InMemoryTableProvider)catalog["orders"]).ProvideSourceIndex(orderSourceIndex);
         ScanOperator orderScan = new(catalog["orders"], null, orderRows.Length);
-        orderScan.SetSourceIndex(orderSourceIndex);
 
         // Inner right: "customers" table — simple, no bloom needed.
         MockOperator customerSide = new(
@@ -483,8 +483,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side: only key 4.0 — should match chunk 1 only.
         MockOperator rightSide = new(
@@ -558,8 +558,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
         TableCatalog catalog = CreateCatalog(("left", leftRows));
+        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-        scanOperator.SetSourceIndex(sourceIndex);
 
         // Build side has keys from both chunks.
         MockOperator rightSide = new(

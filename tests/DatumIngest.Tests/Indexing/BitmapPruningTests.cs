@@ -459,8 +459,8 @@ public sealed class BitmapPruningTests : ServiceTestBase
         SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
 
         InMemoryTableProvider provider = CreateInMemoryProvider("data", rows);
+        provider.ProvideSourceIndex(sourceIndex);
         ScanOperator scan = new(provider, null, rows.Length);
-        scan.SetSourceIndex(sourceIndex);
 
         OperatorPlanDescription plan = scan.DescribeForExplain();
         Assert.NotNull(plan.AccessStrategy);
@@ -606,8 +606,8 @@ public sealed class BitmapPruningTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         catalog.Add(provider);
 
+        provider.ProvideSourceIndex(sourceIndex);
         ScanOperator scan = new(provider, null, provider.GetRowCount());
-        scan.SetSourceIndex(sourceIndex);
         scan.AddFilterHint(filterHint);
         return (scan, catalog);
     }

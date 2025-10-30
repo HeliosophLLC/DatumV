@@ -34,6 +34,9 @@ public sealed class InMemoryTableProvider : ITableProvider
     private readonly object?[][] _rows;
     private readonly Schema _schema;
     private readonly ColumnLookup _fullLookup;
+    private readonly bool _indexEnabled;
+    private readonly Lazy<SourceIndex?>? _lazySourceIndex;
+    private SourceIndex? _overrideIndex;
 
     /// <summary>
     /// Creates a provider from explicit column names and raw <c>object[]</c> rows.
@@ -44,7 +47,17 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// <param name="name">The logical table name.</param>
     /// <param name="columns">Column names, in the order cells appear in each row.</param>
     /// <param name="rows">Rows as <c>object?[]</c> arrays with one cell per column.</param>
-    public InMemoryTableProvider(Pool pool, string name, string[] columns, object?[][] rows)
+    /// <param name="indexEnabled">
+    /// When <c>true</c> (default), <see cref="GetSourceIndex"/> lazily builds a
+    /// <see cref="SourceIndex"/> from the backing rows on first access. Set to
+    /// <c>false</c> to verify the no-index scan fallback.
+    /// </param>
+    public InMemoryTableProvider(
+        Pool pool,
+        string name,
+        string[] columns,
+        object?[][] rows,
+        bool indexEnabled = true)
     {
         _pool = pool;
         Name = name;
@@ -52,6 +65,10 @@ public sealed class InMemoryTableProvider : ITableProvider
         _rows = rows;
         _schema = BuildSchema(_columns, _rows);
         _fullLookup = new ColumnLookup(_columns);
+        _indexEnabled = indexEnabled;
+        _lazySourceIndex = indexEnabled
+            ? new Lazy<SourceIndex?>(BuildIndex, LazyThreadSafetyMode.ExecutionAndPublication)
+            : null;
     }
 
     /// <summary>
@@ -111,7 +128,81 @@ public sealed class InMemoryTableProvider : ITableProvider
     public Manifest.QueryResultsManifest? GetManifest() => null;
 
     /// <inheritdoc/>
-    public SourceIndex? GetSourceIndex() => null;
+    /// <remarks>
+    /// Returns (in priority order): the index set via <see cref="ProvideSourceIndex"/>
+    /// if any; otherwise the lazily-built index from the backing rows when indexing is
+    /// enabled; otherwise <c>null</c>.
+    /// </remarks>
+    public SourceIndex? GetSourceIndex()
+    {
+        if (_overrideIndex is not null)
+        {
+            return _overrideIndex;
+        }
+
+        return _lazySourceIndex?.Value;
+    }
+
+    /// <summary>
+    /// Overrides the source index returned by <see cref="GetSourceIndex"/> with a
+    /// caller-supplied instance. Used by tests that need to verify index-consuming
+    /// operators against hand-constructed <see cref="SourceIndex"/> fixtures (e.g.
+    /// specific bloom-filter shapes for pruning tests).
+    /// </summary>
+    /// <remarks>
+    /// Replaces the lazy-built index if any. Subsequent <see cref="GetSourceIndex"/>
+    /// calls return <paramref name="index"/> until this method is called again.
+    /// </remarks>
+    public void ProvideSourceIndex(SourceIndex index)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        _overrideIndex = index;
+    }
+
+    /// <summary>
+    /// Builds a <see cref="SourceIndex"/> from the backing rows by feeding them into
+    /// an <see cref="IncrementalIndexBuilder"/>. Auto-selects bloom filters on all
+    /// columns plus sorted/bitmap indexes on compact columns (the same auto-index
+    /// policy the production indexer uses). HLL cardinality is disabled for determinism.
+    /// </summary>
+    private SourceIndex? BuildIndex()
+    {
+        if (_rows.Length == 0)
+        {
+            return null;
+        }
+
+        SourceFingerprint fingerprint = new(fileSize: 0, new byte[32]);
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: true,
+            indexAllColumns: false,
+            autoIndexColumns: true,
+            computeCardinality: false);
+
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+        using Arena buildArena = new();
+
+        DataKind[] kinds = new DataKind[_columns.Length];
+        for (int c = 0; c < _columns.Length; c++)
+        {
+            kinds[c] = _schema.Columns[c].Kind;
+        }
+
+        foreach (object?[] rawRow in _rows)
+        {
+            DataValue[] values = new DataValue[_columns.Length];
+            for (int c = 0; c < _columns.Length; c++)
+            {
+                object? cell = c < rawRow.Length ? rawRow[c] : null;
+                values[c] = MaterializeCell(cell, kinds[c], buildArena);
+            }
+
+            Row row = new(_fullLookup, values);
+            incremental.AddRow(row, buildArena);
+        }
+
+        return incremental.Finalize();
+    }
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
