@@ -38,21 +38,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Bit mask for the null flag in <see cref="_flags"/>.</summary>
     private const byte FlagIsNull = 0x01;
 
-    /// <summary>Bit mask indicating the value has a payload in an <see cref="IValueStore"/>.</summary>
-    private const byte FlagHasReference = 0x02;
-
     /// <summary>
-    /// Bit mask indicating a <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
-    /// payload whose UTF-8 bytes are stored inline in <c>_p0</c>-<c>_p3</c> (up to 16 bytes).
-    /// When set, <c>_charCount</c> holds the UTF-8 byte length (0-16).
+    /// Bit mask indicating the value's payload lives in an external <see cref="IValueStore"/>
+    /// (typically an <see cref="Arena"/>) rather than inline in <c>_p0</c>-<c>_p3</c>.
+    /// Set for reference-type payloads (vectors, matrices, arrays, images, …) and for
+    /// strings/JSON whose UTF-8 form exceeds 16 bytes. Inline is the default — fixed-size
+    /// scalars and strings/JSON ≤ 16 bytes carry no flag.
     /// </summary>
-    private const byte FlagIsInline = 0x04;
+    private const byte FlagInArena = 0x02;
 
     // ───────────────────────── Fields (20 bytes) ─────────────────────────
 
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
-    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference, bit 2: IsInline
+    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: InArena
     // ushort at offset 2 carries string/JSON sizing info, interpreted by storage mode:
     //   Non-inline (reference-store / arena-slice): full char count (0 = unknown, 65535 = overflow sentinel)
     //   Inline: low byte  = UTF-8 byte length (0-16)
@@ -103,14 +102,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Whether this value represents a typed null.</summary>
     public bool IsNull => (_flags & FlagIsNull) != 0;
 
-    /// <summary>Whether this value has a reference-type payload in an <see cref="IValueStore"/>.</summary>
-    internal bool HasReference => (_flags & FlagHasReference) != 0;
-
     /// <summary>
-    /// Whether this value is a <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
-    /// whose UTF-8 bytes are stored inline in <c>_p0</c>-<c>_p3</c>.
+    /// Whether this value's payload is self-contained in the struct's 16-byte inline region
+    /// (<c>_p0</c>-<c>_p3</c>). True for fixed-size scalars (integers, floats, dates, times,
+    /// UUIDs, booleans, types) and for strings/JSON whose UTF-8 form fits in 16 bytes.
+    /// False for nulls and for any value whose payload lives in an external
+    /// <see cref="IValueStore"/> (<see cref="IsArenaBacked"/>).
     /// </summary>
-    public bool IsInline => (_flags & FlagIsInline) != 0;
+    /// <remarks>
+    /// Indexes (bloom, bitmap, sorted, B+Tree) only admit inline values — lookups against
+    /// non-inline values can short-circuit to a negative result.
+    /// </remarks>
+    public bool IsInline => (_flags & (FlagIsNull | FlagInArena)) == 0;
 
     /// <summary>
     /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.
@@ -201,7 +204,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromUInt8Array(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.UInt8Array, flags: FlagInArena, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -239,7 +242,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
@@ -254,7 +257,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreChars(chars);
         var (hashLo, hashHi) = HashString(chars);
         ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
@@ -268,7 +271,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreUtf8(utf8);
         var (hashLo, hashHi) = HashUtf8(utf8);
         ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>
@@ -293,7 +296,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return new(
             kind,
-            flags: FlagIsInline,
+            flags: 0,
             p0: asInts[0],
             p1: asInts[1],
             p2: asInts[2],
@@ -310,7 +313,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="offset">Byte offset into the owning <see cref="Arena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
     public static DataValue FromStringSlice(int offset, int length) =>
-        new(DataKind.String, flags: 0, p0: offset, p1: length);
+        new(DataKind.String, flags: FlagInArena, p0: offset, p1: length);
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVector(float[], IValueStore)"/> instead.</remarks>
@@ -321,7 +324,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromVector(float[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreFloats(value);
-        return new(DataKind.Vector, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.Vector, flags: FlagInArena, p0: p0, p1: p1);
     }
 
     /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
@@ -339,7 +342,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         var (p0, _) = store.StoreFloats(data);
-        return new(DataKind.Matrix, flags: FlagHasReference, p0: p0, p1: rows, p2: columns);
+        return new(DataKind.Matrix, flags: FlagInArena, p0: p0, p1: rows, p2: columns);
     }
 
     /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
@@ -361,7 +364,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         var (p0, p1) = store.StoreTensor(data, shape);
-        return new(DataKind.Tensor, flags: FlagHasReference, p0: p0, p1: p1, p2: expectedLength);
+        return new(DataKind.Tensor, flags: FlagInArena, p0: p0, p1: p1, p2: expectedLength);
     }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
@@ -373,7 +376,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromImage(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.Image, flags: FlagInArena, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -385,7 +388,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// would otherwise force.
     /// </summary>
     public static DataValue FromImageAtOffset(int offset, int length) =>
-        new(DataKind.Image, flags: FlagHasReference, p0: offset, p1: length);
+        new(DataKind.Image, flags: FlagInArena, p0: offset, p1: length);
 
     /// <summary>
     /// Creates a <see cref="DataKind.UInt8Array"/> value that references bytes
@@ -394,7 +397,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// payloads where the bytes are already arena-resident.
     /// </summary>
     public static DataValue FromUInt8ArrayAtOffset(int offset, int length) =>
-        new(DataKind.UInt8Array, flags: FlagHasReference, p0: offset, p1: length);
+        new(DataKind.UInt8Array, flags: FlagInArena, p0: offset, p1: length);
 
     /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
@@ -405,7 +408,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal static DataValue FromImageHandle(ImageHandle handle, IValueStore store)
     {
         var (p0, p1) = store.StoreObject(handle);
-        return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.Image, flags: FlagInArena, p0: p0, p1: p1);
     }
 
     /// <summary>Creates a value from a calendar date.</summary>
@@ -453,7 +456,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.JsonValue, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>
@@ -525,13 +528,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     // ───────────────────────── Arena state ─────────────────────────
 
     /// <summary>
-    /// Whether this value stores an arena offset rather than a direct reference.
-    /// True for string/JSON values created via <see cref="FromStringSlice(int, int)"/>.
-    /// Inline strings (see <see cref="IsInline"/>) are self-contained and return <c>false</c>.
+    /// Whether this value's payload lives in an external <see cref="IValueStore"/>
+    /// (typically an <see cref="Arena"/>) rather than inline. The inline payload holds an
+    /// offset/length pair (<c>_p0</c>/<c>_p1</c>) into the store. True for variable-size
+    /// reference types (vectors, matrices, images, arrays, structs, byte arrays) and for
+    /// strings/JSON whose UTF-8 form exceeds 16 bytes or were produced via
+    /// <see cref="FromStringSlice(int, int)"/>.
     /// </summary>
-    public bool IsArenaBacked =>
-        (_kind is DataKind.String or DataKind.JsonValue)
-        && (_flags & (FlagIsNull | FlagHasReference | FlagIsInline)) == 0;
+    public bool IsArenaBacked => (_flags & FlagInArena) != 0;
 
     /// <summary>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
@@ -569,7 +573,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <returns>An adjusted value whose length is unchanged.</returns>
     internal DataValue WithArenaOffset(int delta)
     {
-        return new DataValue(_kind, flags: 0, p0: _p0 + delta, p1: _p1);
+        return new DataValue(_kind, flags: _flags, p0: _p0 + delta, p1: _p1, p2: _p2, p3: _p3, charCount: _charCount);
     }
 
     /// <summary>Creates a typed array value from an element kind and an array of elements.</summary>
@@ -581,14 +585,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromArray(DataKind elementKind, DataValue[] elements, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(elements);
-        return new(DataKind.Array, flags: FlagHasReference, p0: p0, p1: p1, p2: (int)elementKind);
+        return new(DataKind.Array, flags: FlagInArena, p0: p0, p1: p1, p2: (int)elementKind);
     }
 
     /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromArray(DataKind elementKind, List<DataValue> elements, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(CollectionsMarshal.AsSpan(elements));
-        return new(DataKind.Array, flags: FlagHasReference, p0: p0, p1: p1, p2: (int)elementKind);
+        return new(DataKind.Array, flags: FlagInArena, p0: p0, p1: p1, p2: (int)elementKind);
     }
 
     /// <summary>Creates a typed null array with the given element kind.</summary>
@@ -605,7 +609,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStruct(short fieldCount, DataValue[] fields, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(fields);
-        return new(DataKind.Struct, flags: FlagHasReference, p0: p0, p1: p1, p2: fieldCount);
+        return new(DataKind.Struct, flags: FlagInArena, p0: p0, p1: p1, p2: fieldCount);
     }
 
     /// <summary>Creates a typed null struct with the given field count.</summary>
@@ -662,15 +666,15 @@ public readonly struct DataValue : IEquatable<DataValue>
         };
     }
 
-    /// <summary>
-    /// Converts a CLR literal value to a <see cref="DataValue"/>.
-    /// </summary>
-    /// <remarks>Note: string literals require a store. Use <see cref="FromLiteral(object, IValueStore)"/> for string literals.</remarks>
-    public static DataValue FromLiteral(object rawLiteral)
-    {
-        throw new InvalidOperationException(
-            "Use FromLiteral(rawLiteral, store) for string literals. ReferenceStore is no longer available.");
-    }
+    // /// <summary>
+    // /// Converts a CLR literal value to a <see cref="DataValue"/>.
+    // /// </summary>
+    // /// <remarks>Note: string literals require a store. Use <see cref="FromLiteral(object, IValueStore)"/> for string literals.</remarks>
+    // public static DataValue FromLiteral(object rawLiteral)
+    // {
+    //     throw new InvalidOperationException(
+    //         "Use FromLiteral(rawLiteral, store) for string literals. ReferenceStore is no longer available.");
+    // }
 
     /// <summary>
     /// Maps a CLR <see cref="Type"/> to the corresponding <see cref="DataKind"/>.
@@ -1353,12 +1357,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
-        if ((_flags & FlagHasReference) != 0)
-        {
-            // HasReference values need a full IValueStore. Arena can serve as one since it implements IValueStore.
-            return arena.RetrieveString(_p0, _p1);
-        }
-
         return arena.GetString(_p0, _p1);
     }
 
@@ -1978,16 +1976,12 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
             DataKind.String => IsInline
                 ? $"String[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
-                : HasReference
-                    ? $"String[offset={_p0}, len={_p1}]"
-                    : $"String[arena@{_p0}+{_p1}]",
+                : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.JsonValue => IsInline
                 ? $"JsonValue[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
-                : HasReference
-                    ? $"JsonValue[offset={_p0}, len={_p1}]"
-                    : $"JsonValue[arena@{_p0}+{_p1}]",
+                : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
