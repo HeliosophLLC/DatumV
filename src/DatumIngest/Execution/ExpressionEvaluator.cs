@@ -10,13 +10,23 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// Evaluates AST <see cref="Expression"/> nodes against a <see cref="Row"/>.
-/// Forces <see cref="LazyDataValue"/> on access so that WHERE/ON/ORDER BY
-/// clauses materialize only the columns they reference.
+/// Per-call context (row, source arena for reading, target arena for writing, outer
+/// row) is passed through an <see cref="EvaluationFrame"/>. A backward-compatible
+/// <c>Row</c> overload reuses the store supplied at construction for both arenas.
 /// </summary>
 public sealed class ExpressionEvaluator
 {
     private readonly FunctionRegistry _functions;
     private readonly QueryMeter? _meter;
+
+    /// <summary>
+    /// Persistent store used for (1) per-evaluator caches (<see cref="_castTargetCache"/>,
+    /// <see cref="_inValueSetCache"/>) whose <see cref="DataValue"/> entries must outlive
+    /// any single batch, and (2) the <see cref="Row"/>-only overload of
+    /// <see cref="Evaluate(Expression, Row)"/> which constructs a default frame using this
+    /// store for both the source and target arenas. Callers that want true two-arena
+    /// behaviour should invoke the <see cref="EvaluationFrame"/>-based overloads instead.
+    /// </summary>
     private readonly IValueStore? _store;
     private readonly Row? _outerRow;
     private readonly Schema? _sourceSchema;
@@ -69,7 +79,9 @@ public sealed class ExpressionEvaluator
     /// <param name="outerRow">
     /// Optional outer row from a correlated scalar subquery, or <see langword="null"/> when not inside
     /// a correlated subquery. Column references that cannot be resolved against the current row
-    /// will fall back to this row.
+    /// will fall back to this row. Only consulted by the <see cref="Evaluate(Expression, Row)"/>
+    /// backward-compatible overload; the <see cref="EvaluationFrame"/>-based overloads carry the
+    /// outer row per-call.
     /// </param>
     /// <param name="sourceSchema">
     /// Optional query output schema used to resolve struct field names at evaluation time.
@@ -82,7 +94,12 @@ public sealed class ExpressionEvaluator
     /// referenced binding's expression is a struct literal, field positions are recovered from
     /// the AST. Enables named destructuring of struct literals through hidden bindings.
     /// </param>
-    /// <param name="store">Optional value store for resolving reference-type payloads (strings, arrays).</param>
+    /// <param name="store">
+    /// Optional persistent value store used for per-evaluator caches (cast target names, IN
+    /// literal sets) and as the default source/target arena for the <see cref="Row"/>-only
+    /// <see cref="Evaluate(Expression, Row)"/> overload. For true two-arena evaluation use the
+    /// <see cref="EvaluationFrame"/>-based overloads.
+    /// </param>
     public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null, IValueStore? store = null)
     {
         _functions = functions;
@@ -93,33 +110,60 @@ public sealed class ExpressionEvaluator
         _letBindingExpressions = letBindingExpressions;
     }
 
-    /// <summary>Resolves a string DataValue via the store if available.</summary>
-    private string Str(DataValue v) => _store is not null ? v.AsString(_store) : v.AsString();
+    /// <summary>Resolves a string DataValue against the frame's source arena.</summary>
+    private static string Str(DataValue v, in EvaluationFrame frame) => v.AsString(frame.Source);
+
+    // ──────────────────── Public entry points ────────────────────
 
     /// <summary>
-    /// Evaluates an expression tree against the given row and returns the result.
+    /// Evaluates an expression tree against the given row, using the store supplied at
+    /// construction for both reads and writes. Convenience overload for callers that don't
+    /// yet distinguish source and target arenas.
+    /// </summary>
+    public DataValue Evaluate(Expression expression, Row row)
+    {
+        IValueStore store = _store ?? ThrowStoreRequired();
+        return Evaluate(expression, new EvaluationFrame(row, store, store, _outerRow));
+    }
+
+    /// <summary>
+    /// Evaluates an expression and interprets the result as a boolean, using the store
+    /// supplied at construction. Convenience overload.
+    /// </summary>
+    public bool EvaluateAsBoolean(Expression expression, Row row)
+    {
+        IValueStore store = _store ?? ThrowStoreRequired();
+        return EvaluateAsBoolean(expression, new EvaluationFrame(row, store, store, _outerRow));
+    }
+
+    private static IValueStore ThrowStoreRequired() =>
+        throw new InvalidOperationException(
+            "ExpressionEvaluator was constructed without a store; use the EvaluationFrame overload or supply a store.");
+
+    /// <summary>
+    /// Evaluates an expression tree against the given frame and returns the result.
     /// </summary>
     /// <param name="expression">The AST expression to evaluate.</param>
-    /// <param name="row">The current data row providing column values.</param>
+    /// <param name="frame">Row + arenas + outer row for this evaluation.</param>
     /// <returns>The computed result.</returns>
-    public DataValue Evaluate(Expression expression, Row row)
+    public DataValue Evaluate(Expression expression, in EvaluationFrame frame)
     {
         try
         {
             return expression switch
             {
-                LiteralExpression literal => EvaluateLiteral(literal),
-                ColumnReference column => EvaluateColumn(column, row, _outerRow),
-                BinaryExpression binary => EvaluateBinary(binary, row),
-                UnaryExpression unary => EvaluateUnary(unary, row),
-                FunctionCallExpression function => EvaluateFunction(function, row),
-                InExpression inExpr => EvaluateIn(inExpr, row),
-                BetweenExpression between => EvaluateBetween(between, row),
-                IsNullExpression isNull => EvaluateIsNull(isNull, row),
-                CastExpression cast => EvaluateCast(cast, row),
-                AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, row),
-                CaseExpression caseExpr => EvaluateCase(caseExpr, row),
-                LikeExpression like => EvaluateLikeEscape(like, row),
+                LiteralExpression literal => EvaluateLiteral(literal, frame),
+                ColumnReference column => EvaluateColumn(column, frame),
+                BinaryExpression binary => EvaluateBinary(binary, frame),
+                UnaryExpression unary => EvaluateUnary(unary, frame),
+                FunctionCallExpression function => EvaluateFunction(function, frame),
+                InExpression inExpr => EvaluateIn(inExpr, frame),
+                BetweenExpression between => EvaluateBetween(between, frame),
+                IsNullExpression isNull => EvaluateIsNull(isNull, frame),
+                CastExpression cast => EvaluateCast(cast, frame),
+                AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, frame),
+                CaseExpression caseExpr => EvaluateCase(caseExpr, frame),
+                LikeExpression like => EvaluateLikeEscape(like, frame),
                 WindowFunctionCallExpression window => throw new InvalidOperationException(
                     $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
                     "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
@@ -138,8 +182,8 @@ public sealed class ExpressionEvaluator
                 LambdaExpression => throw new InvalidOperationException(
                     "Lambda expressions cannot be evaluated as standalone values. " +
                     "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
-                StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, row),
-                IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, row),
+                StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, frame),
+                IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, frame),
                 TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
                 _ => throw new InvalidOperationException(
                     $"Unsupported expression type: {expression.GetType().Name}.")
@@ -162,9 +206,9 @@ public sealed class ExpressionEvaluator
     /// Evaluates an expression and interprets the result as a boolean (truthy/falsy).
     /// Null is treated as false. Scalar 0 is false; non-zero is true.
     /// </summary>
-    public bool EvaluateAsBoolean(Expression expression, Row row)
+    public bool EvaluateAsBoolean(Expression expression, in EvaluationFrame frame)
     {
-        DataValue result = Evaluate(expression, row);
+        DataValue result = Evaluate(expression, frame);
 
         if (result.IsNull)
         {
@@ -184,12 +228,12 @@ public sealed class ExpressionEvaluator
             DataKind.UInt32 => result.AsUInt32() != 0,
             DataKind.Int64 => result.AsInt64() != 0,
             DataKind.UInt64 => result.AsUInt64() != 0,
-            DataKind.String => !string.IsNullOrEmpty(Str(result)),
+            DataKind.String => !string.IsNullOrEmpty(Str(result, frame)),
             _ => true,
         };
     }
 
-    private DataValue EvaluateLiteral(LiteralExpression literal)
+    private DataValue EvaluateLiteral(LiteralExpression literal, in EvaluationFrame frame)
     {
         if (literal.Value is null)
         {
@@ -205,7 +249,7 @@ public sealed class ExpressionEvaluator
             long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),
             double doubleValue => DataValue.FromFloat64(doubleValue),
-            string stringValue => _store is not null ? DataValue.FromString(stringValue, _store) : DataValue.FromString(stringValue),
+            string stringValue => DataValue.FromString(stringValue, frame.Target),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type: {literal.Value.GetType().Name}."),
@@ -240,8 +284,10 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private static DataValue EvaluateColumn(ColumnReference column, Row row, Row? outerRow)
+    private static DataValue EvaluateColumn(ColumnReference column, in EvaluationFrame frame)
     {
+        Row row = frame.Row;
+
         // For qualified references (table.column), try the full qualified name first,
         // then the unqualified column name.
         if (column.QualifiedName is not null)
@@ -258,15 +304,15 @@ public sealed class ExpressionEvaluator
         }
 
         // Fall back to the outer row for correlated subquery column resolution.
-        if (outerRow is not null)
+        if (frame.OuterRow is Row outerRow)
         {
             if (column.QualifiedName is not null &&
-                outerRow.Value.TryGetValue(column.QualifiedName, out DataValue outerQualifiedValue))
+                outerRow.TryGetValue(column.QualifiedName, out DataValue outerQualifiedValue))
             {
                 return outerQualifiedValue;
             }
 
-            if (outerRow.Value.TryGetValue(column.ColumnName, out DataValue outerValue))
+            if (outerRow.TryGetValue(column.ColumnName, out DataValue outerValue))
             {
                 return outerValue;
             }
@@ -278,17 +324,17 @@ public sealed class ExpressionEvaluator
                 : $"Column '{column.ColumnName}' not found in row.");
     }
 
-    private DataValue EvaluateBinary(BinaryExpression binary, Row row)
+    private DataValue EvaluateBinary(BinaryExpression binary, in EvaluationFrame frame)
     {
         // Short-circuit for AND/OR.
         if (binary.Operator == BinaryOperator.And)
         {
-            if (!EvaluateAsBoolean(binary.Left, row))
+            if (!EvaluateAsBoolean(binary.Left, frame))
             {
                 return DataValue.FromBoolean(false);
             }
 
-            if (!EvaluateAsBoolean(binary.Right, row))
+            if (!EvaluateAsBoolean(binary.Right, frame))
             {
                 return DataValue.FromBoolean(false);
             }
@@ -298,12 +344,12 @@ public sealed class ExpressionEvaluator
 
         if (binary.Operator == BinaryOperator.Or)
         {
-            if (EvaluateAsBoolean(binary.Left, row))
+            if (EvaluateAsBoolean(binary.Left, frame))
             {
                 return DataValue.FromBoolean(true);
             }
 
-            if (EvaluateAsBoolean(binary.Right, row))
+            if (EvaluateAsBoolean(binary.Right, frame))
             {
                 return DataValue.FromBoolean(true);
             }
@@ -312,8 +358,8 @@ public sealed class ExpressionEvaluator
         }
 
         {
-            DataValue left = Evaluate(binary.Left, row);
-            DataValue right = Evaluate(binary.Right, row);
+            DataValue left = Evaluate(binary.Left, frame);
+            DataValue right = Evaluate(binary.Right, frame);
 
             // NULL propagation: any operation with NULL yields NULL (except IS NULL checks).
             // Comparisons and pattern operators produce Boolean nulls; arithmetic produces
@@ -346,18 +392,18 @@ public sealed class ExpressionEvaluator
                 BinaryOperator.GreaterThan => CompareValues(left, right, 1),
                 BinaryOperator.LessThanOrEqual => CompareValuesLe(left, right),
                 BinaryOperator.GreaterThanOrEqual => CompareValuesGe(left, right),
-                BinaryOperator.Like => EvaluateLike(left, right),
-                BinaryOperator.ILike => EvaluateILike(left, right),
-                BinaryOperator.Regexp => EvaluateRegexp(left, right),
+                BinaryOperator.Like => EvaluateLike(left, right, frame),
+                BinaryOperator.ILike => EvaluateILike(left, right, frame),
+                BinaryOperator.Regexp => EvaluateRegexp(left, right, frame),
                 _ => throw new InvalidOperationException(
                     $"Unsupported binary operator: {binary.Operator}."),
             };
         }
     }
 
-    private DataValue EvaluateUnary(UnaryExpression unary, Row row)
+    private DataValue EvaluateUnary(UnaryExpression unary, in EvaluationFrame frame)
     {
-        DataValue operand = Evaluate(unary.Operand, row);
+        DataValue operand = Evaluate(unary.Operand, frame);
 
         if (operand.IsNull)
         {
@@ -369,14 +415,14 @@ public sealed class ExpressionEvaluator
         return unary.Operator switch
         {
             UnaryOperator.Not => DataValue.FromBoolean(
-                !EvaluateAsBoolean(unary.Operand, row)),
+                !EvaluateAsBoolean(unary.Operand, frame)),
             UnaryOperator.Negate => DataValue.FromFloat32(-ToFloat(operand)),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
         };
     }
 
-    private DataValue EvaluateFunction(FunctionCallExpression function, Row row)
+    private DataValue EvaluateFunction(FunctionCallExpression function, in EvaluationFrame frame)
     {
         IScalarFunction? scalarFunction = _functions.TryGetScalar(function.FunctionName);
 
@@ -389,7 +435,7 @@ public sealed class ExpressionEvaluator
         // Higher-order function path: detect lambda arguments and route accordingly.
         if (scalarFunction is IHigherOrderFunction higherOrder)
         {
-            return EvaluateHigherOrderFunction(higherOrder, function, row);
+            return EvaluateHigherOrderFunction(higherOrder, function, frame);
         }
 
         int argumentCount = function.Arguments.Count;
@@ -398,22 +444,20 @@ public sealed class ExpressionEvaluator
         {
             for (int index = 0; index < argumentCount; index++)
             {
-                arguments[index] = Evaluate(function.Arguments[index], row);
+                arguments[index] = Evaluate(function.Arguments[index], frame);
             }
 
-            DataValue result = _store is not null
-                ? scalarFunction.Execute(arguments.AsSpan(0, argumentCount), _store)
-                : scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
+            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), frame.Target);
 
             _meter?.Add(scalarFunction.QueryUnitCost);
-        if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
-        {
-            _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
-        }
+            if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
+            {
+                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
+            }
             // Dispose intermediate ImageHandle arguments whose bitmaps are no longer needed.
             // Handles still referenced by the source row are kept alive — they may appear
             // as ordinal copies in the projected row (e.g. SELECT *, func(image)).
-            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, row);
+            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, frame.Row);
 
             return result;
         }
@@ -433,7 +477,7 @@ public sealed class ExpressionEvaluator
     private DataValue EvaluateHigherOrderFunction(
         IHigherOrderFunction higherOrder,
         FunctionCallExpression function,
-        Row row)
+        in EvaluationFrame frame)
     {
         int argumentCount = function.Arguments.Count;
         IReadOnlySet<int> lambdaIndices = higherOrder.GetLambdaParameterIndices(argumentCount);
@@ -457,16 +501,16 @@ public sealed class ExpressionEvaluator
                 }
                 else
                 {
-                    arguments[index] = Evaluate(function.Arguments[index], row);
+                    arguments[index] = Evaluate(function.Arguments[index], frame);
                 }
             }
 
-            // Capture the current row for closure semantics — lambda body references
+            // Capture the current frame for closure semantics — lambda body references
             // to columns resolve against this row after lambda parameter bindings.
-            Row capturedRow = row;
+            EvaluationFrame capturedFrame = frame;
             LambdaEvaluator evaluator = (LambdaExpression lambda, ReadOnlySpan<DataValue> parameterValues) =>
             {
-                return EvaluateLambdaBody(lambda, parameterValues, capturedRow);
+                return EvaluateLambdaBody(lambda, parameterValues, capturedFrame);
             };
 
             DataValue result = higherOrder.ExecuteHigherOrder(
@@ -480,7 +524,7 @@ public sealed class ExpressionEvaluator
                 _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
             }
 
-            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, row);
+            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, frame.Row);
 
             return result;
         }
@@ -499,7 +543,7 @@ public sealed class ExpressionEvaluator
     private DataValue EvaluateLambdaBody(
         LambdaExpression lambda,
         ReadOnlySpan<DataValue> parameterValues,
-        Row enclosingRow)
+        in EvaluationFrame enclosingFrame)
     {
         int parameterCount = lambda.Parameters.Count;
         if (parameterValues.Length != parameterCount)
@@ -507,6 +551,8 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException(
                 $"Lambda expects {parameterCount} parameter(s) but received {parameterValues.Length}.");
         }
+
+        Row enclosingRow = enclosingFrame.Row;
 
         // Build an augmented row: original columns + lambda parameter bindings.
         // Lambda parameters shadow columns with the same name.
@@ -532,7 +578,7 @@ public sealed class ExpressionEvaluator
         // parameters priority over enclosing columns — correct closure semantics.
         Row augmentedRow = new(augmentedNames, augmentedValues);
 
-        return Evaluate(lambda.Body, augmentedRow);
+        return Evaluate(lambda.Body, enclosingFrame.WithRow(augmentedRow));
     }
 
     /// <summary>
@@ -598,9 +644,9 @@ public sealed class ExpressionEvaluator
         return false;
     }
 
-    private DataValue EvaluateIn(InExpression inExpr, Row row)
+    private DataValue EvaluateIn(InExpression inExpr, in EvaluationFrame frame)
     {
-        DataValue target = Evaluate(inExpr.Expression, row);
+        DataValue target = Evaluate(inExpr.Expression, frame);
 
         if (target.IsNull)
         {
@@ -610,7 +656,7 @@ public sealed class ExpressionEvaluator
         // Fast path: when all values are literals (e.g. constant-folded from an
         // uncorrelated IN subquery), build a HashSet once and do O(1) lookups
         // instead of O(n) linear scans on every row.
-        if (TryGetOrBuildLiteralValueSet(inExpr, out HashSet<DataValue> valueSet, out bool hasNullCandidate))
+        if (TryGetOrBuildLiteralValueSet(inExpr, frame, out HashSet<DataValue> valueSet, out bool hasNullCandidate))
         {
             bool found = valueSet.Contains(target);
 
@@ -643,16 +689,18 @@ public sealed class ExpressionEvaluator
         }
 
         // Slow path: values contain non-literal expressions that depend on the row.
-        return EvaluateInLinear(inExpr, target, row);
+        return EvaluateInLinear(inExpr, target, frame);
     }
 
     /// <summary>
     /// Attempts to retrieve or build a cached <see cref="HashSet{T}"/> of literal values
     /// for the given <see cref="InExpression"/>. Returns <see langword="false"/> if any
     /// value is not a <see cref="LiteralExpression"/>, indicating the linear path is needed.
+    /// The cache uses the evaluator's persistent <c>_store</c> so entries outlive any batch.
     /// </summary>
     private bool TryGetOrBuildLiteralValueSet(
         InExpression inExpr,
+        in EvaluationFrame frame,
         out HashSet<DataValue> valueSet,
         out bool hasNull)
     {
@@ -666,6 +714,12 @@ public sealed class ExpressionEvaluator
         HashSet<DataValue> set = new();
         bool anyNull = false;
 
+        // Materialize literal values into the persistent store so the cache entries
+        // remain valid across batches. Falls back to the frame's target arena when
+        // no persistent store is configured.
+        IValueStore cacheStore = _store ?? frame.Target;
+        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow);
+
         foreach (Expression valueExpression in inExpr.Values)
         {
             if (valueExpression is not LiteralExpression)
@@ -675,7 +729,7 @@ public sealed class ExpressionEvaluator
                 return false;
             }
 
-            DataValue value = EvaluateLiteral((LiteralExpression)valueExpression);
+            DataValue value = EvaluateLiteral((LiteralExpression)valueExpression, cacheFrame);
             if (value.IsNull)
             {
                 anyNull = true;
@@ -695,13 +749,13 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Linear-scan fallback for IN expressions with non-literal values.
     /// </summary>
-    private DataValue EvaluateInLinear(InExpression inExpr, DataValue target, Row row)
+    private DataValue EvaluateInLinear(InExpression inExpr, DataValue target, in EvaluationFrame frame)
     {
         bool hasNullCandidate = false;
 
         foreach (Expression valueExpression in inExpr.Values)
         {
-            DataValue candidate = Evaluate(valueExpression, row);
+            DataValue candidate = Evaluate(valueExpression, frame);
             if (candidate.IsNull)
             {
                 hasNullCandidate = true;
@@ -725,11 +779,11 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(inExpr.Negated);
     }
 
-    private DataValue EvaluateBetween(BetweenExpression between, Row row)
+    private DataValue EvaluateBetween(BetweenExpression between, in EvaluationFrame frame)
     {
-        DataValue target = Evaluate(between.Expression, row);
-        DataValue low = Evaluate(between.Low, row);
-        DataValue high = Evaluate(between.High, row);
+        DataValue target = Evaluate(between.Expression, frame);
+        DataValue low = Evaluate(between.Low, frame);
+        DataValue high = Evaluate(between.High, frame);
 
         if (target.IsNull || low.IsNull || high.IsNull)
         {
@@ -749,9 +803,9 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(inRange);
     }
 
-    private DataValue EvaluateIsNull(IsNullExpression isNull, Row row)
+    private DataValue EvaluateIsNull(IsNullExpression isNull, in EvaluationFrame frame)
     {
-        DataValue value = Evaluate(isNull.Expression, row);
+        DataValue value = Evaluate(isNull.Expression, frame);
         bool result = value.IsNull;
 
         if (isNull.Negated)
@@ -765,13 +819,14 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Cached <see cref="DataValue"/> wrappers for CAST target type strings, keyed by
     /// the type name (e.g. "Float32", "UInt8"). Avoids allocating a new DataValue per row.
+    /// Entries are written to the persistent <c>_store</c> so they outlive any batch.
     /// </summary>
     private readonly Dictionary<string, DataValue> _castTargetCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private DataValue EvaluateCast(CastExpression cast, Row row)
+    private DataValue EvaluateCast(CastExpression cast, in EvaluationFrame frame)
     {
-        DataValue value = Evaluate(cast.Expression, row);
+        DataValue value = Evaluate(cast.Expression, frame);
 
         IScalarFunction? castFunction = _functions.TryGetScalar("cast");
         if (castFunction is null)
@@ -781,9 +836,9 @@ public sealed class ExpressionEvaluator
 
         if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue targetTypeValue))
         {
-            targetTypeValue = _store is not null
-                ? DataValue.FromString(cast.TargetType, _store)
-                : DataValue.FromString(cast.TargetType);
+            // Cache entries must outlive any single batch — use the persistent store.
+            IValueStore cacheStore = _store ?? frame.Target;
+            targetTypeValue = DataValue.FromString(cast.TargetType, cacheStore);
             _castTargetCache[cast.TargetType] = targetTypeValue;
         }
 
@@ -792,9 +847,7 @@ public sealed class ExpressionEvaluator
         {
             arguments[0] = value;
             arguments[1] = targetTypeValue;
-            DataValue result = _store is not null
-                ? castFunction.Execute(arguments.AsSpan(0, 2), _store)
-                : castFunction.Execute(arguments.AsSpan(0, 2));
+            DataValue result = castFunction.Execute(arguments.AsSpan(0, 2), frame.Target);
             _meter?.Add(castFunction.QueryUnitCost);
             return result;
         }
@@ -810,17 +863,17 @@ public sealed class ExpressionEvaluator
     /// specified IANA timezone. The instant in time is preserved; only the UTC offset
     /// (and therefore the displayed local time) changes.
     /// </summary>
-    private DataValue EvaluateAtTimeZone(AtTimeZoneExpression atz, Row row)
+    private DataValue EvaluateAtTimeZone(AtTimeZoneExpression atz, in EvaluationFrame frame)
     {
-        DataValue value = Evaluate(atz.Expression, row);
+        DataValue value = Evaluate(atz.Expression, frame);
 
         if (value.IsNull)
         {
             return DataValue.Null(DataKind.DateTime);
         }
 
-        DataValue tzValue = Evaluate(atz.TimeZone, row);
-        string tzName = Str(tzValue);
+        DataValue tzValue = Evaluate(atz.TimeZone, frame);
+        string tzName = Str(tzValue, frame);
 
         if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
         {
@@ -840,14 +893,14 @@ public sealed class ExpressionEvaluator
     /// Searched CASE evaluates each WHEN condition as a boolean predicate.
     /// Only the matching THEN branch is evaluated.
     /// </summary>
-    private DataValue EvaluateCase(CaseExpression caseExpression, Row row)
+    private DataValue EvaluateCase(CaseExpression caseExpression, in EvaluationFrame frame)
     {
-        DataValue result = EvaluateCaseBranch(caseExpression, row);
+        DataValue result = EvaluateCaseBranch(caseExpression, frame);
 
         // Resolve target kind once per CaseExpression and coerce the result.
         if (!_caseResolvedKindCache.TryGetValue(caseExpression, out DataKind? resolvedKind))
         {
-            resolvedKind = ResolveCaseTargetKind(caseExpression, row);
+            resolvedKind = ResolveCaseTargetKind(caseExpression, frame);
             _caseResolvedKindCache[caseExpression] = resolvedKind;
         }
 
@@ -868,19 +921,19 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Evaluates the matching CASE branch without coercion — pure short-circuit logic.
     /// </summary>
-    private DataValue EvaluateCaseBranch(CaseExpression caseExpression, Row row)
+    private DataValue EvaluateCaseBranch(CaseExpression caseExpression, in EvaluationFrame frame)
     {
         if (caseExpression.Operand is not null)
         {
             // Simple CASE: compare operand against each WHEN value.
-            DataValue operand = Evaluate(caseExpression.Operand, row);
+            DataValue operand = Evaluate(caseExpression.Operand, frame);
 
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
-                DataValue whenValue = Evaluate(whenClause.Condition, row);
+                DataValue whenValue = Evaluate(whenClause.Condition, frame);
                 if (!operand.IsNull && !whenValue.IsNull && CompareDataValues(operand, whenValue) == 0)
                 {
-                    return Evaluate(whenClause.Result, row);
+                    return Evaluate(whenClause.Result, frame);
                 }
             }
         }
@@ -889,9 +942,9 @@ public sealed class ExpressionEvaluator
             // Searched CASE: evaluate each WHEN condition as boolean.
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
-                if (EvaluateAsBoolean(whenClause.Condition, row))
+                if (EvaluateAsBoolean(whenClause.Condition, frame))
                 {
-                    return Evaluate(whenClause.Result, row);
+                    return Evaluate(whenClause.Result, frame);
                 }
             }
         }
@@ -899,7 +952,7 @@ public sealed class ExpressionEvaluator
         // No match: return ELSE result or typed null.
         if (caseExpression.ElseResult is not null)
         {
-            return Evaluate(caseExpression.ElseResult, row);
+            return Evaluate(caseExpression.ElseResult, frame);
         }
 
         return DataValue.Null(DataKind.Float32);
@@ -910,8 +963,10 @@ public sealed class ExpressionEvaluator
     /// the current row and delegating to <see cref="ExpressionTypeResolver"/>.
     /// Falls back to AST-level inference when a row-derived schema cannot be built.
     /// </summary>
-    private DataKind? ResolveCaseTargetKind(CaseExpression caseExpression, Row row)
+    private DataKind? ResolveCaseTargetKind(CaseExpression caseExpression, in EvaluationFrame frame)
     {
+        Row row = frame.Row;
+
         // Build a schema from the row so column references resolve to their actual types.
         if (row.FieldCount > 0)
         {
@@ -1065,35 +1120,35 @@ public sealed class ExpressionEvaluator
 
     // ───────────────── Struct and index-access evaluation ─────────────────
 
-    private DataValue EvaluateStructLiteral(StructLiteralExpression literal, Row row)
+    private DataValue EvaluateStructLiteral(StructLiteralExpression literal, in EvaluationFrame frame)
     {
         DataValue[] fields = new DataValue[literal.Fields.Count];
 
         for (int index = 0; index < literal.Fields.Count; index++)
         {
-            fields[index] = Evaluate(literal.Fields[index].Value, row);
+            fields[index] = Evaluate(literal.Fields[index].Value, frame);
         }
 
         return DataValue.FromStruct((short)literal.Fields.Count, fields);
     }
 
-    private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, Row row)
+    private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, in EvaluationFrame frame)
     {
-        DataValue source = Evaluate(indexAccess.Source, row);
+        DataValue source = Evaluate(indexAccess.Source, frame);
 
         if (source.IsNull)
         {
             return source;
         }
 
-        DataValue index = Evaluate(indexAccess.Index, row);
+        DataValue index = Evaluate(indexAccess.Index, frame);
 
         if (source.Kind == DataKind.Array)
         {
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{Str(index)}') is not supported on Array: " +
+                    $"Named field access ('{Str(index, frame)}') is not supported on Array: " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
@@ -1114,7 +1169,7 @@ public sealed class ExpressionEvaluator
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{Str(index)}') is not supported on Vector — " +
+                    $"Named field access ('{Str(index, frame)}') is not supported on Vector — " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
@@ -1135,7 +1190,7 @@ public sealed class ExpressionEvaluator
             // Integer index → positional (ordinal) access by declaration order.
             if (index.Kind is DataKind.Float32 or DataKind.Float64 or DataKind.Int32 or DataKind.Int64)
             {
-                DataValue[] fields = source.AsStruct(_store!);
+                DataValue[] fields = source.AsStruct(frame.Source);
                 int position = (int)ToFloat(index);
                 if (position < 0 || position >= fields.Length)
                 {
@@ -1145,7 +1200,7 @@ public sealed class ExpressionEvaluator
             }
 
             // String index → named field access.
-            return EvaluateStructFieldAccess(source, index, indexAccess, row);
+            return EvaluateStructFieldAccess(source, index, indexAccess, frame);
         }
 
         throw new InvalidOperationException(
@@ -1153,10 +1208,10 @@ public sealed class ExpressionEvaluator
     }
 
     private DataValue EvaluateStructFieldAccess(
-        DataValue source, DataValue index, IndexAccessExpression indexAccess, Row row)
+        DataValue source, DataValue index, IndexAccessExpression indexAccess, in EvaluationFrame frame)
     {
-        DataValue[] fields = source.AsStruct(_store!);
-        string fieldName = Str(index);
+        DataValue[] fields = source.AsStruct(frame.Source);
+        string fieldName = Str(index, frame);
 
         // Try to resolve field position from schema when source is a column reference.
         if (indexAccess.Source is ColumnReference colRef)
@@ -1258,15 +1313,15 @@ public sealed class ExpressionEvaluator
     /// Evaluates a case-sensitive LIKE expression. Converts SQL wildcards
     /// (<c>%</c> and <c>_</c>) into a regex pattern.
     /// </summary>
-    private DataValue EvaluateLike(DataValue left, DataValue right)
+    private DataValue EvaluateLike(DataValue left, DataValue right, in EvaluationFrame frame)
     {
         if (left.Kind != DataKind.String || right.Kind != DataKind.String)
         {
             throw new InvalidOperationException("LIKE requires string operands.");
         }
 
-        string input = Str(left);
-        string pattern = Str(right);
+        string input = Str(left, frame);
+        string pattern = Str(right, frame);
 
         if (!_likeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1286,15 +1341,15 @@ public sealed class ExpressionEvaluator
     /// Evaluates a case-insensitive ILIKE expression. Same wildcard conversion
     /// as LIKE but with <see cref="RegexOptions.IgnoreCase"/>.
     /// </summary>
-    private DataValue EvaluateILike(DataValue left, DataValue right)
+    private DataValue EvaluateILike(DataValue left, DataValue right, in EvaluationFrame frame)
     {
         if (left.Kind != DataKind.String || right.Kind != DataKind.String)
         {
             throw new InvalidOperationException("ILIKE requires string operands.");
         }
 
-        string input = Str(left);
-        string pattern = Str(right);
+        string input = Str(left, frame);
+        string pattern = Str(right, frame);
 
         if (!_iLikeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1316,15 +1371,15 @@ public sealed class ExpressionEvaluator
     /// <see cref="RegexOptions.NonBacktracking"/> to prevent catastrophic
     /// backtracking on adversarial patterns.
     /// </summary>
-    private DataValue EvaluateRegexp(DataValue left, DataValue right)
+    private DataValue EvaluateRegexp(DataValue left, DataValue right, in EvaluationFrame frame)
     {
         if (left.Kind != DataKind.String || right.Kind != DataKind.String)
         {
             throw new InvalidOperationException("REGEXP requires string operands.");
         }
 
-        string input = Str(left);
-        string pattern = Str(right);
+        string input = Str(left, frame);
+        string pattern = Str(right, frame);
 
         if (!_regexpCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1341,11 +1396,11 @@ public sealed class ExpressionEvaluator
     /// The escape character causes the following <c>%</c> or <c>_</c> to be
     /// treated as a literal instead of a wildcard.
     /// </summary>
-    private DataValue EvaluateLikeEscape(LikeExpression like, Row row)
+    private DataValue EvaluateLikeEscape(LikeExpression like, in EvaluationFrame frame)
     {
-        DataValue input = Evaluate(like.Expression, row);
-        DataValue pattern = Evaluate(like.Pattern, row);
-        DataValue escapeValue = Evaluate(like.EscapeCharacter, row);
+        DataValue input = Evaluate(like.Expression, frame);
+        DataValue pattern = Evaluate(like.Pattern, frame);
+        DataValue escapeValue = Evaluate(like.EscapeCharacter, frame);
 
         if (input.IsNull || pattern.IsNull || escapeValue.IsNull)
         {
@@ -1357,14 +1412,14 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("LIKE ... ESCAPE requires string operands.");
         }
 
-        string escapeString = Str(escapeValue);
+        string escapeString = Str(escapeValue, frame);
         if (escapeString.Length != 1)
         {
             throw new InvalidOperationException("ESCAPE character must be a single character.");
         }
 
         char escapeChar = escapeString[0];
-        string sqlPattern = Str(pattern);
+        string sqlPattern = Str(pattern, frame);
         string cacheKey = $"{sqlPattern}\0{escapeChar}\0{(like.CaseInsensitive ? 'i' : 'c')}";
 
         if (!_likeRegexCache.TryGetValue(cacheKey, out Regex? regex))
@@ -1408,7 +1463,7 @@ public sealed class ExpressionEvaluator
             _likeRegexCache[cacheKey] = regex;
         }
 
-        bool matches = regex.IsMatch(Str(input));
+        bool matches = regex.IsMatch(Str(input, frame));
         return DataValue.FromBoolean(matches);
     }
 }

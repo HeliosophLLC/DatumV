@@ -111,11 +111,19 @@ public sealed class ProjectOperator : IQueryOperator
         {
             RowBatch outputBatch = pool.RentBatch(inputBatch.Count);
 
+            // Source arena: where the input row's non-inline values live (input batch).
+            // Target arena: the long-lived context store, since projected output values
+            // must outlive the input batch (which is returned to the pool before this
+            // method yields the output batch downstream).
+            IValueStore sourceArena = inputBatch.Arena;
+            IValueStore targetArena = context.Store;
+
             for (int index = 0; index < inputBatch.Count; index++)
             {
                 Row row = inputBatch[index];
                 schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                Row? projected = schema.Project(row, evaluator, pool, assertionDiagnostics);
+                EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow);
+                Row? projected = schema.Project(frame, evaluator, pool, assertionDiagnostics);
                 if (projected.HasValue)
                 {
                     outputBatch.Add(projected.Value);
@@ -315,13 +323,14 @@ public sealed class ProjectOperator : IQueryOperator
         /// Returns <see langword="null"/> when an <c>ASSERT … ON FAIL SKIP</c>
         /// clause fails, signalling the caller to discard the row.
         /// </summary>
-        internal Row? Project(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
+        internal Row? Project(in EvaluationFrame sourceFrame, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
         {
             if (_letExpressions is not null && _letExpressions.Length > 0)
             {
-                return ProjectWithLetBindings(sourceRow, evaluator, pool, diagnostics);
+                return ProjectWithLetBindings(sourceFrame, evaluator, pool, diagnostics);
             }
 
+            Row sourceRow = sourceFrame.Row;
             DataValue[] values = pool.Rent(_slots.Length);
 
             for (int index = 0; index < _slots.Length; index++)
@@ -329,18 +338,18 @@ public sealed class ProjectOperator : IQueryOperator
                 ProjectionSlot slot = _slots[index];
                 values[index] = slot.SourceOrdinal >= 0
                     ? sourceRow[slot.SourceOrdinal]
-                    : evaluator.Evaluate(slot.Expression!, sourceRow);
+                    : evaluator.Evaluate(slot.Expression!, sourceFrame);
             }
 
             if (_assertions is not null)
             {
                 foreach (AssertClause assertClause in _assertions)
                 {
-                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceRow);
+                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceFrame);
                     if (!passed)
                     {
                         string? message = assertClause.Message is not null
-                            ? evaluator.Evaluate(assertClause.Message, sourceRow).ToString()
+                            ? evaluator.Evaluate(assertClause.Message, sourceFrame).ToString()
                             : null;
                         switch (assertClause.FailureMode)
                         {
@@ -368,8 +377,10 @@ public sealed class ProjectOperator : IQueryOperator
         /// the augmented row. Returns <see langword="null"/> when a SKIP assertion
         /// fails, signalling the caller to discard the row.
         /// </summary>
-        private Row? ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
+        private Row? ProjectWithLetBindings(in EvaluationFrame sourceFrame, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
         {
+            Row sourceRow = sourceFrame.Row;
+
             // Build augmented values: source columns + LET binding slots.
             DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
             for (int index = 0; index < _sourceFieldCount; index++)
@@ -380,6 +391,7 @@ public sealed class ProjectOperator : IQueryOperator
             // The Row constructor stores the array by reference, so mutations
             // to augmentedValues are visible through the Row's indexers.
             Row augmentedRow = new(_augmentedNames!, augmentedValues, _augmentedNameIndex!);
+            EvaluationFrame augmentedFrame = sourceFrame.WithRow(augmentedRow);
 
             // Evaluate each LET binding sequentially. Each binding's result
             // is written into the augmented array before the next binding
@@ -387,7 +399,7 @@ public sealed class ProjectOperator : IQueryOperator
             for (int index = 0; index < _letExpressions.Length; index++)
             {
                 augmentedValues[_sourceFieldCount + index] =
-                    evaluator.Evaluate(_letExpressions[index], augmentedRow);
+                    evaluator.Evaluate(_letExpressions[index], augmentedFrame);
             }
 
             // Evaluate ASSERT clauses against the augmented row (source + LET values).
@@ -395,11 +407,11 @@ public sealed class ProjectOperator : IQueryOperator
             {
                 foreach (AssertClause assertClause in _assertions)
                 {
-                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedRow);
+                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedFrame);
                     if (!passed)
                     {
                         string? message = assertClause.Message is not null
-                            ? evaluator.Evaluate(assertClause.Message, augmentedRow).ToString()
+                            ? evaluator.Evaluate(assertClause.Message, augmentedFrame).ToString()
                             : null;
                         switch (assertClause.FailureMode)
                         {
@@ -423,7 +435,7 @@ public sealed class ProjectOperator : IQueryOperator
                 ProjectionSlot slot = _slots[index];
                 values[index] = slot.SourceOrdinal >= 0
                     ? augmentedRow[slot.SourceOrdinal]
-                    : evaluator.Evaluate(slot.Expression!, augmentedRow);
+                    : evaluator.Evaluate(slot.Expression!, augmentedFrame);
             }
 
             return new Row(_names, values, _nameIndex);

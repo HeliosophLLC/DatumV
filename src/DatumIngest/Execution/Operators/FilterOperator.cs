@@ -60,12 +60,19 @@ public sealed class FilterOperator : IQueryOperator
         {
             try
             {
+                // Source arena: where the row's non-inline values live (the input batch).
+                // Target arena: the long-lived context store, so literal materialisations
+                // and cache entries from predicate evaluation outlive this batch.
+                IValueStore sourceArena = inputBatch.Arena;
+                IValueStore targetArena = context.Store;
+
                 for (int index = 0, count = inputBatch.Count; index < count; index++)
                 {
                     Row row = inputBatch[index];
+                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow);
 
-                    if (!evaluator.EvaluateAsBoolean(Predicate, row)) continue;
-                    
+                    if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
+
                     outputBatch ??= pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
                     pool.RentAndCopyToOutput(inputBatch, index, outputBatch);

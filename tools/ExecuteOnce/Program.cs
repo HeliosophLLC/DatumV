@@ -202,7 +202,7 @@ static string FormatRow(Row row, Arena arena)
         if (i > 0) builder.Append('\t');
         builder.Append(FormatValue(row[i], arena));
     }
-    return builder.ToString();
+    return string.Empty;//builder.ToString();
 }
 
 static string FormatValue(DataValue value, Arena arena)

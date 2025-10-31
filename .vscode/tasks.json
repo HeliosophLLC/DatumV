@@ -64,12 +64,13 @@
 		},
 		{
 			"label": "Trace: CPU + GC",
-			"type": "shell",
+			"type": "process",
 			"command": "powershell",
 			"args": [
 				"-ExecutionPolicy", "Bypass",
 				"-File", "tools\\trace.ps1",
-				"-Tool", "${input:traceTool}"
+				"-Tool", "${input:traceTool}",
+				"-Sql", "${input:traceSql}"
 			],
 			"problemMatcher": [],
 			"group": "test",
@@ -186,6 +187,21 @@
 			"hide": true
 		},
 		{
+			"label": "Release: Build ExecuteOnce",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/ExecuteOnce",
+				"-c", "Release"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
 			"label": "Run: ExplainOnce",
 			"type": "shell",
 			"command": "dotnet",
@@ -212,8 +228,14 @@
 			"id": "traceTool",
 			"type": "pickString",
 			"description": "Which tool to trace",
-			"options": ["IngestOnce", "IndexOnce", "ReadCsv"],
+			"options": ["IngestOnce", "IndexOnce", "ReadCsv", "ExecuteOnce"],
 			"default": "IndexOnce"
+		},
+		{
+			"id": "traceSql",
+			"type": "promptString",
+			"description": "SQL to execute (ExecuteOnce only; ignored for other tools)",
+			"default": "SELECT * LIMIT 5000"
 		},
 		{
 			"id": "indexPath",

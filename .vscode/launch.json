@@ -44,6 +44,21 @@
 			"stopAtEntry": false,
 			"preLaunchTask": "Debug: Build ExecuteOnce"
 		},
+		{
+			"name": "ExecuteOnce: Release (Ctrl+F5 for perf)",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/tools/ExecuteOnce/bin/Release/net10.0/execute-once.dll",
+			"args": [
+				"${input:executeDatumFile}",
+				"${input:executeSql}"
+			],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Release: Build ExecuteOnce"
+		},
 	],
 	"inputs": [
 		{
