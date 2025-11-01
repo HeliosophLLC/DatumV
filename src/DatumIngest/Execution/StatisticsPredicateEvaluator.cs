@@ -25,7 +25,7 @@ public static class StatisticsPredicateEvaluator
     /// <remarks>
     /// Kept for call-site compatibility with existing index navigation code. New callers
     /// should prefer the arena-aware
-    /// <see cref="DataValueComparer.Compare(DataValue, Arena, DataValue, Arena)"/> overload
+    /// <see cref="DataValueComparer.Compare(DataValue, IValueStore, DataValue, IValueStore)"/> overload
     /// so that non-inline string keys compare correctly against non-inline string bounds.
     /// </remarks>
     internal static int CompareValues(DataValue left, DataValue right)

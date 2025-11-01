@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution;
 
@@ -22,4 +23,18 @@ public interface IQueryOperator
     /// </summary>
     /// <returns>A description of this operator for the execution plan.</returns>
     OperatorPlanDescription DescribeForExplain();
+
+    /// <summary>
+    /// Returns a copy of this operator with every contained <see cref="Expression"/>
+    /// tree passed through <paramref name="rewriter"/> and every child operator
+    /// recursively rewritten. Used by <see cref="LiteralHoister"/> to pre-materialize
+    /// literal payloads into a query-scoped store.
+    /// <para>
+    /// Default returns <c>this</c> — correct for leaf operators that hold no
+    /// expressions. Operators with an expression or a child operator should override
+    /// to forward the rewrite. Operators that don't override still work; they simply
+    /// opt out of the optimization (their descendants' literals stay unhoisted).
+    /// </para>
+    /// </summary>
+    IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) => this;
 }

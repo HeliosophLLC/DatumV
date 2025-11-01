@@ -25,7 +25,7 @@ internal static class DataValueComparer
     /// scalar kinds, null values, and inline strings (which are self-contained in the
     /// <see cref="DataValue"/> struct). Throws for non-inline <see cref="DataKind.String"/>
     /// or <see cref="DataKind.JsonValue"/> values — those require arenas to resolve payload
-    /// bytes; use <see cref="Compare(DataValue, Arena, DataValue, Arena)"/> instead.
+    /// bytes; use <see cref="Compare(DataValue, IValueStore, DataValue, IValueStore)"/> instead.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown when either side is a non-inline String or JsonValue. The caller must
@@ -58,7 +58,7 @@ internal static class DataValueComparer
     /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
     /// are widened to <see cref="double"/> before comparison.
     /// </summary>
-    internal static int Compare(DataValue left, DataValue right, Arena arena)
+    internal static int Compare(DataValue left, DataValue right, IValueStore arena)
         => Compare(left, arena, right, arena);
 
     /// <summary>
@@ -67,7 +67,7 @@ internal static class DataValueComparer
     /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
     /// are widened to <see cref="double"/> before comparison.
     /// </summary>
-    internal static int Compare(DataValue left, Arena leftArena, DataValue right, Arena rightArena)
+    internal static int Compare(DataValue left, IValueStore leftArena, DataValue right, IValueStore rightArena)
     {
         // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
         // original per-class implementations and handles cases like INT column vs FLOAT literal.
@@ -103,7 +103,7 @@ internal static class DataValueComparer
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="kind"/> supports natural
-    /// ordering via <see cref="Compare(DataValue, Arena, DataValue, Arena)"/>. This includes all numeric scalars, strings,
+    /// ordering via <see cref="Compare(DataValue, IValueStore, DataValue, IValueStore)"/>. This includes all numeric scalars, strings,
     /// date/time types, duration, uuid, and boolean.
     /// </summary>
     internal static bool IsComparable(DataKind kind) =>

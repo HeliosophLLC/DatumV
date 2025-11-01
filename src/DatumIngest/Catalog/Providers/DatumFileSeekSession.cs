@@ -88,6 +88,16 @@ internal sealed class DatumFileSeekSession : ISeekSession
                 break;
             }
 
+            // Rewind the column batch's arena before decoding the next row group.
+            // The previously yielded batch has been consumed and its arena-backed
+            // payloads stabilised into downstream output arenas by now (await-foreach
+            // semantics guarantee the consumer finished before asking for the next),
+            // so the arena's bytes are expendable. Without this reset the arena grew
+            // monotonically with every row group — hundreds of MB over a full scan,
+            // triggering repeated mmap doublings (copy + unmap) that dominated CPU
+            // in filtered full-scan queries.
+            _columnBatch.Arena.Reset();
+
             // Decode directly into the session's owned column buffers.
             _reader.ReadColumnsInto(rgIndex, _columnBatch, _compressedBuffer, _decompressedBuffer);
 

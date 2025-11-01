@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -32,6 +33,10 @@ public sealed class LimitOperator : IQueryOperator
 
     /// <summary>Number of rows to skip before emitting.</summary>
     public int Offset { get; }
+
+    /// <inheritdoc/>
+    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
+        new LimitOperator(_source.RewriteExpressions(rewriter), Limit, Offset);
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()

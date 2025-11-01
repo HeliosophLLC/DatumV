@@ -152,6 +152,10 @@ public sealed class ExpressionEvaluator
         {
             return expression switch
             {
+                // Hoisted literals: produced by LiteralHoister before execution so the
+                // DataValue is already materialized. Zero-cost read compared to the
+                // switch-on-CLR-type + FromX() path taken by LiteralExpression below.
+                LiteralValueExpression hoisted => hoisted.Value,
                 LiteralExpression literal => EvaluateLiteral(literal, frame),
                 ColumnReference column => EvaluateColumn(column, frame),
                 BinaryExpression binary => EvaluateBinary(binary, frame),
@@ -386,12 +390,12 @@ public sealed class ExpressionEvaluator
                 BinaryOperator.Divide => ArithmeticOp(left, right, static (a, b) => b != 0f ? a / b : float.NaN),
                 BinaryOperator.Modulo => ArithmeticOp(left, right, static (a, b) => b != 0f ? a % b : float.NaN),
                 BinaryOperator.Power => ArithmeticOp(left, right, static (a, b) => MathF.Pow(a, b)),
-                BinaryOperator.Equal => CompareValues(left, right, 0),
-                BinaryOperator.NotEqual => CompareValues(left, right, 0, negate: true),
-                BinaryOperator.LessThan => CompareValues(left, right, -1),
-                BinaryOperator.GreaterThan => CompareValues(left, right, 1),
-                BinaryOperator.LessThanOrEqual => CompareValuesLe(left, right),
-                BinaryOperator.GreaterThanOrEqual => CompareValuesGe(left, right),
+                BinaryOperator.Equal => CompareValues(left, right, 0, frame),
+                BinaryOperator.NotEqual => CompareValues(left, right, 0, frame, negate: true),
+                BinaryOperator.LessThan => CompareValues(left, right, -1, frame),
+                BinaryOperator.GreaterThan => CompareValues(left, right, 1, frame),
+                BinaryOperator.LessThanOrEqual => CompareValuesLe(left, right, frame),
+                BinaryOperator.GreaterThanOrEqual => CompareValuesGe(left, right, frame),
                 BinaryOperator.Like => EvaluateLike(left, right, frame),
                 BinaryOperator.ILike => EvaluateILike(left, right, frame),
                 BinaryOperator.Regexp => EvaluateRegexp(left, right, frame),
@@ -667,7 +671,7 @@ public sealed class ExpressionEvaluator
             {
                 foreach (DataValue candidate in valueSet)
                 {
-                    if (CompareDataValues(target, candidate) == 0)
+                    if (CompareDataValues(target, candidate, frame) == 0)
                     {
                         found = true;
                         break;
@@ -722,14 +726,19 @@ public sealed class ExpressionEvaluator
 
         foreach (Expression valueExpression in inExpr.Values)
         {
-            if (valueExpression is not LiteralExpression)
+            if (valueExpression is not (LiteralExpression or LiteralValueExpression))
             {
                 valueSet = null!;
                 hasNull = false;
                 return false;
             }
 
-            DataValue value = EvaluateLiteral((LiteralExpression)valueExpression, cacheFrame);
+            DataValue value = valueExpression switch
+            {
+                LiteralValueExpression lv => lv.Value,
+                LiteralExpression le => EvaluateLiteral(le, cacheFrame),
+                _ => throw new InvalidOperationException("unreachable"),
+            };
             if (value.IsNull)
             {
                 anyNull = true;
@@ -762,7 +771,7 @@ public sealed class ExpressionEvaluator
                 continue;
             }
 
-            if (CompareDataValues(target, candidate) == 0)
+            if (CompareDataValues(target, candidate, frame) == 0)
             {
                 return DataValue.FromBoolean(!inExpr.Negated);
             }
@@ -931,7 +940,7 @@ public sealed class ExpressionEvaluator
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
                 DataValue whenValue = Evaluate(whenClause.Condition, frame);
-                if (!operand.IsNull && !whenValue.IsNull && CompareDataValues(operand, whenValue) == 0)
+                if (!operand.IsNull && !whenValue.IsNull && CompareDataValues(operand, whenValue, frame) == 0)
                 {
                     return Evaluate(whenClause.Result, frame);
                 }
@@ -1044,6 +1053,7 @@ public sealed class ExpressionEvaluator
     {
         return expression switch
         {
+            LiteralValueExpression lv => lv.Value.IsNull ? DataKind.Unknown : lv.Value.Kind,
             LiteralExpression { Value: string } => DataKind.String,
             LiteralExpression { Value: sbyte } => DataKind.Int8,
             LiteralExpression { Value: short } => DataKind.Int16,
@@ -1089,9 +1099,9 @@ public sealed class ExpressionEvaluator
 
     // ──────────────────── Comparison helpers ────────────────────
 
-    private static DataValue CompareValues(DataValue left, DataValue right, int expectedSign, bool negate = false)
+    private static DataValue CompareValues(DataValue left, DataValue right, int expectedSign, in EvaluationFrame frame, bool negate = false)
     {
-        int comparison = CompareDataValues(left, right);
+        int comparison = CompareDataValues(left, right, frame);
         bool result = expectedSign == 0 ? comparison == 0 : (expectedSign < 0 ? comparison < 0 : comparison > 0);
         if (negate)
         {
@@ -1101,21 +1111,30 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(result);
     }
 
-    private static DataValue CompareValuesLe(DataValue left, DataValue right)
+    private static DataValue CompareValuesLe(DataValue left, DataValue right, in EvaluationFrame frame)
     {
-        int comparison = CompareDataValues(left, right);
+        int comparison = CompareDataValues(left, right, frame);
         return DataValue.FromBoolean(comparison <= 0);
     }
 
-    private static DataValue CompareValuesGe(DataValue left, DataValue right)
+    private static DataValue CompareValuesGe(DataValue left, DataValue right, in EvaluationFrame frame)
     {
-        int comparison = CompareDataValues(left, right);
+        int comparison = CompareDataValues(left, right, frame);
         return DataValue.FromBoolean(comparison >= 0);
     }
 
-    private static int CompareDataValues(DataValue left, DataValue right)
+    /// <summary>
+    /// Compares two <see cref="DataValue"/>s using the arenas carried by <paramref name="frame"/>.
+    /// For non-inline String/JsonValue operands the comparer needs arena bytes to resolve
+    /// UTF-8 payloads; we pass <see cref="EvaluationFrame.Source"/> for the left operand (row
+    /// values typically live in the input batch's arena) and <see cref="EvaluationFrame.Target"/>
+    /// for the right (materialised literals go there). This convention matches the common
+    /// <c>column OP literal</c> shape; flipped operand order with a non-inline literal on the
+    /// left is not yet supported without literal hoisting.
+    /// </summary>
+    private static int CompareDataValues(DataValue left, DataValue right, in EvaluationFrame frame)
     {
-        return DataValueComparer.Compare(left, right);
+        return DataValueComparer.Compare(left, frame.Source, right, frame.Target);
     }
 
     // ───────────────── Struct and index-access evaluation ─────────────────

@@ -88,6 +88,12 @@ using LocalBufferPool localBufferPool = new(backing);
 DatumIngest.Execution.ExecutionContext executionContext = new(
     cts.Token, functions, catalog, localBufferPool, pool);
 
+// Hoist literal expressions: materialize each literal's DataValue into the long-lived
+// context store exactly once, so per-row evaluation returns the cached value instead
+// of re-encoding on every row. Big win on WHERE-heavy scans; no-op on queries with
+// no predicates.
+plan = plan.RewriteExpressions(expr => LiteralHoister.Hoist(expr, executionContext.Store));
+
 Console.WriteLine($"Table:  {tableName}");
 Console.WriteLine($"Source: {opts.DatumPath}");
 Console.WriteLine($"SQL:    {sql.Trim().ReplaceLineEndings(" ")}");
@@ -202,7 +208,7 @@ static string FormatRow(Row row, Arena arena)
         if (i > 0) builder.Append('\t');
         builder.Append(FormatValue(row[i], arena));
     }
-    return string.Empty;//builder.ToString();
+    return builder.ToString();
 }
 
 static string FormatValue(DataValue value, Arena arena)

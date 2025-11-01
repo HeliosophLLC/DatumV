@@ -320,7 +320,7 @@ public sealed class PoolBacking
     /// <returns><see langword="true"/> if the arena was accepted into the pool; <see langword="false"/> if the arena was not pooled (e.g. still in use by another owner, or above the capacity threshold).</returns>
     public bool TryReturn(Arena arena)
     {
-        const int maxArenaCapacity = 4 * 1024 * 1024; // 4 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
+        const int maxArenaCapacity = 64 * 1024 * 1024; // 4 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
 
         if (arena.ReleaseReference() > 0)
         {

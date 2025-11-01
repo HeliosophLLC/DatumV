@@ -52,6 +52,33 @@ public sealed class ProjectOperator : IQueryOperator
     public IReadOnlyList<AssertClause>? Assertions => _assertions;
 
     /// <inheritdoc/>
+    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
+    {
+        IReadOnlyList<SelectColumn> columns = _columns
+            .Select(c => c with { Expression = rewriter(c.Expression) })
+            .ToList();
+
+        IReadOnlyList<LetBinding>? letBindings = _letBindings?
+            .Select(b => b with { Expression = rewriter(b.Expression) })
+            .ToList();
+
+        IReadOnlyList<AssertClause>? assertions = _assertions?
+            .Select(a => a with
+            {
+                Predicate = rewriter(a.Predicate),
+                Message = a.Message is null ? null : rewriter(a.Message),
+            })
+            .ToList();
+
+        return new ProjectOperator(
+            _source.RewriteExpressions(rewriter),
+            columns,
+            letBindings,
+            assertions,
+            _sourceSchema);
+    }
+
+    /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
         List<string> columnDescriptions = [];

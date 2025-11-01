@@ -29,6 +29,10 @@ public sealed class FilterOperator : IQueryOperator
     public Expression Predicate { get; }
 
     /// <inheritdoc/>
+    public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter) =>
+        new FilterOperator(Source.RewriteExpressions(rewriter), rewriter(Predicate));
+
+    /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
         List<string> warnings = [];
@@ -63,8 +67,8 @@ public sealed class FilterOperator : IQueryOperator
                 // Source arena: where the row's non-inline values live (the input batch).
                 // Target arena: the long-lived context store, so literal materialisations
                 // and cache entries from predicate evaluation outlive this batch.
-                IValueStore sourceArena = inputBatch.Arena;
-                IValueStore targetArena = context.Store;
+                Arena sourceArena = inputBatch.Arena;
+                Arena targetArena = context.Store;
 
                 for (int index = 0, count = inputBatch.Count; index < count; index++)
                 {
