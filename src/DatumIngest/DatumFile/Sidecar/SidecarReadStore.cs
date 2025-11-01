@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 
@@ -144,5 +145,44 @@ public sealed class SidecarReadStore : IBlobSource
                 $"but the sidecar carries {actualFingerprint:X16}. The sidecar is stale or has been " +
                 $"swapped with one from a different .datum file.");
         }
+
+        ulong storedHash = BinaryPrimitives.ReadUInt64LittleEndian(
+            header.Slice(SidecarConstants.PayloadHashOffset, 8));
+
+        // Zero hash means "unhashed" — produced by writers predating Phase 9b. Skip
+        // verification for these so older sidecars keep opening without re-ingest.
+        if (storedHash == 0) return;
+
+        ulong actualHash = ComputePayloadHash();
+        if (actualHash != storedHash)
+        {
+            throw new InvalidDataException(
+                $"Sidecar payload corrupted: header records xxHash3-64 {storedHash:X16}, " +
+                $"actual content hashes to {actualHash:X16}. The .datum-blob has been " +
+                $"modified or truncated since it was written.");
+        }
+    }
+
+    private unsafe ulong ComputePayloadHash()
+    {
+        long payloadLength = _fileLength - SidecarConstants.HeaderSize;
+        XxHash3 hasher = new();
+
+        // Walk the mmap in span-sized windows. xxHash3 streams without needing
+        // contiguous access to the whole file; this lets us hash multi-GB sidecars
+        // without converting them to a single Span (which would be capped at int.MaxValue).
+        byte* cursor = _basePointer + SidecarConstants.HeaderSize;
+        long remaining = payloadLength;
+        const int ChunkSize = 1 << 24; // 16 MiB
+
+        while (remaining > 0)
+        {
+            int take = (int)Math.Min(remaining, ChunkSize);
+            hasher.Append(new ReadOnlySpan<byte>(cursor, take));
+            cursor += take;
+            remaining -= take;
+        }
+
+        return hasher.GetCurrentHashAsUInt64();
     }
 }

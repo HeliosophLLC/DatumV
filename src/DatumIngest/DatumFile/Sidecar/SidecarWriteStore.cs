@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Hashing;
 using System.Security.Cryptography;
 
 namespace DatumIngest.DatumFile.Sidecar;
@@ -30,6 +31,16 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     private FileStream? _stream;
     private long _writeOffset;
     private bool _disposed;
+
+    /// <summary>
+    /// xxHash3-64 over the payload region, updated incrementally on every
+    /// <see cref="Append"/>. Created on first <see cref="Append"/>; finalised and
+    /// patched into the header on <see cref="Dispose"/>. Hashing inline with writes
+    /// is essentially free (xxHash3 saturates at multi-GB/s on a single core, vs
+    /// disk write at ~1 GB/s) and avoids a second-pass re-read of the payload at
+    /// finalize time.
+    /// </summary>
+    private XxHash3? _hasher;
 
     /// <summary>
     /// Creates a sidecar writer targeting <paramref name="path"/>. The file is not
@@ -72,19 +83,24 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
                 // .datum file: overwrite if a stale sidecar exists from a prior run.
                 // The pair (.datum + .datum-blob) is always finalised together, so the
                 // companion file is no more sacred than the .datum itself.
+                // Stream is opened ReadWrite (not Write) only so Dispose can seek
+                // back and patch the 8-byte hash into the header. Payload writes
+                // remain pure forward streaming.
                 _stream = new FileStream(
                     _path,
                     FileMode.Create,
-                    FileAccess.Write,
+                    FileAccess.ReadWrite,
                     FileShare.Read,
                     bufferSize: 1 << 20,
                     options: FileOptions.SequentialScan);
                 WriteHeader(_stream, Fingerprint);
                 _writeOffset = SidecarConstants.HeaderSize;
+                _hasher = new XxHash3();
             }
 
             long offset = _writeOffset;
             _stream.Write(bytes);
+            _hasher!.Append(bytes);
             _writeOffset += bytes.Length;
             return (offset, bytes.Length);
         }
@@ -95,9 +111,23 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _stream?.Flush();
-        _stream?.Dispose();
-        _stream = null;
+
+        if (_stream is not null)
+        {
+            // Finalise the running hash (built incrementally on every Append) and
+            // patch it into the header. No payload re-read — the hash state is
+            // already current as of the last Append. Patching is one 8-byte write
+            // at offset 24, then the stream is flushed and closed.
+            ulong hash = _hasher!.GetCurrentHashAsUInt64();
+            _stream.Seek(SidecarConstants.PayloadHashOffset, SeekOrigin.Begin);
+            Span<byte> hashBytes = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(hashBytes, hash);
+            _stream.Write(hashBytes);
+
+            _stream.Flush();
+            _stream.Dispose();
+            _stream = null;
+        }
     }
 
     private static ulong GenerateFingerprint()

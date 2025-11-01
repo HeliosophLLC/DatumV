@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Hashing;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Sidecar;
 
@@ -43,6 +45,8 @@ ReadOnlySpan<byte> header = headerBuffer;
 ulong magic = BinaryPrimitives.ReadUInt64LittleEndian(header[0..8]);
 uint version = BinaryPrimitives.ReadUInt32LittleEndian(header[8..12]);
 ulong fingerprint = BinaryPrimitives.ReadUInt64LittleEndian(header[16..24]);
+ulong storedHash = BinaryPrimitives.ReadUInt64LittleEndian(
+    header.Slice(SidecarConstants.PayloadHashOffset, 8));
 
 bool magicOk = magic == SidecarConstants.Magic;
 bool versionOk = version == SidecarConstants.Version;
@@ -57,6 +61,17 @@ Console.WriteLine();
 long payloadBytes = sidecarSize - SidecarConstants.HeaderSize;
 Console.WriteLine("Payload:");
 Console.WriteLine($"  Bytes:       {payloadBytes:N0} ({FormatBytes(payloadBytes)})");
+
+if (storedHash == 0)
+{
+    Console.WriteLine($"  Hash:        0x{storedHash:X16} (legacy file — payload not hashed)");
+}
+else
+{
+    ulong actualHash = HashSidecarPayload(sidecarPath, payloadBytes);
+    bool hashOk = actualHash == storedHash;
+    Console.WriteLine($"  Hash:        0x{storedHash:X16} {(hashOk ? "✓ xxHash3 matches" : $"✗ payload corrupted (actual 0x{actualHash:X16})")}");
+}
 Console.WriteLine();
 
 // Cross-check companion .datum file if it exists.
@@ -131,6 +146,33 @@ static (bool HasSidecarFlag, ulong? Fingerprint, string Diagnostic) ReadDatumSid
     stream.ReadExactly(fpBuffer);
     ulong fingerprint = BinaryPrimitives.ReadUInt64LittleEndian(fpBuffer);
     return (true, fingerprint, string.Empty);
+}
+
+static ulong HashSidecarPayload(string path, long payloadBytes)
+{
+    using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+    stream.Seek(SidecarConstants.HeaderSize, SeekOrigin.Begin);
+
+    XxHash3 hasher = new();
+    byte[] buffer = ArrayPool<byte>.Shared.Rent(1 << 20);
+    try
+    {
+        long remaining = payloadBytes;
+        while (remaining > 0)
+        {
+            int take = (int)Math.Min(remaining, buffer.Length);
+            int read = stream.Read(buffer, 0, take);
+            if (read == 0) break;
+            hasher.Append(buffer.AsSpan(0, read));
+            remaining -= read;
+        }
+    }
+    finally
+    {
+        ArrayPool<byte>.Shared.Return(buffer);
+    }
+
+    return hasher.GetCurrentHashAsUInt64();
 }
 
 static string FormatBytes(long bytes)

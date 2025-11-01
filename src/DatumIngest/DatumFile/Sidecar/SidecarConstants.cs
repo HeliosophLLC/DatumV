@@ -10,11 +10,11 @@ namespace DatumIngest.DatumFile.Sidecar;
 /// Layout:
 /// </para>
 /// <code>
-/// [magic       : 8 bytes "DATUMBLB" little-endian]
-/// [version     : 4 bytes uint32 little-endian]
-/// [reserved1   : 4 bytes (zero in v1)]
-/// [fingerprint : 8 bytes uint64 little-endian — must match the .datum footer's reference]
-/// [reserved2   : 8 bytes (zero in v1)]
+/// [magic       : 8 bytes  "DATUMBLB" little-endian]
+/// [version     : 4 bytes  uint32 little-endian]
+/// [reserved1   : 4 bytes  (zero in v1)]
+/// [fingerprint : 8 bytes  uint64 little-endian — must match the .datum footer's reference]
+/// [payloadHash : 8 bytes  xxHash3-64 of the payload region [HeaderSize..EOF), little-endian]
 /// [blob bytes  : append-only payload region]
 /// </code>
 /// <para>
@@ -28,6 +28,14 @@ namespace DatumIngest.DatumFile.Sidecar;
 /// materialised. The companion <c>.datum</c> file's footer carries the same value;
 /// <see cref="SidecarReadStore"/> refuses to open a sidecar whose fingerprint doesn't
 /// match the one the <c>.datum</c> file expects, catching swap / staleness scenarios.
+/// </para>
+/// <para>
+/// The <c>payloadHash</c> is xxHash3-64 over <c>[HeaderSize..EOF)</c>, computed and
+/// patched into the header by <see cref="SidecarWriteStore.Dispose"/> after the final
+/// append. <see cref="SidecarReadStore"/> verifies it on open. A zero hash is treated
+/// as "unhashed" (legacy file written before integrity hashing was added) and the check
+/// is skipped — this preserves backwards compatibility with sidecars produced by
+/// earlier writers.
 /// </para>
 /// </remarks>
 public static class SidecarConstants
@@ -43,6 +51,9 @@ public static class SidecarConstants
 
     /// <summary>Total bytes occupied by the file header before the first blob payload byte.</summary>
     public const int HeaderSize = 32;
+
+    /// <summary>Byte offset within the header at which the payload xxHash3-64 lives.</summary>
+    public const int PayloadHashOffset = 24;
 
     /// <summary>
     /// Conventional file extension for a sidecar associated with a <c>.datum</c> file.
