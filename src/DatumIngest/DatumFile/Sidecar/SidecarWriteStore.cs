@@ -68,9 +68,13 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
         {
             if (_stream is null)
             {
+                // FileMode.Create matches DatumFileWriter's behavior on the companion
+                // .datum file: overwrite if a stale sidecar exists from a prior run.
+                // The pair (.datum + .datum-blob) is always finalised together, so the
+                // companion file is no more sacred than the .datum itself.
                 _stream = new FileStream(
                     _path,
-                    FileMode.CreateNew,
+                    FileMode.Create,
                     FileAccess.Write,
                     FileShare.Read,
                     bufferSize: 1 << 20,

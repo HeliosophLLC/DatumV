@@ -17,5 +17,6 @@
     <Project Path="tools/IndexInspect/IndexInspect.csproj" />
     <Project Path="tools/IndexOnce/IndexOnce.csproj" />
     <Project Path="tools/IngestOnce/IngestOnce.csproj" />
+    <Project Path="tools/SidecarInspect/SidecarInspect.csproj" />
   </Folder>
 </Solution>

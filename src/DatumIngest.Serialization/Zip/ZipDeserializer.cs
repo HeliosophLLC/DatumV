@@ -1,36 +1,52 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
+using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 
 namespace DatumIngest.Serialization.Zip;
 
 /// <summary>
 /// Deserializes ZIP archives containing image datasets into <see cref="RowBatch"/>
-/// streams. Yields one row per entry with <c>file_name</c> (string) and
-/// <c>file_bytes</c> (<see cref="DataKind.Image"/>). OS/editor metadata entries
-/// (<c>__MACOSX/</c>, <c>.DS_Store</c>, <c>thumbs.db</c>, <c>desktop.ini</c>) are
-/// skipped silently; any other entry whose first bytes do not match a supported
-/// image magic (JPEG / PNG / WebP) aborts ingestion with a descriptive error.
+/// streams. Yields one row per entry with the following columns:
+/// <list type="bullet">
+///   <item><description><c>file_name</c> (String) — the entry's full path within the archive.</description></item>
+///   <item><description><c>file</c> (<see cref="DataKind.Image"/>) — the raw image bytes.</description></item>
+///   <item><description><c>file_width</c> (Int32) — image pixel width, null when the header could not be parsed.</description></item>
+///   <item><description><c>file_height</c> (Int32) — image pixel height, null when the header could not be parsed.</description></item>
+///   <item><description><c>file_channels</c> (UInt8) — channel count (1/3/4 typical), null when the header could not be parsed.</description></item>
+///   <item><description><c>file_byte_length</c> (Int64) — uncompressed entry length in bytes; always populated.</description></item>
+///   <item><description><c>file_orientation</c> (String) — <c>"landscape"</c> / <c>"portrait"</c> / <c>"square"</c>, null when the header could not be parsed.</description></item>
+/// </list>
+/// OS/editor metadata entries (<c>__MACOSX/</c>, <c>.DS_Store</c>, <c>thumbs.db</c>,
+/// <c>desktop.ini</c>) are skipped silently; any other entry whose first bytes do
+/// not match a supported image magic (JPEG / PNG / WebP) aborts ingestion with a
+/// descriptive error.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Opinionated contract: ZIP is treated as a bag-of-images format. Mixed-content
 /// archives (e.g. images + annotations + READMEs) need to be split at the source
-/// or ingested via a different pipeline. Future work could extend magic-byte
-/// detection to video (MP4, WebM) or audio (WAV, FLAC, OGG) formats, but those
-/// require substantial additional engine work on the compute side.
+/// or ingested via a different pipeline. Column names are deliberately prefixed
+/// <c>file_*</c> rather than <c>image_*</c> so a future <c>AnyFile</c> mode can
+/// keep the same schema shape (with the dimension columns null for non-images).
 /// </para>
 /// <para>
 /// Entry bytes are decompressed <em>directly into the row batch's arena</em> via
 /// <see cref="Arena.AppendFromStream"/>, avoiding the per-entry managed
 /// <c>byte[]</c> allocation that would otherwise hit the Large Object Heap for
 /// typical image sizes (&gt;85 KB). This keeps ingestion of large image archives
-/// like COCO2017 out of Gen2 GC territory.
+/// like COCO2017 out of Gen2 GC territory. When <see cref="SerializationContext.LboStore"/>
+/// is set, bytes are routed to the <c>.datum-blob</c> sidecar instead and the row's
+/// image cell holds the absolute (offset, length) coordinates rather than an arena slice.
 /// </para>
 /// <para>
-/// Image magic detection is peek-only (first 4 – 12 bytes after the stream write)
-/// and does not parse headers; dimension parsing happens later in
-/// <c>ImageStatsAccumulator</c>.
+/// The image header is parsed inline via <see cref="ImageHeaderParser.TryParseHeader"/>,
+/// populating the derived dimension columns at zero extra I/O cost since the bytes
+/// are already in hand. This makes width/height/channels/orientation queryable as
+/// regular columns, eligible for zone-map pruning, and removes the need for stats
+/// accumulators to re-read image bytes for these summaries.
 /// </para>
 /// </remarks>
 public sealed class ZipDeserializer : IFormatDeserializer
@@ -51,7 +67,15 @@ public sealed class ZipDeserializer : IFormatDeserializer
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
         using ZipArchive archive = new(stream, ZipArchiveMode.Read);
 
-        ColumnLookup columnLookup = new(["file_name", "file_bytes"]);
+        ColumnLookup columnLookup = new([
+            "file_name",
+            "file",
+            "file_width",
+            "file_height",
+            "file_channels",
+            "file_byte_length",
+            "file_orientation",
+        ]);
 
         int batchSize = ComputeBatchSize(archive, context.BatchByteTarget);
 
@@ -67,10 +91,15 @@ public sealed class ZipDeserializer : IFormatDeserializer
             if (IsIgnorableMetadata(entry.FullName)) continue;
 
             batch ??= context.Pool.RentRowBatch(columnLookup, batchSize);
-            DataValue[] values = context.Pool.RentDataValues(2);
+            DataValue[] values = context.Pool.RentDataValues(7);
 
             values[0] = DataValue.FromString(entry.FullName, batch.Arena);
-            values[1] = StoreEntryIntoArena(entry, batch.Arena);
+            (DataValue imageValue, ImageDimensions? dimensions, long byteLength) = context.LboStore is null
+                ? StoreEntryIntoArena(entry, batch.Arena)
+                : StoreEntryIntoSidecar(entry, context.LboStore);
+
+            values[1] = imageValue;
+            PopulateDerivedColumns(values, dimensions, byteLength, batch.Arena);
 
             batch.Add(values);
 
@@ -113,9 +142,12 @@ public sealed class ZipDeserializer : IFormatDeserializer
     /// Streams the entry's decompressed bytes directly into the batch arena (no
     /// managed <c>byte[]</c> allocation) and validates that the payload is a
     /// supported image format. Throws <see cref="InvalidDataException"/> when the
-    /// entry is not JPEG / PNG / WebP.
+    /// entry is not JPEG / PNG / WebP. Returns the image cell, parsed header
+    /// dimensions (null when only the magic check passed but the deeper header
+    /// parse failed), and the byte length.
     /// </summary>
-    private static DataValue StoreEntryIntoArena(ZipArchiveEntry entry, Arena arena)
+    private static (DataValue Image, ImageDimensions? Dimensions, long ByteLength) StoreEntryIntoArena(
+        ZipArchiveEntry entry, Arena arena)
     {
         long length64 = entry.Length;
         if (length64 <= 0 || length64 > int.MaxValue)
@@ -129,7 +161,8 @@ public sealed class ZipDeserializer : IFormatDeserializer
         using Stream entryStream = entry.Open();
         (int offset, int actualLength) = arena.AppendFromStream(entryStream, length);
 
-        if (!DetectImageKind(arena.GetBytes(offset, actualLength)))
+        ReadOnlySpan<byte> bytes = arena.GetBytes(offset, actualLength);
+        if (!DetectImageKind(bytes))
         {
             throw new InvalidDataException(
                 $"ZIP entry '{entry.FullName}' is not a recognised image format " +
@@ -139,7 +172,90 @@ public sealed class ZipDeserializer : IFormatDeserializer
                 $"source format.");
         }
 
-        return DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength);
+        ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(bytes);
+        DataValue image = DataValueHelpers.FromArenaSlice(DataKind.Image, offset, actualLength);
+        return (image, dimensions, actualLength);
+    }
+
+    /// <summary>
+    /// Reads the entry into a pooled buffer and appends it to the
+    /// <paramref name="sidecar"/>. The pooled rent avoids LOH pressure for typical
+    /// image sizes (&gt;85 KB) while keeping the path streaming-free at the
+    /// <see cref="IBlobSink"/> boundary. Returns a sidecar-flagged
+    /// <see cref="DataValue"/> with the absolute (offset, length) the sidecar
+    /// assigned, plus parsed header dimensions and byte length so the deserializer
+    /// can populate the derived dimension columns without re-reading the bytes.
+    /// </summary>
+    private static (DataValue Image, ImageDimensions? Dimensions, long ByteLength) StoreEntryIntoSidecar(
+        ZipArchiveEntry entry, IBlobSink sidecar)
+    {
+        long length64 = entry.Length;
+        if (length64 <= 0 || length64 > int.MaxValue)
+        {
+            throw new InvalidDataException(
+                $"ZIP entry '{entry.FullName}' has an invalid uncompressed length " +
+                $"({length64}). DatumIngest expects well-formed image archives.");
+        }
+
+        int length = (int)length64;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            using Stream entryStream = entry.Open();
+            entryStream.ReadExactly(buffer, 0, length);
+
+            ReadOnlySpan<byte> bytes = buffer.AsSpan(0, length);
+            if (!DetectImageKind(bytes))
+            {
+                throw new InvalidDataException(
+                    $"ZIP entry '{entry.FullName}' is not a recognised image format " +
+                    $"(JPEG / PNG / WebP). DatumIngest treats ZIP sources as image " +
+                    $"datasets; mixed-content archives are not supported. Remove " +
+                    $"non-image files from the archive or ingest them via a different " +
+                    $"source format.");
+            }
+
+            ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(bytes);
+            (long offset, long appended) = sidecar.Append(bytes);
+            DataValue image = DataValue.FromImageInSidecar(offset, appended);
+            return (image, dimensions, appended);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Fills the five derived columns at slots 2-6 of <paramref name="values"/>:
+    /// <c>file_width</c>, <c>file_height</c>, <c>file_channels</c>,
+    /// <c>file_byte_length</c>, <c>file_orientation</c>. Width/height/channels and
+    /// orientation are emitted as nulls when <paramref name="dimensions"/> is
+    /// <see langword="null"/> (header parse failed despite a valid magic check);
+    /// byte length is always populated from the entry's uncompressed size.
+    /// </summary>
+    private static void PopulateDerivedColumns(
+        DataValue[] values, ImageDimensions? dimensions, long byteLength, Arena arena)
+    {
+        values[5] = DataValue.FromInt64(byteLength);
+
+        if (dimensions is null)
+        {
+            values[2] = DataValue.Null(DataKind.Int32);
+            values[3] = DataValue.Null(DataKind.Int32);
+            values[4] = DataValue.Null(DataKind.UInt8);
+            values[6] = DataValue.Null(DataKind.String);
+            return;
+        }
+
+        values[2] = DataValue.FromInt32(dimensions.Width);
+        values[3] = DataValue.FromInt32(dimensions.Height);
+        values[4] = DataValue.FromUInt8((byte)dimensions.Channels);
+
+        string orientation = dimensions.Width > dimensions.Height ? "landscape"
+                           : dimensions.Height > dimensions.Width ? "portrait"
+                           : "square";
+        values[6] = DataValue.FromString(orientation, arena);
     }
 
     /// <summary>

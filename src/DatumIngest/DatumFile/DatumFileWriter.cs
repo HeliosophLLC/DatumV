@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.DatumFile.Encoding;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile;
@@ -34,6 +35,15 @@ public sealed class DatumFileWriter : IDisposable
     private long _footerOffset;
     private bool _initialized;
     private bool _finalized;
+
+    /// <summary>
+    /// Optional companion sidecar store. When attached before <see cref="Initialize"/>,
+    /// image-column descriptors are rewritten with <see cref="DatumColumnFlags.SidecarBlobs"/>;
+    /// if the sidecar gets materialised during ingest, the file header's
+    /// <see cref="DatumFileFlags.HasSidecarBlobs"/> flag is set and the footer carries
+    /// the sidecar fingerprint for read-time verification.
+    /// </summary>
+    private SidecarWriteStore? _sidecar;
 
     /// <summary>
     /// Writer-owned arena holding verbatim byte copies of every incoming batch's arena.
@@ -141,6 +151,25 @@ public sealed class DatumFileWriter : IDisposable
     }
 
     /// <summary>
+    /// Attaches the companion sidecar store. Must be called before <see cref="Initialize"/>.
+    /// On <see cref="Initialize"/>, every image-column descriptor in the schema gets the
+    /// <see cref="DatumColumnFlags.SidecarBlobs"/> flag, instructing the encoder to emit
+    /// pointer-only pages whose <c>(offset, length)</c> values point into the sidecar.
+    /// On <see cref="Finalize"/>, if the sidecar was actually written to, the file header's
+    /// <see cref="DatumFileFlags.HasSidecarBlobs"/> flag is set and the footer records
+    /// the sidecar's 64-bit fingerprint so the reader can verify the pair.
+    /// </summary>
+    public void AttachSidecar(SidecarWriteStore sidecar)
+    {
+        if (_initialized)
+        {
+            throw new InvalidOperationException("Sidecar must be attached before Initialize.");
+        }
+
+        _sidecar = sidecar;
+    }
+
+    /// <summary>
     /// Initializes the writer with a schema and writes the file header.
     /// Must be called exactly once before any calls to <see cref="WriteRowBatch"/>.
     /// </summary>
@@ -156,10 +185,16 @@ public sealed class DatumFileWriter : IDisposable
         _schema = schema;
 
         // Mutable working copies of column descriptors so we can freeze shapes on first flush.
+        // When a sidecar is attached, image columns get rewritten with the SidecarBlobs flag
+        // so the encoder routes them through the pointer-only page path. Schema is the
+        // single source of truth — see BinaryColumnEncoder.EncodeSidecar.
         _descriptors = new DatumColumnDescriptor[schema.ColumnCount];
         for (int index = 0; index < schema.ColumnCount; index++)
         {
-            _descriptors[index] = schema.Columns[index];
+            DatumColumnDescriptor src = schema.Columns[index];
+            _descriptors[index] = (_sidecar is not null && src.Kind == DataKind.Image && !src.UsesSidecar)
+                ? src with { Flags = src.Flags | DatumColumnFlags.SidecarBlobs }
+                : src;
         }
 
         _columnBuffers = new List<DataValue>[schema.ColumnCount];
@@ -519,6 +554,15 @@ public sealed class DatumFileWriter : IDisposable
             rowGroupDescriptor.Serialize(writer);
         }
 
+        // Sidecar fingerprint follows the row group directory when (and only when) the
+        // attached sidecar was actually written to. Reader pairs this against the
+        // .datum-blob header to detect stale or swapped sidecar files. The header flag
+        // DatumFileFlags.HasSidecarBlobs is patched in PatchHeader.
+        if (_sidecar is { WasMaterialized: true })
+        {
+            writer.Write(_sidecar.Fingerprint);
+        }
+
         writer.Flush();
         long footerEndOffset = _stream.Position;
         uint footerByteLength = (uint)(footerEndOffset - _footerOffset);
@@ -532,6 +576,19 @@ public sealed class DatumFileWriter : IDisposable
     private void PatchHeader()
     {
         long restorePosition = _stream.Position;
+
+        // Patch the file flags (offset 6) so HasSidecarBlobs reflects whether the
+        // attached sidecar was actually materialised during this run.
+        DatumFileFlags fileFlags = DatumFileFlags.None;
+        if (_sidecar is { WasMaterialized: true })
+        {
+            fileFlags |= DatumFileFlags.HasSidecarBlobs;
+        }
+
+        _stream.Seek(6, SeekOrigin.Begin);
+        Span<byte> flagsPatch = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(flagsPatch, (ushort)fileFlags);
+        _stream.Write(flagsPatch);
 
         // Seek to offset 8: skip magic(4) + version(2) + flags(2).
         _stream.Seek(8, SeekOrigin.Begin);

@@ -30,7 +30,7 @@ namespace DatumIngest.DatumFile.Sidecar;
 /// match the one the <c>.datum</c> file expects, catching swap / staleness scenarios.
 /// </para>
 /// </remarks>
-internal static class SidecarConstants
+public static class SidecarConstants
 {
     /// <summary>
     /// Magic bytes identifying a <c>.datum-blob</c> file: ASCII "DATUMBLB" stored

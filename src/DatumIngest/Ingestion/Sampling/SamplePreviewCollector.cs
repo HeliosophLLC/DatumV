@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 
@@ -92,14 +93,23 @@ internal sealed class SamplePreviewCollector
     /// table schema.
     /// </summary>
     /// <param name="schema">The schema of the ingested table.</param>
+    /// <param name="sidecar">
+    /// Optional read-only handle on the just-finalised <c>.datum-blob</c> sidecar.
+    /// Required iff the reservoir contains any sidecar-backed image cells (deferred
+    /// from <see cref="Consider(Row, IValueStore)"/> because the bytes weren't
+    /// available until the writer flushed). Sidecar-backed cells are resolved here
+    /// and replaced with their <c>base64://...</c> thumbnail strings.
+    /// </param>
     /// <returns>A preview containing feature descriptors and the sampled rows.</returns>
-    public SamplePreview Build(Schema schema)
+    public SamplePreview Build(Schema schema, IBlobSource? sidecar = null)
     {
         List<SampleFeature> features = new(schema.Columns.Count);
         foreach (ColumnInfo column in schema.Columns)
         {
             features.Add(new SampleFeature(column.Name, column.Kind.ToString().ToLowerInvariant()));
         }
+
+        ResolveSidecarThumbnails(sidecar);
 
         object?[][] samples = new object?[_reservoirCount][];
         Array.Copy(_reservoir, samples, _reservoirCount);
@@ -109,6 +119,37 @@ internal sealed class SamplePreviewCollector
             Features = features,
             Samples = samples,
         };
+    }
+
+    /// <summary>
+    /// Walks the reservoir and replaces every <see cref="SidecarImageRef"/> placeholder
+    /// with the rendered <c>base64://...</c> thumbnail string. Throws when a placeholder
+    /// is found but no sidecar source was provided.
+    /// </summary>
+    private void ResolveSidecarThumbnails(IBlobSource? sidecar)
+    {
+        for (int row = 0; row < _reservoirCount; row++)
+        {
+            object?[]? cells = _reservoir[row];
+            if (cells is null) continue;
+
+            for (int col = 0; col < cells.Length; col++)
+            {
+                if (cells[col] is not SidecarImageRef refValue) continue;
+
+                if (sidecar is null)
+                {
+                    throw new InvalidOperationException(
+                        "SamplePreviewCollector reservoir contains a sidecar-backed image " +
+                        "but Build was called without an IBlobSource. Pass the SidecarReadStore " +
+                        "for the just-finalised .datum-blob.");
+                }
+
+                ReadOnlySpan<byte> bytes = sidecar.Read(refValue.Offset, refValue.Length);
+                byte[] thumbnailBytes = CreateThumbnail(bytes.ToArray());
+                cells[col] = "base64://" + Convert.ToBase64String(thumbnailBytes);
+            }
+        }
     }
 
     /// <summary>
@@ -231,13 +272,30 @@ internal sealed class SamplePreviewCollector
     /// <summary>
     /// Converts an image to a base64 string prefixed with <c>base64://</c>.
     /// The image is resized to fit within 64×64 pixels, preserving aspect ratio.
+    /// For sidecar-backed values the bytes aren't yet readable (writer is mid-stream),
+    /// so a <see cref="SidecarImageRef"/> placeholder is returned and resolved later
+    /// in <see cref="Build(Schema, IBlobSource?)"/> against the finalised sidecar.
     /// </summary>
     private static object ConvertImage(DataValue value, IValueStore store)
     {
+        if (value.IsInSidecar)
+        {
+            return new SidecarImageRef(value.SidecarOffset, value.SidecarLength);
+        }
+
         byte[] imageBytes = value.AsImage(store);
         byte[] thumbnailBytes = CreateThumbnail(imageBytes);
         return "base64://" + Convert.ToBase64String(thumbnailBytes);
     }
+
+    /// <summary>
+    /// Reservoir placeholder for sidecar-backed image cells. Holds the absolute
+    /// <c>(offset, length)</c> coordinates of the row's image bytes within the
+    /// companion <c>.datum-blob</c>, deferring thumbnail rendering until
+    /// <see cref="Build(Schema, IBlobSource?)"/> when an <see cref="IBlobSource"/>
+    /// is available.
+    /// </summary>
+    private sealed record SidecarImageRef(long Offset, long Length);
 
     /// <summary>
     /// Decodes an image, resizes it to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>

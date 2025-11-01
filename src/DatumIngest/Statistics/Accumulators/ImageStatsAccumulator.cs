@@ -69,6 +69,19 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             return;
         }
 
+        // Sidecar-backed values would require an IBlobSource to materialise their
+        // bytes, which the stats path doesn't carry. The DatumIngest pipeline emits
+        // derived dimension columns (file_width / file_height / file_channels /
+        // file_byte_length / file_orientation) at ingest time, so all the summaries
+        // this accumulator produces are available from the regular numeric stats on
+        // those columns. The accumulator is preserved here for the in-arena path
+        // (test fixtures, future formats) where bytes are still resolvable through
+        // the value store.
+        if (value.IsInSidecar)
+        {
+            return;
+        }
+
         ReadOnlySpan<byte> imageBytes = value.AsByteSpan(store);
         if (imageBytes.Length == 0)
         {

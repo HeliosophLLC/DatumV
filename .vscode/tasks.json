@@ -222,6 +222,41 @@
 				"panel": "dedicated"
 			}
 		},
+		{
+			"label": "Debug: Build SidecarInspect",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"tools/SidecarInspect",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
+			"label": "Run: SidecarInspect",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project", "tools/SidecarInspect",
+				"-c", "Debug",
+				"--no-build",
+				"--",
+				"${input:sidecarPath}"
+			],
+			"dependsOn": "Debug: Build SidecarInspect",
+			"problemMatcher": [],
+			"group": "test",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
 	],
 	"inputs": [
 		{
@@ -256,6 +291,11 @@
 			"id": "explainSql",
 			"type": "promptString",
 			"description": "SQL to explain (quote spaces)"
+		},
+		{
+			"id": "sidecarPath",
+			"type": "promptString",
+			"description": "Path to a .datum or .datum-blob file (sidecar resolved automatically)"
 		}
 	]
 }

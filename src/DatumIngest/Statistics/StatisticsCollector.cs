@@ -80,7 +80,7 @@ public sealed class StatisticsCollector
             DataValue value = row[columnName];
             if (!_columnAccumulators.TryGetValue(columnName, out List<IStatisticAccumulator>? accumulators))
             {
-                accumulators = CreateAccumulators(value.Kind);
+                accumulators = CreateAccumulators(value);
                 _columnAccumulators[columnName] = accumulators;
             }
 
@@ -139,8 +139,18 @@ public sealed class StatisticsCollector
         }
     }
 
-    private List<IStatisticAccumulator> CreateAccumulators(DataKind kind)
+    private List<IStatisticAccumulator> CreateAccumulators(DataValue firstValue)
     {
+        DataKind kind = firstValue.Kind;
+        // Sidecar-backed image columns get their dimension/size summaries from the
+        // sibling derived columns (file_width / file_height / file_channels /
+        // file_byte_length / file_orientation) emitted by the deserializer, so the
+        // ImageStatsAccumulator would just emit an empty image_stats record.
+        // Skip it entirely. The first-row check is sufficient because the
+        // deserializer makes a one-shot routing decision for the whole column —
+        // if the first non-null value is sidecar-backed, every value is.
+        bool sidecarBacked = firstValue.IsInSidecar;
+
         List<IStatisticAccumulator> accumulators =
         [
             new CountAccumulator(),
@@ -175,7 +185,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new VectorStatsAccumulator());
         }
 
-        if (kind is DataKind.Image)
+        if (kind is DataKind.Image && !sidecarBacked)
         {
             accumulators.Add(new ImageStatsAccumulator());
         }

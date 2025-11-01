@@ -208,6 +208,14 @@ public enum DatumFileFlags : ushort
     /// remains the physical (pre-deletion) count.
     /// </summary>
     HasTombstones = 0x04,
+
+    /// <summary>
+    /// One or more columns reference payload bytes stored in the companion
+    /// <c>.datum-blob</c> sidecar. The footer's schema block is followed by an
+    /// 8-byte fingerprint that must match the sidecar header; readers must open
+    /// the sidecar via <c>SidecarReadStore</c> to materialise sidecar-backed values.
+    /// </summary>
+    HasSidecarBlobs = 0x08,
 }
 
 /// <summary>
