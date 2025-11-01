@@ -153,11 +153,6 @@ public sealed class ColumnBatch : IDisposable
     {
         if (Disposed) return;
         
-        for (int column = 0; column < ColumnCount; column++)
-        {
-            ArrayPool<DataValue>.Shared.Return(_columns[column], clearArray: true);
-        }
-
         ArrayPool<DataValue[]>.Shared.Return(_columns, clearArray: true);
 
         _columns = null;

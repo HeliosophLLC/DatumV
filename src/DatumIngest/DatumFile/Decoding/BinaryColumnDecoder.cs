@@ -45,6 +45,9 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
             ? Path.GetDirectoryName(context.DatumFilePath) ?? string.Empty
             : string.Empty;
 
+        IValueStore store = context.Store
+            ?? throw new InvalidOperationException("DatumDecoderContext.Store must be set for string decoding.");
+
         DataValue[] result = new DataValue[rowCount];
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
@@ -70,7 +73,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
                 bytes = raw[(poolStart + (int)start)..(poolStart + (int)end)];
             }
 
-            result[rowIndex] = isImage ? DataValue.FromImage(bytes) : DataValue.FromUInt8Array(bytes);
+            result[rowIndex] = isImage ? DataValue.FromImage(bytes, store) : DataValue.FromUInt8Array(bytes, store);
         }
 
         return result;
