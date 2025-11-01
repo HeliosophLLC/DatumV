@@ -124,9 +124,11 @@ public sealed class PoolBacking
                 tracker.MarkRented();
             }
 #endif
+            DatumDiagnostics.RecordPoolDataValueArrayRent(fromPool: true);
             return buffer;
         }
 
+        DatumDiagnostics.RecordPoolDataValueArrayRent(fromPool: false);
         return new DataValue[length];
     }
 
@@ -164,6 +166,7 @@ public sealed class PoolBacking
         Row[] rows = ArrayPool<Row>.Shared.Rent(capacity);
         RowBatch rowBatch = new(columnLookup, rows, arena);
 
+        DatumDiagnostics.RecordPoolRowBatchRent();
         return rowBatch;
     }
 
@@ -190,7 +193,8 @@ public sealed class PoolBacking
         {
             arena = RentArena();
         }
-        
+
+        DatumDiagnostics.RecordPoolColumnBatchRent();
         return new ColumnBatch(columnLookup, columns, arena);
     }
 
@@ -237,20 +241,24 @@ public sealed class PoolBacking
             && pool.TryDequeue(out GroupState? pooled))
         {
             state = pooled;
+            DatumDiagnostics.RecordPoolGroupStateRent(fromPool: true);
         }
         else
         {
             state = new GroupState();
+            DatumDiagnostics.RecordPoolGroupStateRent(fromPool: false);
         }
 
         if (accumulatorArrayPools.TryGetValue(accumulatorCount, out CountedPool<IAggregateAccumulator[]>? arrayPool)
             && arrayPool.TryDequeue(out IAggregateAccumulator[]? array))
         {
             state.Accumulators = array;
+            DatumDiagnostics.RecordPoolAccumulatorArrayRent(fromPool: true);
         }
         else
         {
             state.Accumulators = new IAggregateAccumulator[accumulatorCount];
+            DatumDiagnostics.RecordPoolAccumulatorArrayRent(fromPool: false);
         }
 
         state.AccumulatorCount = accumulatorCount;
@@ -271,7 +279,8 @@ public sealed class PoolBacking
 #endif
 
         CountedPool<DataValue[]> pool = dataValuePools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
-        pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
+        bool pooled = pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
+        DatumDiagnostics.RecordPoolDataValueArrayReturn(pooled);
     }
 
     /// <summary>
@@ -297,6 +306,7 @@ public sealed class PoolBacking
         TryReturn(batch.Arena);
 
         batch.Dispose();
+        DatumDiagnostics.RecordPoolRowBatchReturn();
     }
 
     /// <summary>
@@ -315,6 +325,7 @@ public sealed class PoolBacking
         TryReturn(batch.Arena);
 
         batch.Dispose();
+        DatumDiagnostics.RecordPoolColumnBatchReturn();
     }
 
     /// <summary>
@@ -360,14 +371,16 @@ public sealed class PoolBacking
 
         foreach (GroupState state in groups)
         {
-            arrayPool.EnqueueIfUnderLimit(state.Accumulators, _maxItemsPerBucket);
+            bool arrayPooled = arrayPool.EnqueueIfUnderLimit(state.Accumulators, _maxItemsPerBucket);
+            DatumDiagnostics.RecordPoolAccumulatorArrayReturn(arrayPooled);
 
             state.Accumulators = [];
             state.AccumulatorCount = 0;
             state.KeyValues = null;
             state.OrderedBuffers = null;
 
-            pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+            bool statePooled = pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+            DatumDiagnostics.RecordPoolGroupStateReturn(statePooled);
         }
     }
 
@@ -385,7 +398,8 @@ public sealed class PoolBacking
 
         CountedPool<IAggregateAccumulator[]> arrayPool = accumulatorArrayPools.GetOrAdd(
             accumulatorCount, static _ => new CountedPool<IAggregateAccumulator[]>());
-        arrayPool.EnqueueIfUnderLimit(array, _maxItemsPerBucket);
+        bool arrayPooled = arrayPool.EnqueueIfUnderLimit(array, _maxItemsPerBucket);
+        DatumDiagnostics.RecordPoolAccumulatorArrayReturn(arrayPooled);
 
         state.Accumulators = [];
         state.AccumulatorCount = 0;
@@ -394,7 +408,8 @@ public sealed class PoolBacking
 
         CountedPool<GroupState> pool = groupStatePools.GetOrAdd(
             accumulatorCount, static _ => new CountedPool<GroupState>());
-        pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+        bool statePooled = pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+        DatumDiagnostics.RecordPoolGroupStateReturn(statePooled);
     }
 
 }
@@ -430,14 +445,19 @@ internal sealed class CountedPool<T>
     /// <summary>
     /// Enqueues an item if the approximate count is below <paramref name="limit"/>.
     /// Uses a racy read — may slightly exceed the limit, which is acceptable for a soft cap.
+    /// Returns <see langword="true"/> when the item was enqueued; <see langword="false"/>
+    /// when the limit gate rejected it. Callers can use this to record diagnostic
+    /// "pooled vs over-limit-discarded" counters.
     /// </summary>
-    public void EnqueueIfUnderLimit(T item, int limit)
+    public bool EnqueueIfUnderLimit(T item, int limit)
     {
         if (Volatile.Read(ref _approximateCount) < limit)
         {
             _queue.Enqueue(item);
             Interlocked.Increment(ref _approximateCount);
+            return true;
         }
+        return false;
     }
 
     /// <summary>Unconditionally enqueues an item.</summary>
