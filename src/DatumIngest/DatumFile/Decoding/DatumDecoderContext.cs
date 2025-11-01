@@ -3,19 +3,11 @@ using DatumIngest.Model;
 namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
-/// Reader-side context needed for decoding externalized column pages.
-/// Passed to <see cref="DatumColumnDecoder.Decode(byte[], DatumEncoding, DatumCompression, int, int, DatumColumnDescriptor, DatumDecoderContext)"/> so decoders that store sidecar
-/// blob paths can resolve the absolute path of each blob file.
+/// Reader-side context passed to every column decoder. Carries the value store used
+/// for arena-backed string and binary payloads.
 /// </summary>
 public sealed class DatumDecoderContext
 {
-    /// <summary>
-    /// Absolute path to the <c>.datum</c> file being read.
-    /// Used to resolve relative sidecar blob paths produced by <c>BinaryColumnEncoder</c>
-    /// when externalization was triggered.
-    /// </summary>
-    public string DatumFilePath { get; init; } = string.Empty;
-
     /// <summary>
     /// Value store for string and binary payloads. Decoders use this store for
     /// Arena-backed string storage. Defaults to <c>null</c> — callers must set this
@@ -27,8 +19,7 @@ public sealed class DatumDecoderContext
     public IValueStore? Store { get; init; }
 
     /// <summary>
-    /// A context with no file path, suitable for in-memory decode scenarios
-    /// that contain no externalized blobs.
+    /// A shared singleton suitable for in-memory decode scenarios with no per-call state.
     /// </summary>
     public static DatumDecoderContext Empty { get; } = new();
 }

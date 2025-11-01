@@ -21,7 +21,6 @@ namespace DatumIngest.DatumFile;
 public sealed class DatumMemoryMappedReader : IDisposable
 {
     private readonly MemoryMappedFile _mappedFile;
-    private readonly string _filePath;
     private readonly DatumFileSchema _schema;
     private readonly DatumRowGroupDescriptor[] _rowGroups;
     private readonly long _totalRowCount;
@@ -33,13 +32,11 @@ public sealed class DatumMemoryMappedReader : IDisposable
 
     private DatumMemoryMappedReader(
         MemoryMappedFile mappedFile,
-        string filePath,
         DatumFileSchema schema,
         DatumRowGroupDescriptor[] rowGroups,
         long totalRowCount)
     {
         _mappedFile = mappedFile;
-        _filePath = filePath;
         _schema = schema;
         _rowGroups = rowGroups;
         _totalRowCount = totalRowCount;
@@ -66,7 +63,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
         MemoryMappedFile mappedFile = MemoryMappedFile.CreateFromFile(
             filePath, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
 
-        return new DatumMemoryMappedReader(mappedFile, filePath, schema, rowGroups, totalRowCount);
+        return new DatumMemoryMappedReader(mappedFile, schema, rowGroups, totalRowCount);
     }
 
     /// <summary>The column schema of this file.</summary>
@@ -92,7 +89,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
         DataValue[][] result = new DataValue[columnIndices.Length][];
 
-        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
+        DatumDecoderContext context = new() { Store = Store };
 
         Parallel.For(0, columnIndices.Length, resultIndex =>
         {

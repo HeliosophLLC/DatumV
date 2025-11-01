@@ -361,8 +361,6 @@ public sealed class DatumFileWriter : IDisposable
 
         DatumEncoderContext context = new()
         {
-            DatumFilePath = _filePath ?? string.Empty,
-            RowGroupIndex = _rowGroupDescriptors.Count,
             Store = _writerArena,
             Pages = _pages,
         };

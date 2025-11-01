@@ -63,16 +63,6 @@ public static class DatumFileConstants
     /// </summary>
     public const int LargePageAutoTuneThresholdBytes = 33_554_432;
 
-    /// <summary>
-    /// Default blob externalization threshold in bytes. When the largest blob in a row group
-    /// exceeds this value, the entire column page for that row group is externalized to sidecar files
-    /// and the page stores relative path strings instead of raw bytes.
-    /// </summary>
-    public const long DefaultExternalizationThresholdBytes = 1_048_576;
-
-    /// <summary>Directory name appended to the datum file path for externalized blob storage.</summary>
-    public const string BlobsFolderSuffix = ".datum_blobs";
-
     /// <summary>Default Zstd compression level. Level 3 balances speed and ratio well for ETL workloads.</summary>
     public const int DefaultZstdCompressionLevel = 3;
 }
@@ -138,15 +128,6 @@ public enum DatumEncoding : byte
     /// Applied to low-cardinality String, JsonValue, and Scalar columns.
     /// </summary>
     DictionaryRLE = 7,
-
-    /// <summary>
-    /// Externalized binary data. Same offset/pool layout as <see cref="VariableBytes"/>, but the pool
-    /// contains relative UTF-8 path strings pointing to sidecar files rather than raw binary bytes.
-    /// Used by <see cref="DatumIngest.Model.DataKind.Image"/> and
-    /// <see cref="DatumIngest.Model.DataKind.UInt8Array"/> column pages when any blob in the row group
-    /// exceeds the column's externalization threshold.
-    /// </summary>
-    ExternalBytes = 8,
 
     /// <summary>
     /// Pointer-only page referencing payload bytes stored in the companion <c>.datum-blob</c>
@@ -239,12 +220,6 @@ public enum DatumColumnFlags : byte
 
     /// <summary>This column has been promoted to dictionary encoding and is eligible for it in future row groups.</summary>
     DictionaryEligible = 0x04,
-
-    /// <summary>
-    /// Oversized blobs in this column are externalized to sidecar files.
-    /// Pages store UTF-8 relative path strings instead of raw binary content.
-    /// </summary>
-    ExternBlobs = 0x08,
 
     /// <summary>
     /// Payload bytes for this column live in the companion <c>.datum-blob</c> sidecar.

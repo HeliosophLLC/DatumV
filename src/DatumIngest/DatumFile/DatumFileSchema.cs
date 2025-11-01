@@ -86,12 +86,6 @@ public sealed class DatumFileSchema
                     writer.Write(dimension);
                 }
             }
-
-            if (column.ExternalizesBlobs)
-            {
-                // Store as uint32 — threshold values above 4 GiB are unsupported.
-                writer.Write((uint)Math.Min(column.ExternalizationThresholdBytes, uint.MaxValue));
-            }
         }
     }
 
@@ -122,14 +116,7 @@ public sealed class DatumFileSchema
                 }
             }
 
-            long externalizationThreshold = DatumFileConstants.DefaultExternalizationThresholdBytes;
-
-            if ((flags & DatumColumnFlags.ExternBlobs) != 0)
-            {
-                externalizationThreshold = reader.ReadUInt32();
-            }
-
-            descriptors.Add(new DatumColumnDescriptor(name, kind, flags, fixedShape, externalizationThreshold));
+            descriptors.Add(new DatumColumnDescriptor(name, kind, flags, fixedShape));
         }
 
         return new DatumFileSchema(descriptors);

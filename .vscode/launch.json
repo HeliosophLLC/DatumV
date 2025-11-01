@@ -51,8 +51,7 @@
 			"program": "${workspaceFolder}/tools/ExecuteOnce/bin/Release/net10.0/execute-once.dll",
 			"args": [
 				"${input:executeDatumFile}",
-				"${input:executeSql}",
-				"--all"
+				"${input:executeSql}"
 			],
 			"cwd": "${workspaceFolder}",
 			"console": "integratedTerminal",

@@ -4,8 +4,7 @@ namespace DatumIngest.DatumFile;
 
 /// <summary>
 /// Describes a single column within a <c>.datum</c> file schema: its name, data kind,
-/// column-level flags, optional fixed shape for tensor types, and the externalization
-/// threshold for binary columns.
+/// column-level flags, and optional fixed shape for tensor types.
 /// </summary>
 public sealed record DatumColumnDescriptor
 {
@@ -19,22 +18,16 @@ public sealed record DatumColumnDescriptor
     /// Dimension array for Vector (length 1), Matrix (length 2: rows, cols), or Tensor (rank N) columns.
     /// <c>null</c> for all other kinds. Populated by the writer on first row group flush.
     /// </param>
-    /// <param name="externalizationThresholdBytes">
-    /// Maximum blob size (bytes) before the entire column page is externalized to sidecar files.
-    /// Only meaningful when <see cref="DatumColumnFlags.ExternBlobs"/> is set.
-    /// </param>
     public DatumColumnDescriptor(
         string name,
         DataKind kind,
         DatumColumnFlags flags = DatumColumnFlags.None,
-        int[]? fixedShape = null,
-        long externalizationThresholdBytes = DatumFileConstants.DefaultExternalizationThresholdBytes)
+        int[]? fixedShape = null)
     {
         Name = name;
         Kind = kind;
         Flags = flags;
         FixedShape = fixedShape;
-        ExternalizationThresholdBytes = externalizationThresholdBytes;
     }
 
     /// <summary>The column name as it appears in query expressions.</summary>
@@ -53,12 +46,6 @@ public sealed record DatumColumnDescriptor
     /// </summary>
     public int[]? FixedShape { get; init; }
 
-    /// <summary>
-    /// Blob externalization threshold in bytes. Only consulted when
-    /// <see cref="DatumColumnFlags.ExternBlobs"/> is set in <see cref="Flags"/>.
-    /// </summary>
-    public long ExternalizationThresholdBytes { get; init; }
-
     /// <summary>Returns <c>true</c> if this column may contain null values.</summary>
     public bool IsNullable => (Flags & DatumColumnFlags.Nullable) != 0;
 
@@ -67,9 +54,6 @@ public sealed record DatumColumnDescriptor
 
     /// <summary>Returns <c>true</c> if this column is eligible for dictionary encoding.</summary>
     public bool IsDictionaryEligible => (Flags & DatumColumnFlags.DictionaryEligible) != 0;
-
-    /// <summary>Returns <c>true</c> if oversized blobs in this column are externalized to sidecar files.</summary>
-    public bool ExternalizesBlobs => (Flags & DatumColumnFlags.ExternBlobs) != 0;
 
     /// <summary>
     /// Returns <c>true</c> if this column's payload bytes live in the companion

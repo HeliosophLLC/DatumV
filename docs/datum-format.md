@@ -88,7 +88,7 @@ Each column page independently records its encoding as a single `DatumEncoding` 
 | `VariableBytes` | 5 | String, JsonValue, UInt8Array, Image | `nullBitmap[⌈N/8⌉]` then `uint32 offsets[N+1]` then `byte pool[offsets[N]]`. Null rows: `offsets[i] == offsets[i+1]` with null bit set |
 | `VariableDataValue` | 6 | Array (heterogeneous) | Same offset-pool layout as `VariableBytes`, but each pool entry is a serialized `DataValue` |
 | `DictionaryRLE` | 7 | Low-cardinality String, Float32 | In-page dictionary followed by code array: `uint8[N]` when ≤ 255 unique values (sentinel `0xFF` = null), otherwise `uint16[N]` (sentinel `0xFFFF`) |
-| `ExternalBytes` | 8 | Image, UInt8Array (large blobs) | Same layout as `VariableBytes`, but pool contains UTF-8 relative path strings referencing sidecar files instead of raw bytes |
+| `SidecarBlobs` | 9 | Image, UInt8Array routed to `.datum-blob` | `nullBitmap[⌈N/8⌉]` then `int64 offsets[N]` then `int64 lengths[N]`. Each pair is the absolute `(offset, length)` of one row's payload in the companion `.datum-blob` sidecar. Pages are zstd-compressed |
 
 #### Null bitmap
 
@@ -112,9 +112,7 @@ This creates long runs of similar byte values (e.g., exponent bytes cluster toge
 
 #### Blob externalization
 
-When any blob in a row group exceeds the column's externalization threshold (default 1 MiB), the entire column page switches to `ExternalBytes` encoding. Blobs are written to sidecar files in a `.datum_blobs/` directory adjacent to the `.datum` file, and the page stores relative path strings instead of raw bytes. This keeps the column page compact and prevents individual large blobs from inflating the file.
-
-> **Note:** A unified [`.datum-blob`](#optional-sidecar-datum-blob) sidecar (one file holding all binary payloads, addressed by 64-bit offsets) is being introduced as the successor to the per-blob `.datum_blobs/` directory mechanism. Both code paths coexist for backwards compatibility with existing files.
+Image and `UInt8Array` columns can be routed to a unified [`.datum-blob`](#optional-sidecar-datum-blob) companion file. When the writer is configured with a sidecar, image-column descriptors are flagged `SidecarBlobs` and their pages use the `SidecarBlobs` encoding — pointer-only, no payload bytes embedded. This keeps the `.datum` file compact and lets readers mmap the sidecar directly, avoiding heap copies for large binary payloads.
 
 ## Footer
 
@@ -133,8 +131,6 @@ For each column:
   If FixedShape flag is set:
     uint16:  shapeRank
     int32[]: dimensions[rank]  (e.g. [256, 512] for a 256×512 matrix)
-  If ExternBlobs flag is set:
-    uint32:  externalizationThresholdBytes
 ```
 
 **Column flags:**
@@ -144,7 +140,7 @@ For each column:
 | `Nullable` | 0x01 | Column may contain nulls |
 | `FixedShape` | 0x02 | Vector/Matrix/Tensor column with uniform dimensions (frozen on first row group) |
 | `DictionaryEligible` | 0x04 | Column uses or is eligible for dictionary encoding |
-| `ExternBlobs` | 0x08 | Large blobs externalized to sidecar files |
+| `SidecarBlobs` | 0x10 | Column's payload bytes live in the companion `.datum-blob` sidecar; pages use `SidecarBlobs` encoding |
 
 ### Row group directory
 
@@ -245,7 +241,7 @@ See [indexes.md](indexes.md) for the full binary specification of both sidecar f
 
 ## Optional sidecar (`.datum-blob`)
 
-An optional `.datum-blob` companion file provides a unified sidecar for **Large Binary Objects (LBOs)** — images, byte arrays, and (eventually) video — that would otherwise inflate column pages or fragment into many per-blob files. Unlike the legacy `.datum_blobs/` directory used by [`ExternalBytes`](#encoding-strategies) encoding (one filesystem entry per blob), the `.datum-blob` is a single append-only file containing all sidecar-routed payloads concatenated.
+An optional `.datum-blob` companion file provides a unified sidecar for **Large Binary Objects (LBOs)** — images, byte arrays, and (eventually) video — that would otherwise inflate column pages. The `.datum-blob` is a single append-only file containing all sidecar-routed payloads concatenated.
 
 Bytes are addressed by absolute 64-bit file offset, so a single sidecar can hold terabytes of binary data without per-blob or per-file caps. Readers memory-map the entire sidecar and slice it directly — zero copy, zero decompression for already-compressed payloads (JPEG, PNG, MP4, etc.).
 
@@ -283,10 +279,6 @@ The encoder for sidecar-routed columns produces a column page consisting of `nul
 ### Concurrency and atomicity
 
 `SidecarWriteStore.Append` serialises concurrent appenders internally; multiple producers (parallel deserializers, threaded ingest) can safely share a single sink without external coordination. On finalize, the sidecar is flushed and closed before the `.datum` footer is written, so a crash mid-finalize leaves either a complete pair of files or an orphaned sidecar (easily detected and discarded — the `.datum` footer's fingerprint reference is the source of truth for "valid pair").
-
-### Relationship to legacy `ExternalBytes` / `.datum_blobs/`
-
-The original [blob externalization](#blob-externalization) mechanism — one sidecar file per externalized blob, written into a `.datum_blobs/` directory — remains the legacy code path and continues to read older `.datum` files unchanged. New writes use the unified `.datum-blob` sidecar; the per-blob-file mechanism will be retired once readers no longer need backwards compatibility with files predating the unified sidecar.
 
 ## Reading flow
 

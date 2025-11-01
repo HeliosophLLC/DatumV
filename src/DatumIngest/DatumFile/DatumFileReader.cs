@@ -17,7 +17,6 @@ namespace DatumIngest.DatumFile;
 public sealed class DatumFileReader : IDisposable
 {
     private readonly FileStream _stream;
-    private readonly string _filePath;
     private readonly DatumFileSchema _schema;
     private readonly DatumRowGroupDescriptor[] _rowGroups;
     private readonly long _totalRowCount;
@@ -26,7 +25,6 @@ public sealed class DatumFileReader : IDisposable
 
     private DatumFileReader(
         FileStream stream,
-        string filePath,
         DatumFileSchema schema,
         DatumRowGroupDescriptor[] rowGroups,
         long totalRowCount,
@@ -34,7 +32,6 @@ public sealed class DatumFileReader : IDisposable
         ulong? sidecarFingerprint)
     {
         _stream = stream;
-        _filePath = filePath;
         _schema = schema;
         _rowGroups = rowGroups;
         _totalRowCount = totalRowCount;
@@ -61,7 +58,7 @@ public sealed class DatumFileReader : IDisposable
                 DatumFileFlags flags, ulong? sidecarFingerprint) = ReadFooterAndHeader(stream);
 
             var reader = new DatumFileReader(
-                stream, filePath, schema, rowGroups, totalRowCount, flags, sidecarFingerprint);
+                stream, schema, rowGroups, totalRowCount, flags, sidecarFingerprint);
 
             return reader;
         }
@@ -117,7 +114,7 @@ public sealed class DatumFileReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
         DataValue[][] result = new DataValue[columnIndices.Length][];
 
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new();
 
         for (int i = 0; i < columnIndices.Length; i++)
         {
@@ -169,8 +166,8 @@ public sealed class DatumFileReader : IDisposable
     {
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
-        DatumDecoderContext context = new() {
-            DatumFilePath = _filePath,
+        DatumDecoderContext context = new()
+        {
             // Route arena-backed string payloads into the batch's shared arena.
             // Previously the context defaulted Store to a fresh `new Arena()` that was
             // never Disposed — its backing MemoryMappedFile got finalized per row group,

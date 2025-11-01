@@ -6,19 +6,10 @@ namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
 /// Decodes <see cref="DataKind.UInt8Array"/> and <see cref="DataKind.Image"/> column pages
-/// produced by <c>BinaryColumnEncoder</c>.
+/// produced by <c>BinaryColumnEncoder</c>. Supports <see cref="DatumEncoding.VariableBytes"/>
+/// (bytes embedded in the pool) and <see cref="DatumEncoding.SidecarBlobs"/> (pointer-only
+/// pages whose payloads live in the companion <c>.datum-blob</c> sidecar).
 /// </summary>
-/// <remarks>
-/// <para>
-/// When the encoding is <see cref="DatumEncoding.VariableBytes"/> the pool
-/// contains raw binary bytes.
-/// </para>
-/// <para>
-/// When the encoding is <see cref="DatumEncoding.ExternalBytes"/> the pool
-/// contains relative UTF-8 path strings.  Each non-null row's blob is loaded from the
-/// sidecar file at <c>Path.Combine(datumFileDir, relativePath)</c>.
-/// </para>
-/// </remarks>
 internal sealed class BinaryColumnDecoder : DatumColumnDecoder
 {
     /// <inheritdoc/>
@@ -41,14 +32,9 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
 
         bool isImage = descriptor.Kind == DataKind.Image;
-        bool isExternalized = encoding == DatumEncoding.ExternalBytes;
 
         int offsetsStart = bitmapByteCount;
         int poolStart = offsetsStart + (rowCount + 1) * 4;
-
-        string datumFileDirectory = isExternalized
-            ? Path.GetDirectoryName(context.DatumFilePath) ?? string.Empty
-            : string.Empty;
 
         IValueStore store = context.Store
             ?? throw new InvalidOperationException("DatumDecoderContext.Store must be set for string decoding.");
@@ -65,18 +51,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
                 continue;
             }
 
-            byte[] bytes;
-            if (isExternalized)
-            {
-                string relativePath = System.Text.Encoding.UTF8.GetString(
-                    raw, poolStart + (int)start, (int)(end - start));
-                string absolutePath = Path.Combine(datumFileDirectory, relativePath);
-                bytes = File.ReadAllBytes(absolutePath);
-            }
-            else
-            {
-                bytes = raw[(poolStart + (int)start)..(poolStart + (int)end)];
-            }
+            byte[] bytes = raw[(poolStart + (int)start)..(poolStart + (int)end)];
 
             result[rowIndex] = isImage ? DataValue.FromImage(bytes, store) : DataValue.FromUInt8Array(bytes, store);
         }

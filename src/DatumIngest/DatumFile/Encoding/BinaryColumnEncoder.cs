@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
@@ -8,20 +7,16 @@ namespace DatumIngest.DatumFile.Encoding;
 
 /// <summary>
 /// Encodes <see cref="DataKind.UInt8Array"/> and <see cref="DataKind.Image"/> column pages
-/// using <see cref="DatumEncoding.VariableBytes"/> layout.
+/// using either inline <see cref="DatumEncoding.VariableBytes"/> layout (bytes embedded in
+/// the page pool) or pointer-only <see cref="DatumEncoding.SidecarBlobs"/> layout (bytes
+/// routed to the companion <c>.datum-blob</c> sidecar at ingest time).
 /// </summary>
 /// <remarks>
 /// <para>
-/// When no blob in the row group exceeds the column's externalization threshold, the layout is
-/// identical to <see cref="StringColumnEncoder"/> with raw bytes in the pool:
-/// <c>nullBitmap[ceil(N/8)] | offsets:uint32[N+1] | pool:byte[offsets[N]]</c>.
-/// </para>
-/// <para>
-/// When any blob in the row group exceeds <see cref="DatumColumnDescriptor.ExternalizationThresholdBytes"/>,
-/// the entire column page is externalized: each blob is written to a sidecar file at
-/// <c>{DatumFilePath}.datum_blobs/{columnName}/{rowGroupIndex}_{blobIndex}{ext}</c>, and the pool
-/// stores the relative UTF-8 path strings instead of the raw bytes. The
-/// <see cref="DatumColumnFlags.ExternBlobs"/> flag in the descriptor signals this mode to the decoder.
+/// Inline mode layout is identical to <see cref="StringColumnEncoder"/> with raw bytes in
+/// the pool: <c>nullBitmap[ceil(N/8)] | offsets:uint32[N+1] | pool:byte[offsets[N]]</c>.
+/// Sidecar mode (selected via <see cref="DatumColumnFlags.SidecarBlobs"/> on the descriptor)
+/// emits only the per-row pointer pairs; see <see cref="EncodeSidecar"/>.
 /// </para>
 /// <para>
 /// Image pages use <see cref="DatumCompression.None"/> because the image data is already
@@ -30,8 +25,6 @@ namespace DatumIngest.DatumFile.Encoding;
 /// </remarks>
 internal sealed class BinaryColumnEncoder : DatumColumnEncoder
 {
-    private static readonly string ImageExtension = ".dat";
-
     /// <inheritdoc/>
     public override DatumEncodedPage Encode(
         IReadOnlyList<DataValue> values,
@@ -50,7 +43,6 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         // allocation per entry.
         int totalPoolBytes = 0;
         uint nullCount = 0;
-        long maxBlobSize = 0;
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             DataValue value = values[rowIndex];
@@ -64,7 +56,6 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
             // _p1 holds the byte length for UInt8Array and Image payloads.
             int blobLength = value.StringOrBinaryByteLength;
             totalPoolBytes += blobLength;
-            if (blobLength > maxBlobSize) maxBlobSize = blobLength;
         }
 
         DatumZoneMap zoneMap = new(nullCount);
@@ -76,13 +67,6 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         if (descriptor.UsesSidecar)
         {
             return EncodeSidecar(values, nullBitmap, rowCount, zoneMap, descriptor);
-        }
-
-        bool externalize = descriptor.ExternalizesBlobs && maxBlobSize > descriptor.ExternalizationThresholdBytes;
-
-        if (externalize)
-        {
-            return EncodeExternalized(values, descriptor, context, nullBitmap, rowCount, nullCount, zoneMap, isImage, compression);
         }
 
         return EncodeInline(values, context, nullBitmap, rowCount, nullCount, totalPoolBytes, zoneMap, compression);
@@ -206,106 +190,4 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         }
     }
 
-    private static DatumEncodedPage EncodeExternalized(
-        IReadOnlyList<DataValue> values,
-        DatumColumnDescriptor descriptor,
-        DatumEncoderContext context,
-        DatumNullBitmap nullBitmap,
-        int rowCount,
-        uint nullCount,
-        DatumZoneMap zoneMap,
-        bool isImage,
-        DatumCompression compression)
-    {
-        string sidecarRoot = context.DatumFilePath + DatumFileConstants.BlobsFolderSuffix;
-        string columnSidecarDir = Path.Combine(sidecarRoot, descriptor.Name);
-        Directory.CreateDirectory(columnSidecarDir);
-
-        // Paths stored in the page pool are relative to the .datum file's directory.
-        string datumFileDir = Path.GetDirectoryName(context.DatumFilePath) ?? string.Empty;
-        byte[][] pathBytes = ArrayPool<byte[]>.Shared.Rent(rowCount);
-        int blobIndex = 0;
-
-        try
-        {
-            // Walk pages once: for each non-null entry, stream its bytes straight to the
-            // sidecar file via FileStream.Write(span) — no managed byte[] materialization
-            // of the blob itself. Only the path is materialized (UTF-8 encoded) for
-            // inclusion in the column-page pool.
-            foreach (PageSpan page in context.Pages)
-            {
-                IValueStore pageStore = page.ArenaLength > 0
-                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
-                    : context.Store;
-
-                int endRow = page.RowStart + page.RowCount;
-                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
-                {
-                    if (nullBitmap.IsNull(rowIndex))
-                    {
-                        pathBytes[rowIndex] = [];
-                        continue;
-                    }
-
-                    ReadOnlySpan<byte> blob = values[rowIndex].AsByteSpan(pageStore);
-                    string fileName = $"{context.RowGroupIndex}_{blobIndex++}{ImageExtension}";
-                    string absolutePath = Path.Combine(columnSidecarDir, fileName);
-                    using (FileStream sidecarStream = File.Create(absolutePath))
-                    {
-                        sidecarStream.Write(blob);
-                    }
-
-                    string relativePath = Path.GetRelativePath(datumFileDir, absolutePath);
-                    pathBytes[rowIndex] = System.Text.Encoding.UTF8.GetBytes(relativePath);
-                }
-            }
-
-            int totalPoolBytes = 0;
-            for (int i = 0; i < rowCount; i++) totalPoolBytes += pathBytes[i].Length;
-
-            byte[] bitmapBytes = nullBitmap.ToBytes();
-            int offsetsSize = (rowCount + 1) * 4;
-            int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
-            byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
-
-            try
-            {
-                Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
-
-                int offsetWrite = bitmapBytes.Length;
-                int poolWrite = bitmapBytes.Length + offsetsSize;
-                uint runningOffset = 0;
-
-                BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-                offsetWrite += 4;
-
-                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
-                {
-                    byte[] pathBuf = pathBytes[rowIndex];
-                    runningOffset += (uint)pathBuf.Length;
-                    BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-                    offsetWrite += 4;
-
-                    if (pathBuf.Length > 0)
-                    {
-                        Buffer.BlockCopy(pathBuf, 0, raw, poolWrite, pathBuf.Length);
-                        poolWrite += pathBuf.Length;
-                    }
-                }
-
-                // Externalized pages store paths (ASCII/UTF-8), which compress well.
-                (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
-
-                return new DatumEncodedPage(payload, payloadLength, DatumEncoding.ExternalBytes, DatumCompression.Zstd, rawLength, zoneMap);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(raw);
-            }
-        }
-        finally
-        {
-            ArrayPool<byte[]>.Shared.Return(pathBytes, clearArray: true);
-        }
-    }
 }

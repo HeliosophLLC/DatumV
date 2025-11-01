@@ -8,7 +8,7 @@ namespace DatumIngest.DatumFile.Decoding;
 /// </summary>
 /// <remarks>
 /// The page encoding is the primary discriminator: <see cref="DatumEncoding.DictionaryRLE"/>
-/// and <see cref="DatumEncoding.ExternalBytes"/> override the kind-based switch regardless
+/// and <see cref="DatumEncoding.SidecarBlobs"/> override the kind-based switch regardless
 /// of what kind the column was declared as.
 /// </remarks>
 public static class DatumDecoderFactory
@@ -44,7 +44,7 @@ public static class DatumDecoderFactory
             return DictionaryDecoder;
         }
 
-        if (encoding == DatumEncoding.ExternalBytes || encoding == DatumEncoding.SidecarBlobs)
+        if (encoding == DatumEncoding.SidecarBlobs)
         {
             return BinaryDecoder;
         }
