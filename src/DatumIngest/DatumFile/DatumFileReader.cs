@@ -22,6 +22,7 @@ public sealed class DatumFileReader : IDisposable
     private readonly DatumRowGroupDescriptor[] _rowGroups;
     private readonly long _totalRowCount;
     private readonly DatumFileFlags _flags;
+    private readonly ulong? _sidecarFingerprint;
 
     private DatumFileReader(
         FileStream stream,
@@ -29,7 +30,8 @@ public sealed class DatumFileReader : IDisposable
         DatumFileSchema schema,
         DatumRowGroupDescriptor[] rowGroups,
         long totalRowCount,
-        DatumFileFlags flags)
+        DatumFileFlags flags,
+        ulong? sidecarFingerprint)
     {
         _stream = stream;
         _filePath = filePath;
@@ -37,6 +39,7 @@ public sealed class DatumFileReader : IDisposable
         _rowGroups = rowGroups;
         _totalRowCount = totalRowCount;
         _flags = flags;
+        _sidecarFingerprint = sidecarFingerprint;
     }
 
     /// <summary>Opens a <c>.datum</c> file and reads its footer and schema.</summary>
@@ -54,10 +57,11 @@ public sealed class DatumFileReader : IDisposable
 
         try
         {
-            (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount, DatumFileFlags flags) =
-                ReadFooterAndHeader(stream);
+            (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount,
+                DatumFileFlags flags, ulong? sidecarFingerprint) = ReadFooterAndHeader(stream);
 
-            var reader = new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount, flags);
+            var reader = new DatumFileReader(
+                stream, filePath, schema, rowGroups, totalRowCount, flags, sidecarFingerprint);
 
             return reader;
         }
@@ -79,6 +83,14 @@ public sealed class DatumFileReader : IDisposable
 
     /// <summary>File-level flags read from the header.</summary>
     internal DatumFileFlags Flags => _flags;
+
+    /// <summary>
+    /// The 64-bit sidecar fingerprint recorded in the footer when
+    /// <see cref="DatumFileFlags.HasSidecarBlobs"/> is set; <see langword="null"/>
+    /// otherwise. The companion <c>.datum-blob</c> sidecar must carry the same value
+    /// in its header — <see cref="Sidecar.SidecarReadStore"/> does the cross-check on open.
+    /// </summary>
+    public ulong? SidecarFingerprint => _sidecarFingerprint;
 
     /// <summary>The raw schema descriptor, used internally for provider wiring.</summary>
     internal DatumFileSchema FileSchema => _schema;
@@ -204,7 +216,8 @@ public sealed class DatumFileReader : IDisposable
 
     // ──────────────────── Footer reading ────────────────────
 
-    internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount, DatumFileFlags Flags)
+    internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount,
+        DatumFileFlags Flags, ulong? SidecarFingerprint)
         ReadFooterAndHeader(Stream stream)
     {
         // Validate header magic and read totalRowCount from position 12.
@@ -257,6 +270,15 @@ public sealed class DatumFileReader : IDisposable
             rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones);
         }
 
-        return (schema, rowGroups, totalRowCount, flags);
+        // The sidecar fingerprint follows the row group directory when (and only when)
+        // the file declares a companion .datum-blob via DatumFileFlags.HasSidecarBlobs.
+        // See DatumFileWriter.WriteFooter for the symmetric write side.
+        ulong? sidecarFingerprint = null;
+        if (flags.HasFlag(DatumFileFlags.HasSidecarBlobs))
+        {
+            sidecarFingerprint = reader.ReadUInt64();
+        }
+
+        return (schema, rowGroups, totalRowCount, flags, sidecarFingerprint);
     }
 }

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using DatumIngest.DatumFile;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
@@ -25,6 +26,14 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     private readonly SourceIndex? _sourceIndex;
 
     /// <summary>
+    /// Memory-mapped read view over the companion <c>.datum-blob</c> when this file
+    /// declares <see cref="DatumFileFlags.HasSidecarBlobs"/>. <see langword="null"/>
+    /// for tabular-only files. Held for the provider's lifetime; image cells with
+    /// <c>FlagInSidecar</c> resolve their bytes through this store.
+    /// </summary>
+    private readonly SidecarReadStore? _sidecar;
+
+    /// <summary>
     /// Initializes the provider with the given descriptor and pool. Auto-discovers
     /// <c>.datum-manifest</c> and <c>.datum-index</c> sidecars alongside the source
     /// file and caches them so <see cref="GetManifest"/> and <see cref="GetSourceIndex"/>
@@ -41,7 +50,16 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
+        _sidecar = TryOpenSidecar(descriptor.FilePath, Reader);
     }
+
+    /// <summary>
+    /// Memory-mapped read view over the companion <c>.datum-blob</c>, or
+    /// <see langword="null"/> when the file declares no sidecar. Operators thread
+    /// this through <see cref="EvaluationFrame.Sidecar"/> so image accessors can
+    /// resolve <c>FlagInSidecar</c> values to their absolute byte ranges.
+    /// </summary>
+    public IBlobSource? Sidecar => _sidecar;
 
     private DatumFileReader Reader { get; }
 
@@ -260,7 +278,34 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     public void Dispose()
     {
         _mappedIndexSet?.Dispose();
+        _sidecar?.Dispose();
         Reader.Dispose();
+    }
+
+    /// <summary>
+    /// Opens the companion <c>.datum-blob</c> sidecar when the reader's footer
+    /// declared one (via <see cref="DatumFileFlags.HasSidecarBlobs"/>). Returns
+    /// <see langword="null"/> for tabular-only <c>.datum</c> files. The fingerprint
+    /// recorded in the footer is verified against the sidecar's header by
+    /// <see cref="SidecarReadStore"/>; mismatches throw on construction.
+    /// </summary>
+    private static SidecarReadStore? TryOpenSidecar(string datumFilePath, DatumFileReader reader)
+    {
+        if (!reader.Flags.HasFlag(DatumFileFlags.HasSidecarBlobs))
+        {
+            return null;
+        }
+
+        if (reader.SidecarFingerprint is not ulong fingerprint)
+        {
+            throw new InvalidDataException(
+                $".datum file '{datumFilePath}' declares HasSidecarBlobs but its footer " +
+                "carries no fingerprint. The file is malformed or was written by an " +
+                "older incompatible writer.");
+        }
+
+        string sidecarPath = Path.ChangeExtension(datumFilePath, SidecarConstants.FileExtension);
+        return new SidecarReadStore(sidecarPath, fingerprint);
     }
 
     /// <summary>

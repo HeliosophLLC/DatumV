@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DatumIngest.DatumFile;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -93,7 +94,15 @@ public class Ingester(
         using DatumFileWriter writer = new(outputStream);
         writer.SetMemoryBudget(options.RowGroupByteThreshold, options.SerialColumnEncoding);
 
-        SerializationContext sourceContext = new(pool, options.BatchByteTarget);
+        // The sidecar is created lazily — no .datum-blob file appears on disk unless a
+        // deserializer actually appends to it. Pure-tabular ingests therefore pay no
+        // on-disk cost. The writer learns its fingerprint and rewrites image-column
+        // descriptors with the SidecarBlobs flag during Initialize.
+        string sidecarPath = SidecarPathFor(destination.FilePath);
+        using SidecarWriteStore sidecar = new(sidecarPath);
+        writer.AttachSidecar(sidecar);
+
+        SerializationContext sourceContext = new(pool, options.BatchByteTarget, lboStore: sidecar);
 
         long rowCount = 0;
         long batchCount = 0;
@@ -139,6 +148,14 @@ public class Ingester(
         statisticsCollector.FlushRowGroup(writer.WriterArena);
         long bytesWritten = writer.Finalize();
 
+        // Capture the sidecar's state before disposing — Dispose nulls the stream
+        // and would flip WasMaterialized back to false. Then close the sidecar so
+        // the file is no longer held for write, and we can mmap it for the sample
+        // preview thumbnail pass below.
+        bool sidecarMaterialized = sidecar.WasMaterialized;
+        ulong sidecarFingerprint = sidecar.Fingerprint;
+        sidecar.Dispose();
+
         sw.Stop();
 
         PassMetrics ingestMetrics = new(
@@ -158,7 +175,14 @@ public class Ingester(
         }
 
         QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
-        SamplePreview sample = sampleCollector.Build(finalSchema);
+
+        // Sidecar-backed image cells in the reservoir hold (offset, length) placeholders;
+        // the sample collector resolves them here against the just-finalised .datum-blob.
+        // Bounded by reservoir size (~25 rows), so this is a tiny mmap'd post-pass.
+        using IBlobSource? sidecarReader = sidecarMaterialized
+            ? new SidecarReadStore(sidecarPath, sidecarFingerprint)
+            : null;
+        SamplePreview sample = sampleCollector.Build(finalSchema, sidecarReader);
 
         return new IngestionResult(
             OutputPath: destination.FilePath,
@@ -169,5 +193,16 @@ public class Ingester(
             Sample: sample,
             ScanPass: deserializer.ScanMetrics,
             IngestPass: ingestMetrics);
+    }
+
+    /// <summary>
+    /// Returns the companion sidecar path for a given <c>.datum</c> output path.
+    /// Strips the <c>.datum</c> extension if present and appends <c>.datum-blob</c>;
+    /// otherwise appends <c>.datum-blob</c> to the full path. Result lives next to
+    /// the <c>.datum</c> file so a single move/copy covers both files.
+    /// </summary>
+    private static string SidecarPathFor(string datumPath)
+    {
+        return Path.ChangeExtension(datumPath, SidecarConstants.FileExtension);
     }
 }

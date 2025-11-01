@@ -39,6 +39,14 @@ public static class DataValueRetention
         if (value.IsNull) return value;
         if (value.IsInline) return value;
 
+        // Sidecar-backed values reference absolute (offset, length) coordinates in a
+        // long-lived .datum-blob mmap. The payload's lifetime is the IBlobSource, not
+        // the source arena, so stabilisation across arena boundaries is a no-op.
+        // Reading the bytes here would also fail — Stabilize doesn't carry the
+        // IBlobSource, and the destination arena's coordinate space is 32-bit while
+        // the sidecar's is 64-bit.
+        if (value.IsInSidecar) return value;
+
         return value.Kind switch
         {
             // Fixed-size scalars: self-contained in the struct's inline payload bytes.

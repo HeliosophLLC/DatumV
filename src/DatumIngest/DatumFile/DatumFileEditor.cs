@@ -58,8 +58,8 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(newRowGroups);
         if (newRowGroups.Count == 0) return;
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
-            DatumFileReader.ReadFooterAndHeader(stream);
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount,
+            DatumFileFlags flags, ulong? _) = DatumFileReader.ReadFooterAndHeader(stream);
 
         long footerOffset = ReadFooterOffset(stream);
         stream.Seek(footerOffset, SeekOrigin.Begin);
@@ -104,8 +104,8 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(replacements);
         if (replacements.Count == 0) return;
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
-            DatumFileReader.ReadFooterAndHeader(stream);
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount,
+            DatumFileFlags flags, ulong? _) = DatumFileReader.ReadFooterAndHeader(stream);
 
         // Deep-copy row group descriptors so chunk arrays can be mutated.
         List<DatumRowGroupDescriptor> allRowGroups = new(existingRowGroups.Length);
@@ -181,8 +181,8 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(newColumn);
         ArgumentNullException.ThrowIfNull(pagesPerRowGroup);
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
-            DatumFileReader.ReadFooterAndHeader(stream);
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount,
+            DatumFileFlags flags, ulong? _) = DatumFileReader.ReadFooterAndHeader(stream);
 
         if (pagesPerRowGroup.Count != existingRowGroups.Length)
         {
@@ -256,8 +256,8 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(tombstoneUpdates);
         if (tombstoneUpdates.Count == 0) return 0;
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
-            DatumFileReader.ReadFooterAndHeader(stream);
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount,
+            DatumFileFlags flags, ulong? _) = DatumFileReader.ReadFooterAndHeader(stream);
 
         // Enable the tombstone flag if this is the first deletion.
         flags |= DatumFileFlags.HasTombstones;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using DatumIngest.Catalog;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
@@ -143,7 +144,7 @@ try
 
                 if (opts.PrintAll || printedRows < opts.Limit)
                 {
-                    Console.WriteLine(FormatRow(row, batch.Arena));
+                    Console.WriteLine(FormatRow(row, batch.Arena, executionContext.Sidecar));
                     printedRows++;
                 }
                 else
@@ -209,18 +210,18 @@ DatumDiagnostics.Report();
 
 return 0;
 
-static string FormatRow(Row row, Arena arena)
+static string FormatRow(Row row, Arena arena, IBlobSource? sidecar)
 {
     StringBuilder builder = new();
     for (int i = 0; i < row.FieldCount; i++)
     {
         if (i > 0) builder.Append('\t');
-        builder.Append(FormatValue(row[i], arena));
+        builder.Append(FormatValue(row[i], arena, sidecar));
     }
     return builder.ToString();
 }
 
-static string FormatValue(DataValue value, Arena arena)
+static string FormatValue(DataValue value, Arena arena, IBlobSource? sidecar)
 {
     if (value.IsNull) return "NULL";
 
@@ -244,8 +245,20 @@ static string FormatValue(DataValue value, Arena arena)
         DataKind.Uuid => value.AsUuid().ToString(),
         DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena),
         DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena),
+        DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, sidecar),
         _ => $"<{value.Kind}>",
     };
+}
+
+static string FormatBlobPreview(DataValue value, Arena arena, IBlobSource? sidecar)
+{
+    const int PreviewBytes = 8;
+    ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, sidecar);
+    int previewLength = Math.Min(PreviewBytes, bytes.Length);
+    string hex = Convert.ToHexString(bytes[..previewLength]);
+    return bytes.Length > PreviewBytes
+        ? $"0x{hex}... ({bytes.Length:N0} bytes)"
+        : $"0x{hex} ({bytes.Length:N0} bytes)";
 }
 
 static MemorySnapshot Snapshot(Process proc)

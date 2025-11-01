@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
@@ -28,6 +29,7 @@ public sealed class ExecutionContext
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
         MaxStratifyClasses = context.MaxStratifyClasses;
+        Sidecar = context.Sidecar;
     }
 
   /// <summary>
@@ -190,6 +192,7 @@ public sealed class ExecutionContext
             BatchSize = BatchSize,
             AssertionDiagnostics = AssertionDiagnostics,
             MaxStratifyClasses = MaxStratifyClasses,
+            Sidecar = Sidecar,
         };
     }
 
@@ -207,4 +210,20 @@ public sealed class ExecutionContext
     /// internal default (10,000).
     /// </summary>
     public int? MaxStratifyClasses { get; init; }
+
+    /// <summary>
+    /// Sidecar blob source for the current query, when a referenced table declares
+    /// <see cref="DatumFile.DatumFileFlags.HasSidecarBlobs"/>. Populated by the scan
+    /// operator on first use. Frame builders (filter / project / expression evaluator)
+    /// thread this into <see cref="EvaluationFrame.Sidecar"/> so accessors like
+    /// <see cref="Model.DataValue.AsImage(IValueStore, IBlobSource?)"/> can resolve
+    /// <c>FlagInSidecar</c> values to their absolute byte ranges.
+    /// </summary>
+    /// <remarks>
+    /// Single-sidecar-per-query: if a query joins two sidecar-bound tables, the
+    /// last scan wins. Multi-sidecar queries are not yet supported and will require
+    /// per-batch sidecar carriage. For typical ML-from-SQL workloads (single
+    /// image table) this is sufficient.
+    /// </remarks>
+    public IBlobSource? Sidecar { get; set; }
 }

@@ -1,5 +1,6 @@
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -129,36 +130,49 @@ public sealed class ProjectOperator : IQueryOperator
             letBindingExpressions = map;
         }
 
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, letBindingExpressions: letBindingExpressions, store: context.Store);
+        ExpressionEvaluator evaluator = new(
+            context.FunctionRegistry,
+            context.QueryMeter,
+            context.OuterRow,
+            letBindingExpressions: letBindingExpressions,
+            store: context.Store);
         ProjectionSchema? schema = null;
-        LocalBufferPool pool = context.LocalBufferPool;
+        //Pool pool = context.Pool;
+        LocalBufferPool poolOld = context.LocalBufferPool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            RowBatch outputBatch = pool.RentBatch(inputBatch.Count);
+            RowBatch outputBatch = poolOld.RentBatch(inputBatch.Count);
 
-            // Source arena: where the input row's non-inline values live (input batch).
-            // Target arena: the long-lived context store, since projected output values
-            // must outlive the input batch (which is returned to the pool before this
-            // method yields the output batch downstream).
-            IValueStore sourceArena = inputBatch.Arena;
-            IValueStore targetArena = context.Store;
-
-            for (int index = 0; index < inputBatch.Count; index++)
+            try
             {
-                Row row = inputBatch[index];
-                schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow);
-                Row? projected = schema.Project(frame, evaluator, pool, assertionDiagnostics);
-                if (projected.HasValue)
-                {
-                    outputBatch.Add(projected.Value);
-                }
-            }
+                // Source arena: where the input row's non-inline values live (input batch).
+                // Target arena: the long-lived context store, since projected output values
+                // must outlive the input batch (which is returned to the pool before this
+                // method yields the output batch downstream).
+                IValueStore sourceArena = inputBatch.Arena;
+                IValueStore targetArena = context.Store;
 
-            pool.ReturnBatch(inputBatch);
-            yield return outputBatch;
+                for (int index = 0; index < inputBatch.Count; index++)
+                {
+                    Row row = inputBatch[index];
+                    schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
+                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.Sidecar);
+                    Row? projected = schema.Project(frame, evaluator, poolOld, assertionDiagnostics);
+                    if (projected.HasValue)
+                    {
+                        outputBatch.Add(projected.Value);
+                    }
+                }
+
+                
+                yield return outputBatch;
+            }
+            finally
+            {
+                poolOld.ReturnBatch(inputBatch);
+            }
         }
     }
 
