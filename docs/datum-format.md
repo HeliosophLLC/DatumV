@@ -2,7 +2,10 @@
 
 [← Back to README](../README.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Providers](providers.md)
 
-The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It stores data in compressed column pages grouped by row group, with a self-describing footer that carries schema, encoding metadata, and per-column zone maps. A companion [`.datum-index`](indexes.md) sidecar file provides bloom filters, sorted value indexes, and chunk-level statistics for query acceleration. An optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) sidecar adds memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
+The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It stores data in compressed column pages grouped by row group, with a self-describing footer that carries schema, encoding metadata, and per-column zone maps. Two optional companion sidecars extend the base format:
+
+- A companion [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics for query acceleration. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) variant provides memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
+- A companion [`.datum-blob`](#optional-sidecar-datum-blob) sidecar carries Large Binary Objects (images, byte arrays, future video) addressed by 64-bit offsets so the data file itself stays compact. The sidecar is created lazily — only `.datum` files that actually carry binary payload produce one.
 
 ## Design goals
 
@@ -110,6 +113,8 @@ This creates long runs of similar byte values (e.g., exponent bytes cluster toge
 #### Blob externalization
 
 When any blob in a row group exceeds the column's externalization threshold (default 1 MiB), the entire column page switches to `ExternalBytes` encoding. Blobs are written to sidecar files in a `.datum_blobs/` directory adjacent to the `.datum` file, and the page stores relative path strings instead of raw bytes. This keeps the column page compact and prevents individual large blobs from inflating the file.
+
+> **Note:** A unified [`.datum-blob`](#optional-sidecar-datum-blob) sidecar (one file holding all binary payloads, addressed by 64-bit offsets) is being introduced as the successor to the per-blob `.datum_blobs/` directory mechanism. Both code paths coexist for backwards compatibility with existing files.
 
 ## Footer
 
@@ -238,6 +243,51 @@ The `.datum-mapped-index` sidecar (format version 4) stores memory-mapped fixed-
 
 See [indexes.md](indexes.md) for the full binary specification of both sidecar formats.
 
+## Optional sidecar (`.datum-blob`)
+
+An optional `.datum-blob` companion file provides a unified sidecar for **Large Binary Objects (LBOs)** — images, byte arrays, and (eventually) video — that would otherwise inflate column pages or fragment into many per-blob files. Unlike the legacy `.datum_blobs/` directory used by [`ExternalBytes`](#encoding-strategies) encoding (one filesystem entry per blob), the `.datum-blob` is a single append-only file containing all sidecar-routed payloads concatenated.
+
+Bytes are addressed by absolute 64-bit file offset, so a single sidecar can hold terabytes of binary data without per-blob or per-file caps. Readers memory-map the entire sidecar and slice it directly — zero copy, zero decompression for already-compressed payloads (JPEG, PNG, MP4, etc.).
+
+### Lazy materialization
+
+The sidecar is created only when a write actually happens. `.datum` files containing only inline-sized data (numbers, short strings, dates) leave no orphan `.datum-blob` artifact. The `.datum` footer carries a sidecar fingerprint reference only when the sidecar was materialized; readers detect this and require the companion file to exist.
+
+### Header layout (32 bytes)
+
+```
+[magic       : 8 bytes  "DATUMBLB" little-endian (0x424C424D55544144)]
+[version     : 4 bytes  uint32 = 1]
+[reserved1   : 4 bytes  zero]
+[fingerprint : 8 bytes  uint64 — must match the .datum footer's reference]
+[reserved2   : 8 bytes  zero]
+[blob bytes  : append-only payload region — concatenated raw bytes]
+```
+
+There is no internal framing between blobs in the payload region. Each blob's location is recorded in its referencing column page's pointer table (see *DataValue coordinates* below); the sidecar itself is opaque to anyone not holding the corresponding `.datum`.
+
+### Fingerprint linkage
+
+The fingerprint is a random 64-bit value generated once when a sidecar is first materialized. It is stored both in the sidecar header (offset 16) and in the companion `.datum` footer. Readers compare both before opening the sidecar — a mismatch (file swap, manual edit, stale partial restore) raises a clear error rather than risking silent corruption.
+
+### DataValue coordinates
+
+A `DataValue` referencing a sidecar payload carries:
+
+- **64-bit absolute offset** — the byte position in `.datum-blob` (includes the 32-byte header, so readers slice the mmap directly without offset translation)
+- **40-bit length** — payload size, supports per-blob values up to 1 TiB (covers all realistic image, video, tensor, and scientific-array sizes)
+- **24 reserved bits** — for future per-value metadata (format ID, codec hint, dimensions, etc.); zero in v1
+
+The encoder for sidecar-routed columns produces a column page consisting of `nullBitmap | (uint64 offset, uint40 length)[N]` — no inline byte pool. Decoders reconstruct `DataValue`s with sidecar coordinates, never copying bytes through arena memory at decode time.
+
+### Concurrency and atomicity
+
+`SidecarWriteStore.Append` serialises concurrent appenders internally; multiple producers (parallel deserializers, threaded ingest) can safely share a single sink without external coordination. On finalize, the sidecar is flushed and closed before the `.datum` footer is written, so a crash mid-finalize leaves either a complete pair of files or an orphaned sidecar (easily detected and discarded — the `.datum` footer's fingerprint reference is the source of truth for "valid pair").
+
+### Relationship to legacy `ExternalBytes` / `.datum_blobs/`
+
+The original [blob externalization](#blob-externalization) mechanism — one sidecar file per externalized blob, written into a `.datum_blobs/` directory — remains the legacy code path and continues to read older `.datum` files unchanged. New writes use the unified `.datum-blob` sidecar; the per-blob-file mechanism will be retired once readers no longer need backwards compatibility with files predating the unified sidecar.
+
 ## Reading flow
 
 ```
@@ -297,3 +347,8 @@ See [indexes.md](indexes.md) for the full binary specification of both sidecar f
 | `DatumCompressor.cs` | Compression/decompression dispatch (Zstd, Zlib, Brotli) |
 | `FloatByteShuffle.cs` | BLOSC-style byte-lane interleaving for float pages |
 | `DatumFileTableProvider.cs` | Query-engine table provider with seekable chunk access |
+| `Sidecar/IBlobSink.cs` | Append-only sink contract (64-bit offset/length) for the `.datum-blob` write path |
+| `Sidecar/IBlobSource.cs` | Read-only random-access source contract for the `.datum-blob` read path |
+| `Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout |
+| `Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
+| `Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |
