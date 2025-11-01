@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -198,16 +199,20 @@ public sealed class PoolBacking
     /// </summary>
     public Arena RentArena()
     {
+        bool fromPool;
         if (arenaPools.TryDequeue(out Arena? arena))
         {
             arena.Unpool();
+            fromPool = true;
         }
         else
         {
             arena = new Arena();
+            fromPool = false;
         }
 
         arena.AddReference();
+        DatumDiagnostics.RecordPoolArenaRent(fromPool);
 
         return arena;
     }
@@ -320,23 +325,25 @@ public sealed class PoolBacking
     /// <returns><see langword="true"/> if the arena was accepted into the pool; <see langword="false"/> if the arena was not pooled (e.g. still in use by another owner, or above the capacity threshold).</returns>
     public bool TryReturn(Arena arena)
     {
-        const int maxArenaCapacity = 64 * 1024 * 1024; // 4 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
+        const int maxArenaCapacity = 64 * 1024 * 1024; // 64 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
 
         if (arena.ReleaseReference() > 0)
         {
-            // Arena is still has outstanding references
+            // Arena still has outstanding references — not a full return.
+            DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: false);
             return false;
         }
         else if (arena.Capacity >= maxArenaCapacity)
         {
             arena.Dispose();
-
+            DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: true);
             return true;
         }
 
         arena.Pool();
 
         arenaPools.Enqueue(arena);
+        DatumDiagnostics.RecordPoolArenaReturn(pooled: true, disposedOverCap: false);
 
         return true;
     }

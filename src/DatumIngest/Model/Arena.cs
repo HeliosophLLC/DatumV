@@ -2,6 +2,7 @@ using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
+using DatumIngest.Diagnostics;
 
 namespace DatumIngest.Model;
 
@@ -505,6 +506,7 @@ public sealed class Arena : IValueStore, IDisposable
             _position = 0;
             _objects?.Clear();
         }
+        DatumDiagnostics.RecordArenaReset();
     }
 
     // ───────────────────────── Pooling ─────────────────────────
@@ -552,6 +554,7 @@ public sealed class Arena : IValueStore, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        DatumDiagnostics.RecordArenaDispose(_capacity);
         ReleaseMapping();
         _position = 0;
     }
@@ -595,11 +598,14 @@ public sealed class Arena : IValueStore, IDisposable
             int capacity = Math.Max(_initialCapacity, required);
             CreateMapping(capacity, out _mmf, out _accessor, out _pointer);
             _capacity = capacity;
+            DatumDiagnostics.RecordArenaInitialMapping(capacity);
             return;
         }
 
         if (required <= _capacity) return;
 
+        int oldCapacity = _capacity;
+        int bytesCopied = _position;
         int newCapacity = Math.Max(_capacity * 2, required);
         CreateMapping(newCapacity, out var newMmf, out var newAccessor, out var newPointer);
 
@@ -612,6 +618,8 @@ public sealed class Arena : IValueStore, IDisposable
         _accessor = newAccessor;
         _pointer = newPointer;
         _capacity = newCapacity;
+
+        DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied);
     }
 
     private unsafe Span<byte> GetSpanForWrite(int offset, int length)

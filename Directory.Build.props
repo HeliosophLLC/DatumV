@@ -9,5 +9,17 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <!--
+    DATUM_DIAGNOSTICS enables [Conditional]-gated counter recording throughout
+    the solution (see DatumDiagnostics). The symbol must be visible to callers,
+    not just the callee assembly, because [Conditional] strips call sites based
+    on the compiling project's constants. Setting it here in Directory.Build.props
+    applies to every project (main library + tools) so one recompile enables
+    instrumentation across the whole pipeline.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DefineConstants>$(DefineConstants);DATUM_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
 </Project>
 

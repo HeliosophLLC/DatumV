@@ -9,6 +9,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsTrimmable>true</IsTrimmable>
+    <!-- POOL_DIAGNOSTICS uses #if, so only this assembly needs to see it. DATUM_DIAGNOSTICS uses
+         [Conditional] and must be visible to callers too; that one lives in Directory.Build.props. -->
     <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
     <IsPackable>true</IsPackable>
     <PackageId>DatumIngest</PackageId>
