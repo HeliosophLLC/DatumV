@@ -44,7 +44,7 @@ public static class DatumDecoderFactory
             return DictionaryDecoder;
         }
 
-        if (encoding == DatumEncoding.ExternalBytes)
+        if (encoding == DatumEncoding.ExternalBytes || encoding == DatumEncoding.SidecarBlobs)
         {
             return BinaryDecoder;
         }

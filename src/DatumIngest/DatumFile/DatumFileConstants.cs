@@ -147,6 +147,17 @@ public enum DatumEncoding : byte
     /// exceeds the column's externalization threshold.
     /// </summary>
     ExternalBytes = 8,
+
+    /// <summary>
+    /// Pointer-only page referencing payload bytes stored in the companion <c>.datum-blob</c>
+    /// sidecar. Layout: <c>nullBitmap[ceil(N/8)] | offsets:int64[N] | lengths:int64[N]</c>.
+    /// Each <c>(offset, length)</c> pair is the absolute byte position and length of one
+    /// row's payload within the sidecar. Used by <see cref="DatumIngest.Model.DataKind.Image"/>
+    /// and <see cref="DatumIngest.Model.DataKind.UInt8Array"/> column pages when the writer
+    /// was configured with an <c>IBlobSink</c> that routed payloads to the sidecar at
+    /// ingest time.
+    /// </summary>
+    SidecarBlobs = 9,
 }
 
 /// <summary>
@@ -226,4 +237,12 @@ public enum DatumColumnFlags : byte
     /// Pages store UTF-8 relative path strings instead of raw binary content.
     /// </summary>
     ExternBlobs = 0x08,
+
+    /// <summary>
+    /// Payload bytes for this column live in the companion <c>.datum-blob</c> sidecar.
+    /// Pages use <see cref="DatumEncoding.SidecarBlobs"/> and store only
+    /// <c>(offset, length)</c> pointer pairs. Reader must open the sidecar (via
+    /// <see cref="DatumIngest.DatumFile.Sidecar.IBlobSource"/>) to materialise values.
+    /// </summary>
+    SidecarBlobs = 0x10,
 }

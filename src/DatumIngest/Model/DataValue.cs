@@ -141,13 +141,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
     /// meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
     /// </summary>
-    private long SidecarOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
+    internal long SidecarOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
 
     /// <summary>
     /// Decodes the 40-bit sidecar length packed across <c>_p2</c> and the low byte of
     /// <c>_p3</c>. Only meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
     /// </summary>
-    private long SidecarLength => (long)(uint)_p2 | ((long)(_p3 & 0xFF) << 32);
+    internal long SidecarLength => (long)(uint)_p2 | ((long)(_p3 & 0xFF) << 32);
 
     /// <summary>
     /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.

@@ -68,6 +68,16 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         }
 
         DatumZoneMap zoneMap = new(nullCount);
+
+        // Sidecar-backed columns carry their (offset, length) into the .datum-blob
+        // companion file. Schema is the source of truth: when the column descriptor
+        // declares the column sidecar-bound, the page only preserves pointer pairs and
+        // no payload bytes are copied here.
+        if (descriptor.UsesSidecar)
+        {
+            return EncodeSidecar(values, nullBitmap, rowCount, zoneMap, descriptor);
+        }
+
         bool externalize = descriptor.ExternalizesBlobs && maxBlobSize > descriptor.ExternalizationThresholdBytes;
 
         if (externalize)
@@ -76,6 +86,53 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
         }
 
         return EncodeInline(values, context, nullBitmap, rowCount, nullCount, totalPoolBytes, zoneMap, compression);
+    }
+
+    private static DatumEncodedPage EncodeSidecar(
+        IReadOnlyList<DataValue> values,
+        DatumNullBitmap nullBitmap,
+        int rowCount,
+        DatumZoneMap zoneMap,
+        DatumColumnDescriptor descriptor)
+    {
+        byte[] bitmapBytes = nullBitmap.ToBytes();
+        int rawLength = bitmapBytes.Length + 16 * rowCount;
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
+
+        try
+        {
+            Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
+
+            int offsetsStart = bitmapBytes.Length;
+            int lengthsStart = offsetsStart + 8 * rowCount;
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                DataValue value = values[rowIndex];
+                long offset = 0, length = 0;
+                if (!value.IsNull)
+                {
+                    if (!value.IsInSidecar)
+                    {
+                        throw new InvalidOperationException(
+                            $"Column '{descriptor.Name}' is declared sidecar-bound (DatumColumnFlags.SidecarBlobs) " +
+                            $"but row {rowIndex} carries an in-arena DataValue. The deserializer must route this " +
+                            "column's payload through the SerializationContext.LboStore.");
+                    }
+                    offset = value.SidecarOffset;
+                    length = value.SidecarLength;
+                }
+                BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(offsetsStart + 8 * rowIndex), offset);
+                BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(lengthsStart + 8 * rowIndex), length);
+            }
+
+            (byte[] payload, int payloadLength) = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+            return new DatumEncodedPage(payload, payloadLength, DatumEncoding.SidecarBlobs, DatumCompression.Zstd, rawLength, zoneMap);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(raw);
+        }
     }
 
     private static DatumEncodedPage EncodeInline(

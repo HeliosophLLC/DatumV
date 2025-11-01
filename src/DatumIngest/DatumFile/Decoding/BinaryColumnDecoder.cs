@@ -31,6 +31,11 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context)
     {
+        if (encoding == DatumEncoding.SidecarBlobs)
+        {
+            return DecodeSidecar(payload, compression, uncompressedByteLength, rowCount, descriptor);
+        }
+
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
@@ -74,6 +79,42 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
             }
 
             result[rowIndex] = isImage ? DataValue.FromImage(bytes, store) : DataValue.FromUInt8Array(bytes, store);
+        }
+
+        return result;
+    }
+
+    private static DataValue[] DecodeSidecar(
+        byte[] payload,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        int offsetsStart = bitmapByteCount;
+        int lengthsStart = offsetsStart + 8 * rowCount;
+
+        bool isImage = descriptor.Kind == DataKind.Image;
+        DataValue[] result = new DataValue[rowCount];
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                result[rowIndex] = DataValue.Null(isImage ? DataKind.Image : DataKind.UInt8Array);
+                continue;
+            }
+
+            long offset = BinaryPrimitives.ReadInt64LittleEndian(raw.AsSpan(offsetsStart + 8 * rowIndex));
+            long length = BinaryPrimitives.ReadInt64LittleEndian(raw.AsSpan(lengthsStart + 8 * rowIndex));
+
+            result[rowIndex] = isImage
+                ? DataValue.FromImageInSidecar(offset, length)
+                : DataValue.FromUInt8ArrayInSidecar(offset, length);
         }
 
         return result;

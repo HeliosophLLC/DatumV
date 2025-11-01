@@ -72,6 +72,14 @@ public sealed record DatumColumnDescriptor
     public bool ExternalizesBlobs => (Flags & DatumColumnFlags.ExternBlobs) != 0;
 
     /// <summary>
+    /// Returns <c>true</c> if this column's payload bytes live in the companion
+    /// <c>.datum-blob</c> sidecar. Pages use <see cref="DatumEncoding.SidecarBlobs"/>
+    /// and store only <c>(offset, length)</c> pointer pairs. Set at writer-config time;
+    /// drives both encoder and decoder behavior.
+    /// </summary>
+    public bool UsesSidecar => (Flags & DatumColumnFlags.SidecarBlobs) != 0;
+
+    /// <summary>
     /// Computes the total number of float elements per row for a fixed-shape float column.
     /// Returns 1 for Scalar, the vector length for Vector, and the product of all dimensions
     /// for Matrix and Tensor. Returns 0 if <see cref="FixedShape"/> is not yet populated.
