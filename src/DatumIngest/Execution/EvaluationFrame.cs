@@ -1,15 +1,16 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 
 namespace DatumIngest.Execution;
 
 /// <summary>
 /// Per-call context for <see cref="ExpressionEvaluator"/>. Carries the current row
-/// together with the two arenas involved in expression evaluation:
+/// together with the stores involved in expression evaluation:
 /// <list type="bullet">
 ///   <item><description>
 ///     <see cref="Source"/> — the arena backing the current row's non-inline values.
 ///     Used whenever the evaluator reads a string, JSON, vector, array, or other
-///     reference-type payload from a row column.
+///     arena-backed reference-type payload from a row column.
 ///   </description></item>
 ///   <item><description>
 ///     <see cref="Target"/> — the arena where newly-materialized values are written
@@ -18,8 +19,14 @@ namespace DatumIngest.Execution;
 ///     current row batch should pass a long-lived arena here; callers that write
 ///     their result straight into an output batch should pass that batch's arena.
 ///   </description></item>
+///   <item><description>
+///     <see cref="Sidecar"/> — optional <see cref="IBlobSource"/> for resolving
+///     <c>FlagInSidecar</c> DataValues (Large Binary Objects stored in the
+///     <c>.datum-blob</c> sidecar). Populated by the table provider when a sidecar
+///     accompanies the queried <c>.datum</c> file; left <c>null</c> otherwise.
+///   </description></item>
 /// </list>
-/// The two are passed separately because the streaming pipeline typically reads
+/// The arenas are passed separately because the streaming pipeline typically reads
 /// from one batch's arena and writes into another — mixing them would either pin
 /// the source batch or write results into a soon-to-be-recycled arena.
 /// </summary>
@@ -41,22 +48,37 @@ public readonly struct EvaluationFrame
     public Row? OuterRow { get; }
 
     /// <summary>
+    /// Optional Large Binary Object source (<c>.datum-blob</c> sidecar) backing
+    /// <c>FlagInSidecar</c> DataValues for the queried table. <c>null</c> when the
+    /// table has no sidecar; non-null when the table provider supplies one.
+    /// </summary>
+    public IBlobSource? Sidecar { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
-    /// that produce only inline boolean results and don't allocate strings).
+    /// that produce only inline boolean results and don't allocate strings). Pass
+    /// <paramref name="sidecar"/> when the queried table has a <c>.datum-blob</c> sidecar
+    /// so accessors like <c>AsImage</c> can resolve sidecar-backed binary values.
     /// </summary>
-    public EvaluationFrame(Row row, IValueStore source, IValueStore target, Row? outerRow = null)
+    public EvaluationFrame(
+        Row row,
+        IValueStore source,
+        IValueStore target,
+        Row? outerRow = null,
+        IBlobSource? sidecar = null)
     {
         Row = row;
         Source = source;
         Target = target;
         OuterRow = outerRow;
+        Sidecar = sidecar;
     }
 
     /// <summary>
-    /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas
-    /// and outer-row context. Used when the evaluator descends into a derived row
-    /// (e.g. a lambda body's augmented row).
+    /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
+    /// outer-row context, and sidecar source. Used when the evaluator descends into a
+    /// derived row (e.g. a lambda body's augmented row).
     /// </summary>
-    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow);
+    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, Sidecar);
 }

@@ -1,6 +1,7 @@
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Image;
 
 namespace DatumIngest.Model;
@@ -46,6 +47,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// scalars and strings/JSON ≤ 16 bytes carry no flag.
     /// </summary>
     private const byte FlagInArena = 0x02;
+
+    /// <summary>
+    /// Bit mask indicating the value's payload lives in a <c>.datum-blob</c> sidecar
+    /// addressed by a 64-bit absolute offset (<c>_p0</c>+<c>_p1</c>) and a 40-bit length
+    /// (<c>_p2</c> + low byte of <c>_p3</c>). The high 24 bits of <c>_p3</c> are reserved.
+    /// Mutually exclusive with <see cref="FlagInArena"/>; resolution requires an
+    /// <see cref="IBlobSource"/> rather than an <see cref="IValueStore"/>.
+    /// </summary>
+    private const byte FlagInSidecar = 0x04;
+
+    /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
+    private const long SidecarLengthMax = (1L << 40) - 1;
 
     // ───────────────────────── Fields (20 bytes) ─────────────────────────
 
@@ -106,14 +119,35 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Whether this value's payload is self-contained in the struct's 16-byte inline region
     /// (<c>_p0</c>-<c>_p3</c>). True for fixed-size scalars (integers, floats, dates, times,
     /// UUIDs, booleans, types) and for strings/JSON whose UTF-8 form fits in 16 bytes.
-    /// False for nulls and for any value whose payload lives in an external
-    /// <see cref="IValueStore"/> (<see cref="IsArenaBacked"/>).
+    /// False for nulls and for any value whose payload lives in an external store —
+    /// either an arena (<see cref="IsArenaBacked"/>) or a sidecar (<see cref="IsInSidecar"/>).
     /// </summary>
     /// <remarks>
     /// Indexes (bloom, bitmap, sorted, B+Tree) only admit inline values — lookups against
     /// non-inline values can short-circuit to a negative result.
     /// </remarks>
-    public bool IsInline => (_flags & (FlagIsNull | FlagInArena)) == 0;
+    public bool IsInline => (_flags & (FlagIsNull | FlagInArena | FlagInSidecar)) == 0;
+
+    /// <summary>
+    /// Whether this value's payload lives in a <c>.datum-blob</c> sidecar, addressed by
+    /// a 64-bit absolute offset and a 40-bit length. Resolution requires the table
+    /// provider's <see cref="IBlobSource"/>; the standard <see cref="IValueStore"/>
+    /// cannot satisfy reads against sidecar-backed values because the coordinate space
+    /// is 64-bit, not 32-bit.
+    /// </summary>
+    public bool IsInSidecar => (_flags & FlagInSidecar) != 0;
+
+    /// <summary>
+    /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
+    /// meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
+    /// </summary>
+    private long SidecarOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
+
+    /// <summary>
+    /// Decodes the 40-bit sidecar length packed across <c>_p2</c> and the low byte of
+    /// <c>_p3</c>. Only meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
+    /// </summary>
+    private long SidecarLength => (long)(uint)_p2 | ((long)(_p3 & 0xFF) << 32);
 
     /// <summary>
     /// For inline strings, the UTF-8 byte length (0-16) stored in the low byte of <c>_charCount</c>.
@@ -206,6 +240,17 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreBytes(value);
         return new(DataKind.UInt8Array, flags: FlagInArena, p0: p0, p1: p1);
     }
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.UInt8Array"/> value whose bytes live in a
+    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
+    /// 40-bit length; resolution requires an <see cref="IBlobSource"/>, typically the
+    /// table provider's sidecar read store.
+    /// </summary>
+    /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
+    /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
+    public static DataValue FromUInt8ArrayInSidecar(long offset, long length) =>
+        BuildSidecar(DataKind.UInt8Array, offset, length);
 
     /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
@@ -377,6 +422,45 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         var (p0, p1) = store.StoreBytes(value);
         return new(DataKind.Image, flags: FlagInArena, p0: p0, p1: p1);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Image"/> value whose encoded bytes live in a
+    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
+    /// 40-bit length; resolution requires an <see cref="IBlobSource"/>, typically the
+    /// table provider's sidecar read store. <see cref="AsImage(IValueStore, IBlobSource?)"/>
+    /// dispatches based on the sidecar flag.
+    /// </summary>
+    /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
+    /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
+    public static DataValue FromImageInSidecar(long offset, long length) =>
+        BuildSidecar(DataKind.Image, offset, length);
+
+    /// <summary>
+    /// Packs a sidecar coordinate into the DataValue payload. <c>_p0</c>+<c>_p1</c>
+    /// hold the 64-bit offset, <c>_p2</c> + low byte of <c>_p3</c> hold the 40-bit
+    /// length, the high 24 bits of <c>_p3</c> are reserved (zero in v1).
+    /// </summary>
+    private static DataValue BuildSidecar(DataKind kind, long offset, long length)
+    {
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), offset, "Sidecar offset must be non-negative.");
+        }
+        if (length < 0 || length > SidecarLengthMax)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length), length,
+                $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
+        }
+
+        int p0 = (int)offset;
+        int p1 = (int)(offset >> 32);
+        int p2 = (int)length;
+        int p3 = (int)((length >> 32) & 0xFF);  // high 8 bits of length; high 24 bits of _p3 reserved
+
+        return new(kind, flags: FlagInSidecar, p0: p0, p1: p1, p2: p2, p3: p3);
     }
 
     /// <summary>
@@ -1131,38 +1215,68 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the byte array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore, IBlobSource?)"/> instead.</remarks>
     public byte[] AsUInt8Array()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
         throw new InvalidOperationException("Use AsUInt8Array(store). ReferenceStore is no longer available.");
     }
 
-    /// <summary>Returns the byte array payload from an explicit <see cref="IValueStore"/>.</summary>
-    public byte[] AsUInt8Array(IValueStore store)
+    /// <summary>
+    /// Returns the byte array payload. For arena-backed values, reads from
+    /// <paramref name="store"/>; for sidecar-backed values, reads from
+    /// <paramref name="sidecar"/>. The flag on the DataValue determines which path runs.
+    /// </summary>
+    public byte[] AsUInt8Array(IValueStore store, IBlobSource? sidecar = null)
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(sidecar).ToArray();
+        }
         return store.RetrieveBytes(_p0, _p1);
     }
 
     /// <summary>
     /// Returns the byte payload for a <see cref="DataKind.UInt8Array"/> or
-    /// <see cref="DataKind.Image"/> value as a <see cref="ReadOnlySpan{T}"/> backed
-    /// by the arena, without materializing a managed <c>byte[]</c>. Zero-allocation
-    /// hot-path reader for encoders that just need to copy the bytes somewhere.
+    /// <see cref="DataKind.Image"/> value as a <see cref="ReadOnlySpan{T}"/>, without
+    /// materializing a managed <c>byte[]</c>. Zero-allocation hot-path reader.
     /// </summary>
     /// <remarks>
-    /// The returned span is valid only while <paramref name="store"/>'s backing
-    /// arena is alive; callers must consume it before the arena resets (e.g.
-    /// before a row-group flush).
+    /// For arena-backed values the span is valid only while <paramref name="store"/>'s
+    /// backing arena is alive; for sidecar-backed values the span lives as long as the
+    /// <paramref name="sidecar"/>'s mmap view does. Callers must consume the span
+    /// before whichever store backs it goes away.
     /// </remarks>
-    public ReadOnlySpan<byte> AsByteSpan(IValueStore store)
+    public ReadOnlySpan<byte> AsByteSpan(IValueStore store, IBlobSource? sidecar = null)
     {
         if (_kind is not (DataKind.UInt8Array or DataKind.Image))
         {
             throw new InvalidOperationException($"AsByteSpan is only valid for UInt8Array and Image; got {_kind}.");
         }
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(sidecar);
+        }
         return store.RetrieveUtf8Span(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Resolves a sidecar-backed byte payload via the given <see cref="IBlobSource"/>.
+    /// Throws when no sidecar source is provided — sidecar-backed DataValues cannot
+    /// be read against an arena alone.
+    /// </summary>
+    private ReadOnlySpan<byte> ReadSidecarBytes(IBlobSource? sidecar)
+    {
+        if (sidecar is null)
+        {
+            throw new InvalidOperationException(
+                "DataValue is sidecar-backed (FlagInSidecar) but no IBlobSource was provided. " +
+                "Pass the table provider's SidecarReadStore as the sidecar argument.");
+        }
+        return sidecar.Read(SidecarOffset, SidecarLength);
     }
 
     /// <summary>Returns the text string payload.</summary>
@@ -1429,17 +1543,26 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the encoded image byte array payload.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore, IBlobSource?)"/> instead.</remarks>
     public byte[] AsImage()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
         throw new InvalidOperationException("Use AsImage(store). ReferenceStore is no longer available.");
     }
 
-    /// <summary>Returns the encoded image byte array from an explicit <see cref="IValueStore"/>.</summary>
-    public byte[] AsImage(IValueStore store)
+    /// <summary>
+    /// Returns the encoded image byte array. For arena-backed values, reads from
+    /// <paramref name="store"/>; for sidecar-backed values, reads from
+    /// <paramref name="sidecar"/>. The flag on the DataValue determines which path runs.
+    /// </summary>
+    public byte[] AsImage(IValueStore store, IBlobSource? sidecar = null)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(sidecar).ToArray();
+        }
         return store.RetrieveBytes(_p0, _p1);
     }
 
@@ -1447,7 +1570,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the <see cref="ImageHandle"/> for this image value.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, IBlobSource?)"/> instead.</remarks>
     internal ImageHandle GetImageHandle()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
@@ -1459,9 +1582,19 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// encoded bytes stored in the given <see cref="IValueStore"/>. The bitmap is not
     /// decoded until explicitly requested.
     /// </summary>
-    internal ImageHandle GetImageHandle(IValueStore store)
+    internal ImageHandle GetImageHandle(IValueStore store, IBlobSource? sidecar = null)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
+
+        if (IsInSidecar)
+        {
+            // Sidecar payloads are always raw encoded bytes (JPEG/PNG/etc.) — no
+            // object side-list, no precomputed ImageHandle. Decode directly from the
+            // mmap-backed span.
+            ReadOnlySpan<byte> bytes = ReadSidecarBytes(sidecar);
+            byte[] copy = bytes.ToArray();
+            return new ImageHandle(copy, ImageEncoder.ResolveFormat(copy, formatOverride: null));
+        }
 
         // Try the object side-list first (ImageHandle from a previous function in the chain).
         try
@@ -1473,15 +1606,15 @@ public readonly struct DataValue : IEquatable<DataValue>
         catch (NotSupportedException) { /* store doesn't support objects — fall through */ }
 
         // Fall back to byte[] storage (from deserialization or FromImage).
-        byte[] bytes = store.RetrieveBytes(_p0, _p1);
-        return new ImageHandle(bytes, ImageEncoder.ResolveFormat(bytes, formatOverride: null));
+        byte[] bytes2 = store.RetrieveBytes(_p0, _p1);
+        return new ImageHandle(bytes2, ImageEncoder.ResolveFormat(bytes2, formatOverride: null));
     }
 
     /// <summary>
     /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
     /// or <c>null</c> if the payload is raw bytes or no store is available.
     /// </summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore)"/> and check the store instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, IBlobSource?)"/> and check the store instead.</remarks>
     internal ImageHandle? TryGetOwnedImageHandle() => null;
 
     /// <summary>Returns the calendar date payload.</summary>
