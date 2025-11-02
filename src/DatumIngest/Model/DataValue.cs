@@ -68,7 +68,19 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// </summary>
         InSidecar = 0x04,
 
-        // 0x08, 0x10, 0x20, 0x40, 0x80 reserved for future use (e.g. InlineArray, IsArray).
+        /// <summary>
+        /// This value is a typed array of <see cref="DataValue.Kind"/> elements rather
+        /// than a scalar. Storage flag (<see cref="InArena"/> / <see cref="InSidecar"/> /
+        /// inline) tells where the bytes live; this flag tells how to interpret them.
+        /// New typed-array kinds (Int32[], Float64[], Date[], …) come into existence via
+        /// <c>Kind + IsArray</c>. The legacy array kinds (<see cref="DataKind.UInt8Array"/>,
+        /// <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
+        /// <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/>) predate this flag
+        /// and don't set it; <see cref="DataValue.IsArray"/> reports <c>true</c> for both.
+        /// </summary>
+        IsArray = 0x08,
+
+        // 0x10, 0x20, 0x40, 0x80 reserved for future use (e.g. InlineArray).
     }
 
     /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
@@ -150,6 +162,33 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// is 64-bit, not 32-bit.
     /// </summary>
     public bool IsInSidecar => (_flags & DataValueFlags.InSidecar) != 0;
+
+    /// <summary>
+    /// Whether this value is a typed array of <see cref="Kind"/> elements (rather than
+    /// a scalar). Returns <c>true</c> when either:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     The new <c>IsArray</c> flag is set on the value (used by typed arrays of
+    ///     arbitrary element kinds: Int32[], Float64[], Date[], …)
+    ///   </description></item>
+    ///   <item><description>
+    ///     <see cref="Kind"/> is one of the legacy array kinds — <see cref="DataKind.UInt8Array"/>,
+    ///     <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
+    ///     <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/> — which predate
+    ///     the flag and don't set it. Treated as arrays so callers don't need to know
+    ///     the migration history.
+    ///   </description></item>
+    /// </list>
+    /// Switch dispatch can use <c>case DataKind.UInt8 when value.IsArray:</c> to handle
+    /// new-style byte arrays without relying on a separate kind enum value.
+    /// </summary>
+    public bool IsArray =>
+        (_flags & DataValueFlags.IsArray) != 0
+        || _kind is DataKind.UInt8Array
+            or DataKind.Vector
+            or DataKind.Matrix
+            or DataKind.Tensor
+            or DataKind.Array;
 
     /// <summary>
     /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only

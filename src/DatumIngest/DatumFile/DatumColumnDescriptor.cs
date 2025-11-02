@@ -64,6 +64,23 @@ public sealed record DatumColumnDescriptor
     public bool UsesSidecar => (Flags & DatumColumnFlags.SidecarBlobs) != 0;
 
     /// <summary>
+    /// Returns <c>true</c> if this column holds typed arrays of <see cref="Kind"/>
+    /// elements rather than scalars. True when either the new <c>IsArray</c> flag is
+    /// set OR <see cref="Kind"/> is one of the legacy array kinds
+    /// (<see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Vector"/>,
+    /// <see cref="DataKind.Matrix"/>, <see cref="DataKind.Tensor"/>,
+    /// <see cref="DataKind.Array"/>). Mirrors <see cref="Model.DataValue.IsArray"/> so
+    /// callers see a unified array model regardless of how the column was authored.
+    /// </summary>
+    public bool IsArray =>
+        (Flags & DatumColumnFlags.IsArray) != 0
+        || Kind is DataKind.UInt8Array
+            or DataKind.Vector
+            or DataKind.Matrix
+            or DataKind.Tensor
+            or DataKind.Array;
+
+    /// <summary>
     /// Computes the total number of float elements per row for a fixed-shape float column.
     /// Returns 1 for Scalar, the vector length for Vector, and the product of all dimensions
     /// for Matrix and Tensor. Returns 0 if <see cref="FixedShape"/> is not yet populated.

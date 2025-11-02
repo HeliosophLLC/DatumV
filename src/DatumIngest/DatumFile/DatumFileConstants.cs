@@ -228,4 +228,14 @@ public enum DatumColumnFlags : byte
     /// <see cref="DatumIngest.DatumFile.Sidecar.IBlobSource"/>) to materialise values.
     /// </summary>
     SidecarBlobs = 0x10,
+
+    /// <summary>
+    /// This column holds typed arrays of <see cref="DatumColumnDescriptor.Kind"/>
+    /// elements rather than scalars. Set on new typed-array columns (Int32[],
+    /// Float64[], Date[], …); legacy array kinds (<see cref="DatumIngest.Model.DataKind.UInt8Array"/>,
+    /// <see cref="DatumIngest.Model.DataKind.Vector"/>, <see cref="DatumIngest.Model.DataKind.Matrix"/>,
+    /// <see cref="DatumIngest.Model.DataKind.Tensor"/>) predate this flag and don't set
+    /// it; <see cref="DatumColumnDescriptor.IsArray"/> reports <c>true</c> for both.
+    /// </summary>
+    IsArray = 0x20,
 }
