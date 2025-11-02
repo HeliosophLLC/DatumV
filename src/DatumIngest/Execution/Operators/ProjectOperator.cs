@@ -137,13 +137,13 @@ public sealed class ProjectOperator : IQueryOperator
             letBindingExpressions: letBindingExpressions,
             store: context.Store);
         ProjectionSchema? schema = null;
-        //Pool pool = context.Pool;
-        LocalBufferPool poolOld = context.LocalBufferPool;
+        Pool pool = context.Pool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
+
+        RowBatch? outputBatch = null;
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            RowBatch outputBatch = poolOld.RentBatch(inputBatch.Count);
 
             try
             {
@@ -157,22 +157,56 @@ public sealed class ProjectOperator : IQueryOperator
                 for (int index = 0; index < inputBatch.Count; index++)
                 {
                     Row row = inputBatch[index];
-                    schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
-                    Row? projected = schema.Project(frame, evaluator, poolOld, assertionDiagnostics);
-                    if (projected.HasValue)
+
+                    try
                     {
-                        outputBatch.Add(projected.Value);
+                        schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
+                        outputBatch ??= pool.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
+
+                        EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
+                        DataValue[]? projected = null;
+
+                        projected = schema.Project(
+                            frame,
+                            evaluator,
+                            pool,
+                            inputBatch.Arena,
+                            outputBatch.Arena,
+                            assertionDiagnostics);
+                            
+                        if (projected is null)
+                            continue; // Row was skipped due to ASSERT … ON FAIL SKIP
+
+                        outputBatch.Add(projected);
+
+                    }
+                    catch (Exception)
+                    {
+                        if (outputBatch is not null)
+                        {
+                            pool.ReturnRowBatch(outputBatch);
+                            outputBatch = null;
+                        }
+                        throw;
+                    }
+
+                    
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
                     }
                 }
-
-                
-                yield return outputBatch;
             }
             finally
             {
-                poolOld.ReturnBatch(inputBatch);
+                pool.ReturnRowBatch(inputBatch);
             }
+        }
+        
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 
@@ -356,6 +390,14 @@ public sealed class ProjectOperator : IQueryOperator
         }
 
         /// <summary>
+        /// Builds a column lookup from the schema's output column names and name index.
+        /// </summary>
+        /// <param name="schema">The projection schema.</param>
+        /// <returns>The column lookup.</returns>
+        internal static ColumnLookup BuildColumnLookup(ProjectionSchema schema) =>
+            new(schema._names, schema._nameIndex);
+
+        /// <summary>
         /// Projects a source row using the pre-computed schema. When LET bindings
         /// are present, builds an augmented row with memoized LET values before
         /// evaluating projection expressions. The output <see cref="DataValue"/>
@@ -364,50 +406,87 @@ public sealed class ProjectOperator : IQueryOperator
         /// Returns <see langword="null"/> when an <c>ASSERT … ON FAIL SKIP</c>
         /// clause fails, signalling the caller to discard the row.
         /// </summary>
-        internal Row? Project(in EvaluationFrame sourceFrame, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
+        internal DataValue[]? Project(
+            in EvaluationFrame sourceFrame,
+            ExpressionEvaluator evaluator,
+            Pool pool,
+            Arena sourceArena,
+            Arena destinationArena,
+            AssertionDiagnostics? diagnostics)
         {
             if (_letExpressions is not null && _letExpressions.Length > 0)
             {
-                return ProjectWithLetBindings(sourceFrame, evaluator, pool, diagnostics);
+                return ProjectWithLetBindings(
+                    sourceFrame,
+                    evaluator,
+                    pool,
+                    sourceArena,
+                    destinationArena,
+                    diagnostics);
             }
 
-            Row sourceRow = sourceFrame.Row;
-            DataValue[] values = pool.Rent(_slots.Length);
+            DataValue[]? values = null;
 
-            for (int index = 0; index < _slots.Length; index++)
+            try
             {
-                ProjectionSlot slot = _slots[index];
-                values[index] = slot.SourceOrdinal >= 0
-                    ? sourceRow[slot.SourceOrdinal]
-                    : evaluator.Evaluate(slot.Expression!, sourceFrame);
-            }
+                Row sourceRow = sourceFrame.Row;
+                values = pool.RentDataValues(_slots.Length);
 
-            if (_assertions is not null)
-            {
-                foreach (AssertClause assertClause in _assertions)
+                for (int index = 0; index < _slots.Length; index++)
                 {
-                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceFrame);
-                    if (!passed)
+                    ProjectionSlot slot = _slots[index];
+                    
+                    if (slot.SourceOrdinal >= 0)
                     {
-                        string? message = assertClause.Message is not null
-                            ? evaluator.Evaluate(assertClause.Message, sourceFrame).ToString()
-                            : null;
-                        switch (assertClause.FailureMode)
+                        values[index] = DataValueRetention.Stabilize(sourceRow[slot.SourceOrdinal], sourceArena, destinationArena);
+                    }
+                    else if (slot.Expression is not null)
+                    {
+                        values[index] = evaluator.Evaluate(slot.Expression, sourceFrame);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Invalid projection slot: must copy from source ordinal or evaluate expression.");
+                    }
+                }
+
+                if (_assertions is not null)
+                {
+                    foreach (AssertClause assertClause in _assertions)
+                    {
+                        bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceFrame);
+                        if (!passed)
                         {
-                            case AssertFailureMode.Skip:
-                                diagnostics?.RecordSkip(message);
-                                return null;
-                            case AssertFailureMode.Warn:
-                                diagnostics?.RecordWarn(message);
-                                break;
-                            default:
-                                throw new AssertionAbortException(message, assertClause.Span);
+                            string? message = assertClause.Message is not null
+                                ? evaluator.Evaluate(assertClause.Message, sourceFrame).ToString()
+                                : null;
+                            switch (assertClause.FailureMode)
+                            {
+                                case AssertFailureMode.Skip:
+                                    diagnostics?.RecordSkip(message);
+                                    return null;
+                                case AssertFailureMode.Warn:
+                                    diagnostics?.RecordWarn(message);
+                                    break;
+                                default:
+                                    throw new AssertionAbortException(message, assertClause.Span);
+                            }
                         }
                     }
                 }
-            }
 
-            return new Row(_names, values, _nameIndex);
+                return values;
+            }
+            catch
+            {
+                // Ensure that any rented values are returned to the pool on exceptions.
+                if (values is not null)
+                {
+                    pool.ReturnDataValues(values);
+                }
+
+                throw;
+            }
         }
 
         /// <summary>
@@ -418,68 +497,106 @@ public sealed class ProjectOperator : IQueryOperator
         /// the augmented row. Returns <see langword="null"/> when a SKIP assertion
         /// fails, signalling the caller to discard the row.
         /// </summary>
-        private Row? ProjectWithLetBindings(in EvaluationFrame sourceFrame, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
+        private DataValue[]? ProjectWithLetBindings(
+            in EvaluationFrame sourceFrame,
+            ExpressionEvaluator evaluator,
+            Pool pool,
+            Arena sourceArena,
+            Arena destinationArena,
+            AssertionDiagnostics? diagnostics)
         {
+            DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
+            DataValue[]? values = null;
             Row sourceRow = sourceFrame.Row;
 
-            // Build augmented values: source columns + LET binding slots.
-            DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
-            for (int index = 0; index < _sourceFieldCount; index++)
+            try
             {
-                augmentedValues[index] = sourceRow[index];
-            }
-
-            // The Row constructor stores the array by reference, so mutations
-            // to augmentedValues are visible through the Row's indexers.
-            Row augmentedRow = new(_augmentedNames!, augmentedValues, _augmentedNameIndex!);
-            EvaluationFrame augmentedFrame = sourceFrame.WithRow(augmentedRow);
-
-            // Evaluate each LET binding sequentially. Each binding's result
-            // is written into the augmented array before the next binding
-            // is evaluated, enabling left-to-right chaining.
-            for (int index = 0; index < _letExpressions.Length; index++)
-            {
-                augmentedValues[_sourceFieldCount + index] =
-                    evaluator.Evaluate(_letExpressions[index], augmentedFrame);
-            }
-
-            // Evaluate ASSERT clauses against the augmented row (source + LET values).
-            if (_assertions is not null)
-            {
-                foreach (AssertClause assertClause in _assertions)
+                // Build augmented values: source columns + LET binding slots.
+                for (int index = 0; index < _sourceFieldCount; index++)
                 {
-                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedFrame);
-                    if (!passed)
+                    augmentedValues[index] = sourceRow[index];
+                }
+
+                // The Row constructor stores the array by reference, so mutations
+                // to augmentedValues are visible through the Row's indexers.
+                Row augmentedRow = new(_augmentedNames!, augmentedValues, _augmentedNameIndex!);
+                EvaluationFrame augmentedFrame = sourceFrame.WithRow(augmentedRow);
+
+                // Evaluate each LET binding sequentially. Each binding's result
+                // is written into the augmented array before the next binding
+                // is evaluated, enabling left-to-right chaining.
+                for (int index = 0; index < _letExpressions.Length; index++)
+                {
+                    augmentedValues[_sourceFieldCount + index] =
+                        evaluator.Evaluate(_letExpressions[index], augmentedFrame);
+                }
+
+                // Evaluate ASSERT clauses against the augmented row (source + LET values).
+                if (_assertions is not null)
+                {
+                    foreach (AssertClause assertClause in _assertions)
                     {
-                        string? message = assertClause.Message is not null
-                            ? evaluator.Evaluate(assertClause.Message, augmentedFrame).ToString()
-                            : null;
-                        switch (assertClause.FailureMode)
+                        bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedFrame);
+                        if (!passed)
                         {
-                            case AssertFailureMode.Skip:
-                                diagnostics?.RecordSkip(message);
-                                return null;
-                            case AssertFailureMode.Warn:
-                                diagnostics?.RecordWarn(message);
-                                break;
-                            default:
-                                throw new AssertionAbortException(message, assertClause.Span);
+                            string? message = assertClause.Message is not null
+                                ? evaluator.Evaluate(assertClause.Message, augmentedFrame).ToString()
+                                : null;
+                            switch (assertClause.FailureMode)
+                            {
+                                case AssertFailureMode.Skip:
+                                    diagnostics?.RecordSkip(message);
+                                    return null;
+                                case AssertFailureMode.Warn:
+                                    diagnostics?.RecordWarn(message);
+                                    break;
+                                default:
+                                    throw new AssertionAbortException(message, assertClause.Span);
+                            }
                         }
                     }
                 }
-            }
 
-            // Evaluate output slots against the augmented row.
-            DataValue[] values = pool.Rent(_slots.Length);
-            for (int index = 0; index < _slots.Length; index++)
+                // Evaluate output slots against the augmented row.
+                values = pool.RentDataValues(_slots.Length);
+
+                for (int index = 0; index < _slots.Length; index++)
+                {
+                    ProjectionSlot slot = _slots[index];
+
+                    if (slot.SourceOrdinal >= 0)
+                    {
+                        values[index] = DataValueRetention.Stabilize(augmentedRow[slot.SourceOrdinal], sourceArena, destinationArena);
+                    }
+                    else if (slot.Expression is not null)
+                    {
+                        values[index] = evaluator.Evaluate(slot.Expression, augmentedFrame);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Invalid projection slot: must copy from source ordinal or evaluate expression.");
+                    }
+                }
+
+                return values;
+            }
+            catch
             {
-                ProjectionSlot slot = _slots[index];
-                values[index] = slot.SourceOrdinal >= 0
-                    ? augmentedRow[slot.SourceOrdinal]
-                    : evaluator.Evaluate(slot.Expression!, augmentedFrame);
-            }
+                if (values is not null)
+                {
+                    // Return the augmented array to the pool if it was rented.
+                    pool.ReturnDataValues(values);
+                }
 
-            return new Row(_names, values, _nameIndex);
+                throw;
+            }
+            finally
+            {
+                if (augmentedValues is not null)
+                {
+                    pool.ReturnDataValues(augmentedValues);
+                }
+            }
         }
     }
 
