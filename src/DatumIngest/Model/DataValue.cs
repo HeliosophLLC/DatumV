@@ -36,26 +36,40 @@ public readonly struct DataValue : IEquatable<DataValue>
 {
     // ───────────────────────── Flag constants ─────────────────────────
 
-    /// <summary>Bit mask for the null flag in <see cref="_flags"/>.</summary>
-    private const byte FlagIsNull = 0x01;
-
     /// <summary>
-    /// Bit mask indicating the value's payload lives in an external <see cref="IValueStore"/>
-    /// (typically an <see cref="Arena"/>) rather than inline in <c>_p0</c>-<c>_p3</c>.
-    /// Set for reference-type payloads (vectors, matrices, arrays, images, …) and for
-    /// strings/JSON whose UTF-8 form exceeds 16 bytes. Inline is the default — fixed-size
-    /// scalars and strings/JSON ≤ 16 bytes carry no flag.
+    /// Bitfield describing where a <see cref="DataValue"/>'s payload lives and how it
+    /// should be resolved. Each flag is mutually exclusive with the other storage flags
+    /// (a value is in arena, in sidecar, or inline; not multiple). <see cref="None"/>
+    /// = inline scalar / inline string. <see cref="IsNull"/> overrides everything.
     /// </summary>
-    private const byte FlagInArena = 0x02;
+    [Flags]
+    private enum DataValueFlags : byte
+    {
+        /// <summary>Plain inline value: payload self-contained in <c>_p0</c>-<c>_p3</c>.</summary>
+        None = 0,
 
-    /// <summary>
-    /// Bit mask indicating the value's payload lives in a <c>.datum-blob</c> sidecar
-    /// addressed by a 64-bit absolute offset (<c>_p0</c>+<c>_p1</c>) and a 40-bit length
-    /// (<c>_p2</c> + low byte of <c>_p3</c>). The high 24 bits of <c>_p3</c> are reserved.
-    /// Mutually exclusive with <see cref="FlagInArena"/>; resolution requires an
-    /// <see cref="IBlobSource"/> rather than an <see cref="IValueStore"/>.
-    /// </summary>
-    private const byte FlagInSidecar = 0x04;
+        /// <summary>Typed null. Other bits and payload are ignored.</summary>
+        IsNull = 0x01,
+
+        /// <summary>
+        /// Payload lives in an external <see cref="IValueStore"/> (typically an
+        /// <see cref="Arena"/>) rather than inline. Set for reference-type payloads
+        /// (vectors, matrices, arrays, images, …) and for strings / JSON whose UTF-8
+        /// form exceeds 16 bytes.
+        /// </summary>
+        InArena = 0x02,
+
+        /// <summary>
+        /// Payload lives in a <c>.datum-blob</c> sidecar addressed by a 64-bit absolute
+        /// offset (<c>_p0</c>+<c>_p1</c>) and a 40-bit length (<c>_p2</c> + low byte of
+        /// <c>_p3</c>). The high 24 bits of <c>_p3</c> are reserved. Mutually exclusive
+        /// with <see cref="InArena"/>; resolution requires an <see cref="IBlobSource"/>
+        /// (looked up via the <c>storeId</c> in the low byte of <c>_charCount</c>).
+        /// </summary>
+        InSidecar = 0x04,
+
+        // 0x08, 0x10, 0x20, 0x40, 0x80 reserved for future use (e.g. InlineArray, IsArray).
+    }
 
     /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
     private const long SidecarLengthMax = (1L << 40) - 1;
@@ -64,7 +78,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
-    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: InArena
+    [FieldOffset(1)]  private readonly DataValueFlags _flags; //  1 byte  — see DataValueFlags
     // ushort at offset 2 carries string/JSON sizing info, interpreted by storage mode:
     //   Non-inline (reference-store / arena-slice): full char count (0 = unknown, 65535 = overflow sentinel)
     //   Inline: low byte  = UTF-8 byte length (0-16)
@@ -81,7 +95,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     [FieldOffset(4)]  private readonly int _referenceIndex; // overlaps _p0
     [FieldOffset(8)]  private readonly short _meta;         // overlaps low 2 bytes of _p1
 
-    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0, ushort charCount = 0)
+    private DataValue(DataKind kind, DataValueFlags flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0, ushort charCount = 0)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
@@ -97,7 +111,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Constructor for reference types that need <c>_meta</c>.
     /// Sets <c>_p0</c> = referenceIndex and <c>_meta</c> at the overlapping offset.
     /// </summary>
-    private DataValue(DataKind kind, byte flags, int referenceIndex, short meta)
+    private DataValue(DataKind kind, DataValueFlags flags, int referenceIndex, short meta)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
@@ -113,7 +127,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataKind Kind => _kind;
 
     /// <summary>Whether this value represents a typed null.</summary>
-    public bool IsNull => (_flags & FlagIsNull) != 0;
+    public bool IsNull => (_flags & DataValueFlags.IsNull) != 0;
 
     /// <summary>
     /// Whether this value's payload is self-contained in the struct's 16-byte inline region
@@ -126,7 +140,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Indexes (bloom, bitmap, sorted, B+Tree) only admit inline values — lookups against
     /// non-inline values can short-circuit to a negative result.
     /// </remarks>
-    public bool IsInline => (_flags & (FlagIsNull | FlagInArena | FlagInSidecar)) == 0;
+    public bool IsInline => (_flags & (DataValueFlags.IsNull | DataValueFlags.InArena | DataValueFlags.InSidecar)) == 0;
 
     /// <summary>
     /// Whether this value's payload lives in a <c>.datum-blob</c> sidecar, addressed by
@@ -135,7 +149,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// cannot satisfy reads against sidecar-backed values because the coordinate space
     /// is 64-bit, not 32-bit.
     /// </summary>
-    public bool IsInSidecar => (_flags & FlagInSidecar) != 0;
+    public bool IsInSidecar => (_flags & DataValueFlags.InSidecar) != 0;
 
     /// <summary>
     /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
@@ -186,7 +200,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     private static readonly DataValue Float32Zero = new(DataKind.Float32, flags: 0, p0: 0);
     private static readonly DataValue Float32One = new(DataKind.Float32, flags: 0, p0: BitConverter.SingleToInt32Bits(1f));
-    private static readonly DataValue NullUnknown = new(DataKind.Unknown, flags: FlagIsNull, p0: 0);
+    private static readonly DataValue NullUnknown = new(DataKind.Unknown, flags: DataValueFlags.IsNull, p0: 0);
     private static readonly DataValue BooleanTrue = new(DataKind.Boolean, flags: 0, p0: 1);
     private static readonly DataValue BooleanFalse = new(DataKind.Boolean, flags: 0, p0: 0);
 
@@ -248,7 +262,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromUInt8Array(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.UInt8Array, flags: FlagInArena, p0: p0, p1: p1);
+        return new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -302,7 +316,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
@@ -317,7 +331,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreChars(chars);
         var (hashLo, hashHi) = HashString(chars);
         ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
@@ -331,7 +345,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreUtf8(utf8);
         var (hashLo, hashHi) = HashUtf8(utf8);
         ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.String, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>
@@ -373,7 +387,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="offset">Byte offset into the owning <see cref="Arena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
     public static DataValue FromStringSlice(int offset, int length) =>
-        new(DataKind.String, flags: FlagInArena, p0: offset, p1: length);
+        new(DataKind.String, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVector(float[], IValueStore)"/> instead.</remarks>
@@ -384,7 +398,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromVector(float[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreFloats(value);
-        return new(DataKind.Vector, flags: FlagInArena, p0: p0, p1: p1);
+        return new(DataKind.Vector, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
     /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
@@ -402,7 +416,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         var (p0, _) = store.StoreFloats(data);
-        return new(DataKind.Matrix, flags: FlagInArena, p0: p0, p1: rows, p2: columns);
+        return new(DataKind.Matrix, flags: DataValueFlags.InArena, p0: p0, p1: rows, p2: columns);
     }
 
     /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
@@ -424,7 +438,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         var (p0, p1) = store.StoreTensor(data, shape);
-        return new(DataKind.Tensor, flags: FlagInArena, p0: p0, p1: p1, p2: expectedLength);
+        return new(DataKind.Tensor, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: expectedLength);
     }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
@@ -436,7 +450,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromImage(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.Image, flags: FlagInArena, p0: p0, p1: p1);
+        return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -477,7 +491,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         int p2 = (int)length;
         int p3 = (int)((length >> 32) & 0xFF);  // high 8 bits of length; high 24 bits of _p3 reserved
 
-        return new(kind, flags: FlagInSidecar, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
+        return new(kind, flags: DataValueFlags.InSidecar, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
     }
 
     /// <summary>
@@ -489,7 +503,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// would otherwise force.
     /// </summary>
     public static DataValue FromImageAtOffset(int offset, int length) =>
-        new(DataKind.Image, flags: FlagInArena, p0: offset, p1: length);
+        new(DataKind.Image, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
     /// <summary>
     /// Creates a <see cref="DataKind.UInt8Array"/> value that references bytes
@@ -498,7 +512,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// payloads where the bytes are already arena-resident.
     /// </summary>
     public static DataValue FromUInt8ArrayAtOffset(int offset, int length) =>
-        new(DataKind.UInt8Array, flags: FlagInArena, p0: offset, p1: length);
+        new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
     /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
@@ -509,7 +523,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal static DataValue FromImageHandle(ImageHandle handle, IValueStore store)
     {
         var (p0, p1) = store.StoreObject(handle);
-        return new(DataKind.Image, flags: FlagInArena, p0: p0, p1: p1);
+        return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
     /// <summary>Creates a value from a calendar date.</summary>
@@ -557,7 +571,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         var (p0, p1) = store.StoreString(value);
         var (hashLo, hashHi) = HashString(value.AsSpan());
         ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.JsonValue, flags: FlagInArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+        return new(DataKind.JsonValue, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>
@@ -636,7 +650,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// strings/JSON whose UTF-8 form exceeds 16 bytes or were produced via
     /// <see cref="FromStringSlice(int, int)"/>.
     /// </summary>
-    public bool IsArenaBacked => (_flags & FlagInArena) != 0;
+    public bool IsArenaBacked => (_flags & DataValueFlags.InArena) != 0;
 
     /// <summary>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
@@ -686,20 +700,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromArray(DataKind elementKind, DataValue[] elements, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(elements);
-        return new(DataKind.Array, flags: FlagInArena, p0: p0, p1: p1, p2: (int)elementKind);
+        return new(DataKind.Array, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: (int)elementKind);
     }
 
     /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromArray(DataKind elementKind, List<DataValue> elements, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(CollectionsMarshal.AsSpan(elements));
-        return new(DataKind.Array, flags: FlagInArena, p0: p0, p1: p1, p2: (int)elementKind);
+        return new(DataKind.Array, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: (int)elementKind);
     }
 
     /// <summary>Creates a typed null array with the given element kind.</summary>
     /// <param name="elementKind">The element kind of the null array.</param>
     public static DataValue NullArray(DataKind elementKind) =>
-        new(DataKind.Array, FlagIsNull, referenceIndex: 0, meta: (short)elementKind);
+        new(DataKind.Array, DataValueFlags.IsNull, referenceIndex: 0, meta: (short)elementKind);
 
     /// <summary>Creates a struct value from a positional array of field values.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromStruct(short, DataValue[], IValueStore)"/> instead.</remarks>
@@ -710,16 +724,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStruct(short fieldCount, DataValue[] fields, IValueStore store)
     {
         var (p0, p1) = store.StoreDataValues(fields);
-        return new(DataKind.Struct, flags: FlagInArena, p0: p0, p1: p1, p2: fieldCount);
+        return new(DataKind.Struct, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: fieldCount);
     }
 
     /// <summary>Creates a typed null struct with the given field count.</summary>
     public static DataValue NullStruct(short fieldCount) =>
-        new(DataKind.Struct, FlagIsNull, referenceIndex: 0, meta: fieldCount);
+        new(DataKind.Struct, DataValueFlags.IsNull, referenceIndex: 0, meta: fieldCount);
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
-        => new(kind, flags: FlagIsNull, p0: 0);
+        => new(kind, flags: DataValueFlags.IsNull, p0: 0);
 
     /// <summary>
     /// Creates a null value whose type is not statically known.
@@ -1292,7 +1306,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (registry is null)
         {
             throw new InvalidOperationException(
-                "DataValue is sidecar-backed (FlagInSidecar) but no SidecarRegistry was provided. " +
+                "DataValue is sidecar-backed (DataValueFlags.InSidecar) but no SidecarRegistry was provided. " +
                 "Pass the ExecutionContext's registry (or the frame's) so the storeId can resolve.");
         }
 
@@ -2041,7 +2055,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     private void ThrowIfNullOrWrongKind(DataKind expected)
     {
-        if ((_flags & FlagIsNull) != 0)
+        if ((_flags & DataValueFlags.IsNull) != 0)
         {
             throw new InvalidOperationException(
                 $"Cannot read a null {_kind} value.");

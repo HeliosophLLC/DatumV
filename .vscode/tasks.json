@@ -257,6 +257,45 @@
 				"panel": "dedicated"
 			}
 		},
+		{
+			"label": "Test: Run filtered",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--no-restore",
+				"--filter",
+				"${input:testFilter}"
+			],
+			"problemMatcher": [],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
+			"label": "Test: Run all (excluding allocation)",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"test",
+				"--no-restore",
+				"--filter",
+				"FullyQualifiedName!~Allocation"
+			],
+			"problemMatcher": [],
+			"group": "test",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
 	],
 	"inputs": [
 		{
@@ -296,6 +335,12 @@
 			"id": "sidecarPath",
 			"type": "promptString",
 			"description": "Path to a .datum or .datum-blob file (sidecar resolved automatically)"
+		},
+		{
+			"id": "testFilter",
+			"type": "promptString",
+			"description": "Test filter (e.g. 'FullyQualifiedName~Image', 'FullyQualifiedName~SidecarStoreTests', 'Category!=Slow')",
+			"default": "FullyQualifiedName~"
 		}
 	]
 }
