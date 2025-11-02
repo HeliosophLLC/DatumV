@@ -1,6 +1,8 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 
 namespace DatumIngest.DatumFile.Sidecar;
 
@@ -17,8 +19,16 @@ namespace DatumIngest.DatumFile.Sidecar;
 /// <c>(Offset, Length)</c> pairs are unique and non-overlapping.
 /// </para>
 /// <para>
-/// On <see cref="Dispose"/> the file (if materialised) is flushed and closed. The
-/// containing <c>DatumFileWriter</c> embeds <see cref="Fingerprint"/> in the
+/// The xxHash3-64 over the payload region is computed on a dedicated background
+/// thread that consumes a bounded channel of just-written buffers. This keeps the
+/// hash compute (~1.9 GB/s on .NET's <see cref="XxHash3"/>) off the deserializer's
+/// hot path so it overlaps with ZIP read / decompression I/O instead of serialising
+/// behind every <see cref="Append"/>.
+/// </para>
+/// <para>
+/// On <see cref="Dispose"/> the channel is completed, the hash worker drains, and
+/// the final hash is patched into the header before the file is flushed and closed.
+/// The containing <c>DatumFileWriter</c> embeds <see cref="Fingerprint"/> in the
 /// <c>.datum</c> footer only when <see cref="WasMaterialized"/> is true, so the
 /// presence of the field in the footer is the canonical signal that a sidecar
 /// must accompany the <c>.datum</c> file at read time.
@@ -26,6 +36,13 @@ namespace DatumIngest.DatumFile.Sidecar;
 /// </remarks>
 public sealed class SidecarWriteStore : IBlobSink, IDisposable
 {
+    /// <summary>
+    /// Bound on in-flight hash buffers. With ~150 KB average ZIP entry size, 32
+    /// slots cap memory at ~5 MB — small relative to a row-group's arena while
+    /// giving the deserializer plenty of slack before back-pressure kicks in.
+    /// </summary>
+    private const int HashChannelCapacity = 32;
+
     private readonly string _path;
     private readonly Lock _lock = new();
     private FileStream? _stream;
@@ -33,12 +50,22 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// xxHash3-64 over the payload region, updated incrementally on every
-    /// <see cref="Append"/>. Created on first <see cref="Append"/>; finalised and
-    /// patched into the header on <see cref="Dispose"/>. Hashing inline with writes
-    /// is essentially free (xxHash3 saturates at multi-GB/s on a single core, vs
-    /// disk write at ~1 GB/s) and avoids a second-pass re-read of the payload at
-    /// finalize time.
+    /// Bounded channel of just-written buffers (rented from <see cref="ArrayPool{T}.Shared"/>).
+    /// The deserializer thread enqueues; a single background task drains and feeds
+    /// <see cref="_hasher"/>. Buffers are returned to the pool by the worker after
+    /// hashing. Created lazily on first <see cref="Append"/> alongside the
+    /// <see cref="FileStream"/>.
+    /// </summary>
+    private Channel<HashJob>? _hashChannel;
+
+    /// <summary>The single background task draining <see cref="_hashChannel"/>.</summary>
+    private Task? _hashTask;
+
+    /// <summary>
+    /// xxHash3-64 accumulator. Written exclusively on the hash worker thread, so
+    /// no synchronisation is required around <c>Append</c> / <c>GetCurrentHashAsUInt64</c>.
+    /// The worker is started before the first <c>Append</c> returns and joined
+    /// before <c>GetCurrentHashAsUInt64</c> is read in <see cref="Dispose"/>.
     /// </summary>
     private XxHash3? _hasher;
 
@@ -75,14 +102,21 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // Snapshot a copy for the background hasher. Done before taking the lock so
+        // the lock hold time stays minimal — and so memory pressure from the rent +
+        // copy doesn't inflate critical-section time. Cost is one extra memcpy per
+        // Append (~150 KB at ~25 GB/s = ~6 µs); the win is moving xxHash3 compute
+        // off this thread so it parallelises with ZIP read I/O.
+        byte[] copy = ArrayPool<byte>.Shared.Rent(bytes.Length);
+        bytes.CopyTo(copy);
+
+        long offset;
         lock (_lock)
         {
             if (_stream is null)
             {
                 // FileMode.Create matches DatumFileWriter's behavior on the companion
                 // .datum file: overwrite if a stale sidecar exists from a prior run.
-                // The pair (.datum + .datum-blob) is always finalised together, so the
-                // companion file is no more sacred than the .datum itself.
                 // Stream is opened ReadWrite (not Write) only so Dispose can seek
                 // back and patch the 8-byte hash into the header. Payload writes
                 // remain pure forward streaming.
@@ -96,14 +130,33 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
                 WriteHeader(_stream, Fingerprint);
                 _writeOffset = SidecarConstants.HeaderSize;
                 _hasher = new XxHash3();
+                _hashChannel = Channel.CreateBounded<HashJob>(new BoundedChannelOptions(HashChannelCapacity)
+                {
+                    FullMode = BoundedChannelFullMode.Wait,
+                    SingleReader = true,
+                    SingleWriter = false,
+                });
+                _hashTask = Task.Run(HashWorkerAsync);
             }
 
-            long offset = _writeOffset;
+            offset = _writeOffset;
             _stream.Write(bytes);
-            _hasher!.Append(bytes);
             _writeOffset += bytes.Length;
-            return (offset, bytes.Length);
+
+            // Enqueue under the lock so write order matches enqueue order matches
+            // hash order. xxHash3 is order-dependent — Append("ab") ≠ Append("ba")
+            // — and the IBlobSink contract permits concurrent Appends, so we can't
+            // rely on the call site to serialise. TryWrite is non-blocking; the
+            // bounded channel only blocks when the hasher has fallen ~32 buffers
+            // behind, which is rare given xxHash3 throughput beats disk write.
+            if (!_hashChannel!.Writer.TryWrite(new HashJob(copy, bytes.Length)))
+            {
+                _hashChannel.Writer.WriteAsync(new HashJob(copy, bytes.Length))
+                    .AsTask().GetAwaiter().GetResult();
+            }
         }
+
+        return (offset, bytes.Length);
     }
 
     /// <inheritdoc />
@@ -114,10 +167,12 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
 
         if (_stream is not null)
         {
-            // Finalise the running hash (built incrementally on every Append) and
-            // patch it into the header. No payload re-read — the hash state is
-            // already current as of the last Append. Patching is one 8-byte write
-            // at offset 24, then the stream is flushed and closed.
+            // Signal the hash worker to drain remaining jobs and exit. Then await
+            // it so the hasher state reflects every byte ever appended. Only then
+            // is it safe to read the final hash and patch it into the header.
+            _hashChannel!.Writer.TryComplete();
+            _hashTask!.GetAwaiter().GetResult();
+
             ulong hash = _hasher!.GetCurrentHashAsUInt64();
             _stream.Seek(SidecarConstants.PayloadHashOffset, SeekOrigin.Begin);
             Span<byte> hashBytes = stackalloc byte[8];
@@ -127,6 +182,24 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
             _stream.Flush();
             _stream.Dispose();
             _stream = null;
+        }
+    }
+
+    /// <summary>
+    /// Drains <see cref="_hashChannel"/>, feeding each buffer's payload into the
+    /// xxHash3 accumulator and returning the buffer to <see cref="ArrayPool{T}.Shared"/>.
+    /// Runs as a single dedicated background task — the hasher state is therefore
+    /// touched by exactly one thread. Append order matches enqueue order matches
+    /// dequeue order, so the final hash is identical to what an inline implementation
+    /// would produce.
+    /// </summary>
+    private async Task HashWorkerAsync()
+    {
+        ChannelReader<HashJob> reader = _hashChannel!.Reader;
+        await foreach (HashJob job in reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            _hasher!.Append(job.Buffer.AsSpan(0, job.Length));
+            ArrayPool<byte>.Shared.Return(job.Buffer);
         }
     }
 
@@ -144,7 +217,14 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
         BinaryPrimitives.WriteUInt32LittleEndian(header[8..12], SidecarConstants.Version);
         // header[12..16] reserved (zero)
         BinaryPrimitives.WriteUInt64LittleEndian(header[16..24], fingerprint);
-        // header[24..32] reserved (zero)
+        // header[24..32] zero — payloadHash is patched in by Dispose.
         stream.Write(header);
     }
+
+    /// <summary>
+    /// One unit of hashing work: a pooled buffer holding payload bytes and the
+    /// active length. The worker hashes <c>Buffer.AsSpan(0, Length)</c> and returns
+    /// the buffer to <see cref="ArrayPool{T}.Shared"/>.
+    /// </summary>
+    private readonly record struct HashJob(byte[] Buffer, int Length);
 }
