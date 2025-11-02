@@ -93,15 +93,17 @@ internal sealed class SamplePreviewCollector
     /// table schema.
     /// </summary>
     /// <param name="schema">The schema of the ingested table.</param>
-    /// <param name="sidecar">
-    /// Optional read-only handle on the just-finalised <c>.datum-blob</c> sidecar.
-    /// Required iff the reservoir contains any sidecar-backed image cells (deferred
-    /// from <see cref="Consider(Row, IValueStore)"/> because the bytes weren't
-    /// available until the writer flushed). Sidecar-backed cells are resolved here
-    /// and replaced with their <c>base64://...</c> thumbnail strings.
+    /// <param name="registry">
+    /// Optional sidecar registry used to resolve any deferred sidecar-backed image
+    /// cells in the reservoir. Required iff the reservoir contains
+    /// <see cref="SidecarImageRef"/> placeholders (deferred from
+    /// <see cref="Consider(Row, IValueStore)"/> because the bytes weren't available
+    /// until the writer flushed). Each placeholder's <c>storeId</c> is looked up in
+    /// the registry to find the right <see cref="IBlobSource"/>; bytes are read and
+    /// rendered to <c>base64://...</c> thumbnails.
     /// </param>
     /// <returns>A preview containing feature descriptors and the sampled rows.</returns>
-    public SamplePreview Build(Schema schema, IBlobSource? sidecar = null)
+    public SamplePreview Build(Schema schema, SidecarRegistry? registry = null)
     {
         List<SampleFeature> features = new(schema.Columns.Count);
         foreach (ColumnInfo column in schema.Columns)
@@ -109,7 +111,7 @@ internal sealed class SamplePreviewCollector
             features.Add(new SampleFeature(column.Name, column.Kind.ToString().ToLowerInvariant()));
         }
 
-        ResolveSidecarThumbnails(sidecar);
+        ResolveSidecarThumbnails(registry);
 
         object?[][] samples = new object?[_reservoirCount][];
         Array.Copy(_reservoir, samples, _reservoirCount);
@@ -124,9 +126,9 @@ internal sealed class SamplePreviewCollector
     /// <summary>
     /// Walks the reservoir and replaces every <see cref="SidecarImageRef"/> placeholder
     /// with the rendered <c>base64://...</c> thumbnail string. Throws when a placeholder
-    /// is found but no sidecar source was provided.
+    /// is found but no registry was provided or the storeId isn't registered.
     /// </summary>
-    private void ResolveSidecarThumbnails(IBlobSource? sidecar)
+    private void ResolveSidecarThumbnails(SidecarRegistry? registry)
     {
         for (int row = 0; row < _reservoirCount; row++)
         {
@@ -137,15 +139,20 @@ internal sealed class SamplePreviewCollector
             {
                 if (cells[col] is not SidecarImageRef refValue) continue;
 
-                if (sidecar is null)
+                if (registry is null)
                 {
                     throw new InvalidOperationException(
                         "SamplePreviewCollector reservoir contains a sidecar-backed image " +
-                        "but Build was called without an IBlobSource. Pass the SidecarReadStore " +
-                        "for the just-finalised .datum-blob.");
+                        "but Build was called without a SidecarRegistry. Wrap the just-finalised " +
+                        "SidecarReadStore in a registry and pass it.");
                 }
 
-                ReadOnlySpan<byte> bytes = sidecar.Read(refValue.Offset, refValue.Length);
+                IBlobSource source = registry.Resolve(refValue.StoreId)
+                    ?? throw new InvalidOperationException(
+                        $"Sidecar storeId {refValue.StoreId} from a sample reservoir entry is " +
+                        "not registered in the supplied SidecarRegistry.");
+
+                ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
                 byte[] thumbnailBytes = CreateThumbnail(bytes.ToArray());
                 cells[col] = "base64://" + Convert.ToBase64String(thumbnailBytes);
             }
@@ -274,13 +281,13 @@ internal sealed class SamplePreviewCollector
     /// The image is resized to fit within 64×64 pixels, preserving aspect ratio.
     /// For sidecar-backed values the bytes aren't yet readable (writer is mid-stream),
     /// so a <see cref="SidecarImageRef"/> placeholder is returned and resolved later
-    /// in <see cref="Build(Schema, IBlobSource?)"/> against the finalised sidecar.
+    /// in <see cref="Build(Schema, SidecarRegistry?)"/> against the finalised sidecar.
     /// </summary>
     private static object ConvertImage(DataValue value, IValueStore store)
     {
         if (value.IsInSidecar)
         {
-            return new SidecarImageRef(value.SidecarOffset, value.SidecarLength);
+            return new SidecarImageRef(value.SidecarStoreId, value.SidecarOffset, value.SidecarLength);
         }
 
         byte[] imageBytes = value.AsImage(store);
@@ -289,13 +296,13 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>
-    /// Reservoir placeholder for sidecar-backed image cells. Holds the absolute
-    /// <c>(offset, length)</c> coordinates of the row's image bytes within the
-    /// companion <c>.datum-blob</c>, deferring thumbnail rendering until
-    /// <see cref="Build(Schema, IBlobSource?)"/> when an <see cref="IBlobSource"/>
-    /// is available.
+    /// Reservoir placeholder for sidecar-backed image cells. Holds the
+    /// <c>storeId</c> identifying which sidecar in the registry backs the bytes,
+    /// plus absolute <c>(offset, length)</c> coordinates within that sidecar.
+    /// Resolved by <see cref="Build(Schema, SidecarRegistry?)"/> once an
+    /// <see cref="IBlobSource"/> is available.
     /// </summary>
-    private sealed record SidecarImageRef(long Offset, long Length);
+    private sealed record SidecarImageRef(byte StoreId, long Offset, long Length);
 
     /// <summary>
     /// Decodes an image, resizes it to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>

@@ -19,6 +19,15 @@ public sealed class DatumDecoderContext
     public IValueStore? Store { get; init; }
 
     /// <summary>
+    /// Sidecar <c>storeId</c> byte to stamp onto sidecar-flagged DataValues produced
+    /// by <see cref="BinaryColumnDecoder"/>. Set by the table provider after it
+    /// registers its <see cref="DatumIngest.DatumFile.Sidecar.IBlobSource"/> with the
+    /// query's <see cref="DatumIngest.DatumFile.Sidecar.SidecarRegistry"/>. Default 0
+    /// is correct for single-sidecar / first-registered scenarios.
+    /// </summary>
+    public byte SidecarStoreId { get; init; }
+
+    /// <summary>
     /// A shared singleton suitable for in-memory decode scenarios with no per-call state.
     /// </summary>
     public static DatumDecoderContext Empty { get; } = new();

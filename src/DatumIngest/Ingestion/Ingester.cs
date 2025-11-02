@@ -176,23 +176,38 @@ public class Ingester(
 
         QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
 
-        // Sidecar-backed image cells in the reservoir hold (offset, length) placeholders;
-        // the sample collector resolves them here against the just-finalised .datum-blob.
-        // Bounded by reservoir size (~25 rows), so this is a tiny mmap'd post-pass.
-        using IBlobSource? sidecarReader = sidecarMaterialized
-            ? new SidecarReadStore(sidecarPath, sidecarFingerprint)
-            : null;
-        SamplePreview sample = sampleCollector.Build(finalSchema, sidecarReader);
+        // Sidecar-backed image cells in the reservoir hold (storeId, offset, length)
+        // placeholders; the sample collector resolves them via a tiny ad-hoc registry
+        // wrapping the just-finalised .datum-blob. The deserializer stamped storeId=0
+        // onto its values (default for FromImageInSidecar), so the registry only
+        // needs the one source registered (also gets storeId=0). Bounded by reservoir
+        // size (~25 rows), so this is a tiny mmap'd post-pass.
+        SidecarRegistry? sampleRegistry = null;
+        SidecarReadStore? sidecarReader = null;
+        try
+        {
+            if (sidecarMaterialized)
+            {
+                sidecarReader = new SidecarReadStore(sidecarPath, sidecarFingerprint);
+                sampleRegistry = new SidecarRegistry();
+                sampleRegistry.Register(sidecarReader);
+            }
+            SamplePreview sample = sampleCollector.Build(finalSchema, sampleRegistry);
 
-        return new IngestionResult(
-            OutputPath: destination.FilePath,
-            RowCount: rowCount,
-            BytesWritten: bytesWritten,
-            Schema: finalSchema,
-            Manifest: manifest,
-            Sample: sample,
-            ScanPass: deserializer.ScanMetrics,
-            IngestPass: ingestMetrics);
+            return new IngestionResult(
+                OutputPath: destination.FilePath,
+                RowCount: rowCount,
+                BytesWritten: bytesWritten,
+                Schema: finalSchema,
+                Manifest: manifest,
+                Sample: sample,
+                ScanPass: deserializer.ScanMetrics,
+                IngestPass: ingestMetrics);
+        }
+        finally
+        {
+            sidecarReader?.Dispose();
+        }
     }
 
     /// <summary>

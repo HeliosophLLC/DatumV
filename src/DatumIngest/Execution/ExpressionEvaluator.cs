@@ -722,7 +722,7 @@ public sealed class ExpressionEvaluator
         // remain valid across batches. Falls back to the frame's target arena when
         // no persistent store is configured.
         IValueStore cacheStore = _store ?? frame.Target;
-        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow, frame.Sidecar);
+        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow, frame.SidecarRegistry);
 
         foreach (Expression valueExpression in inExpr.Values)
         {

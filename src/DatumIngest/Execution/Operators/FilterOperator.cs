@@ -73,7 +73,7 @@ public sealed class FilterOperator : IQueryOperator
                 for (int index = 0, count = inputBatch.Count; index < count; index++)
                 {
                     Row row = inputBatch[index];
-                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.Sidecar);
+                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
 
                     if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
 

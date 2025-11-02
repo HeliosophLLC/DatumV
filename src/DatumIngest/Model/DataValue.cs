@@ -144,6 +144,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal long SidecarOffset => Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
 
     /// <summary>
+    /// Sidecar <c>storeId</c> packed into the low byte of <c>_charCount</c>. Identifies
+    /// which <see cref="IBlobSource"/> in the per-query
+    /// <see cref="DatumFile.Sidecar.SidecarRegistry"/> backs this value's bytes. Only
+    /// meaningful when <see cref="IsInSidecar"/> is <c>true</c>; otherwise zero.
+    /// Stamped onto values by <see cref="DatumFile.Decoding.BinaryColumnDecoder"/>
+    /// using the storeId the table provider received from the registry at scan time.
+    /// </summary>
+    internal byte SidecarStoreId => (byte)(_charCount & 0xFF);
+
+    /// <summary>
     /// Decodes the 40-bit sidecar length packed across <c>_p2</c> and the low byte of
     /// <c>_p3</c>. Only meaningful when <see cref="IsInSidecar"/> is <c>true</c>.
     /// </summary>
@@ -249,8 +259,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
     /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
-    public static DataValue FromUInt8ArrayInSidecar(long offset, long length) =>
-        BuildSidecar(DataKind.UInt8Array, offset, length);
+    /// <param name="storeId">
+    /// The byte assigned by the per-query <see cref="DatumFile.Sidecar.SidecarRegistry"/>
+    /// when the table provider registered its sidecar. Resolved at access time to find
+    /// the right <see cref="IBlobSource"/>. Defaults to 0 (single-sidecar / first-registered).
+    /// </param>
+    public static DataValue FromUInt8ArrayInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.UInt8Array, offset, length, storeId);
 
     /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
@@ -426,22 +441,24 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Creates a <see cref="DataKind.Image"/> value whose encoded bytes live in a
-    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
-    /// 40-bit length; resolution requires an <see cref="IBlobSource"/>, typically the
-    /// table provider's sidecar read store. <see cref="AsImage(IValueStore, IBlobSource?)"/>
-    /// dispatches based on the sidecar flag.
+    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset,
+    /// 40-bit length, and the <c>storeId</c> byte that resolves to the right
+    /// <see cref="IBlobSource"/> in the per-query
+    /// <see cref="DatumFile.Sidecar.SidecarRegistry"/>.
     /// </summary>
     /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
     /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
-    public static DataValue FromImageInSidecar(long offset, long length) =>
-        BuildSidecar(DataKind.Image, offset, length);
+    /// <param name="storeId">Registry storeId byte (defaults to 0 for single-sidecar / first-registered).</param>
+    public static DataValue FromImageInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.Image, offset, length, storeId);
 
     /// <summary>
     /// Packs a sidecar coordinate into the DataValue payload. <c>_p0</c>+<c>_p1</c>
     /// hold the 64-bit offset, <c>_p2</c> + low byte of <c>_p3</c> hold the 40-bit
-    /// length, the high 24 bits of <c>_p3</c> are reserved (zero in v1).
+    /// length, the high 24 bits of <c>_p3</c> are reserved (zero in v1), and the
+    /// low byte of <c>_charCount</c> holds the registry <c>storeId</c>.
     /// </summary>
-    private static DataValue BuildSidecar(DataKind kind, long offset, long length)
+    private static DataValue BuildSidecar(DataKind kind, long offset, long length, byte storeId)
     {
         if (offset < 0)
         {
@@ -460,7 +477,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         int p2 = (int)length;
         int p3 = (int)((length >> 32) & 0xFF);  // high 8 bits of length; high 24 bits of _p3 reserved
 
-        return new(kind, flags: FlagInSidecar, p0: p0, p1: p1, p2: p2, p3: p3);
+        return new(kind, flags: FlagInSidecar, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
     }
 
     /// <summary>
@@ -1215,7 +1232,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the byte array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore, IBlobSource?)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore, SidecarRegistry?)"/> instead.</remarks>
     public byte[] AsUInt8Array()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
@@ -1224,16 +1241,17 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the byte array payload. For arena-backed values, reads from
-    /// <paramref name="store"/>; for sidecar-backed values, reads from
-    /// <paramref name="sidecar"/>. The flag on the DataValue determines which path runs.
+    /// <paramref name="store"/>; for sidecar-backed values, looks up the source in
+    /// <paramref name="registry"/> by the value's <c>storeId</c> and reads from there.
+    /// The flag on the DataValue determines which path runs.
     /// </summary>
-    public byte[] AsUInt8Array(IValueStore store, IBlobSource? sidecar = null)
+    public byte[] AsUInt8Array(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
 
         if (IsInSidecar)
         {
-            return ReadSidecarBytes(sidecar).ToArray();
+            return ReadSidecarBytes(registry).ToArray();
         }
         return store.RetrieveBytes(_p0, _p1);
     }
@@ -1246,10 +1264,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <remarks>
     /// For arena-backed values the span is valid only while <paramref name="store"/>'s
     /// backing arena is alive; for sidecar-backed values the span lives as long as the
-    /// <paramref name="sidecar"/>'s mmap view does. Callers must consume the span
-    /// before whichever store backs it goes away.
+    /// resolved <see cref="IBlobSource"/>'s mmap view does. Callers must consume the
+    /// span before whichever store backs it goes away.
     /// </remarks>
-    public ReadOnlySpan<byte> AsByteSpan(IValueStore store, IBlobSource? sidecar = null)
+    public ReadOnlySpan<byte> AsByteSpan(IValueStore store, SidecarRegistry? registry = null)
     {
         if (_kind is not (DataKind.UInt8Array or DataKind.Image))
         {
@@ -1258,25 +1276,33 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (IsInSidecar)
         {
-            return ReadSidecarBytes(sidecar);
+            return ReadSidecarBytes(registry);
         }
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
     /// <summary>
-    /// Resolves a sidecar-backed byte payload via the given <see cref="IBlobSource"/>.
-    /// Throws when no sidecar source is provided — sidecar-backed DataValues cannot
-    /// be read against an arena alone.
+    /// Resolves a sidecar-backed byte payload by looking up the value's
+    /// <see cref="SidecarStoreId"/> in <paramref name="registry"/>. Throws when no
+    /// registry is supplied or the storeId isn't registered — sidecar-backed
+    /// DataValues cannot be read against an arena alone.
     /// </summary>
-    private ReadOnlySpan<byte> ReadSidecarBytes(IBlobSource? sidecar)
+    private ReadOnlySpan<byte> ReadSidecarBytes(SidecarRegistry? registry)
     {
-        if (sidecar is null)
+        if (registry is null)
         {
             throw new InvalidOperationException(
-                "DataValue is sidecar-backed (FlagInSidecar) but no IBlobSource was provided. " +
-                "Pass the table provider's SidecarReadStore as the sidecar argument.");
+                "DataValue is sidecar-backed (FlagInSidecar) but no SidecarRegistry was provided. " +
+                "Pass the ExecutionContext's registry (or the frame's) so the storeId can resolve.");
         }
-        return sidecar.Read(SidecarOffset, SidecarLength);
+
+        IBlobSource? source = registry.Resolve(SidecarStoreId)
+            ?? throw new InvalidOperationException(
+                $"Sidecar storeId {SidecarStoreId} is not registered in the supplied " +
+                "SidecarRegistry. The DataValue references a sidecar that wasn't opened by " +
+                "this query — likely the table provider didn't register its IBlobSource.");
+
+        return source.Read(SidecarOffset, SidecarLength);
     }
 
     /// <summary>Returns the text string payload.</summary>
@@ -1543,7 +1569,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the encoded image byte array payload.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore, IBlobSource?)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore, SidecarRegistry?)"/> instead.</remarks>
     public byte[] AsImage()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
@@ -1552,16 +1578,17 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the encoded image byte array. For arena-backed values, reads from
-    /// <paramref name="store"/>; for sidecar-backed values, reads from
-    /// <paramref name="sidecar"/>. The flag on the DataValue determines which path runs.
+    /// <paramref name="store"/>; for sidecar-backed values, looks up the value's
+    /// <c>storeId</c> in <paramref name="registry"/> to find its
+    /// <see cref="IBlobSource"/>. The flag on the DataValue determines which path runs.
     /// </summary>
-    public byte[] AsImage(IValueStore store, IBlobSource? sidecar = null)
+    public byte[] AsImage(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
 
         if (IsInSidecar)
         {
-            return ReadSidecarBytes(sidecar).ToArray();
+            return ReadSidecarBytes(registry).ToArray();
         }
         return store.RetrieveBytes(_p0, _p1);
     }
@@ -1570,7 +1597,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the <see cref="ImageHandle"/> for this image value.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, IBlobSource?)"/> instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, SidecarRegistry?)"/> instead.</remarks>
     internal ImageHandle GetImageHandle()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
@@ -1579,10 +1606,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns an <see cref="ImageHandle"/> for this image value, reconstructing from
-    /// encoded bytes stored in the given <see cref="IValueStore"/>. The bitmap is not
-    /// decoded until explicitly requested.
+    /// encoded bytes stored in the given <see cref="IValueStore"/> (arena-backed) or
+    /// resolved through <paramref name="registry"/> (sidecar-backed). The bitmap is
+    /// not decoded until explicitly requested.
     /// </summary>
-    internal ImageHandle GetImageHandle(IValueStore store, IBlobSource? sidecar = null)
+    internal ImageHandle GetImageHandle(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
 
@@ -1591,7 +1619,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Sidecar payloads are always raw encoded bytes (JPEG/PNG/etc.) — no
             // object side-list, no precomputed ImageHandle. Decode directly from the
             // mmap-backed span.
-            ReadOnlySpan<byte> bytes = ReadSidecarBytes(sidecar);
+            ReadOnlySpan<byte> bytes = ReadSidecarBytes(registry);
             byte[] copy = bytes.ToArray();
             return new ImageHandle(copy, ImageEncoder.ResolveFormat(copy, formatOverride: null));
         }
@@ -1614,7 +1642,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
     /// or <c>null</c> if the payload is raw bytes or no store is available.
     /// </summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, IBlobSource?)"/> and check the store instead.</remarks>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, SidecarRegistry?)"/> and check the store instead.</remarks>
     internal ImageHandle? TryGetOwnedImageHandle() => null;
 
     /// <summary>Returns the calendar date payload.</summary>

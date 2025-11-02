@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -44,6 +45,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private TableCatalog? Parent { get; }
     private Pool Pool { get;}
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
+    private readonly SidecarRegistry _sidecarRegistry = new();
+
+    /// <summary>
+    /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each
+    /// <see cref="DatumFileTableProvider"/> with a <c>.datum-blob</c> sidecar registers
+    /// its source here at <see cref="Add(TableDescriptor)"/> time and gets back a byte;
+    /// the decoder stamps that byte onto every sidecar-flagged
+    /// <see cref="DataValue"/>; image accessors resolve through the registry at access
+    /// time. Catalog-scoped (not query-scoped) so storeId assignments stay stable
+    /// across queries against the same provider. A nested child catalog falls through
+    /// to its parent's registry so providers added via either layer share one byte
+    /// space.
+    /// </summary>
+    public SidecarRegistry SidecarRegistry => Parent?.SidecarRegistry ?? _sidecarRegistry;
 
     /// <summary>
     /// Gets the total number of tables registered in this catalog, including
@@ -136,12 +151,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
         }
-        else if (Tables.TryAdd(tableDescriptor.Name, new DatumFileTableProvider(tableDescriptor, Pool)))
+        DatumFileTableProvider provider = new(tableDescriptor, Pool);
+        if (Tables.TryAdd(tableDescriptor.Name, provider))
         {
+            RegisterProviderSidecar(provider);
             return Tables[tableDescriptor.Name];
         }
         else
         {
+            provider.Dispose();
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered.");
         }
     }
@@ -161,12 +179,28 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
         else if (Tables.TryAdd(tableProvider.Name, tableProvider))
         {
+            RegisterProviderSidecar(tableProvider);
             return Tables[tableProvider.Name];
         }
         else
         {
             throw new ArgumentException($"A table with the name '{tableProvider.Name}' is already registered.");
         }
+    }
+
+    /// <summary>
+    /// If <paramref name="provider"/> is a <see cref="DatumFileTableProvider"/> with a
+    /// <c>.datum-blob</c> companion sidecar, registers the sidecar with this catalog's
+    /// <see cref="SidecarRegistry"/> and stamps the assigned <c>storeId</c> onto the
+    /// provider so its decoder can label sidecar-flagged DataValues at decode time.
+    /// No-op for tabular-only providers and for non-datum providers.
+    /// </summary>
+    private void RegisterProviderSidecar(ITableProvider provider)
+    {
+        if (provider is not DatumFileTableProvider datumProvider) return;
+        if (datumProvider.Sidecar is not { } source) return;
+
+        datumProvider.SidecarStoreId = SidecarRegistry.Register(source);
     }
 
     /// <summary>

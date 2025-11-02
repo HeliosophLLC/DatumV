@@ -27,19 +27,22 @@ internal sealed class DatumFileSeekSession : ISeekSession
     private ColumnBatch? _columnBatch;
     private byte[]? _compressedBuffer;
     private byte[]? _decompressedBuffer;
+    private readonly byte _sidecarStoreId;
 
     internal DatumFileSeekSession(
         Pool pool,
         DatumFileReader reader,
         ColumnBatch columnBatch,
         byte[] compressedBuffer,
-        byte[] decompressedBuffer)
+        byte[] decompressedBuffer,
+        byte sidecarStoreId = 0)
     {
         _pool = pool;
         _reader = reader;
         _columnBatch = columnBatch;
         _compressedBuffer = compressedBuffer;
         _decompressedBuffer = decompressedBuffer;
+        _sidecarStoreId = sidecarStoreId;
     }
 
     /// <summary>
@@ -99,7 +102,7 @@ internal sealed class DatumFileSeekSession : ISeekSession
             _columnBatch.Arena.Reset();
 
             // Decode directly into the session's owned column buffers.
-            _reader.ReadColumnsInto(rgIndex, _columnBatch, _compressedBuffer, _decompressedBuffer);
+            _reader.ReadColumnsInto(rgIndex, _columnBatch, _compressedBuffer, _decompressedBuffer, _sidecarStoreId);
 
             int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
             int sliceEnd = (int)Math.Min(endRow - cumulativeRow, rgRowCount);

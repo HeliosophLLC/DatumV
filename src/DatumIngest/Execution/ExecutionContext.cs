@@ -29,7 +29,6 @@ public sealed class ExecutionContext
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
         MaxStratifyClasses = context.MaxStratifyClasses;
-        Sidecar = context.Sidecar;
     }
 
   /// <summary>
@@ -192,7 +191,6 @@ public sealed class ExecutionContext
             BatchSize = BatchSize,
             AssertionDiagnostics = AssertionDiagnostics,
             MaxStratifyClasses = MaxStratifyClasses,
-            Sidecar = Sidecar,
         };
     }
 
@@ -212,18 +210,11 @@ public sealed class ExecutionContext
     public int? MaxStratifyClasses { get; init; }
 
     /// <summary>
-    /// Sidecar blob source for the current query, when a referenced table declares
-    /// <see cref="DatumFile.DatumFileFlags.HasSidecarBlobs"/>. Populated by the scan
-    /// operator on first use. Frame builders (filter / project / expression evaluator)
-    /// thread this into <see cref="EvaluationFrame.Sidecar"/> so accessors like
-    /// <see cref="Model.DataValue.AsImage(IValueStore, IBlobSource?)"/> can resolve
-    /// <c>FlagInSidecar</c> values to their absolute byte ranges.
+    /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each
+    /// <see cref="DatumFile.Sidecar.IBlobSource"/> in the catalog has a unique
+    /// <c>storeId</c> byte stamped onto its DataValues at decode time; image
+    /// accessors resolve through this registry to find the right source. Catalog-
+    /// scoped (not per-query) so storeId assignments are stable across queries.
     /// </summary>
-    /// <remarks>
-    /// Single-sidecar-per-query: if a query joins two sidecar-bound tables, the
-    /// last scan wins. Multi-sidecar queries are not yet supported and will require
-    /// per-batch sidecar carriage. For typical ML-from-SQL workloads (single
-    /// image table) this is sufficient.
-    /// </remarks>
-    public IBlobSource? Sidecar { get; set; }
+    public SidecarRegistry SidecarRegistry => Catalog.SidecarRegistry;
 }

@@ -24,7 +24,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
     {
         if (encoding == DatumEncoding.SidecarBlobs)
         {
-            return DecodeSidecar(payload, compression, uncompressedByteLength, rowCount, descriptor);
+            return DecodeSidecar(payload, compression, uncompressedByteLength, rowCount, descriptor, context);
         }
 
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
@@ -64,7 +64,8 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
         DatumCompression compression,
         int uncompressedByteLength,
         int rowCount,
-        DatumColumnDescriptor descriptor)
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context)
     {
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
@@ -74,6 +75,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
         int lengthsStart = offsetsStart + 8 * rowCount;
 
         bool isImage = descriptor.Kind == DataKind.Image;
+        byte storeId = context.SidecarStoreId;
         DataValue[] result = new DataValue[rowCount];
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
@@ -88,8 +90,8 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
             long length = BinaryPrimitives.ReadInt64LittleEndian(raw.AsSpan(lengthsStart + 8 * rowIndex));
 
             result[rowIndex] = isImage
-                ? DataValue.FromImageInSidecar(offset, length)
-                : DataValue.FromUInt8ArrayInSidecar(offset, length);
+                ? DataValue.FromImageInSidecar(offset, length, storeId)
+                : DataValue.FromUInt8ArrayInSidecar(offset, length, storeId);
         }
 
         return result;

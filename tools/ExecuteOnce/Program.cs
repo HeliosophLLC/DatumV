@@ -144,7 +144,7 @@ try
 
                 if (opts.PrintAll || printedRows < opts.Limit)
                 {
-                    Console.WriteLine(FormatRow(row, batch.Arena, executionContext.Sidecar));
+                    Console.WriteLine(FormatRow(row, batch.Arena, executionContext.SidecarRegistry));
                     printedRows++;
                 }
                 else
@@ -210,18 +210,18 @@ DatumDiagnostics.Report();
 
 return 0;
 
-static string FormatRow(Row row, Arena arena, IBlobSource? sidecar)
+static string FormatRow(Row row, Arena arena, SidecarRegistry? registry)
 {
     StringBuilder builder = new();
     for (int i = 0; i < row.FieldCount; i++)
     {
         if (i > 0) builder.Append('\t');
-        builder.Append(FormatValue(row[i], arena, sidecar));
+        builder.Append(FormatValue(row[i], arena, registry));
     }
     return builder.ToString();
 }
 
-static string FormatValue(DataValue value, Arena arena, IBlobSource? sidecar)
+static string FormatValue(DataValue value, Arena arena, SidecarRegistry? registry)
 {
     if (value.IsNull) return "NULL";
 
@@ -245,15 +245,15 @@ static string FormatValue(DataValue value, Arena arena, IBlobSource? sidecar)
         DataKind.Uuid => value.AsUuid().ToString(),
         DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena),
         DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena),
-        DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, sidecar),
+        DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, registry),
         _ => $"<{value.Kind}>",
     };
 }
 
-static string FormatBlobPreview(DataValue value, Arena arena, IBlobSource? sidecar)
+static string FormatBlobPreview(DataValue value, Arena arena, SidecarRegistry? registry)
 {
     const int PreviewBytes = 8;
-    ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, sidecar);
+    ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
     int previewLength = Math.Min(PreviewBytes, bytes.Length);
     string hex = Convert.ToHexString(bytes[..previewLength]);
     return bytes.Length > PreviewBytes

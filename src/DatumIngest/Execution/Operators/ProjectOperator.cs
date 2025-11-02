@@ -158,7 +158,7 @@ public sealed class ProjectOperator : IQueryOperator
                 {
                     Row row = inputBatch[index];
                     schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.Sidecar);
+                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
                     Row? projected = schema.Project(frame, evaluator, poolOld, assertionDiagnostics);
                     if (projected.HasValue)
                     {

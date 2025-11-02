@@ -158,11 +158,19 @@ public sealed class DatumFileReader : IDisposable
     /// as the largest uncompressed page. Eliminates repeated <c>new byte[]</c> allocations
     /// inside the decompressor.
     /// </param>
+    /// <param name="sidecarStoreId">
+    /// Byte stamped onto every sidecar-flagged DataValue produced by this decode pass.
+    /// Resolves through the per-query
+    /// <see cref="DatumIngest.DatumFile.Sidecar.SidecarRegistry"/> to find the
+    /// <see cref="DatumIngest.DatumFile.Sidecar.IBlobSource"/> that backs the values.
+    /// Default 0 is correct for the single-sidecar / first-registered case.
+    /// </param>
     internal void ReadColumnsInto(
         int rowGroupIndex,
         ColumnBatch columnBatch,
         byte[] compressedBuffer,
-        byte[] decompressedBuffer)
+        byte[] decompressedBuffer,
+        byte sidecarStoreId = 0)
     {
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
@@ -173,6 +181,7 @@ public sealed class DatumFileReader : IDisposable
             // never Disposed — its backing MemoryMappedFile got finalized per row group,
             // costing tens of seconds of finalizer-thread time on large ingests.
             Store = columnBatch.Arena,
+            SidecarStoreId = sidecarStoreId,
         };
 
         columnBatch.SetRowCount(rowCount);

@@ -217,17 +217,6 @@ public sealed class ScanOperator : IQueryOperator
         CancellationToken cancellationToken = context.CancellationToken;
         SourceIndex? sourceIndex = TableProvider.GetSourceIndex();
 
-        // Publish the table's blob sidecar (if any) onto the shared context so
-        // downstream frame builders can resolve FlagInSidecar DataValues. Single
-        // sidecar per query; if a future multi-table query both reference sidecar-
-        // bound tables, last scan wins and the frame builder will read whichever
-        // sidecar matches the value being resolved.
-        if (TableProvider is Catalog.Providers.DatumFileTableProvider datumProvider
-            && datumProvider.Sidecar is { } providerSidecar)
-        {
-            context.Sidecar = providerSidecar;
-        }
-
         ExecutionTracer.Write($"SCAN start  table={TableProvider.Name}  hasIndex={sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
         ExecutionTracer.Write($"SCAN path  table={TableProvider.Name}  indexPruning={HasIndexPruning}");
 

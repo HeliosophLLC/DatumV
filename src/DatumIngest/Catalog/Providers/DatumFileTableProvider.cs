@@ -55,11 +55,23 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
 
     /// <summary>
     /// Memory-mapped read view over the companion <c>.datum-blob</c>, or
-    /// <see langword="null"/> when the file declares no sidecar. Operators thread
-    /// this through <see cref="EvaluationFrame.Sidecar"/> so image accessors can
-    /// resolve <c>FlagInSidecar</c> values to their absolute byte ranges.
+    /// <see langword="null"/> when the file declares no sidecar. <see cref="TableCatalog"/>
+    /// registers this with the catalog's <see cref="SidecarRegistry"/> at provider-add
+    /// time and writes the assigned <c>storeId</c> back into <see cref="SidecarStoreId"/>.
     /// </summary>
     public IBlobSource? Sidecar => _sidecar;
+
+    /// <summary>
+    /// Sidecar <c>storeId</c> byte assigned to this provider by the catalog's
+    /// <see cref="SidecarRegistry"/>. Set once by <see cref="TableCatalog.Add(TableDescriptor)"/>
+    /// (or the <see cref="ITableProvider"/> overload) at registration time; thereafter
+    /// stable for the catalog's lifetime. Decoder uses this byte to stamp every
+    /// sidecar-flagged <see cref="DataValue"/> it produces so downstream accessors
+    /// can resolve back to <see cref="Sidecar"/> via the registry. Default 0 for
+    /// providers without a sidecar (the slot is unused since no sidecar-flagged
+    /// values are produced).
+    /// </summary>
+    public byte SidecarStoreId { get; internal set; }
 
     private DatumFileReader Reader { get; }
 
@@ -181,7 +193,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
                         }
                     }
 
-                    Reader.ReadColumnsInto(rgIndex, columnBatch, compressedBuffer, decompressedBuffer);
+                    Reader.ReadColumnsInto(rgIndex, columnBatch, compressedBuffer, decompressedBuffer, SidecarStoreId);
 
                     // Skip fully-deleted row groups without emitting any rows.
                     if (rowGroupDescriptor.ActiveRowCount == 0)
@@ -271,7 +283,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
             ? ArrayPool<byte>.Shared.Rent(maxUncompressed)
             : [];
 
-        return new DatumFileSeekSession(Pool, Reader, columnBatch, compressedBuffer, decompressedBuffer);
+        return new DatumFileSeekSession(Pool, Reader, columnBatch, compressedBuffer, decompressedBuffer, SidecarStoreId);
     }
 
     /// <inheritdoc/>

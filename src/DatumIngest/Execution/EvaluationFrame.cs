@@ -20,10 +20,12 @@ namespace DatumIngest.Execution;
 ///     their result straight into an output batch should pass that batch's arena.
 ///   </description></item>
 ///   <item><description>
-///     <see cref="Sidecar"/> — optional <see cref="IBlobSource"/> for resolving
-///     <c>FlagInSidecar</c> DataValues (Large Binary Objects stored in the
-///     <c>.datum-blob</c> sidecar). Populated by the table provider when a sidecar
-///     accompanies the queried <c>.datum</c> file; left <c>null</c> otherwise.
+///     <see cref="SidecarRegistry"/> — optional registry for resolving
+///     <c>FlagInSidecar</c> DataValues (Large Binary Objects stored in
+///     <c>.datum-blob</c> sidecars). Each value carries a <c>storeId</c> byte that
+///     looks up the right <see cref="IBlobSource"/> here. Populated by frame builders
+///     from <c>ExecutionContext.SidecarRegistry</c>; left <c>null</c> outside the
+///     query pipeline.
 ///   </description></item>
 /// </list>
 /// The arenas are passed separately because the streaming pipeline typically reads
@@ -48,37 +50,38 @@ public readonly struct EvaluationFrame
     public Row? OuterRow { get; }
 
     /// <summary>
-    /// Optional Large Binary Object source (<c>.datum-blob</c> sidecar) backing
-    /// <c>FlagInSidecar</c> DataValues for the queried table. <c>null</c> when the
-    /// table has no sidecar; non-null when the table provider supplies one.
+    /// Optional sidecar registry for resolving <c>FlagInSidecar</c> DataValues. The
+    /// registry maps each value's <c>storeId</c> byte to the <see cref="IBlobSource"/>
+    /// that backs its bytes; multi-table queries thread the same registry through every
+    /// frame so joined rows can resolve cells from different sidecars correctly.
     /// </summary>
-    public IBlobSource? Sidecar { get; }
+    public SidecarRegistry? SidecarRegistry { get; }
 
     /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
-    /// <paramref name="sidecar"/> when the queried table has a <c>.datum-blob</c> sidecar
-    /// so accessors like <c>AsImage</c> can resolve sidecar-backed binary values.
+    /// <paramref name="sidecarRegistry"/> when the query touches sidecar-bound tables
+    /// so accessors like <c>AsImage</c> can resolve sidecar-backed values.
     /// </summary>
     public EvaluationFrame(
         Row row,
         IValueStore source,
         IValueStore target,
         Row? outerRow = null,
-        IBlobSource? sidecar = null)
+        SidecarRegistry? sidecarRegistry = null)
     {
         Row = row;
         Source = source;
         Target = target;
         OuterRow = outerRow;
-        Sidecar = sidecar;
+        SidecarRegistry = sidecarRegistry;
     }
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
-    /// outer-row context, and sidecar source. Used when the evaluator descends into a
-    /// derived row (e.g. a lambda body's augmented row).
+    /// outer-row context, and sidecar registry. Used when the evaluator descends into
+    /// a derived row (e.g. a lambda body's augmented row).
     /// </summary>
-    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, Sidecar);
+    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, SidecarRegistry);
 }
