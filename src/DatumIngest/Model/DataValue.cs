@@ -694,6 +694,91 @@ public readonly struct DataValue : IEquatable<DataValue>
     };
 
     /// <summary>
+    /// Universal typed-array reader: dispatches across inline, sidecar, and arena
+    /// storage paths and returns a <see cref="ReadOnlySpan{T}"/> over the elements,
+    /// so callers don't have to inspect storage flags themselves.
+    /// </summary>
+    /// <typeparam name="T">
+    /// Element type. Must be unmanaged and must match the kind the value was authored
+    /// with (e.g. <c>T = float</c> for a <see cref="DataKind.Float32"/> array). Caller
+    /// is responsible — this method does not check kind/<typeparamref name="T"/>
+    /// agreement because the underlying storage is byte-level.
+    /// </typeparam>
+    /// <param name="store">
+    /// Required when the array is arena-backed; ignored otherwise. Pass the
+    /// <c>EvaluationFrame.Source</c> arena (or whichever store backs the row).
+    /// </param>
+    /// <param name="registry">
+    /// Required when the array is sidecar-backed; ignored otherwise. Pass the
+    /// <c>EvaluationFrame.SidecarRegistry</c> (or the catalog's registry).
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Supported storage paths in this version:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>Inline arrays (<see cref="IsInlineArray"/>): zero-allocation, no parameters needed.</description></item>
+    ///   <item><description>Sidecar-backed arrays (<see cref="IsInSidecar"/>): byte-level read from the registry.</description></item>
+    ///   <item><description>Arena-backed values produced via the new <c>IsArray</c> flag model: byte-level read from <paramref name="store"/>.</description></item>
+    /// </list>
+    /// <para>
+    /// The legacy array kinds (<see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
+    /// <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/>) without the new
+    /// <c>IsArray</c> flag still go through their dedicated accessors
+    /// (<c>AsVector</c>, <c>AsMatrix</c>, etc.) and throw here. They will fold into
+    /// this auto-router as part of the deferred kind-consolidation cleanup.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the value isn't an array, when a required parameter is missing for
+    /// the resolved storage path, or when the value uses one of the legacy array
+    /// kinds that this method doesn't yet route through.
+    /// </exception>
+    public ReadOnlySpan<T> AsArraySpan<T>(IValueStore? store = null, SidecarRegistry? registry = null)
+        where T : unmanaged
+    {
+        if (!IsArray)
+        {
+            throw new InvalidOperationException(
+                $"AsArraySpan called on a non-array value (Kind={_kind}, IsArray=false). " +
+                "Use the scalar accessor or check IsArray first.");
+        }
+
+        if (IsInlineArray)
+        {
+            return AsInlineArraySpan<T>();
+        }
+
+        if (IsInSidecar)
+        {
+            ReadOnlySpan<byte> sidecarBytes = ReadSidecarBytes(registry);
+            return MemoryMarshal.Cast<byte, T>(sidecarBytes);
+        }
+
+        // Arena-backed via the new IsArray flag model: bytes live at (_p0, _p1) in
+        // the store. Reinterpret the byte span as ReadOnlySpan<T>.
+        if ((_flags & DataValueFlags.IsArray) != 0 && (_flags & DataValueFlags.InArena) != 0)
+        {
+            if (store is null)
+            {
+                throw new InvalidOperationException(
+                    "AsArraySpan: arena-backed array requires an IValueStore. " +
+                    "Pass the frame's Source arena.");
+            }
+            ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(_p0, _p1);
+            return MemoryMarshal.Cast<byte, T>(arenaBytes);
+        }
+
+        // Legacy array kinds (Vector/Matrix/Tensor/Array) reach IsArray=true via the
+        // kind-based fallback in the IsArray getter, but their byte coordinates and
+        // shape are managed by their dedicated accessors. They aren't routed here
+        // until the kind-consolidation cleanup folds them into the IsArray-flag model.
+        throw new InvalidOperationException(
+            $"AsArraySpan does not yet route DataKind.{_kind} arrays. " +
+            "Use the kind-specific accessor (AsVector / AsMatrix / AsTensor / AsArray) for legacy arrays.");
+    }
+
+    /// <summary>
     /// Creates an <see cref="DataKind.Image"/> value that references bytes already
     /// written to an <see cref="IValueStore"/> at the given <paramref name="offset"/>
     /// and <paramref name="length"/>. Use when the bytes were streamed directly into

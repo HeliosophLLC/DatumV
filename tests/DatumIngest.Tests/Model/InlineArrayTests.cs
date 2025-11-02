@@ -144,4 +144,35 @@ public sealed class InlineArrayTests : ServiceTestBase
         Assert.Equal(value.AsInlineArraySpan<float>().ToArray(),
                      stabilized.AsInlineArraySpan<float>().ToArray());
     }
+
+    // ─── Phase A4: AsArraySpan auto-router ───
+
+    [Fact]
+    public void AsArraySpan_DispatchesToInline_ForInlineArray()
+    {
+        // No store / registry needed — auto-router recognises the inline flag.
+        DataValue value = DataValue.FromInlineArray<int>([10, 20, 30, 40], DataKind.Int32);
+
+        ReadOnlySpan<int> elements = value.AsArraySpan<int>();
+        Assert.Equal(new[] { 10, 20, 30, 40 }, elements.ToArray());
+    }
+
+    [Fact]
+    public void AsArraySpan_TypedFloat32_RoundTrips()
+    {
+        DataValue value = DataValue.FromInlineArray<float>([0.5f, 1.5f, -2.5f], DataKind.Float32);
+
+        ReadOnlySpan<float> elements = value.AsArraySpan<float>();
+        Assert.Equal(new[] { 0.5f, 1.5f, -2.5f }, elements.ToArray());
+    }
+
+    [Fact]
+    public void AsArraySpan_OnScalar_Throws()
+    {
+        DataValue scalar = DataValue.FromInt32(42);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => scalar.AsArraySpan<int>());
+        Assert.Contains("non-array", ex.Message);
+    }
 }
