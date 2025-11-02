@@ -80,7 +80,18 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// </summary>
         IsArray = 0x08,
 
-        // 0x10, 0x20, 0x40, 0x80 reserved for future use (e.g. InlineArray).
+        /// <summary>
+        /// Array payload is packed inline into <c>_p0</c>-<c>_p3</c> rather than living
+        /// in an external store. Combined with <see cref="IsArray"/>: total payload size
+        /// (count × sizeof(element)) must fit in 16 bytes. Element count lives in the
+        /// low byte of <c>_charCount</c>. Useful for small typed arrays — Float32[4]
+        /// (quaternions), Int32[4], Float64[2], UInt8[16] — that would otherwise pay
+        /// for an arena allocation. Self-contained for retention / sort / hash; no
+        /// arena or registry dereference needed.
+        /// </summary>
+        InlineArray = 0x10,
+
+        // 0x20, 0x40, 0x80 reserved for future use.
     }
 
     /// <summary>Maximum representable length for a sidecar-backed value (40-bit cap, ~1 TiB).</summary>
@@ -189,6 +200,22 @@ public readonly struct DataValue : IEquatable<DataValue>
             or DataKind.Matrix
             or DataKind.Tensor
             or DataKind.Array;
+
+    /// <summary>
+    /// Whether this value's array payload is packed inline into <c>_p0</c>-<c>_p3</c>
+    /// (no arena or sidecar reference). True only when both <see cref="DataValueFlags.IsArray"/>
+    /// and <see cref="DataValueFlags.InlineArray"/> are set. Reading the elements is a
+    /// direct span over the inline payload region; no store dereference required.
+    /// </summary>
+    public bool IsInlineArray =>
+        (_flags & (DataValueFlags.IsArray | DataValueFlags.InlineArray))
+            == (DataValueFlags.IsArray | DataValueFlags.InlineArray);
+
+    /// <summary>
+    /// Element count for inline arrays (0-16). Stored in the low byte of <c>_charCount</c>.
+    /// Only meaningful when <see cref="IsInlineArray"/> is <c>true</c>.
+    /// </summary>
+    internal byte InlineArrayElementCount => (byte)(_charCount & 0xFF);
 
     /// <summary>
     /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
@@ -532,6 +559,139 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return new(kind, flags: DataValueFlags.InSidecar, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
     }
+
+    // ───────────────────────── Inline arrays ─────────────────────────
+
+    /// <summary>
+    /// Maximum byte length for an inline array payload — equals the size of the
+    /// <c>_p0</c>-<c>_p3</c> payload region.
+    /// </summary>
+    private const int InlineArrayMaxBytes = 16;
+
+    /// <summary>
+    /// Creates a typed-array <see cref="DataValue"/> with elements packed inline into
+    /// the struct's 16-byte payload region. No arena allocation, no store dereference,
+    /// no <see cref="DataValueRetention.Stabilize"/> copy required — fully self-contained.
+    /// Useful for small fixed-shape arrays: <c>Float32[4]</c> (quaternions, RGBA, 3D
+    /// points), <c>Int32[4]</c>, <c>Float64[2]</c> (lat/lon), <c>UInt8[16]</c>
+    /// (UUID-like byte tags).
+    /// </summary>
+    /// <typeparam name="T">Unmanaged element type matching <paramref name="elementKind"/>.</typeparam>
+    /// <param name="elements">The elements to pack. <c>elements.Length * sizeof(T)</c> must fit in 16 bytes.</param>
+    /// <param name="elementKind">
+    /// Stored as <see cref="Kind"/>. The caller is responsible for the kind matching
+    /// <typeparamref name="T"/> (e.g. <see cref="DataKind.Float32"/> with <c>T = float</c>);
+    /// no runtime check is performed because the lookup at read time is by kind, not by
+    /// the original generic argument.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <c>elements.Length * sizeof(T)</c> exceeds 16, or when
+    /// <c>elements.Length</c> exceeds 255 (the byte cap on the count field).
+    /// </exception>
+    public static DataValue FromInlineArray<T>(ReadOnlySpan<T> elements, DataKind elementKind)
+        where T : unmanaged
+    {
+        int elementSize = Unsafe.SizeOf<T>();
+        int byteCount = elements.Length * elementSize;
+        if (byteCount > InlineArrayMaxBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(elements), elements.Length,
+                $"Inline array payload {byteCount} bytes ({elements.Length} × {elementSize}) " +
+                $"exceeds the {InlineArrayMaxBytes}-byte limit. Use the arena-backed array factory instead.");
+        }
+        if (elements.Length > byte.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(elements), elements.Length,
+                $"Inline array element count {elements.Length} exceeds the 255-element field cap.");
+        }
+
+        // Pack element bytes into the four payload words via a stack buffer. The buffer
+        // is 16 bytes (= InlineArrayMaxBytes), and the validated byteCount fits within
+        // it, so the unfilled tail stays zero — readers slice by element count, not by
+        // buffer size, so the trailing zeros don't leak.
+        Span<byte> buffer = stackalloc byte[InlineArrayMaxBytes];
+        MemoryMarshal.AsBytes(elements).CopyTo(buffer);
+
+        int p0 = MemoryMarshal.Read<int>(buffer[..4]);
+        int p1 = MemoryMarshal.Read<int>(buffer[4..8]);
+        int p2 = MemoryMarshal.Read<int>(buffer[8..12]);
+        int p3 = MemoryMarshal.Read<int>(buffer[12..16]);
+
+        return new(
+            elementKind,
+            flags: DataValueFlags.IsArray | DataValueFlags.InlineArray,
+            p0: p0, p1: p1, p2: p2, p3: p3,
+            charCount: (ushort)elements.Length);
+    }
+
+    /// <summary>
+    /// Returns the inline-array elements as a typed read-only span. The span points
+    /// directly into the struct's payload region via a managed reference, so it is
+    /// valid for the lifetime of <c>this</c> (or any copy — <see cref="DataValue"/>
+    /// is a value type, so the elements follow the struct).
+    /// </summary>
+    /// <typeparam name="T">Element type. Must match the kind the value was authored
+    /// with — caller is responsible for using a sensible <typeparamref name="T"/>.</typeparam>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="IsInlineArray"/> is <c>false</c> — caller should branch
+    /// on the flag before invoking.
+    /// </exception>
+    public ReadOnlySpan<T> AsInlineArraySpan<T>() where T : unmanaged
+    {
+        if (!IsInlineArray)
+        {
+            throw new InvalidOperationException(
+                "AsInlineArraySpan called on a non-inline value. Check IsInlineArray before invoking.");
+        }
+        // Reinterpret the payload region's first int field as ref T and build a span
+        // covering the active element count. Same idiom as SidecarOffset / SidecarLength
+        // accessors above; works without `fixed` because the ref keeps the struct
+        // tracked by the GC via Unsafe.AsRef on a readonly field.
+        ref T head = ref Unsafe.As<int, T>(ref Unsafe.AsRef(in _p0));
+        return MemoryMarshal.CreateReadOnlySpan(ref head, InlineArrayElementCount);
+    }
+
+    /// <summary>
+    /// Returns the raw inline-array bytes. Equivalent to
+    /// <see cref="AsInlineArraySpan{T}"/> with <c>T = byte</c>, but more convenient when
+    /// the caller doesn't need a typed span.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="IsInlineArray"/> is <c>false</c>.
+    /// </exception>
+    public ReadOnlySpan<byte> InlineArrayBytes
+    {
+        get
+        {
+            if (!IsInlineArray)
+            {
+                throw new InvalidOperationException(
+                    "InlineArrayBytes accessed on a non-inline value. Check IsInlineArray first.");
+            }
+            int byteCount = InlineArrayElementCount * ElementByteSize(_kind);
+            ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
+            return MemoryMarshal.CreateReadOnlySpan(ref head, byteCount);
+        }
+    }
+
+    /// <summary>
+    /// Byte size of a single element of the given primitive <see cref="DataKind"/>.
+    /// Used by <see cref="InlineArrayBytes"/> to compute the active byte count from
+    /// the stored element count. Throws for kinds without a fixed element size.
+    /// </summary>
+    private static int ElementByteSize(DataKind kind) => kind switch
+    {
+        DataKind.UInt8 or DataKind.Int8 or DataKind.Boolean => 1,
+        DataKind.UInt16 or DataKind.Int16 => 2,
+        DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date => 4,
+        DataKind.UInt64 or DataKind.Int64 or DataKind.Float64
+            or DataKind.DateTime or DataKind.Time or DataKind.Duration => 8,
+        DataKind.Uuid => 16,
+        _ => throw new InvalidOperationException(
+            $"DataKind.{kind} has no fixed element byte size — inline arrays of this kind are not supported."),
+    };
 
     /// <summary>
     /// Creates an <see cref="DataKind.Image"/> value that references bytes already

@@ -47,6 +47,11 @@ public static class DataValueRetention
         // the sidecar's is 64-bit.
         if (value.IsInSidecar) return value;
 
+        // Inline arrays carry their elements in the struct's _p0-_p3 payload region.
+        // The bytes follow the value through any copy — no external store backs them,
+        // so stabilisation across arena boundaries is a pass-through.
+        if (value.IsInlineArray) return value;
+
         return value.Kind switch
         {
             // Fixed-size scalars: self-contained in the struct's inline payload bytes.
