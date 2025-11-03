@@ -65,14 +65,28 @@ public sealed class Pool
     /// <returns>The rented and copied data value array.</returns>
     public DataValue[] RentAndCopyDataValues(ReadOnlySpan<DataValue> source, Arena sourceArena, Arena targetArena)
     {
-        DataValue[] buffer = Backing.RentDataValues(source.Length);
-        
-        for (int i = 0; i < source.Length; i++)
+        DataValue[]? buffer = null;
+        try
         {
-            buffer[i] = DataValueRetention.Stabilize(source[i], sourceArena, targetArena);
-        }
+            buffer = Backing.RentDataValues(source.Length);
+            
+            for (int i = 0; i < source.Length; i++)
+            {
+                buffer[i] = DataValueRetention.Stabilize(source[i], sourceArena, targetArena);
+            }
 
-        return buffer;
+            return buffer;
+        }
+        catch
+        {
+            // If stabilization or copying throws, return the buffer to the pool to avoid leaks.
+            if (buffer != null)
+            {
+                ReturnDataValues(buffer);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -80,6 +94,21 @@ public sealed class Pool
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity, Arena? arena = null)
         => Backing.RentRowBatch(columnLookup, capacity, arena);
+
+
+    /// <summary>
+    /// Rents a <see cref="RowBatch"/> from the pool, copies the contents of the <paramref name="inputBatch"/>
+    /// into it, and returns the new batch. The input batch is returned to the pool after copying.
+    /// </summary>
+    /// <param name="inputBatch">The input row batch.</param>
+    /// <param name="columnLookup">The column lookup for the new batch.</param>
+    /// <returns>The new row batch.</returns>
+    public RowBatch RebindRowBatch(RowBatch inputBatch, ColumnLookup columnLookup)
+    {
+        inputBatch.Clear(out Row[] rows, out Arena arena, out int count);
+
+        return new(columnLookup, rows, arena, count);
+    }
 
     /// <summary>
     /// Rents a <see cref="ColumnBatch"/> with the specified column lookup and row capacity.

@@ -12,7 +12,7 @@ namespace DatumIngest.Model;
 /// <para>
 /// RowBatch is a dumb container — it does not manage <see cref="DataValue"/>
 /// array lifetimes. Lifecycle management is handled by <see cref="Pooling.Pool"/>
-/// via <see cref="Pooling.Pool.ReturnRowBatch(RowBatch)"/>
+/// via <see cref="Pooling.Pool.RentRowBatch(ColumnLookup, int, Arena?)"/>
 /// and <see cref="Pooling.Pool.ReturnRowBatch(RowBatch)"/>.
 /// </para>
 /// </remarks>
@@ -22,11 +22,12 @@ public sealed class RowBatch : IDisposable
     private Arena? _arena;
     private ColumnLookup _columnLookup;
 
-    internal RowBatch(ColumnLookup columnLookup, Row[] rows, Arena arena)
+    internal RowBatch(ColumnLookup columnLookup, Row[] rows, Arena arena, int count = 0)
     {
         _columnLookup = columnLookup;
         _rows = rows;
         _arena = arena;
+        Count = count;
     }
 
     /// <summary>Maximum number of rows this batch can hold.</summary>
@@ -50,6 +51,28 @@ public sealed class RowBatch : IDisposable
     [MemberNotNullWhen(false, nameof(_rows))]
     [MemberNotNullWhen(false, nameof(_arena))]
     public bool Disposed { get; private set; }
+
+    /// <summary>
+    /// Clears all fields and returns the backing row and arena as out parameters for reuse.
+    /// Rows are not returned to any pool; their lifecycle is managed separately by operators.
+    /// The batch must not be used after calling this method.
+    /// </summary>
+    /// <param name="rows">The array of rows to return.</param>
+    /// <param name="arena">The arena to return.</param>
+    /// <param name="count">The number of valid rows in the returned array.</param>
+    public void Clear(out Row[] rows, out Arena arena, out int count)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        rows = _rows;
+        arena = _arena;
+        count = Count;
+
+        _rows = [];
+        _arena = null;
+        Count = 0;
+        Disposed = true;
+    }
 
     /// <summary>
     /// Gets the <see cref="Arena"/> associated with this batch.
@@ -146,11 +169,15 @@ public sealed class RowBatch : IDisposable
         }
 
         _arena = null;
-        Array.Clear(_rows, 0, Count);
-        ArrayPool<Row>.Shared.Return(_rows);
-        _rows = Array.Empty<Row>();
-        Count = 0;
 
+        if (_rows != null)
+        {
+            Array.Clear(_rows, 0, Count);
+            ArrayPool<Row>.Shared.Return(_rows);
+            _rows = [];
+        }
+
+        Count = 0;
         Disposed = true;
     }
 
