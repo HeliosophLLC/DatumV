@@ -332,6 +332,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Creates a byte array using the new <c>IsArray</c>-flag model: <see cref="DataKind.UInt8"/>
+    /// with the <c>IsArray</c> and <c>InArena</c> flags set. Equivalent to
+    /// <see cref="FromUInt8Array(byte[], IValueStore)"/> in storage and read semantics
+    /// (same arena coordinates, same byte content); the difference is only in how the
+    /// "this is an array" intent is expressed (flag vs. dedicated kind). Intended as
+    /// the canonical factory for new code while the legacy <c>UInt8Array</c> kind is
+    /// being phased out.
+    /// </summary>
+    public static DataValue FromByteArray(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(
+            DataKind.UInt8,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray,
+            p0: p0, p1: p1);
+    }
+
+    /// <summary>
     /// Creates a <see cref="DataKind.UInt8Array"/> value whose bytes live in a
     /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
     /// 40-bit length; resolution requires an <see cref="IBlobSource"/>, typically the
@@ -346,6 +364,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </param>
     public static DataValue FromUInt8ArrayInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.UInt8Array, offset, length, storeId);
+
+    /// <summary>
+    /// New-model parallel to <see cref="FromUInt8ArrayInSidecar"/>: byte array whose
+    /// bytes live in a <c>.datum-blob</c> sidecar, expressed via
+    /// <see cref="DataKind.UInt8"/> + <c>IsArray</c> + <c>InSidecar</c> flags. Same
+    /// 64-bit offset, 40-bit length, 8-bit <c>storeId</c> packing as the legacy
+    /// factory; the only difference is the kind+flag intent representation.
+    /// </summary>
+    public static DataValue FromByteArrayInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.UInt8, offset, length, storeId, isArray: true);
 
     /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
@@ -536,9 +564,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Packs a sidecar coordinate into the DataValue payload. <c>_p0</c>+<c>_p1</c>
     /// hold the 64-bit offset, <c>_p2</c> + low byte of <c>_p3</c> hold the 40-bit
     /// length, the high 24 bits of <c>_p3</c> are reserved (zero in v1), and the
-    /// low byte of <c>_charCount</c> holds the registry <c>storeId</c>.
+    /// low byte of <c>_charCount</c> holds the registry <c>storeId</c>. Pass
+    /// <paramref name="isArray"/> = <c>true</c> when authoring via the new
+    /// <c>IsArray</c>-flag model (e.g. <c>FromByteArrayInSidecar</c>); legacy
+    /// kinds like <see cref="DataKind.Image"/> and <see cref="DataKind.UInt8Array"/>
+    /// leave it <c>false</c>.
     /// </summary>
-    private static DataValue BuildSidecar(DataKind kind, long offset, long length, byte storeId)
+    private static DataValue BuildSidecar(
+        DataKind kind, long offset, long length, byte storeId, bool isArray = false)
     {
         if (offset < 0)
         {
@@ -557,7 +590,10 @@ public readonly struct DataValue : IEquatable<DataValue>
         int p2 = (int)length;
         int p3 = (int)((length >> 32) & 0xFF);  // high 8 bits of length; high 24 bits of _p3 reserved
 
-        return new(kind, flags: DataValueFlags.InSidecar, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
+        DataValueFlags flags = DataValueFlags.InSidecar;
+        if (isArray) flags |= DataValueFlags.IsArray;
+
+        return new(kind, flags: flags, p0: p0, p1: p1, p2: p2, p3: p3, charCount: storeId);
     }
 
     // ───────────────────────── Inline arrays ─────────────────────────
@@ -797,6 +833,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public static DataValue FromUInt8ArrayAtOffset(int offset, int length) =>
         new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: offset, p1: length);
+
+    /// <summary>
+    /// New-model parallel to <see cref="FromUInt8ArrayAtOffset"/>: arena-slice byte
+    /// array using <see cref="DataKind.UInt8"/> + <c>IsArray</c> + <c>InArena</c> flags
+    /// rather than the legacy <c>UInt8Array</c> kind. The bytes already live in an
+    /// arena at the given coordinates; this factory wraps them without re-storing.
+    /// </summary>
+    public static DataValue FromByteArrayAtOffset(int offset, int length) =>
+        new(
+            DataKind.UInt8,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray,
+            p0: offset, p1: length);
 
     /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
@@ -1545,7 +1593,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public byte[] AsUInt8Array(IValueStore store, SidecarRegistry? registry = null)
     {
-        ThrowIfNullOrWrongKind(DataKind.UInt8Array);
+        // Accept either the legacy DataKind.UInt8Array kind OR the new-model
+        // UInt8 + IsArray-flag form. Both produce byte content at the same
+        // (_p0, _p1) coordinates; only the kind+flag intent representation differs.
+        if (!IsByteArrayKind())
+        {
+            throw new InvalidOperationException(
+                $"AsUInt8Array is only valid for byte arrays (UInt8Array, or UInt8 + IsArray); got {_kind}.");
+        }
+        if (IsNull)
+        {
+            throw new InvalidOperationException("Value is null.");
+        }
 
         if (IsInSidecar)
         {
@@ -1553,6 +1612,17 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
         return store.RetrieveBytes(_p0, _p1);
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when this value carries a byte-array payload — either via
+    /// the legacy <see cref="DataKind.UInt8Array"/> kind or via the new-model
+    /// <see cref="DataKind.UInt8"/> + <see cref="DataValueFlags.IsArray"/> flag pair.
+    /// Used by <see cref="AsUInt8Array(IValueStore, DatumFile.Sidecar.SidecarRegistry?)"/>
+    /// and <see cref="AsByteSpan"/> to bridge both shapes during the migration.
+    /// </summary>
+    private bool IsByteArrayKind() =>
+        _kind == DataKind.UInt8Array
+        || (_kind == DataKind.UInt8 && (_flags & DataValueFlags.IsArray) != 0);
 
     /// <summary>
     /// Returns the byte payload for a <see cref="DataKind.UInt8Array"/> or
@@ -1567,9 +1637,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </remarks>
     public ReadOnlySpan<byte> AsByteSpan(IValueStore store, SidecarRegistry? registry = null)
     {
-        if (_kind is not (DataKind.UInt8Array or DataKind.Image))
+        // Accept legacy UInt8Array, Image, and the new-model UInt8 + IsArray form.
+        // All three carry byte content at (_p0, _p1) — read path is identical.
+        if (_kind != DataKind.Image && !IsByteArrayKind())
         {
-            throw new InvalidOperationException($"AsByteSpan is only valid for UInt8Array and Image; got {_kind}.");
+            throw new InvalidOperationException(
+                $"AsByteSpan is only valid for byte-content kinds (Image, UInt8Array, or UInt8 + IsArray); got {_kind}.");
         }
 
         if (IsInSidecar)
