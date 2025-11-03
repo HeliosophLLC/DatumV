@@ -54,6 +54,15 @@ public static class DataValueRetention
 
         return value.Kind switch
         {
+            // Byte array via the new IsArray flag — copy bytes into retention store.
+            // Must come before the scalar-UInt8 arm so it matches first; otherwise
+            // the scalar arm would return the value unchanged (incorrect for an
+            // arena-backed byte array). Parallel to the legacy UInt8Array case
+            // below; PR3 removes that case.
+            DataKind.UInt8 when value.IsArray => DataValue.FromByteArray(
+                value.AsUInt8Array(sourceStore),
+                retentionStore),
+
             // Fixed-size scalars: self-contained in the struct's inline payload bytes.
             DataKind.Unknown
                 or DataKind.Boolean

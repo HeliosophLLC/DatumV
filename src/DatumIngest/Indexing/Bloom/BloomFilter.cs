@@ -306,6 +306,9 @@ public sealed class BloomFilter
     {
         switch (value.Kind)
         {
+            // New-model byte array (UInt8 + IsArray) handled alongside legacy UInt8Array.
+            // PR3 will drop the UInt8Array case.
+            case DataKind.UInt8 when value.IsArray:
             case DataKind.UInt8Array:
                 return value.AsUInt8Array(store);
             case DataKind.Vector:

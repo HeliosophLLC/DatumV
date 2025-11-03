@@ -50,6 +50,10 @@ public static class DatumEncoderFactory
         {
             DataKind.Float32 => FloatScalarEncoder,
             DataKind.Float64 => FloatScalarEncoder,
+            // Byte-array via the new IsArray flag must match before scalar UInt8.
+            // Switch expression checks `when` clauses in declaration order; the more
+            // specific case wins. PR3 will remove the legacy UInt8Array arm below.
+            DataKind.UInt8 when descriptor.IsArray => BinaryEncoder,
             DataKind.UInt8 => IntegerEncoder,
             DataKind.Int8 => IntegerEncoder,
             DataKind.Int16 => IntegerEncoder,

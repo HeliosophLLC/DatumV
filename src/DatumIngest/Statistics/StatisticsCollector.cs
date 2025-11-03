@@ -151,6 +151,12 @@ public sealed class StatisticsCollector
         // if the first non-null value is sidecar-backed, every value is.
         bool sidecarBacked = firstValue.IsInSidecar;
 
+        // True when this column holds byte arrays via the new IsArray flag model
+        // (Kind=UInt8 + IsArray) rather than the legacy DataKind.UInt8Array. PR3
+        // will remove the legacy kind; until then we recognise both for stats.
+        bool isByteArray = kind == DataKind.UInt8Array
+            || (kind == DataKind.UInt8 && firstValue.IsArray);
+
         List<IStatisticAccumulator> accumulators =
         [
             new CountAccumulator(),
@@ -162,13 +168,16 @@ public sealed class StatisticsCollector
         // and tensors are treated as opaque payloads — HLL on their arena offsets
         // would just return the row count. Perceptual-hash cardinality is available
         // on demand via the phash() SQL function.
-        if (kind is not (DataKind.Image or DataKind.UInt8Array or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
+        if (!isByteArray
+            && kind is not (DataKind.Image or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
         {
             accumulators.Add(new CardinalityAccumulator());
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
         }
 
-        if (DataValueComparer.IsNumericScalar(kind))
+        // IsNumericScalar returns true for UInt8 — but a byte-array value (UInt8 +
+        // IsArray) is not a scalar and must not get numeric stats. Gate explicitly.
+        if (!isByteArray && DataValueComparer.IsNumericScalar(kind))
         {
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());
@@ -190,7 +199,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new ImageStatsAccumulator());
         }
 
-        if (kind is DataKind.UInt8Array)
+        if (isByteArray)
         {
             accumulators.Add(new BinarySizeAccumulator());
         }

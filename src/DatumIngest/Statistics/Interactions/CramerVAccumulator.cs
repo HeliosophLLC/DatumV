@@ -105,10 +105,12 @@ public sealed class CramerVAccumulator
     internal static string? ToCategorical(DataValue value)
     {
         // Numeric and composite kinds are not meaningful as categorical keys.
+        // Array-kinded values (legacy UInt8Array/Vector/Matrix/Tensor/Array OR
+        // any new-model Kind+IsArray) are also opaque to category keying.
+        if (value.IsArray) return null;
         if (DataValueComparer.IsNumericScalar(value.Kind))
             return null;
-        if (value.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor
-            or DataKind.UInt8Array or DataKind.Image or DataKind.Array or DataKind.Struct)
+        if (value.Kind is DataKind.Image or DataKind.Struct)
             return null;
 
         return value.ToDisplayString();

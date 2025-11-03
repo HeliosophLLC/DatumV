@@ -53,6 +53,9 @@ public static class DatumDecoderFactory
         {
             DataKind.Float32 => FloatScalarDecoder,
             DataKind.Float64 => FloatScalarDecoder,
+            // Byte-array via the new IsArray flag must match before scalar UInt8.
+            // The legacy UInt8Array arm below stays during PR2; PR3 removes it.
+            DataKind.UInt8 when descriptor.IsArray => BinaryDecoder,
             DataKind.UInt8 => IntegerDecoder,
             DataKind.Int8 => IntegerDecoder,
             DataKind.Int16 => IntegerDecoder,

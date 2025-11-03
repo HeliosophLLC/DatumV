@@ -117,10 +117,14 @@ internal sealed class MemoryEstimator
     {
         for (int index = 0; index < row.FieldCount; index++)
         {
-            DataKind kind = row[index].Kind;
-            if (kind is DataKind.String or DataKind.Vector or DataKind.Matrix
-                or DataKind.Tensor or DataKind.Image or DataKind.UInt8Array
-                or DataKind.JsonValue or DataKind.Array or DataKind.Struct)
+            DataValue field = row[index];
+            // Any array-kinded value (legacy UInt8Array/Vector/Matrix/Tensor/Array
+            // OR new-model Kind+IsArray) is variable-width.
+            if (field.IsArray) return false;
+
+            DataKind kind = field.Kind;
+            if (kind is DataKind.String or DataKind.Image
+                or DataKind.JsonValue or DataKind.Struct)
             {
                 return false;
             }
@@ -146,6 +150,9 @@ internal sealed class MemoryEstimator
 
             bytes += value.Kind switch
             {
+                // Byte array (new-model UInt8 + IsArray) — match before scalar UInt8.
+                // Legacy UInt8Array arm below stays during PR2; PR3 removes it.
+                DataKind.UInt8 when value.IsArray => value.AsUInt8Array().Length,
                 DataKind.Float32 => 4,
                 DataKind.UInt8 => 1,
                 DataKind.Boolean => 1,
