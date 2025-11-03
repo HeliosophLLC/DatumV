@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -45,28 +46,51 @@ public sealed class AliasOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        Pool pool = context.Pool;
         AliasSchema? schema = null;
+        ColumnLookup? columnLookup = null;
+
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            RowBatch outputBatch = context.LocalBufferPool.RentBatch(inputBatch.Count);
-            for (int i = 0; i < inputBatch.Count; i++)
+            if (inputBatch.Count == 0)
             {
-                Row row = inputBatch[i];
-                schema ??= AliasSchema.Build(_alias, row);
-                outputBatch.Add(schema.Apply(row));
+                pool.ReturnRowBatch(inputBatch);
+                continue;
             }
 
-            inputBatch.Return();
-            yield return outputBatch;
+            
+            RowBatch? outputBatch = null;
+            try {
+                schema ??= AliasSchema.Build(_alias, inputBatch[0]);
+                columnLookup ??= schema.GetColumnLookup();
+                outputBatch = pool.RebindRowBatch(inputBatch, columnLookup);
+            }
+            catch
+            {
+                if (outputBatch != null)
+                {
+                    pool.ReturnRowBatch(outputBatch);
+                }
+
+                if (!inputBatch.Disposed)
+                {
+                    pool.ReturnRowBatch(inputBatch);
+                }
+
+                throw;
+            }
+
+            if (outputBatch != null)
+            {
+                yield return outputBatch;
+            }
         }
     }
 
     /// <summary>
     /// Pre-computed doubled column schema for alias expansion. Built once from
-    /// the first source row and reused for all subsequent rows. The
-    /// <see cref="Apply"/> method shares the source row's backing array
-    /// with zero copy — only the column names and lookup index change.
+    /// the first source row and reused for all subsequent rows.
     /// </summary>
     private sealed class AliasSchema
     {
@@ -79,6 +103,11 @@ public sealed class AliasOperator : IQueryOperator
         {
             _names = names;
             _nameIndex = nameIndex;
+        }
+
+        public ColumnLookup GetColumnLookup()
+        {
+            return new ColumnLookup(_names, _nameIndex);
         }
 
         /// <summary>
@@ -107,16 +136,6 @@ public sealed class AliasOperator : IQueryOperator
             }
 
             return new AliasSchema(names, nameIndex);
-        }
-
-        /// <summary>
-        /// Applies the alias schema to a source row by sharing the source row's
-        /// backing <see cref="DataValue"/> array. Zero allocation, zero copy — only
-        /// the column names and lookup index change.
-        /// </summary>
-        internal Row Apply(Row sourceRow)
-        {
-            return new Row(_names, sourceRow.RawValues, _nameIndex);
         }
     }
 }
