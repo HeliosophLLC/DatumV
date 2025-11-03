@@ -56,6 +56,6 @@ public sealed class Base64DecodeFunction : IScalarFunction
         byte[] result = new byte[maxBytes];
         Convert.TryFromBase64Chars(chars, result, out int bytesWritten);
         System.Buffers.ArrayPool<char>.Shared.Return(rented);
-        return DataValue.FromUInt8Array(result.AsSpan(0, bytesWritten).ToArray(), store);
+        return DataValue.FromByteArray(result.AsSpan(0, bytesWritten).ToArray(), store);
     }
 }

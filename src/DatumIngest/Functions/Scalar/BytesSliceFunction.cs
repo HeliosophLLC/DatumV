@@ -60,6 +60,6 @@ public sealed class BytesSliceFunction : IScalarFunction
         length = System.Math.Max(0, System.Math.Min(length, source.Length - start));
 
         byte[] result = source.Slice(start, length).ToArray();
-        return DataValue.FromUInt8Array(result, store);
+        return DataValue.FromByteArray(result, store);
     }
 }

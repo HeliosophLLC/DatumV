@@ -127,7 +127,7 @@ internal static class DataValueReader
     {
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
-        return DataValue.FromUInt8Array(bytes, store);
+        return DataValue.FromByteArray(bytes, store);
     }
 
     private static DataValue ReadVector(BinaryReader reader)

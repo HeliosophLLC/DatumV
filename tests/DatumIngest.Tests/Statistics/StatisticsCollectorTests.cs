@@ -217,7 +217,7 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
         DataValue value = kind switch
         {
             DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }, _arena),
-            DataKind.UInt8Array => DataValue.FromUInt8Array(new byte[] { 1, 2, 3 }, _arena),
+            DataKind.UInt8Array => DataValue.FromByteArray(new byte[] { 1, 2, 3 }, _arena),
             DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }, _arena),
             DataKind.Matrix => DataValue.FromMatrix(new float[] { 1.0f, 2.0f }, 1, 2, _arena),
             DataKind.Tensor => DataValue.FromTensor(new float[] { 1.0f }, new int[] { 1 }, _arena),

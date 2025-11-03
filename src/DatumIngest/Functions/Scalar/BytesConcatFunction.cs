@@ -82,6 +82,6 @@ public sealed class BytesConcatFunction : IScalarFunction
             }
         }
 
-        return DataValue.FromUInt8Array(result, store);
+        return DataValue.FromByteArray(result, store);
     }
 }

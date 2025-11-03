@@ -395,7 +395,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             TimeOnly time => DataValue.FromTime(time),
             TimeSpan ts => DataValue.FromDuration(ts),
             Guid g => DataValue.FromUuid(g),
-            byte[] bytes => DataValue.FromUInt8Array(bytes, arena),
+            byte[] bytes => DataValue.FromByteArray(bytes, arena),
             _ => throw new ArgumentException(
                 $"InMemoryTableProvider cannot materialize cell of type {cell.GetType().FullName}. " +
                 "Pass a supported CLR primitive, a byte[], or a DataValue directly."),

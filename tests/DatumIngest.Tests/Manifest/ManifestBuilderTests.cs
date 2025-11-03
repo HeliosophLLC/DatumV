@@ -142,8 +142,8 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     public void Build_BinaryColumn_ProducesBinaryFeatureManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromUInt8Array([1, 2, 3, 4, 5], _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromUInt8Array([10, 20], _arena)), _arena);
+        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromByteArray([1, 2, 3, 4, 5], _arena)), _arena);
+        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromByteArray([10, 20], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["raw"] = DataKind.UInt8Array };

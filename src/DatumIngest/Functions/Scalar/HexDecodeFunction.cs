@@ -54,6 +54,6 @@ public sealed class HexDecodeFunction : IScalarFunction
         ReadOnlySpan<char> chars = input.AsStringSpan(store, out char[] rented);
         byte[] result = Convert.FromHexString(chars);
         System.Buffers.ArrayPool<char>.Shared.Return(rented);
-        return DataValue.FromUInt8Array(result, store);
+        return DataValue.FromByteArray(result, store);
     }
 }

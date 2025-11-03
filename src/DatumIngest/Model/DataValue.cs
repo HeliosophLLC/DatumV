@@ -332,19 +332,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Creates a byte array using the new <c>IsArray</c>-flag model: <see cref="DataKind.UInt8"/>
-    /// with the <c>IsArray</c> and <c>InArena</c> flags set. Equivalent to
-    /// <see cref="FromUInt8Array(byte[], IValueStore)"/> in storage and read semantics
-    /// (same arena coordinates, same byte content); the difference is only in how the
-    /// "this is an array" intent is expressed (flag vs. dedicated kind). Intended as
-    /// the canonical factory for new code while the legacy <c>UInt8Array</c> kind is
-    /// being phased out.
+    /// Creates a byte array using the migration-stage model: <see cref="DataKind.UInt8Array"/>
+    /// with the new <c>IsArray</c> flag set. During the multi-PR migration off
+    /// <c>DataKind.UInt8Array</c>, this factory produces values that satisfy both
+    /// kind-based switches (still matching <c>case DataKind.UInt8Array</c>) and
+    /// flag-based dispatch (<see cref="IsArray"/> property and the new
+    /// <c>case DataKind.UInt8 when IsArray</c> pattern). The final cutover PR will
+    /// flip the kind to <see cref="DataKind.UInt8"/> once all switch dispatches have
+    /// been migrated to the flag-based form.
     /// </summary>
     public static DataValue FromByteArray(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
         return new(
-            DataKind.UInt8,
+            DataKind.UInt8Array,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
             p0: p0, p1: p1);
     }
@@ -366,14 +367,14 @@ public readonly struct DataValue : IEquatable<DataValue>
         BuildSidecar(DataKind.UInt8Array, offset, length, storeId);
 
     /// <summary>
-    /// New-model parallel to <see cref="FromUInt8ArrayInSidecar"/>: byte array whose
-    /// bytes live in a <c>.datum-blob</c> sidecar, expressed via
-    /// <see cref="DataKind.UInt8"/> + <c>IsArray</c> + <c>InSidecar</c> flags. Same
-    /// 64-bit offset, 40-bit length, 8-bit <c>storeId</c> packing as the legacy
-    /// factory; the only difference is the kind+flag intent representation.
+    /// Migration-stage parallel to <see cref="FromUInt8ArrayInSidecar"/>: byte array
+    /// in a <c>.datum-blob</c> sidecar, with the new <c>IsArray</c> flag set on top
+    /// of <see cref="DataKind.UInt8Array"/>. Switches on <c>UInt8Array</c> still
+    /// match; <see cref="IsArray"/> reports <c>true</c> via the flag. The final
+    /// cutover PR flips the kind to <see cref="DataKind.UInt8"/>.
     /// </summary>
     public static DataValue FromByteArrayInSidecar(long offset, long length, byte storeId = 0) =>
-        BuildSidecar(DataKind.UInt8, offset, length, storeId, isArray: true);
+        BuildSidecar(DataKind.UInt8Array, offset, length, storeId, isArray: true);
 
     /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
@@ -835,14 +836,15 @@ public readonly struct DataValue : IEquatable<DataValue>
         new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
     /// <summary>
-    /// New-model parallel to <see cref="FromUInt8ArrayAtOffset"/>: arena-slice byte
-    /// array using <see cref="DataKind.UInt8"/> + <c>IsArray</c> + <c>InArena</c> flags
-    /// rather than the legacy <c>UInt8Array</c> kind. The bytes already live in an
-    /// arena at the given coordinates; this factory wraps them without re-storing.
+    /// Migration-stage parallel to <see cref="FromUInt8ArrayAtOffset"/>: arena-slice
+    /// byte array using <see cref="DataKind.UInt8Array"/> + <c>IsArray</c> +
+    /// <c>InArena</c> flags. Bytes already live in the arena at the given
+    /// coordinates; this factory wraps them without re-storing. Final cutover PR
+    /// flips the kind to <see cref="DataKind.UInt8"/>.
     /// </summary>
     public static DataValue FromByteArrayAtOffset(int offset, int length) =>
         new(
-            DataKind.UInt8,
+            DataKind.UInt8Array,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
             p0: offset, p1: length);
 

@@ -53,7 +53,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
 
             byte[] bytes = raw[(poolStart + (int)start)..(poolStart + (int)end)];
 
-            result[rowIndex] = isImage ? DataValue.FromImage(bytes, store) : DataValue.FromUInt8Array(bytes, store);
+            result[rowIndex] = isImage ? DataValue.FromImage(bytes, store) : DataValue.FromByteArray(bytes, store);
         }
 
         return result;
@@ -91,7 +91,7 @@ internal sealed class BinaryColumnDecoder : DatumColumnDecoder
 
             result[rowIndex] = isImage
                 ? DataValue.FromImageInSidecar(offset, length, storeId)
-                : DataValue.FromUInt8ArrayInSidecar(offset, length, storeId);
+                : DataValue.FromByteArrayInSidecar(offset, length, storeId);
         }
 
         return result;

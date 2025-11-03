@@ -21,7 +21,7 @@ internal static class IdxValueReader
             return header.ItemDimensionCount switch
             {
                 0 => DataValue.FromUInt8(itemBuffer[0]),
-                1 => DataValue.FromUInt8Array(itemBuffer.ToArray(), store),
+                1 => DataValue.FromByteArray(itemBuffer.ToArray(), store),
                 _ => CreateImageFromUInt8(header, itemBuffer, store),
             };
         }

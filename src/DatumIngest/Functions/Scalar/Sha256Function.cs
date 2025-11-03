@@ -70,13 +70,13 @@ public sealed class Sha256Function : IScalarFunction
         {
             ReadOnlySpan<byte> inputBytes = input.AsUtf8Span(store);
             byte[] hash = SHA256.HashData(inputBytes);
-            return DataValue.FromUInt8Array(hash, store);
+            return DataValue.FromByteArray(hash, store);
         }
         else
         {
             ReadOnlySpan<byte> inputBytes = input.AsUInt8Array();
             byte[] hash = SHA256.HashData(inputBytes);
-            return DataValue.FromUInt8Array(hash, store);
+            return DataValue.FromByteArray(hash, store);
         }
     }
 }

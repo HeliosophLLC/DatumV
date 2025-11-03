@@ -76,7 +76,7 @@ public static class DataValueRetention
                 value.AsJsonValue(sourceStore),
                 retentionStore),
 
-            DataKind.UInt8Array => DataValue.FromUInt8Array(
+            DataKind.UInt8Array => DataValue.FromByteArray(
                 value.AsUInt8Array(sourceStore),
                 retentionStore),
 
