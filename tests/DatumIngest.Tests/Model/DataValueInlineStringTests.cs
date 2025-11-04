@@ -79,10 +79,10 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
     }
 
     [Fact]
-    public void StringByteLength_Inline_ReturnsUtf8ByteCount()
+    public void ContentByteLength_Inline_ReturnsUtf8ByteCount()
     {
         DataValue dv = DataValue.FromString("café", Store); // 5 UTF-8 bytes
-        Assert.Equal(5, dv.StringByteLength);
+        Assert.Equal(5, dv.ContentByteLength);
     }
 
     [Fact]

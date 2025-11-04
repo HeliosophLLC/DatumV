@@ -5,6 +5,7 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -431,8 +432,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task InlinedOperator_ReExecutesInnerEachTime()
     {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+
         int executionCount = 0;
-        CountingOperator inner = new(() => executionCount++,
+        CountingOperator inner = new(pool, lookup, () => executionCount++,
             MakeRow(("x", DataValue.FromFloat32(1f))));
 
         CommonTableExpressionOperator cteOperator = new(inner, "test_cte", isMaterialized: false);
@@ -454,8 +458,11 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task MaterializedOperator_ExecutesInnerOnce()
     {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+
         int executionCount = 0;
-        CountingOperator inner = new(() => executionCount++,
+        CountingOperator inner = new(pool, lookup, () => executionCount++,
             MakeRow(("x", DataValue.FromFloat32(1f))),
             MakeRow(("x", DataValue.FromFloat32(2f))));
 
@@ -477,12 +484,15 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     [Fact]
     public async Task MaterializedOperator_SpillsToDisk_WhenBudgetExceeded()
     {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["id"]);
+
         // Create rows that will exceed a tiny memory budget.
         Row[] rows = Enumerable.Range(0, 100)
             .Select(index => MakeRow(("id", DataValue.FromFloat32((float)index))))
             .ToArray();
 
-        MockOperator inner = new(rows);
+        MockOperator inner = new(pool, lookup, rows);
 
         CommonTableExpressionOperator cteOperator = new(inner, "spill_test", isMaterialized: true);
 
@@ -498,6 +508,47 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         {
             cteOperator.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Breaking out of the materialized in-memory replay mid-iteration must not throw or
+    /// double-return any batches. The producer's finally only owns the leftover (not-yet-
+    /// yielded) batch; once a yield transfers ownership, the local is null. Consumer
+    /// short-circuits (LIMIT, downstream errors, cancellation) all funnel through this path.
+    /// </summary>
+    [Fact]
+    public async Task MaterializedOperator_ConsumerBreaksMidReplay_CleansUp()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+
+        Row[] rows = Enumerable.Range(0, 20)
+            .Select(index => MakeRow(("x", DataValue.FromFloat32((float)index))))
+            .ToArray();
+
+        MockOperator inner = new(pool, lookup, rows);
+        using CommonTableExpressionOperator cteOperator = new(inner, "break_test", isMaterialized: true);
+
+        // Small batch size so the replay yields multiple batches; we'll abandon iteration
+        // after the first one to exercise the iterator-dispose-mid-yield path.
+        ExecutionContext context = CreateExecutionContext(batchSize: 4);
+
+        int batchesReceived = 0;
+        await foreach (RowBatch batch in cteOperator.ExecuteAsync(context))
+        {
+            batchesReceived++;
+            // Take ownership and abandon iteration. The iterator's hidden DisposeAsync
+            // runs the producer's finally; it must not double-return the batch we just
+            // returned to the pool, and it must not throw on subsequent CTE.Dispose().
+            pool.ReturnRowBatch(batch);
+            break;
+        }
+
+        Assert.Equal(1, batchesReceived);
+        // The CTE still owns its cached batches; Dispose() (via the using) should clean them
+        // up cleanly. If the producer's finally double-returned the just-yielded batch, the
+        // arena underneath the cached batch would already be back in the arena pool and the
+        // dispose path would observe a corrupted refcount or throw.
     }
 
     // ─────────────── Query planner CTE tests ───────────────
@@ -774,7 +825,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     {
         string[] names = columns.Select(column => column.Name).ToArray();
         DataValue[] values = columns.Select(column => column.Value).ToArray();
-        return new Row(names, values);
+        return new Row(new ColumnLookup(names), values);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
@@ -783,75 +834,80 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Yields the supplied rows from a fresh pool-rented <see cref="RowBatch"/>. Row values
+    /// are copied into pool-rented <see cref="DataValue"/> arrays so the batch's lifecycle
+    /// is independent of the original Row instances handed in by the test.
+    /// </summary>
+    private static async IAsyncEnumerable<RowBatch> YieldRowsAsBatches(
+        Pool pool, ColumnLookup lookup, Row[] rows)
+    {
+        const int batchCapacity = 64;
+        RowBatch? outputBatch = null;
+        foreach (Row row in rows)
+        {
+            outputBatch ??= pool.RentRowBatch(lookup, batchCapacity);
+            DataValue[] copy = pool.RentDataValues(row.RawValues.Length);
+            row.RawValues.CopyTo(copy.AsSpan());
+            outputBatch.Add(copy);
+            if (outputBatch.IsFull)
+            {
+                yield return outputBatch;
+                outputBatch = null;
+            }
+        }
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
+        }
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
     /// A mock operator that tracks how many times <see cref="ExecuteAsync"/> is called.
     /// </summary>
     private sealed class CountingOperator : IQueryOperator
     {
+        private readonly Pool _pool;
+        private readonly ColumnLookup _lookup;
         private readonly Action _onExecute;
         private readonly Row[] _rows;
 
-        /// <summary>
-        /// Creates a counting operator.
-        /// </summary>
-        /// <param name="onExecute">Called each time <see cref="ExecuteAsync"/> begins.</param>
-        /// <param name="rows">Rows to yield.</param>
-        public CountingOperator(Action onExecute, params Row[] rows)
+        public CountingOperator(Pool pool, ColumnLookup lookup, Action onExecute, params Row[] rows)
         {
+            _pool = pool;
+            _lookup = lookup;
             _onExecute = onExecute;
             _rows = rows;
         }
 
-        /// <inheritdoc/>
         public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
 
-        /// <inheritdoc/>
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
             _onExecute();
-            RowBatch? outputBatch = null;
-            foreach (Row row in _rows)
-            {
-                outputBatch ??= RowBatch.Rent(64);
-                outputBatch.Add(row.Clone());
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-            }
-
-            if (outputBatch is not null) yield return outputBatch;
-            await Task.CompletedTask;
+            return YieldRowsAsBatches(_pool, _lookup, _rows);
         }
     }
 
     /// <summary>
-    /// Reusing the existing MockOperator pattern from OperatorTests.
+    /// Pool-aware mock operator that yields the supplied rows in pool-rented batches.
     /// </summary>
     private sealed class MockOperator : IQueryOperator
     {
+        private readonly Pool _pool;
+        private readonly ColumnLookup _lookup;
         private readonly Row[] _rows;
 
-        /// <summary>
-        /// Creates a mock operator.
-        /// </summary>
-        public MockOperator(params Row[] rows)
+        public MockOperator(Pool pool, ColumnLookup lookup, params Row[] rows)
         {
+            _pool = pool;
+            _lookup = lookup;
             _rows = rows;
         }
 
-        /// <inheritdoc/>
         public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
-        /// <inheritdoc/>
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
-        {
-            RowBatch? outputBatch = null;
-            foreach (Row row in _rows)
-            {
-                outputBatch ??= RowBatch.Rent(64);
-                outputBatch.Add(row.Clone());
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-            }
-
-            if (outputBatch is not null) yield return outputBatch;
-            await Task.CompletedTask;
-        }
+        public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+            => YieldRowsAsBatches(_pool, _lookup, _rows);
     }
 }

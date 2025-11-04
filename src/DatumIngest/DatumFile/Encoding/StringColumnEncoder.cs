@@ -51,7 +51,7 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         int rowCount = values.Count;
 
         // Pass 1: compute total UTF-8 pool size by summing per-value byte length and
-        // mark nulls in the bitmap. StringByteLength reads _p1 directly — no store
+        // mark nulls in the bitmap. ContentByteLength reads _p1 directly — no store
         // dispatch, no span construction, zero allocations.
         DatumNullBitmap nullBitmap = new(rowCount);
         uint nullCount = 0;
@@ -66,7 +66,7 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
                 nullCount++;
                 continue;
             }
-            totalPoolBytes += value.StringByteLength;
+            totalPoolBytes += value.ContentByteLength;
         }
 
         bool isJson = descriptor.Kind == DataKind.JsonValue;

@@ -356,7 +356,7 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         {
             for (int i = 0; i < batch.Count; i++)
             {
-                batch[i].Clone(); // Simulate reading values
+                batch[i].CloneForTest(); // Simulate reading values
             }
 
             pool.ReturnBatch(batch);

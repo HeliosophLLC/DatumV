@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
@@ -11,8 +13,9 @@ namespace DatumIngest.Execution;
 /// <para>
 /// Schema protocol: the first row written to a stream includes column names. Subsequent rows
 /// in the same stream omit names and reuse the cached schema arrays, avoiding repeated string
-/// allocation on the read path. Callers must pair <see cref="WriteSchema"/> + N × <see cref="WriteRow"/>
-/// with <see cref="ReadSchema"/> + N × <see cref="ReadRow"/> using the same stream.
+/// allocation on the read path. Callers must pair <see cref="WriteSchema(BinaryWriter, Row)"/> + N × <see cref="WriteRow"/>
+/// with <see cref="ReadSchema(BinaryReader, out ColumnLookup)"/> + N × <see cref="ReadRow(BinaryReader, Pool, ColumnLookup)"/>
+/// using the same stream.
 /// </para>
 /// <para>
 /// The wire format extends the <c>IndexWriter.WriteDataValue</c> / <c>IndexReader.ReadDataValue</c>
@@ -39,31 +42,86 @@ internal static class RowSerializer
     }
 
     /// <summary>
-    /// Reads a schema (column count and column names) from the stream, producing the
-    /// shared arrays needed for subsequent <see cref="ReadRow"/> calls.
+    /// Writes the schema (column count and column names) directly from a
+    /// <see cref="ColumnLookup"/>. Used by spill code paths that have a schema in hand
+    /// before any rows have been seen.
     /// </summary>
-    /// <param name="reader">The binary reader to read from.</param>
-    /// <param name="names">The column name array, shared across all rows.</param>
-    /// <param name="nameIndex">The case-insensitive name-to-ordinal dictionary, shared across all rows.</param>
+    internal static void WriteSchema(BinaryWriter writer, ColumnLookup columnLookup)
+    {
+        writer.Write(columnLookup.Count);
+        for (int index = 0; index < columnLookup.Count; index++)
+        {
+            writer.Write(columnLookup.ColumnNames[index]);
+        }
+    }
+
+    /// <summary>
+    /// Writes a <see cref="DataValue"/> to the stream as its raw 20-byte struct image.
+    /// The caller is responsible for ensuring any arena-backed payload referenced by
+    /// <c>_p0</c>/<c>_p1</c> is reachable from whatever arena is handed to readers — typically
+    /// by calling <see cref="DataValueRetention.Stabilize"/> against a long-lived consolidated
+    /// arena before passing the value here. Inline and sidecar-backed values round-trip
+    /// without any arena dependency.
+    /// </summary>
+    internal static void WriteStabilizedDataValue(BinaryWriter writer, DataValue value)
+    {
+        Span<byte> buffer = stackalloc byte[DataValueRawSize];
+        MemoryMarshal.Write(buffer, in value);
+        writer.Write(buffer);
+    }
+
+    /// <summary>
+    /// Inverse of <see cref="WriteStabilizedDataValue"/>. The returned value's arena-backed
+    /// offsets only resolve when read against the same arena the writer stabilized into.
+    /// </summary>
+    internal static DataValue ReadStabilizedDataValue(BinaryReader reader)
+    {
+        Span<byte> buffer = stackalloc byte[DataValueRawSize];
+        int read = reader.Read(buffer);
+        if (read != DataValueRawSize)
+        {
+            throw new EndOfStreamException(
+                $"Expected {DataValueRawSize} bytes for a DataValue, got {read}.");
+        }
+        return MemoryMarshal.Read<DataValue>(buffer);
+    }
+
+    /// <summary>Size in bytes of the on-disk image of a single <see cref="DataValue"/>.</summary>
+    private const int DataValueRawSize = 20;
+
+    /// <summary>
+    /// Don't use this
+    /// </summary>
     internal static void ReadSchema(
         BinaryReader reader,
         out string[] names,
         out Dictionary<string, int> nameIndex)
     {
+        throw new Exception("DON'T USE");
+    }
+
+    /// <summary>
+    /// Reads a schema (column count and column names) from the stream, producing a <see cref="ColumnLookup"/>
+    /// that can be used to construct rows.
+    /// </summary>
+    /// <param name="reader">The binary reader to read from.</param>
+    /// <param name="columnLookup">The populated column lookup.</param>
+    internal static void ReadSchema(BinaryReader reader, out ColumnLookup columnLookup)
+    {
         int fieldCount = reader.ReadInt32();
-        names = new string[fieldCount];
-        nameIndex = new Dictionary<string, int>(fieldCount, StringComparer.OrdinalIgnoreCase);
+        string[] names = new string[fieldCount];
 
         for (int index = 0; index < fieldCount; index++)
         {
             names[index] = reader.ReadString();
-            nameIndex[names[index]] = index;
         }
+
+        columnLookup = new ColumnLookup(names);
     }
 
     /// <summary>
     /// Writes a single row's values to the stream. The schema must have been written
-    /// previously via <see cref="WriteSchema"/>.
+    /// previously via <see cref="WriteSchema(BinaryWriter, Row)"/>.
     /// </summary>
     /// <param name="writer">The binary writer to write to.</param>
     /// <param name="row">The row whose values to serialize.</param>
@@ -78,22 +136,49 @@ internal static class RowSerializer
     /// <summary>
     /// Reads a single row's values from the stream using a previously read schema.
     /// </summary>
-    /// <param name="reader">The binary reader to read from.</param>
-    /// <param name="names">The shared column name array from <see cref="ReadSchema"/>.</param>
-    /// <param name="nameIndex">The shared name-index dictionary from <see cref="ReadSchema"/>.</param>
-    /// <returns>A new <see cref="Row"/> with the deserialized values.</returns>
     internal static Row ReadRow(
         BinaryReader reader,
         string[] names,
         Dictionary<string, int> nameIndex)
     {
-        DataValue[] values = new DataValue[names.Length];
-        for (int index = 0; index < names.Length; index++)
+        throw new Exception("DON'T USE");
+    }
+
+    /// <summary>
+    /// Reads a single row's values from the stream using a previously read <see cref="ColumnLookup"/>.
+    /// </summary>
+    /// <param name="reader">The binary reader to read from.</param>
+    /// <param name="pool">The pool to rent data values from.</param>
+    /// <param name="columnLookup">The column lookup to use for constructing the row.</param>
+    /// <returns>A new <see cref="DataValue"/> array with the deserialized values.</returns>
+    internal static DataValue[] ReadRow(
+        BinaryReader reader,
+        Pool pool,
+        ColumnLookup columnLookup)
+    {
+        DataValue[]? values = null;
+        
+        try
         {
-            values[index] = ReadDataValue(reader);
+            values = pool.RentDataValues(columnLookup.Count);
+            
+            for (int index = 0; index < columnLookup.Count; index++)
+            {
+                values[index] = ReadDataValue(reader);
+            }
+
+            return values;
+        }
+        catch
+        {
+            if (values != null)
+            {
+                pool.ReturnDataValues(values);
+            }
+
+            throw;
         }
 
-        return new Row(names, values, nameIndex);
     }
 
     /// <summary>

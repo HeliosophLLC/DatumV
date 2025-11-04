@@ -1,5 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -21,7 +23,7 @@ namespace DatumIngest.Execution.Operators;
 /// and buffers the result set into pool-owned <see cref="RowBatch"/> objects.
 /// Subsequent calls replay by copying cached values into fresh output batches.
 /// When a memory budget is configured and the buffer exceeds it, rows are spilled
-/// to a temporary file via <see cref="RowSerializer"/> and replayed from disk.
+/// via <see cref="SpillReaderWriter"/> and replayed from disk against a consolidated arena.
 /// </description>
 /// </item>
 /// </list>
@@ -34,11 +36,9 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     private readonly IReadOnlyList<string>? _explicitColumnNames;
 
     private List<RowBatch>? _materializedBatches;
-    private LocalBufferPool? _cachePool;
-    private bool _materialized;
-    private string? _spillFilePath;
-    private string[]? _spillSchemaNames;
-    private Dictionary<string, int>? _spillSchemaNameIndex;
+    private Pool? _pool;
+    private SpillReaderWriter? _spiller;
+    private ColumnLookup? _materializedSchema;
 
     /// <summary>
     /// Creates a new CTE operator.
@@ -71,6 +71,15 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     /// <summary>Whether this CTE materializes its result set.</summary>
     public bool IsMaterialized => _isMaterialized;
 
+    /// <summary>True once the spiller has taken over (in-memory cache has been evicted to disk).</summary>
+    [MemberNotNullWhen(true, nameof(_spiller))]
+    public bool IsSpilling => _spiller is not null;
+
+    /// <summary>True once <see cref="MaterializeAsync"/> has run for this instance.</summary>
+    [MemberNotNullWhen(true, nameof(_pool))]
+    [MemberNotNullWhen(true, nameof(_materializedSchema))]
+    private bool HasMaterialized => _materializedBatches is not null || _spiller is not null;
+
     /// <summary>The inner operator tree.</summary>
     public IQueryOperator InnerOperator => _innerOperator;
 
@@ -93,369 +102,209 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        LocalBufferPool pool = context.LocalBufferPool;
+        Pool pool = context.Pool;
 
         if (!_isMaterialized)
         {
-            RowBatch? outputBatch = null;
+            // Inline mode: forward inner batches as-is, or rebuild rows under the renamed
+            // ColumnLookup when the CTE introduces explicit column names. RebindRowBatch is
+            // not enough on its own — each Row instance carries its own ColumnLookup, so the
+            // output batch must contain freshly-constructed Rows that share the renamed
+            // lookup before downstream column-name lookups can find the new names.
             await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
-                for (int i = 0; i < inputBatch.Count; i++)
+                if (_explicitColumnNames is null)
                 {
-                    Row row = inputBatch[i];
-                    outputBatch ??= pool.RentBatch(context.BatchSize);
-                    outputBatch.Add(RenameColumnsIfNeeded(row));
-                    if (outputBatch.IsFull)
-                    {
-                        yield return outputBatch;
-                        outputBatch = null;
-                    }
+                    yield return inputBatch;
+                    continue;
                 }
 
-                inputBatch.Return();
-            }
+                ColumnLookup renamed = RenameColumnsIfNeeded(inputBatch.ColumnLookup);
+                RowBatch renamedBatch = pool.RebindRowBatch(inputBatch, renamed);
 
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
+                yield return renamedBatch;
             }
 
             yield break;
         }
 
         // Materialized path: compute once, replay on subsequent calls.
-        if (!_materialized)
+        if (!HasMaterialized)
         {
             await MaterializeAsync(context).ConfigureAwait(false);
         }
 
-        // Replay from disk if spilled, otherwise from memory.
-        if (_spillFilePath is not null)
+        ColumnLookup outputLookup = _materializedSchema is null
+            ? ColumnLookup.Empty
+            : RenameColumnsIfNeeded(_materializedSchema);
+
+        if (IsSpilling)
         {
-            await foreach (RowBatch batch in ReplayFromDiskAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch batch in _spiller.ReplayAsync(context, outputLookup).ConfigureAwait(false))
             {
                 yield return batch;
             }
+            yield break;
         }
-        else if (_materializedBatches is not null)
+
+        if (_materializedBatches is null)
         {
-            // Replay cached rows by copying values into fresh output batches.
-            // The cache owns its DataValue[] arrays; the output batch owns copies.
-            RowBatch? outputBatch = null;
+            yield break;
+        }
+
+        // Replay cached rows by copying values into fresh output batches whose arena is the
+        // cached batch's arena (so arena-backed values resolve without an extra copy).
+        // Invariant: outputBatch != null ⟺ the producer still owns it. Yielding transfers
+        // ownership, so we null the local *before* yield. The finally then only fires for
+        // a not-yet-yielded leftover, which protects against mid-fill exceptions (e.g. a
+        // Stabilize NotSupportedException) and consumer cancellation. The post-yield
+        // assignment trick wouldn't help — that statement only runs on resumption (next
+        // MoveNextAsync), not on iterator disposal.
+        RowBatch? outputBatch = null;
+        try
+        {
             foreach (RowBatch cachedBatch in _materializedBatches)
             {
                 for (int i = 0; i < cachedBatch.Count; i++)
                 {
-                    Row cachedRow = cachedBatch[i];
-                    DataValue[] outputValues = pool.RentCopy(cachedRow.RawValues);
-                    Row outputRow = new(cachedRow.RawNames, outputValues, cachedRow.RawNameIndex);
-
-                    outputBatch ??= pool.RentBatch(context.BatchSize);
-                    outputBatch.Add(RenameColumnsIfNeeded(outputRow));
+                    outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, cachedBatch.Arena);
+                    pool.RentAndCopyToOutput(cachedBatch, i, outputBatch);
                     if (outputBatch.IsFull)
                     {
-                        yield return outputBatch;
+                        RowBatch toYield = outputBatch;
                         outputBatch = null;
+                        yield return toYield;
                     }
                 }
             }
 
             if (outputBatch is not null)
             {
-                yield return outputBatch;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Consumes the inner operator fully, buffering rows into pool-owned
-    /// <see cref="RowBatch"/> objects. Each input row's <see cref="DataValue"/>
-    /// values are copied into fresh pool-rented arrays so the cache is
-    /// independent of the input batch lifecycle. Spills to disk when the
-    /// memory budget is exceeded.
-    /// </summary>
-    private async Task MaterializeAsync(ExecutionContext context)
-    {
-        LocalBufferPool pool = context.LocalBufferPool;
-        _cachePool = pool;
-        _materializedBatches = new List<RowBatch>();
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
-        BinaryWriter? spillWriter = null;
-        bool schemaWritten = false;
-
-        // Schema arrays shared across all cached rows (built from first row).
-        string[]? cacheNames = null;
-        Dictionary<string, int>? cacheNameIndex = null;
-        RowBatch? cacheBatch = null;
-
-        try
-        {
-            await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
-            {
-                for (int i = 0; i < inputBatch.Count; i++)
-                {
-                    Row row = inputBatch[i];
-                    context.CancellationToken.ThrowIfCancellationRequested();
-                    context.QueryMeter?.ThrowIfExceeded();
-
-                    if (_spillFilePath is not null)
-                    {
-                        // Already spilling — write directly to disk.
-                        if (!schemaWritten)
-                        {
-                            RowSerializer.WriteSchema(spillWriter!, row);
-                            CacheSpillSchema(row);
-                            schemaWritten = true;
-                        }
-
-                        RowSerializer.WriteRow(spillWriter!, row);
-                    }
-                    else
-                    {
-                        // Build shared schema from the first row.
-                        if (cacheNames is null)
-                        {
-                            cacheNames = new string[row.FieldCount];
-                            for (int col = 0; col < row.FieldCount; col++)
-                                cacheNames[col] = row.ColumnNames[col];
-                            cacheNameIndex = new Dictionary<string, int>(
-                                cacheNames.Length, StringComparer.OrdinalIgnoreCase);
-                            for (int col = 0; col < cacheNames.Length; col++)
-                                cacheNameIndex[cacheNames[col]] = col;
-                        }
-
-                        DataValue[] cacheValues = pool.RentCopy(row.RawValues);
-                        Row cachedRow = new(cacheNames, cacheValues, cacheNameIndex!);
-
-                        cacheBatch ??= pool.RentBatch(context.BatchSize);
-                        cacheBatch.Add(cachedRow);
-                        if (cacheBatch.IsFull)
-                        {
-                            _materializedBatches.Add(cacheBatch);
-                            cacheBatch = null;
-                        }
-
-                        if (estimator is not null)
-                        {
-                            if (estimator.ShouldSample())
-                            {
-                                estimator.RecordSample(row);
-                            }
-
-                            estimator.IncrementRowCount();
-                            long estimatedMemory = estimator.EstimateTotalBytes();
-
-                            if (estimatedMemory > memoryBudget!.Value)
-                            {
-                                // Flush the current partial cache batch before spilling.
-                                if (cacheBatch is not null)
-                                {
-                                    _materializedBatches.Add(cacheBatch);
-                                    cacheBatch = null;
-                                }
-
-                                // Spill everything buffered so far plus future rows to disk.
-                                SpillToDisk(ref spillWriter, ref schemaWritten, pool);
-                            }
-                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                            {
-                                estimator.EscalateToEveryRow();
-                            }
-                        }
-                    }
-                }
-
-                inputBatch.Return();
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
         finally
         {
-            if (spillWriter is not null)
-            {
-                spillWriter.Flush();
-                spillWriter.Dispose();
-            }
-        }
-
-        // Add the last partial batch if not spilled.
-        if (cacheBatch is not null && _spillFilePath is null)
-        {
-            _materializedBatches.Add(cacheBatch);
-        }
-        else if (cacheBatch is not null)
-        {
-            // Spill happened after partial batch was created but before it was added.
-            pool.ReturnBatch(cacheBatch);
-        }
-
-        // If we spilled, drop the in-memory cache and return batches to the pool.
-        if (_spillFilePath is not null)
-        {
-            foreach (RowBatch batch in _materializedBatches)
-            {
-                pool.ReturnBatch(batch);
-            }
-
-            _materializedBatches = null;
-        }
-
-        _materialized = true;
-    }
-
-    /// <summary>
-    /// Transitions to spill mode: writes all cached rows to a temp file,
-    /// then clears the in-memory cache.
-    /// </summary>
-    private void SpillToDisk(ref BinaryWriter? spillWriter, ref bool schemaWritten, LocalBufferPool pool)
-    {
-        string spillDirectory = Path.Combine(
-            Path.GetTempPath(),
-            $"datum-cte-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(spillDirectory);
-        _spillFilePath = Path.Combine(spillDirectory, "cte.spill");
-
-        FileStream fileStream = new(
-            _spillFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-        spillWriter = new BinaryWriter(fileStream);
-
-        // Write all previously cached rows to disk, then return cache batches to the pool.
-        foreach (RowBatch batch in _materializedBatches!)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row bufferedRow = batch[i];
-                if (!schemaWritten)
-                {
-                    RowSerializer.WriteSchema(spillWriter, bufferedRow);
-                    CacheSpillSchema(bufferedRow);
-                    schemaWritten = true;
-                }
-
-                RowSerializer.WriteRow(spillWriter, bufferedRow);
-            }
-
-            pool.ReturnBatch(batch);
-        }
-
-        _materializedBatches!.Clear();
-    }
-
-    /// <summary>
-    /// Caches schema arrays from the first row for the disk replay path.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void CacheSpillSchema(Row row)
-    {
-        if (_spillSchemaNames is not null)
-        {
-            return;
-        }
-
-        _spillSchemaNames = new string[row.FieldCount];
-        for (int index = 0; index < row.FieldCount; index++)
-        {
-            _spillSchemaNames[index] = row.ColumnNames[index];
-        }
-
-        _spillSchemaNameIndex = new Dictionary<string, int>(
-            _spillSchemaNames.Length, StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < _spillSchemaNames.Length; index++)
-        {
-            _spillSchemaNameIndex[_spillSchemaNames[index]] = index;
-        }
-    }
-
-    /// <summary>
-    /// Replays rows from a spill file.
-    /// </summary>
-    private async IAsyncEnumerable<RowBatch> ReplayFromDiskAsync(ExecutionContext context)
-    {
-        LocalBufferPool pool = context.LocalBufferPool;
-        FileStream fileStream = new(
-            _spillFilePath!, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-
-        await using (fileStream.ConfigureAwait(false))
-        {
-            using BinaryReader reader = new(fileStream);
-
-            RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
-
-            RowBatch? outputBatch = null;
-            while (fileStream.Position < fileStream.Length)
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                Row row = RowSerializer.ReadRow(reader, names, nameIndex);
-                outputBatch ??= pool.RentBatch(context.BatchSize);
-                outputBatch.Add(RenameColumnsIfNeeded(row));
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
-            }
-
+            // Only fires for a partially-filled batch that was never yielded — typically
+            // a mid-fill exception. The consumer doesn't know about it, so we own its
+            // cleanup. After a successful yield the local is null and this is a no-op.
             if (outputBatch is not null)
             {
-                yield return outputBatch;
+                pool.ReturnRowBatch(outputBatch);
             }
         }
     }
 
     /// <summary>
-    /// Renames the output row's columns if the CTE definition provides explicit column names.
+    /// Consumes the inner operator fully, rebinding each input batch into the
+    /// cached materialization. When the memory budget is exceeded, transitions to
+    /// the <see cref="SpillReaderWriter"/> which consolidates payload bytes and
+    /// writes row metadata to a temp file.
+    /// </summary>
+    private async Task MaterializeAsync(ExecutionContext context)
+    {
+        Pool pool = context.Pool;
+        _pool = pool;
+        _materializedBatches = [];
+
+        long? memoryBudget = context.MemoryBudgetBytes;
+        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+
+        await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
+            _materializedSchema ??= inputBatch.ColumnLookup;
+
+            if (inputBatch.Count == 0)
+            {
+                pool.ReturnRowBatch(inputBatch);
+                continue;
+            }
+
+            if (IsSpilling)
+            {
+                _spiller.Write(inputBatch);
+                continue;
+            }
+
+            RowBatch cacheBatch = pool.RebindRowBatch(inputBatch, _materializedSchema);
+            _materializedBatches.Add(cacheBatch);
+
+            if (estimator is not null)
+            {
+                estimator.RecordBatch(cacheBatch);
+                long estimatedMemory = estimator.EstimateTotalBytes();
+
+                if (estimatedMemory > memoryBudget!.Value)
+                {
+                    SpillCacheToDisk(pool);
+                }
+                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                {
+                    estimator.EscalateToEveryRow();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Transitions to spill mode: stands up a <see cref="SpillReaderWriter"/>, hands every
+    /// cached batch to it (which stabilizes payloads into the consolidated arena, writes
+    /// row metadata to disk, and returns the batches to the pool), and clears the in-memory
+    /// cache. Future input batches go directly through the spiller.
+    /// </summary>
+    private void SpillCacheToDisk(Pool pool)
+    {
+        _spiller = new SpillReaderWriter(pool, _materializedSchema!);
+
+        foreach (RowBatch buffered in _materializedBatches!)
+        {
+            _spiller.Write(buffered);
+        }
+
+        _materializedBatches = null;
+    }
+
+    /// <summary>
+    /// Renames the output columns if the CTE definition provides explicit column names.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Row RenameColumnsIfNeeded(Row row)
+    private ColumnLookup RenameColumnsIfNeeded(ColumnLookup columnLookup)
     {
         if (_explicitColumnNames is null)
         {
-            return row;
+            return columnLookup;
         }
 
-        string[] renamedNames = new string[row.FieldCount];
-        DataValue[] values = new DataValue[row.FieldCount];
-        for (int index = 0; index < row.FieldCount; index++)
+        string[] renamedNames = new string[columnLookup.Count];
+
+        for (int index = 0; index < columnLookup.Count; index++)
         {
             renamedNames[index] = index < _explicitColumnNames.Count
                 ? _explicitColumnNames[index]
-                : row.ColumnNames[index];
-            values[index] = row[index];
+                : columnLookup.ColumnNames[index];
         }
 
-        return new Row(renamedNames, values);
+        return new ColumnLookup(renamedNames);
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        // Return cached batches to the pool if still held.
-        if (_materializedBatches is not null && _cachePool is not null)
+        if (_materializedBatches is not null && _pool is not null)
         {
             foreach (RowBatch batch in _materializedBatches)
             {
-                _cachePool.ReturnBatch(batch);
+                _pool.ReturnRowBatch(batch);
             }
-
             _materializedBatches = null;
         }
 
-        if (_spillFilePath is not null)
-        {
-            string? directory = Path.GetDirectoryName(_spillFilePath);
-            if (directory is not null && Directory.Exists(directory))
-            {
-                try
-                {
-                    Directory.Delete(directory, recursive: true);
-                }
-                catch (IOException)
-                {
-                    // Best-effort cleanup — OS handles temp files on shutdown.
-                }
-            }
-
-            _spillFilePath = null;
-        }
+        _spiller?.Dispose();
+        _spiller = null;
     }
 }

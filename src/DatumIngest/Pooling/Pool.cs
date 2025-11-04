@@ -107,6 +107,12 @@ public sealed class Pool
     {
         inputBatch.Clear(out Row[] rows, out Arena arena, out int count);
 
+        for (int i = 0; i < count; i++)
+        {
+            // Have to rebind the column lookup
+            rows[i] = new Row(columnLookup, rows[i].RawValues);
+        }
+
         return new(columnLookup, rows, arena, count);
     }
 
@@ -119,6 +125,26 @@ public sealed class Pool
     /// <returns>A rented <see cref="ColumnBatch"/>.</returns>
     public ColumnBatch RentColumnBatch(ColumnLookup columnLookup, int rowCapacity, Arena? arena = null)
         => Backing.RentColumnBatch(columnLookup, rowCapacity, arena);
+
+    /// <summary>
+    /// Rents an <see cref="Arena"/> from the pool, optionally with an initial-capacity hint
+    /// for freshly-allocated arenas. Pooled arenas keep their existing capacity; the hint
+    /// only matters when no pooled arena is available and a new one has to be constructed.
+    /// </summary>
+    /// <param name="initialCapacity">
+    /// Initial mmap region size for newly-allocated arenas, in bytes. Use this when the
+    /// caller knows a rough upper bound on bytes it will append (e.g. spill consolidation)
+    /// to avoid repeated doubling reallocations. Zero (default) uses Arena's built-in default.
+    /// </param>
+    public Arena RentArena(int initialCapacity = 0) => Backing.RentArena(initialCapacity);
+
+    /// <summary>
+    /// Releases one reference on <paramref name="arena"/>. When the refcount hits zero, the
+    /// arena is recycled (or disposed if it has grown beyond the pool's per-arena cap).
+    /// Returns <see langword="true"/> when the arena was fully released this call;
+    /// <see langword="false"/> when other owners still hold references.
+    /// </summary>
+    public bool ReturnArena(Arena arena) => Backing.TryReturn(arena);
 
     /// <summary>
     /// Rents a <see cref="GroupState"/> with the specified number of accumulators.

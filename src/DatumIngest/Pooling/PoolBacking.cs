@@ -199,9 +199,18 @@ public sealed class PoolBacking
     }
 
     /// <summary>
-    /// Rents an <see cref="Arena"/> with at least the specified capacity. The returned arena may have a larger capacity than requested;
+    /// Rents an <see cref="Arena"/>. When <paramref name="initialCapacity"/> is supplied,
+    /// freshly-allocated arenas use that as their initial backing-region size — useful when
+    /// the caller knows roughly how many bytes will be appended and wants to avoid the
+    /// resize-and-copy thrash that happens on every doubling. Pooled arenas keep whatever
+    /// capacity they already had; the hint only affects newly-constructed arenas.
     /// </summary>
-    public Arena RentArena()
+    /// <param name="initialCapacity">
+    /// Hint for the initial mmap region size of a freshly-allocated arena, in bytes.
+    /// Zero (default) uses Arena's built-in default. The Arena constructor floors this
+    /// at its own minimum.
+    /// </param>
+    public Arena RentArena(int initialCapacity = 0)
     {
         bool fromPool;
         if (arenaPools.TryDequeue(out Arena? arena))
@@ -211,7 +220,7 @@ public sealed class PoolBacking
         }
         else
         {
-            arena = new Arena();
+            arena = initialCapacity > 0 ? new Arena(initialCapacity) : new Arena();
             fromPool = false;
         }
 

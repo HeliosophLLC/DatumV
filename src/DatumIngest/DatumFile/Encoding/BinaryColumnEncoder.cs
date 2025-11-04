@@ -54,7 +54,7 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
             }
 
             // _p1 holds the byte length for UInt8Array and Image payloads.
-            int blobLength = value.StringOrBinaryByteLength;
+            int blobLength = value.ContentByteLength;
             totalPoolBytes += blobLength;
         }
 

@@ -26,10 +26,10 @@ internal static class QueryOperatorExtensions
         {
             for (int i = 0; i < batch.Count; i++)
             {
-                rows.Add(batch[i].Clone());
+                rows.Add(batch[i].CloneForTest());
             }
 
-            context.LocalBufferPool.ReturnBatch(batch);
+            context.Pool.ReturnRowBatch(batch);
         }
 
         return rows;
@@ -48,7 +48,7 @@ internal static class QueryOperatorExtensions
         {
             for (int i = 0; i < batch.Count; i++)
             {
-                rows.Add(batch[i].Clone());
+                rows.Add(batch[i].CloneForTest());
             }
         }
 

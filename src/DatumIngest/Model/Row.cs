@@ -98,23 +98,6 @@ public readonly struct Row
     internal IReadOnlyDictionary<string, int> RawNameIndex => _columnLookup.NameIndex;
 
     /// <summary>
-    /// Creates a deep copy of this row with its own <see cref="DataValue"/> array.
-    /// The schema arrays (names and name index) are shared with the original.
-    /// Use this when the row must outlive the pooled buffer that backs it — for
-    /// example, when collecting rows from a query stream whose
-    /// <see cref="Execution.LocalBufferPool"/> is disposed after iteration.
-    /// </summary>
-    public Row Clone()
-    {
-        DataValue[] copy = new DataValue[_values.Length];
-        Array.Copy(_values, copy, _values.Length);
-
-        throw new Exception("DON'T USE");
-
-        //return new Row(_columnLookup, copy);
-    }
-
-    /// <summary>
     /// Retrieves a value by column name (case-insensitive).
     /// </summary>
     /// <exception cref="KeyNotFoundException">No column with the given name exists.</exception>

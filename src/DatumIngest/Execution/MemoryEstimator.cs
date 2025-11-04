@@ -17,7 +17,7 @@ namespace DatumIngest.Execution;
 internal sealed class MemoryEstimator
 {
     /// <summary>Per-DataValue object overhead estimate in bytes (reference, kind, isNull, payload pointer, shape pointer).</summary>
-    internal const long DataValueOverheadBytes = 40;
+    internal const long DataValueOverheadBytes = 20;
 
     /// <summary>Per-dictionary/hash-set entry overhead estimate in bytes (hash, key ref, value ref, next).</summary>
     internal const long DictionaryEntryOverheadBytes = 48;
@@ -72,6 +72,24 @@ internal sealed class MemoryEstimator
     internal void IncrementRowCount()
     {
         _totalRowCount++;
+    }
+
+    /// <summary>
+    /// Records every row in <paramref name="batch"/>: samples those for which
+    /// <see cref="ShouldSample"/> returns <see langword="true"/> and increments the running
+    /// row count for every row. Encapsulates the per-row cadence so per-batch callers don't
+    /// have to inline the loop, and keeps <see cref="EscalateToEveryRow"/> meaningful.
+    /// </summary>
+    internal void RecordBatch(RowBatch batch)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            if (ShouldSample())
+            {
+                RecordSample(batch[i]);
+            }
+            IncrementRowCount();
+        }
     }
 
     /// <summary>Switches to sampling every row (called when nearing budget threshold).</summary>
@@ -134,6 +152,12 @@ internal sealed class MemoryEstimator
     }
 
     /// <summary>Estimates the memory consumed by a single row in a hash-based collection.</summary>
+    /// <remarks>
+    /// Per-row cost is the per-DataValue overhead plus each value's variable-length
+    /// payload byte count (read in O(1) via <see cref="DataValue.ContentByteLength"/> —
+    /// no arena materialization). Sidecar-backed values contribute zero in-memory
+    /// residency since their bytes live on disk.
+    /// </remarks>
     internal static long EstimateRowBytes(Row row)
     {
         long bytes = 0;
@@ -148,29 +172,16 @@ internal sealed class MemoryEstimator
                 continue;
             }
 
-            bytes += value.Kind switch
+            // ContentByteLength returns 0 for inline scalars (already counted by the
+            // DataValue overhead), 0 for sidecar values (on-disk), and the payload
+            // byte length for arena-backed strings, byte arrays, vectors, matrices,
+            // tensors, and images.
+            bytes += value.ContentByteLength;
+
+            if (value.Kind == DataKind.Array)
             {
-                // Byte array (new-model UInt8 + IsArray) — match before scalar UInt8.
-                // Legacy UInt8Array arm below stays during PR2; PR3 removes it.
-                DataKind.UInt8 when value.IsArray => value.AsUInt8Array().Length,
-                DataKind.Float32 => 4,
-                DataKind.UInt8 => 1,
-                DataKind.Boolean => 1,
-                DataKind.Date => 4,
-                DataKind.DateTime => 10,
-                DataKind.Time => 8,
-                DataKind.Duration => 8,
-                DataKind.Uuid => 16,
-                DataKind.String => 2L * value.AsString().Length,
-                DataKind.JsonValue => 2L * value.AsJsonValue().Length,
-                DataKind.Vector => 4L * value.AsVector().Length,
-                DataKind.Matrix => 4L * value.AsMatrix(out _, out _).Length,
-                DataKind.Tensor => 4L * value.AsTensor(out _).Length,
-                DataKind.UInt8Array => value.AsUInt8Array().Length,
-                DataKind.Image => value.AsImage().Length,
-                DataKind.Array => EstimateArrayBytes(value),
-                _ => 8,
-            };
+                bytes += EstimateArrayBytes(value);
+            }
         }
 
         bytes += DictionaryEntryOverheadBytes;

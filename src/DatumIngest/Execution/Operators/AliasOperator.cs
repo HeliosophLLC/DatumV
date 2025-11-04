@@ -58,7 +58,6 @@ public sealed class AliasOperator : IQueryOperator
                 pool.ReturnRowBatch(inputBatch);
                 continue;
             }
-
             
             RowBatch? outputBatch = null;
             try {

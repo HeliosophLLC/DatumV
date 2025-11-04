@@ -1736,46 +1736,74 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int RawCharCount => IsInline ? InlineCharCount : _charCount;
 
     /// <summary>
-    /// Returns the UTF-8 byte length of a <see cref="DataKind.String"/> or
-    /// <see cref="DataKind.JsonValue"/> payload without accessing the store.
+    /// Returns the byte length of this value's content as stored in process memory
+    /// (inline payload or arena-backed). Returns <c>0</c> for null, sidecar-backed
+    /// values (whose bytes live on disk — see <see cref="SidecarByteLength"/>), and
+    /// inline scalars whose bytes are entirely inside the <see cref="DataValue"/>
+    /// struct itself.
     /// </summary>
     /// <remarks>
-    /// Pairs with <see cref="StringCharCount(IValueStore)"/>: that returns the decoded
-    /// character count (possibly via a UTF-8 decode), this returns the encoded byte
-    /// count which is always cached in the payload word. Zero-allocation hot-path reader
-    /// for column encoders that need per-row byte sizes upfront.
+    /// <para>
+    /// Zero-allocation hot-path reader: every kind reads its byte count from the
+    /// inline payload words (<c>_p1</c>/<c>_p2</c>) or from <c>InlineByteLength</c>,
+    /// without materializing the value through an <see cref="IValueStore"/>. Use
+    /// this for two-pass encoders sizing pooled buffers, memory-budget estimation,
+    /// and any other "how big is this payload" query.
+    /// </para>
+    /// <para>
+    /// Per-kind layout:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><see cref="DataKind.String"/>, <see cref="DataKind.JsonValue"/>:
+    ///     UTF-8 byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
+    ///   <item><see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>:
+    ///     byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
+    ///   <item><see cref="DataKind.Vector"/>: float count × 4 (<c>_p1 * 4</c>, arena-only).</item>
+    ///   <item><see cref="DataKind.Matrix"/>: rows × columns × 4 (<c>_p1 * _p2 * 4</c>, arena-only).</item>
+    ///   <item><see cref="DataKind.Tensor"/>: element count × 4 (<c>_p2 * 4</c>, arena-only).</item>
+    ///   <item>Inline arrays (<see cref="IsInlineArray"/>): element count × element size.</item>
+    ///   <item>All other kinds (inline scalars, null, sidecar): <c>0</c>.</item>
+    /// </list>
     /// </remarks>
-    public int StringByteLength
+    public int ContentByteLength
     {
         get
         {
-            if (_kind is not (DataKind.String or DataKind.JsonValue))
+            if (IsNull || IsInSidecar) return 0;
+
+            if (IsInline)
             {
-                throw new InvalidOperationException(
-                    $"Cannot read StringByteLength on a {_kind} value.");
+                if (IsInlineArray) return InlineArrayElementCount * ElementByteSize(_kind);
+                if (_kind is DataKind.String or DataKind.JsonValue) return InlineByteLength;
+                return 0;
             }
-            return IsInline ? InlineByteLength : _p1;
+
+            // Arena-backed.
+            return _kind switch
+            {
+                DataKind.String or DataKind.JsonValue
+                    or DataKind.UInt8Array or DataKind.Image => _p1,
+                DataKind.Vector => _p1 * 4,
+                DataKind.Matrix => _p1 * _p2 * 4,
+                DataKind.Tensor => _p2 * 4,
+                _ => 0,
+            };
         }
     }
 
     /// <summary>
-    /// Returns the byte length of a binary payload for
-    /// <see cref="DataKind.UInt8Array"/> or <see cref="DataKind.Image"/>. Parallel
-    /// to <see cref="StringByteLength"/> for binary kinds, enabling two-pass encoders
-    /// to size the pooled output buffer before copying bytes.
+    /// Returns the byte length of this value's payload in a <c>.datum-blob</c>
+    /// sidecar, or <c>null</c> when the value is not sidecar-backed. The length
+    /// is a 40-bit value (max ~1 TiB) packed across <c>_p2</c> and the low byte
+    /// of <c>_p3</c>; see <see cref="BuildSidecar"/> for the layout.
     /// </summary>
-    public int StringOrBinaryByteLength
-    {
-        get
-        {
-            if (_kind is not (DataKind.String or DataKind.JsonValue or DataKind.UInt8Array or DataKind.Image))
-            {
-                throw new InvalidOperationException(
-                    $"Cannot read StringOrBinaryByteLength on a {_kind} value.");
-            }
-            return IsInline ? InlineByteLength : _p1;
-        }
-    }
+    /// <remarks>
+    /// Pairs with <see cref="ContentByteLength"/>: that returns in-memory bytes
+    /// (zero for sidecar values), this returns on-disk bytes (null for non-sidecar
+    /// values). Encoders that need total content size compute
+    /// <c>ContentByteLength + (SidecarByteLength ?? 0)</c>.
+    /// </remarks>
+    public long? SidecarByteLength => IsInSidecar ? SidecarLength : null;
 
     /// <summary>
     /// Returns the cached XxHash64 of the string's UTF-8 bytes as a single ulong,
