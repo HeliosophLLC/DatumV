@@ -80,74 +80,93 @@ public sealed class LimitOperator : IQueryOperator
 
         int skipped = 0;
         int emitted = 0;
+        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
+        // ownership, so we null the local *before* yield. The outer finally cleans up
+        // only the not-yet-yielded leftover, closing the leak window for mid-fill
+        // exceptions and upstream throws during the next MoveNextAsync.
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
+        try
         {
-            // Fast path 1: the entire batch lies inside the skip region — drop it.
-            if (skipped + inputBatch.Count <= Offset)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
             {
-                skipped += inputBatch.Count;
-                context.Pool.ReturnRowBatch(inputBatch);
-                continue;
-            }
-
-            // The skip region is behind us (fully or partially consumed by this batch).
-            int startIndex = Offset - skipped;
-            skipped = Offset;
-            int take = Math.Min(inputBatch.Count - startIndex, Limit - emitted);
-
-            // Fast path 2: no partial start, whole batch fits inside the remaining limit,
-            // and nothing pending in outputBatch that we'd have to merge with — pass the
-            // input batch straight through to the consumer without touching the arena.
-            if (outputBatch is null && startIndex == 0 && take == inputBatch.Count)
-            {
-                emitted += take;
-                yield return inputBatch;
-
-                if (emitted >= Limit) yield break;
-                continue;
-            }
-
-            // Mixed path: copy the [startIndex, startIndex + take) slice into outputBatch,
-            // stabilising each row into the output arena.
-            try
-            {
-                int end = startIndex + take;
-                for (int index = startIndex; index < end; index++)
+                // Fast path 1: the entire batch lies inside the skip region — drop it.
+                if (skipped + inputBatch.Count <= Offset)
                 {
-                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                    skipped += inputBatch.Count;
+                    context.Pool.ReturnRowBatch(inputBatch);
+                    continue;
+                }
 
-                    context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
-                    
-                    emitted++;
+                // The skip region is behind us (fully or partially consumed by this batch).
+                int startIndex = Offset - skipped;
+                skipped = Offset;
+                int take = Math.Min(inputBatch.Count - startIndex, Limit - emitted);
 
-                    if (outputBatch.IsFull)
+                // Fast path 2: no partial start, whole batch fits inside the remaining limit,
+                // and nothing pending in outputBatch that we'd have to merge with — pass the
+                // input batch straight through to the consumer without touching the arena.
+                // The branch guard guarantees outputBatch is null, so no leak window here.
+                if (outputBatch is null && startIndex == 0 && take == inputBatch.Count)
+                {
+                    emitted += take;
+                    yield return inputBatch;
+
+                    if (emitted >= Limit) yield break;
+                    continue;
+                }
+
+                // Mixed path: copy the [startIndex, startIndex + take) slice into outputBatch,
+                // stabilising each row into the output arena.
+                try
+                {
+                    int end = startIndex + take;
+                    for (int index = startIndex; index < end; index++)
                     {
-                        yield return outputBatch;
-                        outputBatch = null;
+                        outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                        context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
+
+                        emitted++;
+
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
-            }
-            finally
-            {
-                context.Pool.ReturnRowBatch(inputBatch);
+                finally
+                {
+                    context.Pool.ReturnRowBatch(inputBatch);
+                }
+
+                if (emitted >= Limit)
+                {
+                    if (outputBatch is not null)
+                    {
+                        RowBatch toYield = outputBatch;
+                        outputBatch = null;
+                        yield return toYield;
+                    }
+                    yield break;
+                }
             }
 
-            if (emitted >= Limit)
+            if (outputBatch is not null)
             {
-                if (outputBatch is not null)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
-                yield break;
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.Pool.ReturnRowBatch(outputBatch);
+            }
         }
     }
 }

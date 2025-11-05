@@ -58,45 +58,64 @@ public sealed class FilterOperator : IQueryOperator
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
         Pool pool = context.Pool;
+        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
+        // ownership, so we null the local *before* yield. The outer finally cleans up
+        // only the not-yet-yielded leftover, closing the leak window for mid-fill
+        // exceptions and upstream throws during the next MoveNextAsync. Post-yield
+        // assignment alone wouldn't help — that statement runs on resumption, not on
+        // iterator disposal.
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch inputBatch in Source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            try
+            await foreach (RowBatch inputBatch in Source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                // Source arena: where the row's non-inline values live (the input batch).
-                // Target arena: the long-lived context store, so literal materialisations
-                // and cache entries from predicate evaluation outlive this batch.
-                Arena sourceArena = inputBatch.Arena;
-                Arena targetArena = context.Store;
-
-                for (int index = 0, count = inputBatch.Count; index < count; index++)
+                try
                 {
-                    Row row = inputBatch[index];
-                    EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
+                    // Source arena: where the row's non-inline values live (the input batch).
+                    // Target arena: the long-lived context store, so literal materialisations
+                    // and cache entries from predicate evaluation outlive this batch.
+                    Arena sourceArena = inputBatch.Arena;
+                    Arena targetArena = context.Store;
 
-                    if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
-
-                    outputBatch ??= pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
-
-                    pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
-
-                    if (outputBatch.IsFull)
+                    for (int index = 0, count = inputBatch.Count; index < count; index++)
                     {
-                        yield return outputBatch;
-                        outputBatch = null;
+                        Row row = inputBatch[index];
+                        EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
+
+                        if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
+
+                        outputBatch ??= pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                        pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
+
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
+                finally
+                {
+                    context.Pool.ReturnRowBatch(inputBatch);
+                }
             }
-            finally
+
+            if (outputBatch is not null)
             {
-                context.Pool.ReturnRowBatch(inputBatch);
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                pool.ReturnRowBatch(outputBatch);
+            }
         }
     }
 }

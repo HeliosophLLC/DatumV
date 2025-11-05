@@ -367,123 +367,45 @@ public sealed class ScanOperator : IQueryOperator
 
         ExecutionTracer.Write($"SCAN index pruning  table={TableProvider.Name}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
 
+        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
+        // ownership, so we null the local *before* yield. The outer finally cleans up
+        // only the not-yet-yielded leftover, closing the leak window for mid-fill
+        // exceptions and upstream throws during the next MoveNextAsync. The middle branch
+        // (pure pass-through) doesn't accumulate, so it's safe inside the same try.
         RowBatch? outputBatch = null;
 
-        // When the provider supports seeking and equality predicates have
-        // index hits, seek directly to matching rows rather than reading entire chunks.
-        if (_filterHint is not null
-            && CollectExactSeekPositions(_filterHint, sourceIndex, chunks, activeChunkIndexes, context.Store) is List<long> exactPositions)
+        try
         {
-            ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
-            ExactSeekRowsFetched = exactPositions.Count;
-
-            using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
-
-            foreach (long rowPosition in exactPositions)
+            // When the provider supports seeking and equality predicates have
+            // index hits, seek directly to matching rows rather than reading entire chunks.
+            if (_filterHint is not null
+                && CollectExactSeekPositions(_filterHint, sourceIndex, chunks, activeChunkIndexes, context.Store) is List<long> exactPositions)
             {
-                await foreach (RowBatch inputBatch in seekSession.SeekAsync(
-                    rowPosition, 1, cancellationToken).ConfigureAwait(false))
+                ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
+                ExactSeekRowsFetched = exactPositions.Count;
+
+                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
+
+                foreach (long rowPosition in exactPositions)
                 {
-                    try
-                    {
-                        for (int i = 0; i < inputBatch.Count; i++)
-                        {
-                            outputBatch ??= context.Pool.RentRowBatch(
-                                inputBatch.ColumnLookup,
-                                context.BatchSize);
-
-                            context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-
-                            if (outputBatch.IsFull)
-                            {
-                                yield return outputBatch;
-                                outputBatch = null;
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        context.Pool.ReturnRowBatch(inputBatch);
-                    }
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
-            }
-
-            yield break;
-        }
-        else if (PrunedIndexChunks == 0 && !HasBitmapRowFilter)
-        {
-            // No pruning and no bitmap row filtering — stream all rows straight from the
-            // provider without the per-chunk seek machinery.
-            await foreach (RowBatch batch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
-            {
-                yield return batch;
-            }
-
-            yield break;
-        }
-        else
-        {
-            using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
-
-            foreach ((long start, long end, int activeChunkIndex) in activeRanges)
-            {
-                int count = (int)(end - start);
-                byte[]? bitmapMask = EvaluateBitmapFilter(
-                    _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count, context.Store);
-
-                if (bitmapMask is not null)
-                {
-                    int rowInChunk = 0;
-
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(
+                        rowPosition, 1, cancellationToken).ConfigureAwait(false))
                     {
                         try
                         {
                             for (int i = 0; i < inputBatch.Count; i++)
                             {
-                                if (IsBitmapBitSet(bitmapMask, rowInChunk))
-                                {
-                                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                outputBatch ??= context.Pool.RentRowBatch(
+                                    inputBatch.ColumnLookup,
+                                    context.BatchSize);
 
-                                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
-                                    
-                                    if (outputBatch.IsFull)
-                                    {
-                                        yield return outputBatch;
-                                        outputBatch = null;
-                                    }
-                                }
-
-                                rowInChunk++;
-                            }
-                        }
-                        finally
-                        {
-                            context.Pool.ReturnRowBatch(inputBatch);
-                        }
-                    }
-                }
-                else
-                {
-                    await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
-                    {
-                        try
-                        {
-                            for (int i = 0; i < inputBatch.Count; i++)
-                            {
-                                outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
-                                
                                 context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                                 if (outputBatch.IsFull)
                                 {
-                                    yield return outputBatch;
+                                    RowBatch toYield = outputBatch;
                                     outputBatch = null;
+                                    yield return toYield;
                                 }
                             }
                         }
@@ -493,14 +415,115 @@ public sealed class ScanOperator : IQueryOperator
                         }
                     }
                 }
-            }
 
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
+
+                yield break;
+            }
+            else if (PrunedIndexChunks == 0 && !HasBitmapRowFilter)
+            {
+                // No pruning and no bitmap row filtering — stream all rows straight from the
+                // provider without the per-chunk seek machinery. outputBatch stays null on
+                // this branch, so the outer finally is a no-op.
+                await foreach (RowBatch batch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+                {
+                    yield return batch;
+                }
+
+                yield break;
+            }
+            else
+            {
+                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
+
+                foreach ((long start, long end, int activeChunkIndex) in activeRanges)
+                {
+                    int count = (int)(end - start);
+                    byte[]? bitmapMask = EvaluateBitmapFilter(
+                        _filterHint, sourceIndex.BitmapIndexes, activeChunkIndex, count, context.Store);
+
+                    if (bitmapMask is not null)
+                    {
+                        int rowInChunk = 0;
+
+                        await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                        {
+                            try
+                            {
+                                for (int i = 0; i < inputBatch.Count; i++)
+                                {
+                                    if (IsBitmapBitSet(bitmapMask, rowInChunk))
+                                    {
+                                        outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                                        context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+
+                                        if (outputBatch.IsFull)
+                                        {
+                                            RowBatch toYield = outputBatch;
+                                            outputBatch = null;
+                                            yield return toYield;
+                                        }
+                                    }
+
+                                    rowInChunk++;
+                                }
+                            }
+                            finally
+                            {
+                                context.Pool.ReturnRowBatch(inputBatch);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        await foreach (RowBatch inputBatch in seekSession.SeekAsync(start, count, cancellationToken).ConfigureAwait(false))
+                        {
+                            try
+                            {
+                                for (int i = 0; i < inputBatch.Count; i++)
+                                {
+                                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+
+                                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+
+                                    if (outputBatch.IsFull)
+                                    {
+                                        RowBatch toYield = outputBatch;
+                                        outputBatch = null;
+                                        yield return toYield;
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                context.Pool.ReturnRowBatch(inputBatch);
+                            }
+                        }
+                    }
+                }
+
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
+
+                yield break;
+            }
+        }
+        finally
+        {
             if (outputBatch is not null)
             {
-                yield return outputBatch;
+                context.Pool.ReturnRowBatch(outputBatch);
             }
-
-            yield break;
         }
     }
 

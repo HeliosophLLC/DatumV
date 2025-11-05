@@ -140,73 +140,75 @@ public sealed class ProjectOperator : IQueryOperator
         Pool pool = context.Pool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
 
+        // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
+        // ownership, so we null the local *before* yield. The outer finally cleans up
+        // only the not-yet-yielded leftover, subsuming the previous bespoke per-row catch
+        // (which only covered exceptions inside the projection block — an upstream throw
+        // during the next MoveNextAsync would still have leaked the in-flight outputBatch).
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-
-            try
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                // Source arena: where the input row's non-inline values live (input batch).
-                // Target arena: the long-lived context store, since projected output values
-                // must outlive the input batch (which is returned to the pool before this
-                // method yields the output batch downstream).
-                IValueStore sourceArena = inputBatch.Arena;
-                IValueStore targetArena = context.Store;
-
-                for (int index = 0; index < inputBatch.Count; index++)
+                try
                 {
-                    Row row = inputBatch[index];
+                    // Source arena: where the input row's non-inline values live (input batch).
+                    // Target arena: the long-lived context store, since projected output values
+                    // must outlive the input batch (which is returned to the pool before this
+                    // method yields the output batch downstream).
+                    IValueStore sourceArena = inputBatch.Arena;
+                    IValueStore targetArena = context.Store;
 
-                    try
+                    for (int index = 0; index < inputBatch.Count; index++)
                     {
+                        Row row = inputBatch[index];
+
                         schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
                         outputBatch ??= pool.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
 
                         EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
-                        DataValue[]? projected = null;
 
-                        projected = schema.Project(
+                        DataValue[]? projected = schema.Project(
                             frame,
                             evaluator,
                             pool,
                             inputBatch.Arena,
                             outputBatch.Arena,
                             assertionDiagnostics);
-                            
+
                         if (projected is null)
                             continue; // Row was skipped due to ASSERT … ON FAIL SKIP
 
                         outputBatch.Add(projected);
 
-                    }
-                    catch (Exception)
-                    {
-                        if (outputBatch is not null)
+                        if (outputBatch.IsFull)
                         {
-                            pool.ReturnRowBatch(outputBatch);
+                            RowBatch toYield = outputBatch;
                             outputBatch = null;
+                            yield return toYield;
                         }
-                        throw;
-                    }
-
-                    
-                    if (outputBatch.IsFull)
-                    {
-                        yield return outputBatch;
-                        outputBatch = null;
                     }
                 }
+                finally
+                {
+                    pool.ReturnRowBatch(inputBatch);
+                }
             }
-            finally
+
+            if (outputBatch is not null)
             {
-                pool.ReturnRowBatch(inputBatch);
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
-        
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                pool.ReturnRowBatch(outputBatch);
+            }
         }
     }
 

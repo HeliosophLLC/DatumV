@@ -481,6 +481,54 @@ public sealed class AssertClauseTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Regression for the ProjectOperator try-finally refactor: an ASSERT … ON FAIL
+    /// ABORT that trips mid-batch must propagate <see cref="AssertionAbortException"/>
+    /// without leaking or double-returning the in-flight outputBatch. Prior to the
+    /// refactor a per-row catch block performed the cleanup and rethrew; the new
+    /// code relies on an outer finally instead. This test exercises the path with
+    /// enough rows preceding the failing one that outputBatch has definitely
+    /// accumulated entries when the exception unwinds, then issues a follow-up query
+    /// against the same DI-resolved <see cref="DatumIngest.Pooling.Pool"/> — a
+    /// double-return would corrupt the pool's per-length DataValue[] queues and the
+    /// follow-up would either throw <see cref="ObjectDisposedException"/> or yield
+    /// stale data.
+    /// </summary>
+    [Fact]
+    public async Task Execute_AbortMode_TripsMidBatch_DoesNotLeakOutputBatch()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: OrderColumns,
+            [1, 10],
+            [2, 20],
+            [3, 30],
+            [4, 40],
+            [5, -5]); // assertion trips here, after 4 successful projections
+
+        await Assert.ThrowsAsync<AssertionAbortException>(
+            () => ExecuteQueryAsync(
+                "SELECT id, amount FROM orders ASSERT amount > 0 ON FAIL ABORT",
+                catalog));
+
+        // Follow-up query against a fresh table but the same Pool. If the previous
+        // query's outputBatch was double-returned, this query's RentRowBatch /
+        // RentDataValues calls would fish a disposed buffer out of the pool and
+        // either throw or produce wrong results.
+        TableCatalog followUp = CreateCatalog("orders2",
+            columns: OrderColumns,
+            [10, 100],
+            [11, 200]);
+
+        List<Row> result = await ExecuteQueryAsync(
+            "SELECT id, amount FROM orders2", followUp);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(10, result[0]["id"].AsInt32());
+        Assert.Equal(100, result[0]["amount"].AsInt32());
+        Assert.Equal(11, result[1]["id"].AsInt32());
+        Assert.Equal(200, result[1]["amount"].AsInt32());
+    }
+
+    /// <summary>
     /// ASSERT ON FAIL SKIP fires for queries built against an in-memory provider.
     /// </summary>
     [Fact]
