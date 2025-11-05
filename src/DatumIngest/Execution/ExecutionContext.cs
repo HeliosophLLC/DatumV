@@ -108,6 +108,18 @@ public sealed class ExecutionContext
     public long? MemoryBudgetBytes { get; }
 
     /// <summary>
+    /// Directory where spill operators write their temp files (data.spill, data.arena).
+    /// Defaults to <see cref="Path.GetTempPath"/>. Override at startup to dedicate a
+    /// physical drive — e.g. on a multi-spindle host where the datum files live on one
+    /// drive (read-heavy random access) and spill writes belong on another (write-heavy
+    /// transient, file-backed Arena pages reclaimed by the OS under memory pressure).
+    /// Each spill operation creates a GUID-prefixed subdirectory under this path; a
+    /// startup sweep (<c>Directory.Delete(subdir, recursive: true)</c> for any
+    /// <c>datum-spill-*</c> entry) cleans up orphans from a prior crashed process.
+    /// </summary>
+    public string SpillDirectory { get; init; } = Path.GetTempPath();
+
+    /// <summary>
     /// Maximum recursion depth for recursive CTEs. Limits how many iterations
     /// the recursive member executes before the operator raises an error.
     /// Defaults to <c>1000</c>.

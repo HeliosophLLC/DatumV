@@ -345,13 +345,28 @@ public sealed class PoolBacking
     /// <returns><see langword="true"/> if the arena was accepted into the pool; <see langword="false"/> if the arena was not pooled (e.g. still in use by another owner, or above the capacity threshold).</returns>
     public bool TryReturn(Arena arena)
     {
-        const int maxArenaCapacity = 64 * 1024 * 1024; // 64 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
+        /* Logic:
+         *  - row batches are typically 1024
+         *  - single DataValue arrays are 20 bytes
+         *  - 256 columns * 1024 rows * 20 bytes = 5MB
+        */
+        const int maxArenaCapacity = 5 * 1024 * 1024;
 
         if (arena.ReleaseReference() > 0)
         {
             // Arena still has outstanding references — not a full return.
             DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: false);
             return false;
+        }
+        else if (arena.IsFileBacked)
+        {
+            // File-backed arenas don't go into the anonymous pool — they have file identity
+            // tied to a specific spill operation. Terminal release deletes the file via
+            // Arena.Dispose. The shared refcount path keeps RowBatch.Return → TryReturn
+            // working uniformly for both arena kinds.
+            arena.Dispose();
+            DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: false);
+            return true;
         }
         else if (arena.Capacity >= maxArenaCapacity)
         {

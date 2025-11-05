@@ -41,22 +41,47 @@ internal sealed class SpillReaderWriter : IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Creates a spiller bound to <paramref name="pool"/> and <paramref name="schema"/>. The
-    /// consolidated arena is rented eagerly so its lifetime is tied to this instance; pass an
-    /// <paramref name="initialArenaCapacity"/> hint when you have a rough estimate of total
-    /// payload bytes to avoid resize thrash.
+    /// Creates a spiller bound to <paramref name="pool"/> and <paramref name="schema"/>.
+    /// Allocates a file-backed consolidated arena under <paramref name="spillDirectory"/> so
+    /// the OS can page payload bytes out of working set under memory pressure — the actual
+    /// memory-relief feature that "spill" implies. The arena's file and the row-metadata
+    /// spill file live in the same GUID-prefixed subdirectory and are removed together on
+    /// <see cref="Dispose"/>.
     /// </summary>
-    public SpillReaderWriter(Pool pool, ColumnLookup schema, int initialArenaCapacity = 1024 * 1024)
+    /// <param name="pool">Pool used for replay-batch allocations and refcount lifecycle.</param>
+    /// <param name="schema">Schema all spilled rows share.</param>
+    /// <param name="spillDirectory">
+    /// Parent directory for this spiller's temp subdirectory. Typically
+    /// <c>ExecutionContext.SpillDirectory</c> — the deployment-configured spill spindle.
+    /// </param>
+    /// <param name="initialArenaCapacity">
+    /// Pre-size the consolidated arena's backing file to this many bytes. Generous values
+    /// reduce growth churn (file-backed grow requires unmap → SetLength → remap, more
+    /// expensive than anonymous grow). Callers should sum the existing per-batch arena
+    /// capacities they're about to spill — and double for headroom — when they have one
+    /// to hand. Floored by Arena's own minimum.
+    /// </param>
+    public SpillReaderWriter(
+        Pool pool,
+        ColumnLookup schema,
+        string spillDirectory,
+        int initialArenaCapacity = 1024 * 1024)
     {
         _pool = pool;
         _schema = schema;
-        _consolidatedArena = pool.RentArena(initialArenaCapacity);
 
         _spillDirectory = Path.Combine(
-            Path.GetTempPath(),
+            spillDirectory,
             $"datum-spill-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_spillDirectory);
         _spillFilePath = Path.Combine(_spillDirectory, "data.spill");
+
+        // File-backed: bytes live on disk, OS pages them in/out as touched. The dispose
+        // path routes through pool.ReturnArena → PoolBacking.TryReturn, which sees
+        // IsFileBacked=true and disposes (deleting data.arena) instead of pooling.
+        string arenaFilePath = Path.Combine(_spillDirectory, "data.arena");
+        _consolidatedArena = Arena.CreateFileBacked(arenaFilePath, initialArenaCapacity);
+        _consolidatedArena.AddReference();
     }
 
     /// <summary>The consolidated arena that backs every spilled arena-stored payload.</summary>

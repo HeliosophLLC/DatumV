@@ -36,6 +36,7 @@ public sealed class Arena : IValueStore, IDisposable
     private const int DefaultCapacity = 1024 * 1024; // 1 MB — OS demand-pages, so unused capacity costs nothing
 
     private readonly Lock _writeLock = new();
+    private readonly string? _backingFilePath;
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
     private unsafe byte* _pointer;
@@ -50,18 +51,55 @@ public sealed class Arena : IValueStore, IDisposable
     // Accessed under _writeLock for thread safety.
     private List<object>? _objects;
 
-    /// <summary>Creates an arena with the specified initial byte capacity and optional owner.</summary>
+    /// <summary>Creates an anonymous-mmap arena with the specified initial byte capacity.</summary>
     /// <param name="initialCapacity">
     /// Initial size of the anonymous memory-mapped region in bytes.
     /// The mapping is not allocated until the first write.
     /// </param>
     public Arena(int initialCapacity = DefaultCapacity)
+        : this(initialCapacity, backingFilePath: null) { }
+
+    /// <summary>
+    /// Internal ctor shared by anonymous and file-backed factories. <paramref name="backingFilePath"/>
+    /// non-null selects the file-backed mode; the file is created lazily on first write.
+    /// </summary>
+    private Arena(int initialCapacity, string? backingFilePath)
     {
         _initialCapacity = Math.Max(initialCapacity, DefaultCapacity);
+        _backingFilePath = backingFilePath;
+    }
+
+    /// <summary>
+    /// Creates a file-backed arena. Bytes live in <paramref name="filePath"/>; the OS can page
+    /// cold pages out under memory pressure and reload them from the file. Suitable for spill
+    /// scenarios where payload bytes need to survive a memory budget without committing process
+    /// memory for them. NOT poolable — <see cref="IDisposable.Dispose"/> deletes the file.
+    /// </summary>
+    /// <param name="filePath">
+    /// Absolute path to the backing file. Must not exist (we open with <see cref="FileMode.CreateNew"/>
+    /// so a stale file from a crashed process surfaces as an exception rather than silently
+    /// resuming with corrupted state).
+    /// </param>
+    /// <param name="initialCapacity">
+    /// Pre-size the file to this many bytes. Generous values reduce growth churn — file-backed
+    /// growth requires unmapping → resizing → remapping, more expensive than anonymous growth's
+    /// in-process memcpy. Floored at <see cref="DefaultCapacity"/>.
+    /// </param>
+    public static Arena CreateFileBacked(string filePath, int initialCapacity = DefaultCapacity)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
+        return new Arena(initialCapacity, filePath);
     }
 
     /// <summary>Whether the backing memory-mapped region has been allocated.</summary>
     public bool IsAllocated => _mmf is not null;
+
+    /// <summary>
+    /// Whether this arena's bytes live in a backing file (<see cref="CreateFileBacked"/>) rather
+    /// than an anonymous mmap region. File-backed arenas are not pool-managed; their lifecycle is
+    /// owner-disposed.
+    /// </summary>
+    public bool IsFileBacked => _backingFilePath is not null;
 
     /// <summary>Whether this arena is currently held in a pool and must not be accessed.</summary>
     public bool Pooled { get => _pooled; private set => _pooled = value; }
@@ -500,6 +538,11 @@ public sealed class Arena : IValueStore, IDisposable
     /// </remarks>
     public void Reset()
     {
+        if (_backingFilePath is not null)
+            throw new InvalidOperationException(
+                "File-backed arenas are not reset for reuse — they're disposed at end of life. " +
+                "Reset is part of the anonymous-pool reuse cycle, which file-backed arenas do not participate in.");
+
         ThrowIfPooled();
         lock (_writeLock)
         {
@@ -518,6 +561,11 @@ public sealed class Arena : IValueStore, IDisposable
     /// </summary>
     internal void Pool()
     {
+        if (_backingFilePath is not null)
+            throw new InvalidOperationException(
+                "File-backed arenas cannot be pooled — they have file identity, not interchangeability. " +
+                "Dispose them directly when their owner is done.");
+
         if (_pooled)
             throw new InvalidOperationException("Arena is already pooled — double-return detected.");
 
@@ -557,14 +605,33 @@ public sealed class Arena : IValueStore, IDisposable
         DatumDiagnostics.RecordArenaDispose(_capacity);
         ReleaseMapping();
         _position = 0;
+
+        // File-backed: best-effort delete of the backing file. The mapping has been released
+        // above so the file is unlocked; on Windows the delete may briefly fail if another
+        // handle still references the file (shouldn't happen — file path is GUID-unique to
+        // this arena). Swallow IOException because the OS reclaims temp dirs at shutdown
+        // anyway, and we don't want disposal to throw.
+        if (_backingFilePath is not null && File.Exists(_backingFilePath))
+        {
+            try
+            {
+                File.Delete(_backingFilePath);
+            }
+            catch (IOException) { }
+        }
     }
 
     // ───────────────────────── Memory-mapped backing ─────────────────────────
 
-    private static unsafe void CreateMapping(int capacity,
+    private static unsafe void CreateMapping(
+        string? backingFilePath, int capacity, FileMode fileMode,
         out MemoryMappedFile mmf, out MemoryMappedViewAccessor accessor, out byte* pointer)
     {
-        mmf = MemoryMappedFile.CreateNew(null, capacity, MemoryMappedFileAccess.ReadWrite);
+        mmf = backingFilePath is null
+            ? MemoryMappedFile.CreateNew(null, capacity, MemoryMappedFileAccess.ReadWrite)
+            : MemoryMappedFile.CreateFromFile(
+                backingFilePath, fileMode, mapName: null, capacity, MemoryMappedFileAccess.ReadWrite);
+
         accessor = mmf.CreateViewAccessor(0, capacity, MemoryMappedFileAccess.ReadWrite);
         pointer = null;
         accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
@@ -586,7 +653,11 @@ public sealed class Arena : IValueStore, IDisposable
 
     /// <summary>
     /// Allocates or grows the backing mapping. Must be called under <see cref="_writeLock"/>.
-    /// On the first call, creates the initial mapping lazily.
+    /// On the first call, creates the initial mapping lazily. Anonymous and file-backed
+    /// arenas share the rent path but diverge on grow: anonymous allocates a fresh mapping
+    /// and memcpys the prior contents; file-backed unmaps, resizes the file in place, and
+    /// remaps (Windows refuses <see cref="FileStream.SetLength"/> on a mapped file, so the
+    /// unmap window is mandatory — it's safe because <see cref="_writeLock"/> serializes us).
     /// </summary>
     private unsafe void EnsureCapacity(int additionalBytes)
     {
@@ -596,7 +667,8 @@ public sealed class Arena : IValueStore, IDisposable
         if (_mmf is null)
         {
             int capacity = Math.Max(_initialCapacity, required);
-            CreateMapping(capacity, out _mmf, out _accessor, out _pointer);
+            CreateMapping(_backingFilePath, capacity, FileMode.CreateNew,
+                out _mmf, out _accessor, out _pointer);
             _capacity = capacity;
             DatumDiagnostics.RecordArenaInitialMapping(capacity);
             return;
@@ -607,16 +679,30 @@ public sealed class Arena : IValueStore, IDisposable
         int oldCapacity = _capacity;
         int bytesCopied = _position;
         int newCapacity = Math.Max(_capacity * 2, required);
-        CreateMapping(newCapacity, out var newMmf, out var newAccessor, out var newPointer);
 
-        // Copy existing data to the new mapping.
-        new ReadOnlySpan<byte>(_pointer, _position).CopyTo(new Span<byte>(newPointer, newCapacity));
+        if (_backingFilePath is null)
+        {
+            // Anonymous: build new mapping, memcpy prior contents, release old.
+            CreateMapping(null, newCapacity, FileMode.CreateNew,
+                out var newMmf, out var newAccessor, out var newPointer);
+            new ReadOnlySpan<byte>(_pointer, _position).CopyTo(new Span<byte>(newPointer, newCapacity));
+            ReleaseMapping();
+            _mmf = newMmf;
+            _accessor = newAccessor;
+            _pointer = newPointer;
+        }
+        else
+        {
+            // File-backed: bytes already persisted. Unmap → SetLength → remap. No memcpy.
+            ReleaseMapping();
+            using (FileStream fs = File.Open(_backingFilePath, FileMode.Open, FileAccess.ReadWrite))
+            {
+                fs.SetLength(newCapacity);
+            }
+            CreateMapping(_backingFilePath, newCapacity, FileMode.Open,
+                out _mmf, out _accessor, out _pointer);
+        }
 
-        ReleaseMapping();
-
-        _mmf = newMmf;
-        _accessor = newAccessor;
-        _pointer = newPointer;
         _capacity = newCapacity;
 
         DatumDiagnostics.RecordArenaGrow(oldCapacity, newCapacity, bytesCopied);

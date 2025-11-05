@@ -65,7 +65,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             [DataValue.FromInt32(2), DataValue.FromFloat32(2.5f), DataValue.FromBoolean(false)],
             [DataValue.FromInt32(3), DataValue.FromFloat32(3.5f), DataValue.FromBoolean(true)]);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         List<DataValue[]> replayed = await ReplayToList(spiller, context, lookup);
@@ -98,7 +98,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         Assert.NotSame(b1.Arena, b2.Arena);
         Assert.NotSame(b2.Arena, b3.Arena);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(b1);
         spiller.Write(b2);
         spiller.Write(b3);
@@ -129,7 +129,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
 
         Assert.NotSame(b1.Arena, b2.Arena);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         Arena consolidated = spiller.ConsolidatedArena;
         spiller.Write(b1);
         spiller.Write(b2);
@@ -165,7 +165,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             DataValue.FromBoolean(false),
         ]);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         Arena consolidated = spiller.ConsolidatedArena;
         spiller.Write(input);
 
@@ -196,7 +196,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         Assert.Equal(1, inputArena.ReferenceCount);
         input.Add([DataValue.FromInt32(42)]);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         // Spiller returned the batch immediately after writing, so its per-batch arena's
@@ -215,7 +215,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         RowBatch input = pool.RentRowBatch(lookup, capacity: 1);
         input.Add([DataValue.FromString("a long arena-backed payload", input.Arena)]);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         await foreach (RowBatch replay in spiller.ReplayAsync(context, lookup))
@@ -239,7 +239,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             input.Add([DataValue.FromInt32(i)]);
         }
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         Arena consolidated = spiller.ConsolidatedArena;
@@ -275,7 +275,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             input.Add([DataValue.FromInt32(i)]);
         }
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         Arena consolidated = spiller.ConsolidatedArena;
@@ -313,7 +313,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         RowBatch input = pool.RentRowBatch(lookup, capacity: 1);
         input.Add([DataValue.FromInt32(1)]);
 
-        SpillReaderWriter spiller = new(pool, lookup);
+        SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         string spillFile = spiller.SpillFilePath;
@@ -336,7 +336,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
 
         RowBatch empty = pool.RentRowBatch(lookup, capacity: 1);
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(empty);
 
         // No file was opened: replay yields nothing.
@@ -362,7 +362,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             input.Add([DataValue.FromInt32(i)]);
         }
 
-        using SpillReaderWriter spiller = new(pool, lookup);
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
         spiller.Write(input);
 
         List<int> sizes = [];
@@ -393,7 +393,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
         RowBatch input = MakeBatch(pool, writeLookup,
             [DataValue.FromInt32(1), DataValue.FromInt32(2)]);
 
-        using SpillReaderWriter spiller = new(pool, writeLookup);
+        using SpillReaderWriter spiller = new(pool, writeLookup, Path.GetTempPath());
         spiller.Write(input);
 
         await foreach (RowBatch batch in spiller.ReplayAsync(context, readLookup))

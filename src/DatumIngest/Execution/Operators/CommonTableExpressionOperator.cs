@@ -241,7 +241,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
 
                 if (estimatedMemory > memoryBudget!.Value)
                 {
-                    SpillCacheToDisk(pool);
+                    SpillCacheToDisk(context);
                 }
                 else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
                 {
@@ -257,11 +257,31 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     /// row metadata to disk, and returns the batches to the pool), and clears the in-memory
     /// cache. Future input batches go directly through the spiller.
     /// </summary>
-    private void SpillCacheToDisk(Pool pool)
+    private void SpillCacheToDisk(ExecutionContext context)
     {
-        _spiller = new SpillReaderWriter(pool, _materializedSchema!);
-
+        // Initial-capacity hint for the consolidated arena's backing file: sum of every
+        // cached batch's per-batch arena capacity, doubled for headroom. Per-batch arenas
+        // already hold a representative payload mix; their sum is a good proxy for what
+        // the consolidated arena will hold post-stabilize, and doubling absorbs the
+        // remaining input rows that haven't been spilled yet plus the file-backed grow
+        // overhead (unmap/SetLength/remap) we'd otherwise pay later.
+        long initialArenaCapacity = 0;
         foreach (RowBatch buffered in _materializedBatches!)
+        {
+            initialArenaCapacity += buffered.Arena.Capacity;
+        }
+        initialArenaCapacity *= 2;
+
+        // Cap at int.MaxValue — Arena.CreateFileBacked takes int. In practice if we're at
+        // 2 GB of arena bytes we have far worse problems than the cast.
+        int hint = initialArenaCapacity > int.MaxValue
+            ? int.MaxValue
+            : (int)initialArenaCapacity;
+
+        _spiller = new SpillReaderWriter(
+            context.Pool, _materializedSchema!, context.SpillDirectory, hint);
+
+        foreach (RowBatch buffered in _materializedBatches)
         {
             _spiller.Write(buffered);
         }
