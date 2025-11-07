@@ -4172,7 +4172,7 @@ public sealed class QueryPlanner
                 SelectStatement anchorStatement = commonTableExpression.Body switch
                 {
                     SelectQueryExpression select => select.Statement,
-                    _ => throw new InvalidOperationException(
+                    _ => throw new QueryPlanException(
                         $"Recursive CTE '{commonTableExpression.Name}' body must be a single SELECT statement (the anchor member)."),
                 };
 

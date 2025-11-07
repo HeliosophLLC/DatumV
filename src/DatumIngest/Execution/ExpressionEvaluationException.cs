@@ -5,9 +5,11 @@ namespace DatumIngest.Execution;
 /// <summary>
 /// Thrown when an expression evaluation fails at runtime. Carries the
 /// <see cref="SourceSpan"/> of the failing expression so that callers can
-/// report the SQL source location to the user.
+/// report the SQL source location to the user. Inherits from
+/// <see cref="ExecutionException"/>: the message is safe to surface to the
+/// caller as a query-level error.
 /// </summary>
-public sealed class ExpressionEvaluationException : Exception
+public sealed class ExpressionEvaluationException : ExecutionException
 {
     /// <summary>
     /// Source span of the expression that triggered the error, if available.

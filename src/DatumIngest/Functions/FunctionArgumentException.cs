@@ -1,14 +1,17 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions;
 
 /// <summary>
 /// Exception thrown when a function argument does not match the expected kind or count.
+/// Inherits from <see cref="ExecutionException"/>: the message is safe to surface to the
+/// caller as a query-level error.
 /// </summary>
 /// <param name="functionName">The name of the function.</param>
 /// <param name="message">The error message.</param>
 public sealed class FunctionArgumentException(string functionName, string message)
-    : Exception($"{FormatFunctionName(functionName)}: {message}")
+    : ExecutionException($"{FormatFunctionName(functionName)}: {message}")
 {
     /// <summary>
     /// Throws if no arguments are provided, but at least one is expected.

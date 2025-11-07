@@ -4,9 +4,11 @@ namespace DatumIngest.Execution;
 /// Thrown when a query's accumulated Query Unit cost exceeds its budget.
 /// Operators that materialize their full input (blocking operators) check
 /// the budget periodically during materialization so the query can be
-/// terminated early instead of consuming unbounded resources.
+/// terminated early instead of consuming unbounded resources. Inherits from
+/// <see cref="ExecutionException"/>: the message is safe to surface to the
+/// caller as a query-level error.
 /// </summary>
-public sealed class QueryBudgetExceededException : Exception
+public sealed class QueryBudgetExceededException : ExecutionException
 {
     /// <summary>
     /// Creates a new instance with the budget and consumed Query Units.

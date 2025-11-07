@@ -4,9 +4,10 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// Thrown when an <see cref="AssertClause"/> with <see cref="AssertFailureMode.Abort"/>
-/// evaluates to false or null for a row.
+/// evaluates to false or null for a row. Inherits from <see cref="ExecutionException"/>:
+/// the message is safe to surface to the caller as a query-level error.
 /// </summary>
-public sealed class AssertionAbortException : Exception
+public sealed class AssertionAbortException : ExecutionException
 {
     /// <summary>
     /// Source span of the ASSERT clause that triggered the abort, if available.
