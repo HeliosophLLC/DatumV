@@ -1,29 +1,44 @@
-using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
 /// <summary>
-/// Spill-to-disk helper that owns a temp file plus a single consolidated <see cref="Arena"/>
-/// holding every arena-backed payload referenced by spilled rows. Used by operators that
-/// need to evict materialized <see cref="RowBatch"/> state when a memory budget is exceeded.
+/// Spill-to-disk helper that owns one or more partition files plus a single consolidated
+/// <see cref="Arena"/> holding every arena-backed payload referenced by spilled rows. Used
+/// by operators that need to evict materialized <see cref="RowBatch"/> state when a memory
+/// budget is exceeded.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each <see cref="Write(RowBatch)"/> call stabilises the batch's <see cref="DataValue"/>s into
-/// the consolidated arena via <see cref="DataValueRetention.Stabilize"/>, writes their raw
-/// 20-byte structs to the spill file, then returns the input batch to the pool. The
-/// per-batch arena is released; payloads survive in the consolidated arena.
+/// <strong>Partitioning.</strong> Constructed with <c>partitionCount = 1</c> (default), the
+/// spiller behaves as a single-stream sink — one file, sequential append, used by the CTE
+/// and recursive-CTE materialization paths. Constructed with <c>partitionCount &gt; 1</c>,
+/// the caller picks a partition index per write (typically <c>hashCode % partitionCount</c>)
+/// and the spiller maintains an independent file + writer per partition, all sharing the
+/// same consolidated arena. Used by hash-partitioned spill operators (UNION DISTINCT,
+/// INTERSECT, EXCEPT, future GroupBy/grace-hash-join).
 /// </para>
 /// <para>
-/// <see cref="ReplayAsync"/> opens the spill file for reading, materialises rows whose
-/// <c>_p0</c>/<c>_p1</c> reference the consolidated arena, and yields output batches that
-/// share that arena (so reads of arena-backed values resolve correctly).
+/// <strong>Single arena, multiple partitions.</strong> The consolidated arena is shared
+/// across every partition. Arena-backed payloads from any partition's writes resolve
+/// correctly during any partition's replay — the partition split is purely about row
+/// metadata grouping, not about isolating payload bytes. This is the load-bearing property
+/// for set operations: when probing left rows against a per-partition right hash set, both
+/// sides see the same arena and string equality "just works" without per-partition copies.
 /// </para>
 /// <para>
-/// Designed to be reusable by other spilling operators (OrderBy, GroupBy, Distinct, etc.)
-/// once they migrate off the throw-stub <c>RowSerializer.WriteDataValue</c> path.
+/// <strong>Write path</strong> (per <see cref="Write(RowBatch, int)"/>): stabilises the
+/// batch's <see cref="DataValue"/>s into the consolidated arena via
+/// <see cref="DataValueRetention.Stabilize"/>, writes their raw 20-byte structs to the
+/// partition's spill file, returns the input batch.
+/// </para>
+/// <para>
+/// <strong>Read path</strong> (per <see cref="ReplayPartitionAsync"/> /
+/// <see cref="ReplayPartitionRangeAsync"/>): yields output batches whose arena is the
+/// consolidated arena (so arena-backed values resolve correctly). The writer remains open
+/// across replays — operators that interleave write and read phases (e.g. recursive CTE,
+/// post-build-side join probe) can keep appending after a partial replay completes.
 /// </para>
 /// </remarks>
 internal sealed class SpillReaderWriter : IDisposable
@@ -32,18 +47,22 @@ internal sealed class SpillReaderWriter : IDisposable
     private readonly ColumnLookup _schema;
     private readonly Arena _consolidatedArena;
     private readonly string _spillDirectory;
-    private readonly string _spillFilePath;
+    private readonly int _partitionCount;
 
-    private FileStream? _writeStream;
-    private BinaryWriter? _writer;
-    private bool _schemaWritten;
-    private long _rowCount;
+    // All per-partition state is arrays of length _partitionCount. Index 0 is the only
+    // active partition for partitionCount=1 (single-stream mode).
+    private readonly FileStream?[] _writeStreams;
+    private readonly BinaryWriter?[] _writers;
+    private readonly bool[] _schemaWritten;
+    private readonly long[] _rowCounts;
     /// <summary>
-    /// Byte offset at which row data begins (i.e. the size of the schema header). Captured
-    /// after WriteSchema completes; used by <see cref="ReplayRangeAsync"/> to seek directly
-    /// to a row offset without re-parsing the header. Zero until the first non-empty Write.
+    /// Byte offset within each partition's file at which row data begins (i.e. the size of
+    /// the schema header). Captured after that partition's WriteSchema completes; used by
+    /// <see cref="ReplayPartitionRangeAsync"/> to seek directly to a row offset without
+    /// re-parsing the header.
     /// </summary>
-    private long _rowDataStartByte;
+    private readonly long[] _rowDataStartBytes;
+    private readonly string[] _spillFilePaths;
     private bool _disposed;
 
     /// <summary>Bytes occupied by a single serialized row. Schema-stride is fixed once schema is written.</summary>
@@ -56,8 +75,8 @@ internal sealed class SpillReaderWriter : IDisposable
     /// Creates a spiller bound to <paramref name="pool"/> and <paramref name="schema"/>.
     /// Allocates a file-backed consolidated arena under <paramref name="spillDirectory"/> so
     /// the OS can page payload bytes out of working set under memory pressure — the actual
-    /// memory-relief feature that "spill" implies. The arena's file and the row-metadata
-    /// spill file live in the same GUID-prefixed subdirectory and are removed together on
+    /// memory-relief feature that "spill" implies. The arena's file and the partition spill
+    /// files all live in the same GUID-prefixed subdirectory and are removed together on
     /// <see cref="Dispose"/>.
     /// </summary>
     /// <param name="pool">Pool used for replay-batch allocations and refcount lifecycle.</param>
@@ -68,25 +87,46 @@ internal sealed class SpillReaderWriter : IDisposable
     /// </param>
     /// <param name="initialArenaCapacity">
     /// Pre-size the consolidated arena's backing file to this many bytes. Generous values
-    /// reduce growth churn (file-backed grow requires unmap → SetLength → remap, more
-    /// expensive than anonymous grow). Callers should sum the existing per-batch arena
-    /// capacities they're about to spill — and double for headroom — when they have one
-    /// to hand. Floored by Arena's own minimum.
+    /// reduce growth churn (file-backed grow requires unmap → SetLength → remap). Floored by
+    /// Arena's own minimum.
+    /// </param>
+    /// <param name="partitionCount">
+    /// Number of independent spill files. Defaults to 1 (single-stream behaviour). Pass
+    /// <c>N &gt; 1</c> for hash-partitioned spill (set operations, hash-aggregate, grace
+    /// join). Each partition has its own file, schema-written flag, and row count, but all
+    /// partitions share the consolidated arena.
     /// </param>
     public SpillReaderWriter(
         Pool pool,
         ColumnLookup schema,
         string spillDirectory,
-        int initialArenaCapacity = 1024 * 1024)
+        int initialArenaCapacity = 1024 * 1024,
+        int partitionCount = 1)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(partitionCount, 1);
+
         _pool = pool;
         _schema = schema;
+        _partitionCount = partitionCount;
 
         _spillDirectory = Path.Combine(
             spillDirectory,
             $"datum-spill-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_spillDirectory);
-        _spillFilePath = Path.Combine(_spillDirectory, "data.spill");
+
+        _writeStreams = new FileStream?[partitionCount];
+        _writers = new BinaryWriter?[partitionCount];
+        _schemaWritten = new bool[partitionCount];
+        _rowCounts = new long[partitionCount];
+        _rowDataStartBytes = new long[partitionCount];
+        _spillFilePaths = new string[partitionCount];
+        for (int i = 0; i < partitionCount; i++)
+        {
+            // For partitionCount=1 the file name is data_0.spill — slight churn from the
+            // pre-partition-aware "data.spill", but file names are an internal detail.
+            // The SpillFilePath / SpillDirectory properties remain the public surface.
+            _spillFilePaths[i] = Path.Combine(_spillDirectory, $"data_{i}.spill");
+        }
 
         // File-backed: bytes live on disk, OS pages them in/out as touched. The dispose
         // path routes through pool.ReturnArena → PoolBacking.TryReturn, which sees
@@ -102,20 +142,60 @@ internal sealed class SpillReaderWriter : IDisposable
     /// <summary>The schema all spilled rows share.</summary>
     public ColumnLookup Schema => _schema;
 
-    /// <summary>Total number of rows handed to <see cref="Write(RowBatch)"/> so far.</summary>
-    public long RowCount => _rowCount;
+    /// <summary>The directory containing every partition's spill file plus the arena file.</summary>
+    public string SpillDirectory => _spillDirectory;
 
-    /// <summary>The spill file path on disk; exists only after the first non-empty Write.</summary>
-    public string SpillFilePath => _spillFilePath;
+    /// <summary>The number of partitions this spiller was constructed with.</summary>
+    public int PartitionCount => _partitionCount;
+
+    /// <summary>
+    /// Total number of rows handed to <see cref="Write(RowBatch)"/> / <see cref="Write(RowBatch, int)"/>
+    /// across all partitions. For per-partition counts, see <see cref="RowsWrittenInPartition"/>.
+    /// </summary>
+    public long RowsWritten
+    {
+        get
+        {
+            long total = 0;
+            for (int i = 0; i < _partitionCount; i++) total += _rowCounts[i];
+            return total;
+        }
+    }
+
+    /// <summary>
+    /// Number of rows written to a specific partition. Used by recursive-CTE iteration tracking
+    /// (single-stream, partition=0) and by hash-partitioned operators when computing per-partition
+    /// drain bounds.
+    /// </summary>
+    public long RowsWrittenInPartition(int partition)
+    {
+        ValidatePartition(partition);
+        return _rowCounts[partition];
+    }
+
+    /// <summary>
+    /// Backward-compatible single-stream property: returns the partition-0 file path. For
+    /// partitioned spillers, prefer iterating <see cref="SpillDirectory"/> contents or using
+    /// per-partition replay.
+    /// </summary>
+    public string SpillFilePath => _spillFilePaths[0];
+
+    /// <summary>
+    /// Single-stream write — equivalent to <c>Write(batch, partition: 0)</c>. Available on
+    /// any spiller; partitionCount &gt; 1 spillers should prefer the partition-aware overload.
+    /// </summary>
+    public void Write(RowBatch batch) => Write(batch, partition: 0);
 
     /// <summary>
     /// Stabilises every value in <paramref name="batch"/> into the consolidated arena, writes
-    /// the raw DataValue structs to the spill file, and returns the batch (releasing its
-    /// per-batch arena). Empty batches are returned without touching the file.
+    /// the raw DataValue structs to <paramref name="partition"/>'s spill file, and returns the
+    /// batch (releasing its per-batch arena). Empty batches are returned without touching any
+    /// file.
     /// </summary>
-    public void Write(RowBatch batch)
+    public void Write(RowBatch batch, int partition)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidatePartition(partition);
 
         if (batch.Count == 0)
         {
@@ -123,21 +203,22 @@ internal sealed class SpillReaderWriter : IDisposable
             return;
         }
 
-        EnsureWriterOpen();
+        EnsureWriterOpen(partition);
 
-        if (!_schemaWritten)
+        if (!_schemaWritten[partition])
         {
-            RowSerializer.WriteSchema(_writer, _schema);
+            RowSerializer.WriteSchema(_writers[partition]!, _schema);
             // Flush so we can read the underlying stream's position — BinaryWriter buffers,
             // so the byte offset of "first row" must be captured against bytes actually
             // written to the FileStream.
-            _writer.Flush();
-            _rowDataStartByte = _writeStream.Position;
-            _schemaWritten = true;
+            _writers[partition]!.Flush();
+            _rowDataStartBytes[partition] = _writeStreams[partition]!.Position;
+            _schemaWritten[partition] = true;
         }
 
         Arena sourceArena = batch.Arena;
         int columnCount = _schema.Count;
+        BinaryWriter writer = _writers[partition]!;
 
         try
         {
@@ -148,9 +229,9 @@ internal sealed class SpillReaderWriter : IDisposable
                 {
                     DataValue stabilized = DataValueRetention.Stabilize(
                         row[columnIndex], sourceArena, _consolidatedArena);
-                    RowSerializer.WriteStabilizedDataValue(_writer, stabilized);
+                    RowSerializer.WriteStabilizedDataValue(writer, stabilized);
                 }
-                _rowCount++;
+                _rowCounts[partition]++;
             }
         }
         finally
@@ -159,63 +240,86 @@ internal sealed class SpillReaderWriter : IDisposable
         }
     }
 
-    /// <summary>Total number of rows handed to <see cref="Write(RowBatch)"/> so far. Useful for
-    /// recursive-CTE iteration tracking — capture the value at iteration start to compute the
-    /// working-table row range for the next iteration.</summary>
-    public long RowsWritten => _rowCount;
-
     /// <summary>
-    /// Replays every spilled row as <see cref="RowBatch"/>es whose arena is the consolidated
-    /// arena (so arena-backed values resolve correctly). Returns no batches if nothing was
-    /// ever written. The writer remains open across replays — callers may continue to
-    /// <see cref="Write(RowBatch)"/> additional rows after a replay completes; subsequent
-    /// replays will see them.
+    /// Replays every spilled row from partition 0. Equivalent to
+    /// <c>ReplayPartitionAsync(context, lookup, partition: 0)</c>. Useful for single-stream
+    /// callers (CTE, recursive CTE in single-stream mode).
     /// </summary>
-    public IAsyncEnumerable<RowBatch> ReplayAsync(
-        ExecutionContext context,
-        ColumnLookup outputLookup)
-    {
-        return ReplayRangeAsync(context, outputLookup, startRow: 0, rowCount: long.MaxValue);
-    }
+    public IAsyncEnumerable<RowBatch> ReplayAsync(ExecutionContext context, ColumnLookup outputLookup)
+        => ReplayPartitionRangeAsync(context, outputLookup, partition: 0, startRow: 0, rowCount: long.MaxValue);
 
     /// <summary>
-    /// Replays a specific row range — useful for recursive CTE working-table semantics where
-    /// each iteration only needs the previous iteration's output (i.e. rows
-    /// <c>[previousIterationEnd, currentIterationEnd)</c>). Pass <c>rowCount = long.MaxValue</c>
-    /// to read from <paramref name="startRow"/> to the end of what's been written so far.
+    /// Replays a row range from partition 0. Equivalent to
+    /// <c>ReplayPartitionRangeAsync(context, lookup, partition: 0, startRow, rowCount)</c>.
+    /// Used by recursive-CTE working-table semantics (read only the previous iteration's slice).
+    /// </summary>
+    public IAsyncEnumerable<RowBatch> ReplayRangeAsync(
+        ExecutionContext context, ColumnLookup outputLookup, long startRow, long rowCount)
+        => ReplayPartitionRangeAsync(context, outputLookup, partition: 0, startRow, rowCount);
+
+    /// <summary>
+    /// Replays every row written to <paramref name="partition"/>. The writer remains open
+    /// across replays — additional writes to any partition (including this one) will be
+    /// visible to subsequent replays.
+    /// </summary>
+    public IAsyncEnumerable<RowBatch> ReplayPartitionAsync(
+        ExecutionContext context, ColumnLookup outputLookup, int partition)
+        => ReplayPartitionRangeAsync(context, outputLookup, partition, startRow: 0, rowCount: long.MaxValue);
+
+    /// <summary>
+    /// Replays a specific row range within <paramref name="partition"/>. Pass
+    /// <c>rowCount = long.MaxValue</c> for "from <paramref name="startRow"/> to end of what's
+    /// been written".
     /// </summary>
     /// <param name="context">Provides cancellation and the output batch size.</param>
     /// <param name="outputLookup">Schema for the output batches; column count must match the spilled schema.</param>
-    /// <param name="startRow">Zero-based row index to start reading from. Must be ≤ <see cref="RowsWritten"/>.</param>
-    /// <param name="rowCount">Maximum number of rows to read. Capped at <c>RowsWritten - startRow</c>.</param>
-    public async IAsyncEnumerable<RowBatch> ReplayRangeAsync(
+    /// <param name="partition">Partition index. Must be in <c>[0, PartitionCount)</c>.</param>
+    /// <param name="startRow">Zero-based row index within the partition to start reading from.</param>
+    /// <param name="rowCount">Maximum number of rows to read. Capped at <c>RowsWrittenInPartition(partition) - startRow</c>.</param>
+    public IAsyncEnumerable<RowBatch> ReplayPartitionRangeAsync(
         ExecutionContext context,
         ColumnLookup outputLookup,
+        int partition,
         long startRow,
         long rowCount)
     {
+        // Eager validation — async iterators defer the body until first MoveNextAsync, so
+        // arg-checks inside the iterator wouldn't fire until the consumer pulls. Split the
+        // public entry point into a non-iterator validator + an iterator implementation.
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidatePartition(partition);
+        return ReplayPartitionRangeImplAsync(context, outputLookup, partition, startRow, rowCount);
+    }
 
-        if (!_schemaWritten || startRow >= _rowCount || rowCount <= 0)
+    private async IAsyncEnumerable<RowBatch> ReplayPartitionRangeImplAsync(
+        ExecutionContext context,
+        ColumnLookup outputLookup,
+        int partition,
+        long startRow,
+        long rowCount)
+    {
+        long partitionRowCount = _rowCounts[partition];
+        if (!_schemaWritten[partition] || startRow >= partitionRowCount || rowCount <= 0)
         {
             yield break;
         }
 
-        // Cap rowCount at what's actually written.
-        long maxAvailable = _rowCount - startRow;
+        // Cap rowCount at what's actually written to this partition.
+        long maxAvailable = partitionRowCount - startRow;
         if (rowCount > maxAvailable) rowCount = maxAvailable;
 
         // Pending writes must hit the OS file cache before the reader can see them — readers
-        // observe FileStream-level bytes, not BinaryWriter's internal buffer.
-        _writer?.Flush();
-        _writeStream?.Flush();
+        // observe FileStream-level bytes, not BinaryWriter's internal buffer. Only flush this
+        // partition's writer (other partitions' bytes don't affect this read).
+        _writers[partition]?.Flush();
+        _writeStreams[partition]?.Flush();
 
         // Reader uses FileShare.ReadWrite so it can coexist with the still-open writer
         // (which has FileAccess.Write + FileShare.Read). Each handle's FileShare must
         // include the access modes of every other open handle: writer's "I'm Write, allow
         // Read" matches reader's "I'm Read, allow ReadWrite".
         FileStream readStream = new(
-            _spillFilePath,
+            _spillFilePaths[partition],
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite,
@@ -223,7 +327,7 @@ internal sealed class SpillReaderWriter : IDisposable
             useAsync: true);
 
         long rowStride = RowStrideBytes;
-        long startByte = _rowDataStartByte + (startRow * rowStride);
+        long startByte = _rowDataStartBytes[partition] + (startRow * rowStride);
         long endByte = startByte + (rowCount * rowStride);
 
         await using (readStream.ConfigureAwait(false))
@@ -295,18 +399,27 @@ internal sealed class SpillReaderWriter : IDisposable
         }
     }
 
-    [MemberNotNull(nameof(_writer), nameof(_writeStream))]
-    private void EnsureWriterOpen()
+    private void EnsureWriterOpen(int partition)
     {
-        if (_writer is null || _writeStream is null)
+        if (_writers[partition] is null || _writeStreams[partition] is null)
         {
-            _writeStream = new FileStream(
-                _spillFilePath,
+            _writeStreams[partition] = new FileStream(
+                _spillFilePaths[partition],
                 FileMode.Create,
                 FileAccess.Write,
                 FileShare.Read,
                 bufferSize: 65536);
-            _writer = new BinaryWriter(_writeStream);
+            _writers[partition] = new BinaryWriter(_writeStreams[partition]!);
+        }
+    }
+
+    private void ValidatePartition(int partition)
+    {
+        if ((uint)partition >= (uint)_partitionCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(partition),
+                $"Partition {partition} is out of range; spiller has {_partitionCount} partition(s).");
         }
     }
 
@@ -318,10 +431,13 @@ internal sealed class SpillReaderWriter : IDisposable
         }
         _disposed = true;
 
-        _writer?.Dispose();
-        _writer = null;
-        _writeStream?.Dispose();
-        _writeStream = null;
+        for (int i = 0; i < _partitionCount; i++)
+        {
+            _writers[i]?.Dispose();
+            _writers[i] = null;
+            _writeStreams[i]?.Dispose();
+            _writeStreams[i] = null;
+        }
 
         _pool.ReturnArena(_consolidatedArena);
 

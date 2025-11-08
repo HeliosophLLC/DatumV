@@ -591,4 +591,311 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
 
         Assert.Equal([longB], values);
     }
+
+    // ─────────── Partitioned mode (set operations, hash joins, hash aggregates) ───────────
+
+    [Fact]
+    public async Task Partitioned_WriteToDistinctPartitions_ReplayEachIndependently()
+    {
+        // Three partitions, each gets its own row set. After all writes, each partition's
+        // ReplayPartitionAsync must yield ONLY that partition's rows.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 3);
+
+        Assert.Equal(3, spiller.PartitionCount);
+
+        // Partition 0 gets 100, 101, 102.
+        RowBatch p0 = pool.RentRowBatch(lookup, capacity: 3);
+        p0.Add([DataValue.FromInt32(100)]);
+        p0.Add([DataValue.FromInt32(101)]);
+        p0.Add([DataValue.FromInt32(102)]);
+        spiller.Write(p0, partition: 0);
+
+        // Partition 1 gets 200, 201.
+        RowBatch p1 = pool.RentRowBatch(lookup, capacity: 2);
+        p1.Add([DataValue.FromInt32(200)]);
+        p1.Add([DataValue.FromInt32(201)]);
+        spiller.Write(p1, partition: 1);
+
+        // Partition 2 gets 300.
+        RowBatch p2 = pool.RentRowBatch(lookup, capacity: 1);
+        p2.Add([DataValue.FromInt32(300)]);
+        spiller.Write(p2, partition: 2);
+
+        Assert.Equal(3L, spiller.RowsWrittenInPartition(0));
+        Assert.Equal(2L, spiller.RowsWrittenInPartition(1));
+        Assert.Equal(1L, spiller.RowsWrittenInPartition(2));
+        Assert.Equal(6L, spiller.RowsWritten);
+
+        async Task<List<int>> ReplayPartition(int p)
+        {
+            List<int> values = [];
+            await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: p))
+            {
+                for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsInt32());
+                pool.ReturnRowBatch(batch);
+            }
+            return values;
+        }
+
+        Assert.Equal([100, 101, 102], await ReplayPartition(0));
+        Assert.Equal([200, 201], await ReplayPartition(1));
+        Assert.Equal([300], await ReplayPartition(2));
+    }
+
+    [Fact]
+    public async Task Partitioned_PartitionWithNoWrites_YieldsEmpty()
+    {
+        // Only partition 0 gets writes; partition 1's replay returns nothing rather than
+        // throwing or returning stale state.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 4);
+
+        RowBatch p0 = pool.RentRowBatch(lookup, capacity: 1);
+        p0.Add([DataValue.FromInt32(1)]);
+        spiller.Write(p0, partition: 0);
+
+        Assert.Equal(0L, spiller.RowsWrittenInPartition(1));
+        Assert.Equal(0L, spiller.RowsWrittenInPartition(2));
+        Assert.Equal(0L, spiller.RowsWrittenInPartition(3));
+
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 1))
+        {
+            Assert.Fail("Empty partition replay should yield no batches.");
+            pool.ReturnRowBatch(batch);
+        }
+    }
+
+    [Fact]
+    public void Partitioned_PartitionOutOfRange_ThrowsArgumentOutOfRange()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 4);
+
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 1);
+        input.Add([DataValue.FromInt32(1)]);
+
+        // Negative partition.
+        Assert.Throws<ArgumentOutOfRangeException>(() => spiller.Write(input, partition: -1));
+
+        // Past-end partition. Need a fresh batch since the previous Write returned its input
+        // batch back to the pool before validation... actually no, validation runs first; the
+        // batch is left untouched. But to keep the test robust, use a new batch.
+        RowBatch input2 = pool.RentRowBatch(lookup, capacity: 1);
+        input2.Add([DataValue.FromInt32(1)]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => spiller.Write(input2, partition: 4));
+
+        // Cleanup: dispose the still-owned batches manually since Write didn't take them.
+        pool.ReturnRowBatch(input);
+        pool.ReturnRowBatch(input2);
+
+        // Replay validation also fires.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => spiller.ReplayPartitionAsync(context, lookup, partition: 4).GetAsyncEnumerator());
+    }
+
+    [Fact]
+    public void Partitioned_PartitionCountLessThanOne_Throws()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new SpillReaderWriter(pool, lookup, Path.GetTempPath(), partitionCount: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new SpillReaderWriter(pool, lookup, Path.GetTempPath(), partitionCount: -1));
+    }
+
+    [Fact]
+    public async Task Partitioned_ArenaBackedStrings_SharedAcrossPartitions()
+    {
+        // The load-bearing property for set operations: arena-backed payloads stabilise into
+        // the SAME consolidated arena regardless of which partition the row was written to.
+        // String equality across partitions must work without per-partition copies.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["s"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        const string longA = "this string is definitely longer than sixteen bytes A";
+        const string longB = "another long string that exceeds the inline threshold B";
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 2);
+
+        Arena consolidated = spiller.ConsolidatedArena;
+
+        RowBatch p0 = pool.RentRowBatch(lookup, capacity: 1);
+        p0.Add([DataValue.FromString(longA, p0.Arena)]);
+        spiller.Write(p0, partition: 0);
+
+        RowBatch p1 = pool.RentRowBatch(lookup, capacity: 1);
+        p1.Add([DataValue.FromString(longB, p1.Arena)]);
+        spiller.Write(p1, partition: 1);
+
+        // Read partition 0; the row should resolve against the consolidated arena.
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 0))
+        {
+            Assert.Equal(longA, batch[0][0].AsString(consolidated));
+            pool.ReturnRowBatch(batch);
+        }
+
+        // Read partition 1; same arena, different bytes.
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 1))
+        {
+            Assert.Equal(longB, batch[0][0].AsString(consolidated));
+            pool.ReturnRowBatch(batch);
+        }
+    }
+
+    [Fact]
+    public async Task Partitioned_InterleavedWriteAndReplay()
+    {
+        // Set operations interleave writing one partition while reading another. Confirm
+        // the writer staying open across reads (shared file-share infrastructure) works
+        // even when the read and write target different partitions.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 2);
+
+        RowBatch firstWrite = pool.RentRowBatch(lookup, capacity: 2);
+        firstWrite.Add([DataValue.FromInt32(1)]);
+        firstWrite.Add([DataValue.FromInt32(2)]);
+        spiller.Write(firstWrite, partition: 0);
+
+        // Replay partition 0 while partition 1 is still write-able.
+        List<int> firstReplay = [];
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 0))
+        {
+            for (int i = 0; i < batch.Count; i++) firstReplay.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([1, 2], firstReplay);
+
+        // Now write to partition 1 — its writer should open fresh.
+        RowBatch secondWrite = pool.RentRowBatch(lookup, capacity: 2);
+        secondWrite.Add([DataValue.FromInt32(11)]);
+        secondWrite.Add([DataValue.FromInt32(12)]);
+        spiller.Write(secondWrite, partition: 1);
+
+        // And append more to partition 0 — its writer also stayed open.
+        RowBatch thirdWrite = pool.RentRowBatch(lookup, capacity: 1);
+        thirdWrite.Add([DataValue.FromInt32(3)]);
+        spiller.Write(thirdWrite, partition: 0);
+
+        Assert.Equal(3L, spiller.RowsWrittenInPartition(0));
+        Assert.Equal(2L, spiller.RowsWrittenInPartition(1));
+
+        // Final replay sees everything.
+        List<int> p0Final = [];
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 0))
+        {
+            for (int i = 0; i < batch.Count; i++) p0Final.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([1, 2, 3], p0Final);
+
+        List<int> p1Final = [];
+        await foreach (RowBatch batch in spiller.ReplayPartitionAsync(context, lookup, partition: 1))
+        {
+            for (int i = 0; i < batch.Count; i++) p1Final.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([11, 12], p1Final);
+    }
+
+    [Fact]
+    public void Partitioned_DisposeDeletesAllPartitionFiles()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+
+        SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 3);
+
+        RowBatch p0 = pool.RentRowBatch(lookup, capacity: 1);
+        p0.Add([DataValue.FromInt32(1)]);
+        spiller.Write(p0, partition: 0);
+
+        RowBatch p2 = pool.RentRowBatch(lookup, capacity: 1);
+        p2.Add([DataValue.FromInt32(3)]);
+        spiller.Write(p2, partition: 2);
+
+        string spillDir = spiller.SpillDirectory;
+        Assert.True(Directory.Exists(spillDir));
+        // Partition 0 and 2 wrote files; partition 1 didn't (no Write call).
+        Assert.True(File.Exists(Path.Combine(spillDir, "data_0.spill")));
+        Assert.False(File.Exists(Path.Combine(spillDir, "data_1.spill")));
+        Assert.True(File.Exists(Path.Combine(spillDir, "data_2.spill")));
+
+        spiller.Dispose();
+        Assert.False(Directory.Exists(spillDir));
+    }
+
+    [Fact]
+    public async Task Partitioned_ReplayPartitionRange_ReturnsRequestedSlice()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(
+            pool, lookup, Path.GetTempPath(),
+            initialArenaCapacity: 1024 * 1024,
+            partitionCount: 2);
+
+        RowBatch p0 = pool.RentRowBatch(lookup, capacity: 10);
+        for (int i = 0; i < 10; i++) p0.Add([DataValue.FromInt32(i)]);
+        spiller.Write(p0, partition: 0);
+
+        RowBatch p1 = pool.RentRowBatch(lookup, capacity: 5);
+        for (int i = 0; i < 5; i++) p1.Add([DataValue.FromInt32(100 + i)]);
+        spiller.Write(p1, partition: 1);
+
+        // Range-read partition 0, rows [3, 7).
+        List<int> p0Slice = [];
+        await foreach (RowBatch batch in spiller.ReplayPartitionRangeAsync(
+            context, lookup, partition: 0, startRow: 3, rowCount: 4))
+        {
+            for (int i = 0; i < batch.Count; i++) p0Slice.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([3, 4, 5, 6], p0Slice);
+
+        // Range-read partition 1, rows [2, 5) — rowCount=100 caps at available.
+        List<int> p1Slice = [];
+        await foreach (RowBatch batch in spiller.ReplayPartitionRangeAsync(
+            context, lookup, partition: 1, startRow: 2, rowCount: 100))
+        {
+            for (int i = 0; i < batch.Count; i++) p1Slice.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([102, 103, 104], p1Slice);
+    }
 }
