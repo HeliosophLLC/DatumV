@@ -1,5 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -11,9 +13,20 @@ namespace DatumIngest.Execution.Operators;
 /// All accumulated rows (anchor + all iterations) are yielded.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Recursive CTEs are always materialized — the full result set must be computed
 /// before any row can be yielded to the outer query, because the recursive member
 /// depends on the running accumulation.
+/// </para>
+/// <para>
+/// Spill behaviour: when the in-memory accumulation exceeds the budget at an
+/// iteration boundary, the operator transitions all cached batches to a
+/// <see cref="SpillReaderWriter"/>. From that point on, both the running
+/// accumulation AND the next iteration's working-table input read from the
+/// spiller, so peak memory is bounded near the budget — the load-bearing
+/// property for multi-tenant servers where one user's runaway recursion
+/// must not OOM the host.
+/// </para>
 /// </remarks>
 internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, IDisposable
 {
@@ -23,15 +36,15 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
 
     /// <summary>
     /// Factory that produces the recursive member's operator tree. Called once per
-    /// iteration with a <see cref="WorkingTableOperator"/> that replays the previous
-    /// iteration's rows.
+    /// iteration with a working-table operator (in-memory or spiller-backed) that replays
+    /// the previous iteration's rows.
     /// </summary>
     private readonly Func<IQueryOperator, IQueryOperator> _recursiveMemberFactory;
 
     private List<RowBatch>? _allBatches;
-    private LocalBufferPool? _cachePool;
-    private bool _materialized;
-    private string? _spillFilePath;
+    private Pool? _pool;
+    private SpillReaderWriter? _spiller;
+    private ColumnLookup? _materializedSchema;
 
     /// <summary>
     /// Creates a recursive CTE operator.
@@ -62,6 +75,14 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <summary>The anchor operator tree.</summary>
     public IQueryOperator AnchorOperator => _anchorOperator;
 
+    /// <summary>True once the spiller has taken over (in-memory accumulation has been evicted to disk).</summary>
+    [MemberNotNullWhen(true, nameof(_spiller))]
+    public bool IsSpilling => _spiller is not null;
+
+    [MemberNotNullWhen(true, nameof(_pool))]
+    [MemberNotNullWhen(true, nameof(_materializedSchema))]
+    private bool HasMaterialized => _allBatches is not null || _spiller is not null;
+
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
@@ -79,444 +100,350 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        LocalBufferPool pool = context.LocalBufferPool;
-
-        if (!_materialized)
+        if (!HasMaterialized)
         {
             await MaterializeAsync(context).ConfigureAwait(false);
         }
 
-        // Replay from disk if spilled, otherwise from memory.
-        if (_spillFilePath is not null)
+        ColumnLookup outputLookup = _materializedSchema is null
+            ? ColumnLookup.Empty
+            : RenameColumnsIfNeeded(_materializedSchema);
+
+        if (IsSpilling)
         {
-            await foreach (RowBatch batch in ReplayFromDiskAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch batch in _spiller.ReplayAsync(context, outputLookup).ConfigureAwait(false))
             {
                 yield return batch;
             }
+            yield break;
         }
-        else if (_allBatches is not null)
-        {
-            // Replay by copying cached values into fresh output batches.
-            RowBatch? outputBatch = null;
-            foreach (RowBatch cachedBatch in _allBatches)
-            {
-                for (int i = 0; i < cachedBatch.Count; i++)
-                {
-                    Row cachedRow = cachedBatch[i];
-                    DataValue[] outputValues = pool.RentCopy(cachedRow.RawValues);
-                    Row outputRow = new(cachedRow.RawNames, outputValues, cachedRow.RawNameIndex);
 
-                    outputBatch ??= pool.RentBatch(context.BatchSize);
-                    outputBatch.Add(RenameColumnsIfNeeded(outputRow));
+        if (_allBatches is null)
+        {
+            yield break;
+        }
+
+        // Replay cached rows by copying values into fresh output batches whose arena is the
+        // cached batch's arena. Same null-before-yield + outer try-finally pattern as the
+        // regular CTE — protects against mid-fill exceptions and consumer cancellation.
+        Pool pool = context.Pool;
+        RowBatch? outputBatch = null;
+        try
+        {
+            foreach (RowBatch cached in _allBatches)
+            {
+                for (int i = 0; i < cached.Count; i++)
+                {
+                    outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, cached.Arena);
+                    pool.RentAndCopyToOutput(cached, i, outputBatch);
                     if (outputBatch.IsFull)
                     {
-                        yield return outputBatch;
+                        RowBatch toYield = outputBatch;
                         outputBatch = null;
+                        yield return toYield;
                     }
                 }
             }
 
             if (outputBatch is not null)
             {
-                yield return outputBatch;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Executes the anchor member, then iterates the recursive member until fixpoint
-    /// or the max recursion depth is reached. All rows are cached with pool-rented
-    /// <see cref="DataValue"/> arrays independent of the input batch lifecycle.
-    /// </summary>
-    private async Task MaterializeAsync(ExecutionContext context)
-    {
-        LocalBufferPool pool = context.LocalBufferPool;
-        _cachePool = pool;
-        _allBatches = new List<RowBatch>();
-        long? memoryBudget = context.MemoryBudgetBytes;
-        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
-        BinaryWriter? spillWriter = null;
-        bool schemaWritten = false;
-        int maxDepth = context.MaxRecursionDepth;
-
-        // Schema arrays shared across all cached rows (built from first row).
-        string[]? cacheNames = null;
-        Dictionary<string, int>? cacheNameIndex = null;
-        RowBatch? cacheBatch = null;
-
-        try
-        {
-            // Execute anchor member.
-            List<Row> workingTable = new();
-            await foreach (RowBatch inputBatch in _anchorOperator.ExecuteAsync(context).ConfigureAwait(false))
-            {
-                for (int i = 0; i < inputBatch.Count; i++)
-                {
-                    Row row = inputBatch[i];
-                    context.CancellationToken.ThrowIfCancellationRequested();
-                    context.QueryMeter?.ThrowIfExceeded();
-
-                    BuildCacheSchema(row, ref cacheNames, ref cacheNameIndex);
-
-                    // Clone into pool-rented array for the cache/working table.
-                    DataValue[] clonedValues = pool.RentCopy(row.RawValues);
-                    Row clonedRow = new(cacheNames!, clonedValues, cacheNameIndex!);
-
-                    workingTable.Add(clonedRow);
-                    AddRow(clonedRow, ref cacheBatch, pool, estimator, memoryBudget,
-                        ref spillWriter, ref schemaWritten);
-                }
-
-                inputBatch.Return();
-            }
-
-            // Iterate recursive member.
-            for (int depth = 0; depth < maxDepth; depth++)
-            {
-                if (workingTable.Count == 0)
-                {
-                    break;
-                }
-
-                WorkingTableOperator workingTableOperator = new(workingTable, pool);
-                IQueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
-
-                List<Row> nextWorkingTable = new();
-                await foreach (RowBatch inputBatch in recursiveMember.ExecuteAsync(context).ConfigureAwait(false))
-                {
-                    for (int i = 0; i < inputBatch.Count; i++)
-                    {
-                        Row row = inputBatch[i];
-                        context.CancellationToken.ThrowIfCancellationRequested();
-                        context.QueryMeter?.ThrowIfExceeded();
-
-                        BuildCacheSchema(row, ref cacheNames, ref cacheNameIndex);
-
-                        DataValue[] clonedValues = pool.RentCopy(row.RawValues);
-                        Row clonedRow = new(cacheNames!, clonedValues, cacheNameIndex!);
-
-                        nextWorkingTable.Add(clonedRow);
-                        AddRow(clonedRow, ref cacheBatch, pool, estimator, memoryBudget,
-                            ref spillWriter, ref schemaWritten);
-                    }
-
-                    inputBatch.Return();
-                }
-
-                // Previous working table rows share DataValue[] with _allBatches cache —
-                // no separate cleanup needed.
-                workingTable = nextWorkingTable;
-            }
-
-            if (workingTable.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"Recursive CTE '{_name}' exceeded maximum recursion depth of {maxDepth}.");
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
         finally
         {
-            if (spillWriter is not null)
-            {
-                spillWriter.Flush();
-                spillWriter.Dispose();
-            }
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
         }
-
-        // Add the last partial batch.
-        if (cacheBatch is not null && _spillFilePath is null)
-        {
-            _allBatches.Add(cacheBatch);
-        }
-        else if (cacheBatch is not null)
-        {
-            pool.ReturnBatch(cacheBatch);
-        }
-
-        if (_spillFilePath is not null)
-        {
-            foreach (RowBatch batch in _allBatches)
-            {
-                pool.ReturnBatch(batch);
-            }
-
-            _allBatches = null;
-        }
-
-        _materialized = true;
     }
 
     /// <summary>
-    /// Builds shared schema arrays from the first row encountered.
+    /// Executes the anchor, then iterates the recursive member until fixpoint or the max
+    /// recursion depth. At each iteration boundary, checks the memory budget; on overflow,
+    /// transitions all in-memory batches to a <see cref="SpillReaderWriter"/> so subsequent
+    /// iterations write to disk and read their working table from disk.
     /// </summary>
-    private static void BuildCacheSchema(
-        Row row,
-        ref string[]? cacheNames,
-        ref Dictionary<string, int>? cacheNameIndex)
+    private async Task MaterializeAsync(ExecutionContext context)
     {
-        if (cacheNames is not null)
+        Pool pool = context.Pool;
+        _pool = pool;
+        _allBatches = [];
+        long? memoryBudget = context.MemoryBudgetBytes;
+        int maxDepth = context.MaxRecursionDepth;
+
+        // Anchor pass.
+        long iterationStartRow = 0;
+        int iterationStartBatchIndex = 0;
+        await foreach (RowBatch input in _anchorOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
-            return;
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
+            _materializedSchema ??= input.ColumnLookup;
+            if (input.Count == 0) { pool.ReturnRowBatch(input); continue; }
+
+            CaptureBatch(pool, input, _materializedSchema!);
         }
 
-        cacheNames = new string[row.FieldCount];
-        for (int col = 0; col < row.FieldCount; col++)
-            cacheNames[col] = row.ColumnNames[col];
-        cacheNameIndex = new Dictionary<string, int>(
-            cacheNames.Length, StringComparer.OrdinalIgnoreCase);
-        for (int col = 0; col < cacheNames.Length; col++)
-            cacheNameIndex[cacheNames[col]] = col;
+        // Possibly spill at the end of the anchor pass.
+        MaybeSpill(context, memoryBudget);
+
+        // Recursive iterations. At each step the working table is the slice
+        //   [iterationStartRow, currentRowCount)
+        // of the running accumulation — either in-memory (_allBatches[batchIndex..])
+        // or on disk (rows [startRow, currentRowCount) in the spiller).
+        for (int depth = 0; depth < maxDepth; depth++)
+        {
+            // Detect fixpoint: previous iteration produced zero rows.
+            long currentRowCount = CurrentTotalRowCount();
+            if (currentRowCount == iterationStartRow)
+            {
+                return;
+            }
+
+            IQueryOperator workingTableOperator = BuildWorkingTableOperator(
+                _materializedSchema!,
+                iterationStartRow,
+                iterationStartBatchIndex,
+                currentRowCount);
+            IQueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
+
+            // Snapshot iteration boundaries BEFORE consuming the recursive member's output —
+            // those are the markers; the *next* iteration uses these.
+            long nextIterationStartRow = currentRowCount;
+            int nextIterationStartBatchIndex = IsSpilling ? 0 : _allBatches!.Count;
+
+            await foreach (RowBatch input in recursiveMember.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                context.CancellationToken.ThrowIfCancellationRequested();
+                context.QueryMeter?.ThrowIfExceeded();
+
+                if (input.Count == 0) { pool.ReturnRowBatch(input); continue; }
+                CaptureBatch(pool, input, _materializedSchema!);
+            }
+
+            // Boundary spill check. If we transition here, the next iteration's working-table
+            // read automatically routes through the spiller (BuildWorkingTableOperator picks
+            // the backend based on IsSpilling at call time). The batch-index marker is no
+            // longer meaningful once spilled — only the row marker matters.
+            MaybeSpill(context, memoryBudget);
+
+            iterationStartRow = nextIterationStartRow;
+            iterationStartBatchIndex = IsSpilling ? 0 : nextIterationStartBatchIndex;
+        }
+
+        // Hit max depth and the last iteration produced rows — runaway recursion.
+        if (CurrentTotalRowCount() > iterationStartRow)
+        {
+            throw new RecursionDepthExceededException(_name, maxDepth);
+        }
     }
 
     /// <summary>
-    /// Adds a row to the cache (in-memory batch or spilled to disk).
+    /// Captures one input batch into the running accumulation. Routes to the spiller if we've
+    /// already transitioned, otherwise rebinds the input batch into <see cref="_allBatches"/>.
     /// </summary>
-    private void AddRow(
-        Row row,
-        ref RowBatch? cacheBatch,
-        LocalBufferPool pool,
-        MemoryEstimator? estimator,
-        long? memoryBudget,
-        ref BinaryWriter? spillWriter,
-        ref bool schemaWritten)
+    private void CaptureBatch(Pool pool, RowBatch input, ColumnLookup schema)
     {
-        if (_spillFilePath is not null)
+        if (IsSpilling)
         {
-            if (!schemaWritten)
-            {
-                RowSerializer.WriteSchema(spillWriter!, row);
-                schemaWritten = true;
-            }
-
-            RowSerializer.WriteRow(spillWriter!, row);
-            // Row was cloned into pool-rented array but is now serialized to disk.
-            // Return its array to the pool.
-            pool.ReturnValues(row);
+            _spiller.Write(input); // Stabilizes payloads, writes row metadata, returns the batch.
         }
         else
         {
-            cacheBatch ??= pool.RentBatch(1024);
-            cacheBatch.Add(row);
-            if (cacheBatch.IsFull)
-            {
-                _allBatches!.Add(cacheBatch);
-                cacheBatch = null;
-            }
-
-            if (estimator is not null)
-            {
-                if (estimator.ShouldSample())
-                {
-                    estimator.RecordSample(row);
-                }
-
-                estimator.IncrementRowCount();
-                long estimatedMemory = estimator.EstimateTotalBytes();
-
-                if (estimatedMemory > memoryBudget!.Value)
-                {
-                    // Flush partial cache batch before spilling.
-                    if (cacheBatch is not null)
-                    {
-                        _allBatches!.Add(cacheBatch);
-                        cacheBatch = null;
-                    }
-
-                    SpillToDisk(ref spillWriter, ref schemaWritten, pool);
-                }
-                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                {
-                    estimator.EscalateToEveryRow();
-                }
-            }
+            _allBatches!.Add(pool.RebindRowBatch(input, schema));
         }
     }
 
     /// <summary>
-    /// Transitions to spill mode, writing all cached rows to a temp file.
+    /// Total row count materialized so far across all iterations, regardless of whether the
+    /// rows live in-memory or on disk.
     /// </summary>
-    private void SpillToDisk(ref BinaryWriter? spillWriter, ref bool schemaWritten, LocalBufferPool pool)
+    private long CurrentTotalRowCount()
     {
-        string spillDirectory = Path.Combine(
-            Path.GetTempPath(),
-            $"datum-rcte-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(spillDirectory);
-        _spillFilePath = Path.Combine(spillDirectory, "rcte.spill");
-
-        FileStream fileStream = new(
-            _spillFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-        spillWriter = new BinaryWriter(fileStream);
-
-        foreach (RowBatch batch in _allBatches!)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row bufferedRow = batch[i];
-                if (!schemaWritten)
-                {
-                    RowSerializer.WriteSchema(spillWriter, bufferedRow);
-                    schemaWritten = true;
-                }
-
-                RowSerializer.WriteRow(spillWriter, bufferedRow);
-            }
-
-            pool.ReturnBatch(batch);
-        }
-
-        _allBatches!.Clear();
+        if (IsSpilling) return _spiller.RowsWritten;
+        long total = 0;
+        foreach (RowBatch b in _allBatches!) total += b.Count;
+        return total;
     }
 
     /// <summary>
-    /// Replays rows from a spill file.
+    /// Estimates the in-memory footprint of the accumulated batches' arenas. Sum of arena
+    /// capacities — the dominant cost since DataValue arrays and Row[] entries are dwarfed
+    /// by arena bytes for any payload-heavy workload.
     /// </summary>
-    private async IAsyncEnumerable<RowBatch> ReplayFromDiskAsync(ExecutionContext context)
+    private long EstimateInMemoryBytes()
     {
-        LocalBufferPool pool = context.LocalBufferPool;
-        FileStream fileStream = new(
-            _spillFilePath!, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
-
-        await using (fileStream.ConfigureAwait(false))
-        {
-            using BinaryReader reader = new(fileStream);
-
-            RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
-
-            RowBatch? outputBatch = null;
-            while (fileStream.Position < fileStream.Length)
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                Row row = RowSerializer.ReadRow(reader, names, nameIndex);
-                outputBatch ??= pool.RentBatch(context.BatchSize);
-                outputBatch.Add(RenameColumnsIfNeeded(row));
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
-            }
-        }
+        if (_allBatches is null) return 0;
+        long total = 0;
+        foreach (RowBatch b in _allBatches) total += b.Arena.Capacity;
+        return total;
     }
 
     /// <summary>
-    /// Renames the output row's columns if the CTE definition provides explicit column names.
+    /// If a memory budget is configured and the in-memory footprint exceeds it, transitions
+    /// to spill mode by handing every cached batch to a fresh <see cref="SpillReaderWriter"/>.
+    /// </summary>
+    private void MaybeSpill(ExecutionContext context, long? memoryBudget)
+    {
+        if (IsSpilling || memoryBudget is null || _allBatches is null) return;
+
+        long inMemoryBytes = EstimateInMemoryBytes();
+        if (inMemoryBytes <= memoryBudget.Value) return;
+
+        // Initial-arena-capacity hint: sum of cached arena capacities, doubled for headroom
+        // (covers the recursive iterations still to come). Same heuristic as CTE.
+        long hintLong = inMemoryBytes * 2;
+        int hint = hintLong > int.MaxValue ? int.MaxValue : (int)hintLong;
+
+        _spiller = new SpillReaderWriter(
+            context.Pool, _materializedSchema!, context.SpillDirectory, hint);
+
+        foreach (RowBatch buffered in _allBatches)
+        {
+            _spiller.Write(buffered);
+        }
+
+        _allBatches = null;
+    }
+
+    /// <summary>
+    /// Builds the working-table operator for the next iteration's recursive member. Picks the
+    /// in-memory backend (when not spilling) or the spiller-backed backend (when spilling),
+    /// representing the row range produced by the immediately preceding iteration.
+    /// </summary>
+    private IQueryOperator BuildWorkingTableOperator(
+        ColumnLookup schema,
+        long startRow,
+        int startBatchIndex,
+        long endRow)
+    {
+        if (IsSpilling)
+        {
+            return new SpillerBackedWorkingTableOperator(
+                _spiller, schema, startRow, endRow - startRow);
+        }
+
+        // In-memory: take a snapshot list to insulate the working-table replay from the next
+        // iteration's appends to _allBatches. _allBatches.GetRange returns a fresh list whose
+        // RowBatch references are still owned by us (refcount-shared).
+        int count = _allBatches!.Count - startBatchIndex;
+        IReadOnlyList<RowBatch> snapshot = _allBatches.GetRange(startBatchIndex, count);
+        return new InMemoryWorkingTableOperator(_pool!, schema, snapshot);
+    }
+
+    /// <summary>
+    /// Renames the output columns if the CTE definition provides explicit column names.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Row RenameColumnsIfNeeded(Row row)
+    private ColumnLookup RenameColumnsIfNeeded(ColumnLookup columnLookup)
     {
-        if (_explicitColumnNames is null)
-        {
-            return row;
-        }
+        if (_explicitColumnNames is null) return columnLookup;
 
-        string[] renamedNames = new string[row.FieldCount];
-        DataValue[] values = new DataValue[row.FieldCount];
-        for (int index = 0; index < row.FieldCount; index++)
+        string[] renamedNames = new string[columnLookup.Count];
+        for (int index = 0; index < columnLookup.Count; index++)
         {
             renamedNames[index] = index < _explicitColumnNames.Count
                 ? _explicitColumnNames[index]
-                : row.ColumnNames[index];
-            values[index] = row[index];
+                : columnLookup.ColumnNames[index];
         }
-
-        return new Row(renamedNames, values);
+        return new ColumnLookup(renamedNames);
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
-        // Return cached batches to the pool if still held.
-        if (_allBatches is not null && _cachePool is not null)
+        if (_allBatches is not null && _pool is not null)
         {
             foreach (RowBatch batch in _allBatches)
             {
-                _cachePool.ReturnBatch(batch);
+                _pool.ReturnRowBatch(batch);
             }
-
             _allBatches = null;
         }
 
-        if (_spillFilePath is not null)
+        _spiller?.Dispose();
+        _spiller = null;
+    }
+
+    /// <summary>
+    /// Working-table replay backed by an in-memory snapshot of <see cref="RowBatch"/>es. Used
+    /// before the recursive CTE transitions to spill mode.
+    /// </summary>
+    private sealed class InMemoryWorkingTableOperator(
+        Pool pool,
+        ColumnLookup schema,
+        IReadOnlyList<RowBatch> batches) : IQueryOperator
+    {
+        public OperatorPlanDescription DescribeForExplain()
         {
-            string? directory = Path.GetDirectoryName(_spillFilePath);
-            if (directory is not null && Directory.Exists(directory))
+            long rows = 0;
+            foreach (RowBatch b in batches) rows += b.Count;
+            return new OperatorPlanDescription("Working Table") { EstimatedRows = rows };
+        }
+
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
+        {
+            // Same null-before-yield + outer try-finally pattern as CTE replay. The cached
+            // batches stay owned by the outer recursive CTE; we yield COPIES that share the
+            // cached arena, so the consumer can dispose its received batches normally.
+            RowBatch? outputBatch = null;
+            try
             {
-                try
+                foreach (RowBatch cached in batches)
                 {
-                    Directory.Delete(directory, recursive: true);
+                    for (int i = 0; i < cached.Count; i++)
+                    {
+                        outputBatch ??= pool.RentRowBatch(schema, context.BatchSize, cached.Arena);
+                        pool.RentAndCopyToOutput(cached, i, outputBatch);
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
+                    }
                 }
-                catch (IOException)
+
+                if (outputBatch is not null)
                 {
-                    // Best-effort cleanup — OS handles temp files on shutdown.
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
                 }
             }
-
-            _spillFilePath = null;
+            finally
+            {
+                if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            }
+            await Task.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Simple operator that replays an in-memory list of rows by copying
-    /// cached values into fresh pool-rented output batches. The cached rows'
-    /// <see cref="DataValue"/> arrays are owned by the recursive CTE's cache
-    /// and must not be returned by downstream consumers.
+    /// Working-table replay backed by a row range in a <see cref="SpillReaderWriter"/>. Used
+    /// after the recursive CTE has transitioned to spill mode. Reads only the slice
+    /// <c>[startRow, startRow + rowCount)</c> from the spill file — the previous iteration's
+    /// output, not the entire accumulation.
     /// </summary>
-    internal sealed class WorkingTableOperator : IQueryOperator
+    private sealed class SpillerBackedWorkingTableOperator(
+        SpillReaderWriter spiller,
+        ColumnLookup schema,
+        long startRow,
+        long rowCount) : IQueryOperator
     {
-        private readonly List<Row> _rows;
-        private readonly LocalBufferPool _pool;
-
-        /// <summary>
-        /// Creates a working table operator from a snapshot of rows.
-        /// </summary>
-        /// <param name="rows">The rows to replay.</param>
-        /// <param name="pool">The pool for renting output batch arrays.</param>
-        public WorkingTableOperator(List<Row> rows, LocalBufferPool pool)
-        {
-            _rows = rows;
-            _pool = pool;
-        }
-
-        /// <inheritdoc/>
         public OperatorPlanDescription DescribeForExplain()
-        {
-            return new OperatorPlanDescription("Working Table")
-            {
-                EstimatedRows = _rows.Count,
-            };
-        }
+            => new("Working Table (spilled)") { EstimatedRows = rowCount };
 
-#pragma warning disable CS1998 // Async method lacks 'await' operators
-        /// <inheritdoc/>
         public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
-            RowBatch? outputBatch = null;
-            foreach (Row row in _rows)
+            await foreach (RowBatch batch in spiller
+                .ReplayRangeAsync(context, schema, startRow, rowCount)
+                .ConfigureAwait(false))
             {
-                // Copy cached values into fresh pool-rented arrays so the output
-                // batch can be safely ReturnBatch'd by downstream operators.
-                DataValue[] outputValues = _pool.RentCopy(row.RawValues);
-                Row outputRow = new(row.RawNames, outputValues, row.RawNameIndex);
-
-                outputBatch ??= _pool.RentBatch(context.BatchSize);
-                outputBatch.Add(outputRow);
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
+                yield return batch;
             }
         }
-#pragma warning restore CS1998
     }
 }

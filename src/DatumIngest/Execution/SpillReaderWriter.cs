@@ -38,7 +38,19 @@ internal sealed class SpillReaderWriter : IDisposable
     private BinaryWriter? _writer;
     private bool _schemaWritten;
     private long _rowCount;
+    /// <summary>
+    /// Byte offset at which row data begins (i.e. the size of the schema header). Captured
+    /// after WriteSchema completes; used by <see cref="ReplayRangeAsync"/> to seek directly
+    /// to a row offset without re-parsing the header. Zero until the first non-empty Write.
+    /// </summary>
+    private long _rowDataStartByte;
     private bool _disposed;
+
+    /// <summary>Bytes occupied by a single serialized row. Schema-stride is fixed once schema is written.</summary>
+    private int RowStrideBytes => _schema.Count * DataValueRawSize;
+
+    /// <summary>Size of a single <see cref="DataValue"/> on disk. Mirrors RowSerializer's compact codec stride.</summary>
+    private const int DataValueRawSize = 20;
 
     /// <summary>
     /// Creates a spiller bound to <paramref name="pool"/> and <paramref name="schema"/>.
@@ -116,6 +128,11 @@ internal sealed class SpillReaderWriter : IDisposable
         if (!_schemaWritten)
         {
             RowSerializer.WriteSchema(_writer, _schema);
+            // Flush so we can read the underlying stream's position — BinaryWriter buffers,
+            // so the byte offset of "first row" must be captured against bytes actually
+            // written to the FileStream.
+            _writer.Flush();
+            _rowDataStartByte = _writeStream.Position;
             _schemaWritten = true;
         }
 
@@ -142,50 +159,80 @@ internal sealed class SpillReaderWriter : IDisposable
         }
     }
 
+    /// <summary>Total number of rows handed to <see cref="Write(RowBatch)"/> so far. Useful for
+    /// recursive-CTE iteration tracking — capture the value at iteration start to compute the
+    /// working-table row range for the next iteration.</summary>
+    public long RowsWritten => _rowCount;
+
     /// <summary>
-    /// Replays previously spilled rows as <see cref="RowBatch"/>es whose arena is the
-    /// consolidated arena (so arena-backed values resolve correctly). Returns no batches if
-    /// nothing was ever written.
+    /// Replays every spilled row as <see cref="RowBatch"/>es whose arena is the consolidated
+    /// arena (so arena-backed values resolve correctly). Returns no batches if nothing was
+    /// ever written. The writer remains open across replays — callers may continue to
+    /// <see cref="Write(RowBatch)"/> additional rows after a replay completes; subsequent
+    /// replays will see them.
     /// </summary>
-    /// <param name="context">Provides cancellation and the output batch size.</param>
-    /// <param name="outputLookup">
-    /// Schema for the output batches. May rename the spilled schema's columns (e.g. CTE
-    /// explicit column names); the column count and ordinal positions must match.
-    /// </param>
-    public async IAsyncEnumerable<RowBatch> ReplayAsync(
+    public IAsyncEnumerable<RowBatch> ReplayAsync(
         ExecutionContext context,
         ColumnLookup outputLookup)
     {
+        return ReplayRangeAsync(context, outputLookup, startRow: 0, rowCount: long.MaxValue);
+    }
+
+    /// <summary>
+    /// Replays a specific row range — useful for recursive CTE working-table semantics where
+    /// each iteration only needs the previous iteration's output (i.e. rows
+    /// <c>[previousIterationEnd, currentIterationEnd)</c>). Pass <c>rowCount = long.MaxValue</c>
+    /// to read from <paramref name="startRow"/> to the end of what's been written so far.
+    /// </summary>
+    /// <param name="context">Provides cancellation and the output batch size.</param>
+    /// <param name="outputLookup">Schema for the output batches; column count must match the spilled schema.</param>
+    /// <param name="startRow">Zero-based row index to start reading from. Must be ≤ <see cref="RowsWritten"/>.</param>
+    /// <param name="rowCount">Maximum number of rows to read. Capped at <c>RowsWritten - startRow</c>.</param>
+    public async IAsyncEnumerable<RowBatch> ReplayRangeAsync(
+        ExecutionContext context,
+        ColumnLookup outputLookup,
+        long startRow,
+        long rowCount)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_schemaWritten)
+        if (!_schemaWritten || startRow >= _rowCount || rowCount <= 0)
         {
             yield break;
         }
 
-        // Close the write side so the OS releases its exclusive write lock. After the first
-        // replay the spiller is effectively read-only — Write will throw if called again.
-        // (Windows file sharing rejects a Read open against a still-open exclusive-Write
-        // handle even within the same process.)
-        _writer?.Dispose();
-        _writer = null;
-        _writeStream?.Dispose();
-        _writeStream = null;
+        // Cap rowCount at what's actually written.
+        long maxAvailable = _rowCount - startRow;
+        if (rowCount > maxAvailable) rowCount = maxAvailable;
 
+        // Pending writes must hit the OS file cache before the reader can see them — readers
+        // observe FileStream-level bytes, not BinaryWriter's internal buffer.
+        _writer?.Flush();
+        _writeStream?.Flush();
+
+        // Reader uses FileShare.ReadWrite so it can coexist with the still-open writer
+        // (which has FileAccess.Write + FileShare.Read). Each handle's FileShare must
+        // include the access modes of every other open handle: writer's "I'm Write, allow
+        // Read" matches reader's "I'm Read, allow ReadWrite".
         FileStream readStream = new(
             _spillFilePath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite,
             bufferSize: 65536,
             useAsync: true);
 
+        long rowStride = RowStrideBytes;
+        long startByte = _rowDataStartByte + (startRow * rowStride);
+        long endByte = startByte + (rowCount * rowStride);
+
         await using (readStream.ConfigureAwait(false))
         {
-            using BinaryReader reader = new(readStream);
+            // leaveOpen so the BinaryReader's dispose doesn't take the FileStream with it —
+            // FileStream is owned by the await-using above.
+            using BinaryReader reader = new(readStream, System.Text.Encoding.UTF8, leaveOpen: true);
 
-            // Discard the on-disk schema header — caller supplies the (possibly renamed) lookup.
-            RowSerializer.ReadSchema(reader, out ColumnLookup _);
+            readStream.Seek(startByte, SeekOrigin.Begin);
 
             int columnCount = outputLookup.Count;
             // Invariant: outputBatch != null ⟺ the producer still owns it. Yielding hands
@@ -199,7 +246,7 @@ internal sealed class SpillReaderWriter : IDisposable
 
             try
             {
-                while (readStream.Position < readStream.Length)
+                while (readStream.Position < endByte)
                 {
                     context.CancellationToken.ThrowIfCancellationRequested();
 

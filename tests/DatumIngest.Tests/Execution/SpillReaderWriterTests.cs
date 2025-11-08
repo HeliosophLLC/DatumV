@@ -405,4 +405,190 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
             pool.ReturnRowBatch(batch);
         }
     }
+
+    // ─────────── ReplayRangeAsync (recursive-CTE working table) ───────────
+
+    [Fact]
+    public async Task ReplayRange_ReturnsOnlyRequestedRows()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        // Write 10 rows in a single batch so they're contiguous on disk.
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 10);
+        for (int i = 0; i < 10; i++) input.Add([DataValue.FromInt32(i)]);
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+        spiller.Write(input);
+        Assert.Equal(10L, spiller.RowsWritten);
+
+        // Read rows [3, 8) — middle slice.
+        List<int> values = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 3, rowCount: 5))
+        {
+            for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+
+        Assert.Equal([3, 4, 5, 6, 7], values);
+    }
+
+    [Fact]
+    public async Task ReplayRange_StartAtZero_ReadsFromBeginning()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 5);
+        for (int i = 0; i < 5; i++) input.Add([DataValue.FromInt32(i)]);
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+        spiller.Write(input);
+
+        List<int> values = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 0, rowCount: 3))
+        {
+            for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+
+        Assert.Equal([0, 1, 2], values);
+    }
+
+    [Fact]
+    public async Task ReplayRange_RowCountExceedsAvailable_CapsAtRowsWritten()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 4);
+        for (int i = 0; i < 4; i++) input.Add([DataValue.FromInt32(i)]);
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+        spiller.Write(input);
+
+        // Ask for 100 rows starting at 2 — should give 2 rows (indices 2 and 3) without
+        // reading past the end of the spilled data.
+        List<int> values = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 2, rowCount: 100))
+        {
+            for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+
+        Assert.Equal([2, 3], values);
+    }
+
+    [Fact]
+    public async Task ReplayRange_StartAtRowCount_YieldsNothing()
+    {
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 3);
+        for (int i = 0; i < 3; i++) input.Add([DataValue.FromInt32(i)]);
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+        spiller.Write(input);
+
+        List<int> values = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 3, rowCount: 100))
+        {
+            for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+
+        Assert.Empty(values);
+    }
+
+    [Fact]
+    public async Task WriteAfterReplay_NewRowsVisibleToSubsequentReplay()
+    {
+        // The recursive-CTE flow needs: write iter 0 → replay [0,k0) as working table for iter 1
+        // → write iter 1 → replay [k0,k1) → ... The writer must survive the first replay and
+        // subsequent reads must see the freshly-written rows.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["x"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+
+        // First write: rows 0–2.
+        RowBatch first = pool.RentRowBatch(lookup, capacity: 3);
+        for (int i = 0; i < 3; i++) first.Add([DataValue.FromInt32(i)]);
+        spiller.Write(first);
+        Assert.Equal(3L, spiller.RowsWritten);
+
+        // Replay first batch as the "working table".
+        List<int> firstReplay = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 0, rowCount: 3))
+        {
+            for (int i = 0; i < batch.Count; i++) firstReplay.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([0, 1, 2], firstReplay);
+
+        // Append more rows AFTER the replay. Writer was never closed.
+        RowBatch second = pool.RentRowBatch(lookup, capacity: 4);
+        for (int i = 3; i < 7; i++) second.Add([DataValue.FromInt32(i)]);
+        spiller.Write(second);
+        Assert.Equal(7L, spiller.RowsWritten);
+
+        // Range-read the second iteration's slice [3,7).
+        List<int> secondReplay = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 3, rowCount: 4))
+        {
+            for (int i = 0; i < batch.Count; i++) secondReplay.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal([3, 4, 5, 6], secondReplay);
+
+        // Full ReplayAsync should see all 7 rows now.
+        List<int> fullReplay = [];
+        await foreach (RowBatch batch in spiller.ReplayAsync(context, lookup))
+        {
+            for (int i = 0; i < batch.Count; i++) fullReplay.Add(batch[i][0].AsInt32());
+            pool.ReturnRowBatch(batch);
+        }
+        Assert.Equal(Enumerable.Range(0, 7), fullReplay);
+    }
+
+    [Fact]
+    public async Task ReplayRange_ArenaBackedStrings_ResolveCorrectly()
+    {
+        // Confirms that range reads still resolve arena-backed payloads against the
+        // consolidated arena, just like full ReplayAsync. This is the worst-case scenario
+        // for recursive CTE: a row inside the range references payload bytes written to
+        // the consolidated arena BEFORE the range's start row.
+        Pool pool = GetService<Pool>();
+        ColumnLookup lookup = new(["s"]);
+        ExecutionContext context = CreateExecutionContext();
+
+        const string longA = "this string is definitely longer than sixteen bytes A";
+        const string longB = "another long string that exceeds the inline threshold B";
+        const string longC = "third arena-backed payload, distinct content again C";
+
+        RowBatch input = pool.RentRowBatch(lookup, capacity: 3);
+        input.Add([DataValue.FromString(longA, input.Arena)]);
+        input.Add([DataValue.FromString(longB, input.Arena)]);
+        input.Add([DataValue.FromString(longC, input.Arena)]);
+
+        using SpillReaderWriter spiller = new(pool, lookup, Path.GetTempPath());
+        Arena consolidated = spiller.ConsolidatedArena;
+        spiller.Write(input);
+
+        // Read only the middle row — its arena-backed _p0/_p1 must still resolve correctly.
+        List<string> values = [];
+        await foreach (RowBatch batch in spiller.ReplayRangeAsync(context, lookup, startRow: 1, rowCount: 1))
+        {
+            for (int i = 0; i < batch.Count; i++) values.Add(batch[i][0].AsString(consolidated));
+            pool.ReturnRowBatch(batch);
+        }
+
+        Assert.Equal([longB], values);
+    }
 }

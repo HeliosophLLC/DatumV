@@ -412,7 +412,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         QueryPlanner planner = new(catalog, DefaultFunctions);
         IQueryOperator plan = planner.Plan(statement);
 
-        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        RecursionDepthExceededException exception = await Assert.ThrowsAsync<RecursionDepthExceededException>(async () =>
         {
             await foreach (RowBatch batch in plan.ExecuteAsync(context))
             {
@@ -422,6 +422,172 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         });
 
         Assert.Contains("exceeded maximum recursion depth", exception.Message);
+        Assert.Equal("nums", exception.CteName);
+        Assert.Equal(3, exception.MaxDepth);
+    }
+
+    /// <summary>
+    /// Recursive CTE under a tiny memory budget transitions to spill mode at an iteration
+    /// boundary. All rows (anchor + every iteration) must round-trip through the spill file
+    /// and replay correctly. Load-bearing for the multi-tenant story: a runaway recursion
+    /// must not OOM the host.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_SpillsToDisk_WhenBudgetExceeded()
+    {
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
+
+        ExecutionContext context = CreateExecutionContext(
+            catalog: catalog,
+            memoryBudgetBytes: 1, // Forces spill at the first iteration boundary.
+            maxRecursionDepth: 100);
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH RECURSIVE nums AS (" +
+            "SELECT 1 AS n FROM dual " +
+            "UNION ALL " +
+            "SELECT n + 1 AS n FROM nums WHERE n < 50" +
+            ") SELECT n FROM nums")).Statement;
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        IQueryOperator plan = planner.Plan(statement);
+
+        List<Row> results = await plan.CollectRowsAsync(context);
+
+        Assert.Equal(50, results.Count);
+        // Confirm full round-trip — each row's n value should match its 1-based index.
+        for (int i = 0; i < 50; i++)
+        {
+            DataValue n = results[i]["n"];
+            int actual = n.Kind switch
+            {
+                DataKind.Int8 => n.AsInt8(),
+                DataKind.Int16 => n.AsInt16(),
+                DataKind.Int32 => n.AsInt32(),
+                DataKind.Float32 => (int)n.AsFloat32(),
+                DataKind.Float64 => (int)n.AsFloat64(),
+                _ => throw new InvalidOperationException($"Unexpected kind: {n.Kind}")
+            };
+            Assert.Equal(i + 1, actual);
+        }
+    }
+
+    /// <summary>
+    /// After a mid-recursion spill, the next iteration's working table must read from the
+    /// spiller (not from a stale in-memory snapshot). This test forces spill at iteration 1
+    /// and confirms iterations 2-N still produce correct rows by reading their working-table
+    /// input through <c>SpillReaderWriter.ReplayRangeAsync</c>.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_WorkingTableReadsFromSpiller_AfterMidRecursionSpill()
+    {
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
+
+        ExecutionContext context = CreateExecutionContext(
+            catalog: catalog,
+            memoryBudgetBytes: 1,
+            maxRecursionDepth: 100);
+
+        // 20 iterations: anchor produces n=1, each iteration produces n+1 of the working
+        // table's rows. After spill, the working table read goes through the spiller.
+        // Recursive CTE produces rows in iteration order (anchor → iter1 → iter2 → ...) so
+        // for this single-row-per-iteration shape the natural order is already 1..N — no
+        // ORDER BY needed (and OrderByOperator's spill path is broken pending its own
+        // migration; see project_spill_operators_broken.md).
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH RECURSIVE nums AS (" +
+            "SELECT 1 AS n FROM dual " +
+            "UNION ALL " +
+            "SELECT n + 1 AS n FROM nums WHERE n < 20" +
+            ") SELECT n FROM nums")).Statement;
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        IQueryOperator plan = planner.Plan(statement);
+
+        List<Row> results = await plan.CollectRowsAsync(context);
+
+        Assert.Equal(20, results.Count);
+        for (int i = 0; i < 20; i++)
+        {
+            DataValue n = results[i]["n"];
+            int actual = n.Kind switch
+            {
+                DataKind.Int8 => n.AsInt8(),
+                DataKind.Int16 => n.AsInt16(),
+                DataKind.Int32 => n.AsInt32(),
+                DataKind.Float32 => (int)n.AsFloat32(),
+                DataKind.Float64 => (int)n.AsFloat64(),
+                _ => throw new InvalidOperationException($"Unexpected kind: {n.Kind}")
+            };
+            Assert.Equal(i + 1, actual);
+        }
+    }
+
+    /// <summary>
+    /// Recursive CTE with a multi-replay consumer that breaks after the first batch must not
+    /// double-return or leak. Mirrors the equivalent CTE/SpillReaderWriter contract test.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_ConsumerBreaksMidReplay_CleansUp()
+    {
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
+
+        ExecutionContext context = CreateExecutionContext(
+            catalog: catalog,
+            batchSize: 4); // Small batches so we have something to break out of.
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH RECURSIVE nums AS (" +
+            "SELECT 1 AS n FROM dual " +
+            "UNION ALL " +
+            "SELECT n + 1 AS n FROM nums WHERE n < 30" +
+            ") SELECT n FROM nums")).Statement;
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        IQueryOperator plan = planner.Plan(statement);
+
+        int batchesReceived = 0;
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
+        {
+            batchesReceived++;
+            context.Pool.ReturnRowBatch(batch);
+            break;
+        }
+
+        Assert.Equal(1, batchesReceived);
+        // No exception means the producer's outer finally didn't double-return the in-flight
+        // batch. The recursive CTE's own Dispose should also clean up cleanly when called by
+        // the outer test scaffolding (no using here — relying on no-throw + GC).
+    }
+
+    /// <summary>
+    /// Empty anchor short-circuits before any recursive iteration runs.
+    /// </summary>
+    [Fact]
+    public async Task Execute_RecursiveCte_EmptyAnchor_YieldsNothing()
+    {
+        TableCatalog catalog = CreateCatalog("dual",
+            columns: ["dummy"],
+            [1f]);
+
+        // Anchor filters all rows out (1 = 0 is never true), so anchor produces zero rows.
+        // The recursive member depends on the working table; an empty working table → no
+        // recursion → terminate immediately.
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH RECURSIVE nums AS (" +
+            "SELECT 1 AS n FROM dual WHERE 1 = 0 " +
+            "UNION ALL " +
+            "SELECT n + 1 FROM nums WHERE n < 5" +
+            ") SELECT n FROM nums",
+            catalog);
+
+        Assert.Empty(results);
     }
 
     // ─────────────── CommonTableExpressionOperator unit tests ───────────────

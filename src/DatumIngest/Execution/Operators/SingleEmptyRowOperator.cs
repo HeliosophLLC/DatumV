@@ -22,6 +22,8 @@ internal sealed class SingleEmptyRowOperator : IQueryOperator
     {
         RowBatch outputBatch = context.Pool.RentRowBatch(ColumnLookup.Empty, 1);
 
+        outputBatch.Add([]);
+
         yield return outputBatch;
     }
 }
