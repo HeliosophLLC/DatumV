@@ -6,57 +6,60 @@ DatumIngest can build `.datum-index` sidecar files that accelerate queries by en
 
 ## Binary format
 
-A `.datum-index` file uses a TOC-at-end layout (like ZIP), enabling sequential writing and random-access reading:
+A `.datum-index` file uses a directory-at-start layout, enabling sequential writing and random-access reading. The whole file is mmap-friendly — readers locate any section by offset without a full scan, and fixed-width payloads (sorted index keys, B+Tree pages, bitmap bitsets) can be binary-searched directly through a `MemoryMappedViewAccessor`.
 
 ```
-┌─────────────────────────────────┐
-│  Header (16 bytes)              │
-│    Magic: DTIX (4 bytes ASCII)  │
-│    Version: uint16 (currently 3)│
-│    ▸ See also: v4 mapped format │
-│    Flags: uint16 (reserved)     │
-│    TOC offset: int64            │
-├─────────────────────────────────┤
-│  Section: Fingerprint           │
-│  Section: Schema                │
-│  Section: ChunkDirectory        │
-│  Section: BloomFilters     (opt)│
-│  Section: SortedIndexes    (opt)│
-│  Section: ZipDirectory     (opt)│
-│  Section: RowOffsets       (opt)│
-│  Section: TableDirectory   (opt)│
-│  Section: BTreeIndexes     (opt)│
-├─────────────────────────────────┤
-│  Table of Contents              │
-│    Count: int32                 │
-│    Entries: (type, offset, len) │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  Header (24 bytes)                          │
+│    Magic: DXIX (4 bytes ASCII)              │
+│    Version: int32 (currently 6)             │
+│    Flags: int32 (reserved, 0)               │
+│    SectionCount: int32                      │
+│    FileLength: int64                        │
+├─────────────────────────────────────────────┤
+│  Section Directory (SectionCount × 18 B)    │
+│    Per entry:                               │
+│      SectionType: byte                      │
+│      TableIndex:  byte (0xFF = shared)      │
+│      Offset:      int64                     │
+│      Length:      int64                     │
+├─────────────────────────────────────────────┤
+│  Section payloads (contiguous)              │
+│    Section: Fingerprint                     │
+│    Section: TableDirectory                  │
+│    Per table:                               │
+│      Section: Schema                        │
+│      Section: ChunkDirectory                │
+│      Section: BloomFilters       (opt)      │
+│      Section: SortedIndexes      (opt)      │
+│      Section: BTreePages         (opt)      │
+│      Section: BitmapIndexes      (opt)      │
+└─────────────────────────────────────────────┘
 ```
 
-Each section is identified by an `IndexSectionType`:
+Each section is identified by a `UnifiedIndexSectionType`:
 
 | Value | Section | Purpose |
 |-------|---------|---------|
 | 0 | Fingerprint | Source file staleness detection |
-| 1 | Schema | Cached column schema and total row count |
-| 2 | ChunkDirectory | Chunk boundaries and per-column statistics |
-| 3 | BloomFilters | Per-column, per-chunk probabilistic membership filters |
-| 4 | SortedIndexes | Sorted distinct values for binary search lookups |
-| 5 | ZipDirectory | Cached ZIP archive central directory |
-| 6 | RowOffsets | Per-chunk row byte offsets for line-oriented seeking |
-| 7 | TableDirectory | Multi-table index mapping (table name → section ranges) |
-| 8 | BTreeIndexes | Per-column B+Tree indexes with compressed leaf pages for disk-resident key lookup |
+| 1 | TableDirectory | Maps table indexes to table names within a multi-table file |
+| 2 | Schema | Cached column schema and total row count |
+| 3 | ChunkDirectory | Chunk boundaries and per-column min/max/null/cardinality statistics |
+| 4 | BloomFilters | Per-column, per-chunk probabilistic membership filters |
+| 5 | SortedIndexes | Per-column fixed-width sorted key arrays + locators for binary-search lookup |
+| 6 | BTreePages | Per-column B+Tree indexes as contiguous 8 KiB pages for demand-paged lookup |
+| 7 | BitmapIndexes | Per-column bitmap indexes for low-cardinality columns |
 
-Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, BTreeIndexes, ZipDirectory, RowOffsets, and TableDirectory are written only when applicable.
+Each directory entry tags its section with a `TableIndex` byte. Fingerprint and TableDirectory use the reserved value `0xFF` to indicate they are shared across all tables; per-table sections carry the table's zero-based index.
+
+Fingerprint, TableDirectory, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, BTreePages, and BitmapIndexes are written only when the column is eligible for that index type.
 
 ### Format versions
 
 | Version | Changes |
 |---------|--------|
-| 1 | Initial format |
-| 2 | Added RowOffsets section, multi-table TableDirectory |
-| 3 | Added per-column Zstd compression for SortedIndexes section, BTreeIndexes section type |
-| 4 (mapped) | Memory-mapped fixed-width sorted indexes in a separate `.datum-mapped-index` file (magic `DXIX`). See [Memory-mapped sorted indexes](#memory-mapped-sorted-indexes). |
+| 1–5 | Earlier layouts; not produced by current writers. |
+| 6 | Current unified layout. Single `.datum-index` file with `DXIX` magic, directory-at-start, fixed-width mmap-friendly sorted-index keys, B+Tree pages, and bitmap sections all in-line. |
 
 ## Staleness detection
 
@@ -70,7 +73,7 @@ The Schema section stores the full column schema (`ColumnInfo[]` with data kinds
 
 ## Chunk directory
 
-The source is logically divided into fixed-size row chunks (default: 10,000 rows). Each chunk records:
+The source is logically divided into fixed-size row chunks (default: 10,000 rows; see `IndexConstants.DefaultChunkSize`). Each chunk records:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -78,7 +81,7 @@ The source is logically divided into fixed-size row chunks (default: 10,000 rows
 | RowCount | int64 | Number of rows in this chunk |
 | ColumnStatistics | dictionary | Per-column minimum, maximum, null count, row count, and HyperLogLog cardinality estimate |
 
-Byte offsets are populated when the provider implements `IChunkMeasuringProvider` (see [Byte-range measurement](#byte-range-measurement) below). Otherwise they default to −1, and the engine falls back to row-counting during execution.
+Per-chunk statistics are encoded as a fixed-width zone map in the `ChunkDirectory` section, enabling random-access lookup by chunk index without decoding earlier entries. See [`MappedChunkDirectory`](../src/DatumIngest/Indexing/MappedChunkDirectory.cs) for the on-disk layout.
 
 ## Bloom filters
 
@@ -119,73 +122,23 @@ datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,times
 
 ### Automatic column selection
 
-When no explicit `--index-columns` are provided, the programmatic `DatumIngester.BuildIndexAsync` API (and the compute backend) automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not:
+When no explicit `--index-columns` are provided, the indexing pipeline automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not. The eligibility rule is in [`SourceIndexBuilder.IsAutoIndexableKind`](../src/DatumIngest/Indexing/SourceIndexBuilder.cs):
 
 | Eligible (auto-indexed) | Skipped |
 |------------------------|---------|
-| Float32 (numeric) | Vector |
-| Boolean | Matrix |
-| Date, DateTime, Time, Duration | Tensor |
-| UUID | Image |
-| String (≤ 16 characters) | JsonValue |
-| UInt8 | Array |
+| Float32, Float64 | Vector |
+| Int8, Int16, Int32, Int64 | Matrix |
+| UInt8, UInt16, UInt32, UInt64 | Tensor |
+| Boolean | Image |
+| Date, DateTime, Time, Duration | JsonValue |
+| Uuid | Array, Struct |
+| String (tentative — dropped if values exceed 16 chars) | UInt8Array |
 
-Auto-indexing is controlled by the `AutoIndexColumns` option (default: `true`). Set `IndexAllColumns = true` to override and index every column regardless of type.
+Auto-indexing is controlled by the `autoIndexColumns` constructor flag on `SourceIndexBuilder` (or `IndexOptions.Columns = IndexColumnSelection.Auto` on the high-level `Indexer` API). Setting `indexAllColumns: true` overrides the eligibility filter and indexes every column.
 
-To cap how many columns are indexed (useful in multi-tenant environments where index size must be bounded), set `MaxIndexedColumns` to the desired limit. Only the first N eligible columns in schema order are indexed.
+### On-disk encoding
 
-### Sorted index compression
-
-As of format version 3, sorted indexes are compressed per-column using Zstd. This typically achieves 5–10× size reduction with negligible read latency impact (decompression is sub-millisecond).
-
-The compressed envelope format per column is:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| ColumnName | string | Column name (length-prefixed UTF-8) |
-| EntryCount | int32 | Number of index entries |
-| UncompressedLength | int32 | Byte length before compression |
-| CompressedLength | int32 | Byte length after compression |
-| CompressedPayload | byte[] | Zstd-compressed entry data |
-
-Compression is enabled by default in the `DatumIndexerOptions` (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
-
-## Memory-mapped sorted indexes
-
-The v4 format replaces variable-length `WriteDataValue` entries with a fixed-width binary layout that can be memory-mapped for zero-copy binary search. Unlike the v3 sorted index section (embedded inside the `.datum-index` TOC), the v4 format lives in a separate file with magic `DXIX` and is designed for direct `MemoryMappedFile` access — no decompression, no deserialization, no materialization into `ValueIndexEntry[]`.
-
-### Motivation
-
-The v3 sorted index path allocates a `ValueIndexEntry[]` per column on read: for a 10-million-row column, that is 10M × 40 bytes ≈ 400 MB per column in managed heap. In a multi-tenant server with ten concurrent sessions each querying a different table, memory usage scales linearly with concurrency.
-
-Memory-mapped indexes solve this by letting the OS page in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions do not multiply memory 10×.
-
-### On-disk format
-
-```
-┌──────────────────────────────────────┐  Offset 0
-│  Magic: DXIX (4 bytes ASCII)         │
-│  Format version: int32 (4)           │
-│  Column count: int32                 │
-├──────────────────────────────────────┤
-│  Column directory                    │
-│    Per column:                       │
-│      Column name (length-prefixed)   │
-│      DataKind: byte                  │
-│      Entry count: int64              │
-│      Keys offset: int64              │
-│      Locators offset: int64          │
-│      String table offset: int64      │
-│      String table length: int64      │
-├──────────────────────────────────────┤
-│  Column 0: Keys array                │
-│  Column 0: Locators array            │
-│  Column 0: String table (if string)  │
-│  Column 1: Keys array                │
-│  Column 1: Locators array            │
-│  ...                                 │
-└──────────────────────────────────────┘
-```
+Sorted indexes are stored inline within the unified `.datum-index` file as fixed-width key arrays plus parallel locators. The layout is mmap-friendly: query operators binary-search directly through a `MemoryMappedViewAccessor` without decompression, deserialization, or per-column heap allocation.
 
 **Keys array**: `entryCount × keyWidth` bytes in sort-preserving binary encoding. For numeric and temporal kinds, `SequenceCompareTo` on raw bytes gives the correct ordering — no decoding needed for comparison. Key encodings:
 
@@ -213,23 +166,9 @@ Memory-mapped indexes solve this by letting the OS page in only the regions touc
 
 **String table** (string columns only): Packed UTF-8 bytes with deduplication. String keys store `(offset, length)` references into this region. Binary search for string keys dereferences the string table for comparison rather than relying on byte ordering.
 
-### Storage strategy
+### Multi-tenant memory profile
 
-The v4 file is stored uncompressed on the local filesystem — the fixed-width layout *is* the storage format, always mmap-ready. On-disk size is larger than Zstd-compressed v3 (~8× for typical columns), but acceptable for local ML ETL workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage uploads compress the file with Zstd; after download, the decompressed file is mmap'd directly.
-
-### Runtime behavior
-
-`MappedSortedIndex` implements the same `IColumnIndex` interface as `SortedValueIndex` and `BPlusTreeReader`. Query operators (`ScanOperator`, `IndexScanOperator`, `JoinOperator`, `QueryPlanner`) are polymorphic — no code changes required. Binary search operates directly on the mapped memory via `MemoryMappedViewAccessor`, touching only the pages needed for each lookup.
-
-### Key types
-
-| Type | Purpose |
-|------|---------|
-| `SortedIndexKeyEncoder` | Encodes/decodes `DataValue` keys in sort-preserving fixed-width binary |
-| `MappedSortedIndexWriter` | Writes the v4 file with column directory and backpatched offsets |
-| `MappedSortedIndexReader` | Opens a v4 file via `MemoryMappedFile`, creates per-column `MappedSortedIndex` instances |
-| `MappedSortedIndex` | `IColumnIndex` implementation with binary search over mapped memory |
-| `MappedSortedIndexSet` | Owns `MemoryMappedFile` + shared `MemoryMappedViewAccessor` lifetime, case-insensitive column lookup |
+The fixed-width mmap layout means the OS pages in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions querying the same table do not multiply memory 10×. On-disk size is larger than a Zstd-compressed encoding (~8× for typical columns) but acceptable for local ML ETL workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage can compress the file with Zstd; after download, the decompressed file is mmap'd directly.
 
 ## B+Tree indexes
 
@@ -373,26 +312,11 @@ datum-ingest index --source data.csv --auto-index --bitmap-columns color,status
 
 ### Storage format
 
-Each bitmap is Zstd-compressed and stored under `IndexSectionType.BitmapIndexes` (section type 9). At a chunk size of 10,000 rows, each uncompressed bitmap is 1.25 KB; Zstd typically achieves 5–20× compression for sparse bitmaps.
+Each bitmap is Zstd-compressed and stored under `UnifiedIndexSectionType.BitmapIndexes` (section type 7). At a chunk size of 10,000 rows, each uncompressed bitmap is 1.25 KB; Zstd typically achieves 5–20× compression for sparse bitmaps.
 
 ### Manifest index hints
 
 When a manifest is generated (via `ManifestBuilder`), per-column `ColumnIndexHint` records are included. These hints record whether a column was observed to be bitmap-eligible (≤ 256 distinct values), sort-eligible, or B+Tree-eligible. On subsequent ingestion runs, `SourceIndexBuilder` can consult these hints to override auto-detection.
-
-## ZIP directory cache
-
-For ZIP archive sources, the index caches the central directory — file names, compressed/uncompressed sizes, CRC-32 checksums, and local header offsets. This avoids re-parsing the ZIP central directory structure on every query.
-
-## Byte-range measurement
-
-Line-oriented providers (CSV, JSONL) can implement `IChunkMeasuringProvider` to pre-scan the source file and report exact byte boundaries for each row chunk. This enables byte-level seeking during query execution.
-
-- **CSV** — quote-aware byte scanning that correctly handles multi-line quoted fields, escaped quotes, and CRLF line endings
-- **JSONL** — detects data rows by looking for `{` at the start of each line, skipping blank lines and non-object content
-
-Binary formats (Parquet, HDF5) use their own internal chunking and do not implement this interface.
-
-For providers that support random-access row reads (`ISeekableTableProvider`), pruned chunks can be read directly by seeking to the target row offset. See [Chunk-level seeking](#chunk-level-seeking) under Query-time pruning.
 
 ## Query-time pruning
 
@@ -448,7 +372,7 @@ All four levels are applied in sequence; each subsequent level can only reduce t
 
 When chunks are pruned, `ScanOperator` must read only the surviving chunks. Providers that implement `ISeekableTableProvider` support random-access row reads — the engine calls `ReadRowRangeAsync` with each surviving chunk's row offset and count, seeking directly to the target rows without streaming through skipped data. Providers without seeking support fall back to streaming all rows and discarding those outside surviving chunks by row index.
 
-Currently, the IDX, Parquet, and HDF5 providers implement `ISeekableTableProvider`. Line-oriented formats (CSV, JSONL) do not — they rely on byte-range measurement via `IChunkMeasuringProvider` instead.
+Currently, the `.datum`, Parquet, and HDF5 providers implement `ISeekableTableProvider`. Line-oriented formats (CSV, JSONL) do not — pruned chunks are streamed through and discarded by row index.
 
 ### Exact row seek for equality predicates
 
@@ -541,163 +465,79 @@ The engine validates the index fingerprint against the source, applies chunk-lev
 
 ## Programmatic API
 
-### Build an index
+### Build an index from a `.datum` file
+
+The `Indexer` class is the single-call public entry point. It reads a `.datum` file, accumulates per-chunk statistics and acceleration structures (bloom filters, bitmap indexes, sorted or B+Tree column indexes), and writes a `.datum-index` sidecar.
 
 ```csharp
-SourceIndexBuilder builder = new(
-    chunkSize: 10_000,
-    bloomColumns: new HashSet<string> { "id" },
-    indexColumns: new HashSet<string> { "id" });
+Indexer indexer = new(pool);
 
-SourceIndex index = await builder.BuildAsync(
-    descriptor, provider, sourceStream, CancellationToken.None);
+DatumFileDescriptor source = new("data.datum");
+OutputDescriptor destination = new("data.datum-index");
 
-// Wrap in a SourceIndexSet container (keyed by table name)
-SourceIndexSet indexSet = SourceIndexSet.Create("data", index);
+IndexResult result = await indexer.IndexAsync(source, destination, cancellationToken);
 
-// Write to disk
-using FileStream output = File.Create("data.csv.datum-index");
-IndexWriter writer = new();
-writer.Write(indexSet, output);
+Console.WriteLine($"{result.RowCount} rows, {result.ChunkCount} chunks, " +
+                  $"{result.IndexedColumns.Count} indexed columns " +
+                  $"({result.BytesWritten} bytes, {result.Elapsed})");
 ```
 
-### Build with auto-indexing
+### Tune column selection and memory profile
+
+`IndexOptions` controls per-column index policy and the build-time memory profile. The default (`IndexOptions.Default`) auto-selects compact columns; `IndexOptions.MultiTenantServer` lowers the per-build working set for processes that share memory with concurrent query workloads.
 
 ```csharp
-// Auto-select compact columns, compress sorted indexes, cap at 8 columns
+IndexOptions options = IndexOptions.Default with
+{
+    Columns = new IndexColumnSelection.Explicit(["user_id", "category"]),
+    ChunkSize = 50_000,
+};
+
+IndexResult result = await indexer.IndexAsync(source, destination, options, cancellationToken);
+```
+
+`IndexColumnSelection` variants:
+
+| Variant | Behavior |
+|---------|----------|
+| `Auto` | Select compact columns via `IsAutoIndexableKind` (default). |
+| `All` | Index every column in the schema, including reference types. |
+| `Explicit(columns)` | Index only the named columns; others receive no index. |
+| `None` | Build no column indexes. Zone maps and chunk directory are still produced. |
+
+### Streaming construction (lower-level)
+
+When indexing must happen alongside another stream of `RowBatch`es — for example during `INSERT INTO` from a query plan — call `SourceIndexBuilder.CreateIncrementalBuilder` directly:
+
+```csharp
+using FileStream sourceStream = File.OpenRead("data.csv");
+SourceFingerprint fingerprint = await SourceFingerprint.ComputeAsync(
+    sourceStream, cancellationToken);
+
 SourceIndexBuilder builder = new(
     bloomAllColumns: false,
     indexAllColumns: false,
-    chunkSize: 10_000,
-    autoIndexColumns: true,
-    maxIndexedColumns: 8);
+    autoIndexColumns: true);
 
-SourceIndex index = await builder.BuildAsync(
-    descriptor, provider, sourceStream, CancellationToken.None);
-```
+using IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
-### Force B+Tree indexes
-
-```csharp
-// Force B+Tree for all indexed columns (useful for testing or known-large datasets)
-DatumIndexerOptions options = new()
+await foreach (RowBatch batch in plan.ExecuteAsync(context))
 {
-    AutoIndexColumns = true,
-    CompressIndexes = true,
-};
-
-await using DatumIndexResult result = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
-```
-
-### Co-generate during output writing
-
-```csharp
-SourceIndexBuilder builder = new(chunkSize: 10_000);
-SourceFingerprint fingerprint = await SourceFingerprint.ComputeAsync(
-    sourceStream, CancellationToken.None);
-
-IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
-
-await foreach (Row row in plan.ExecuteAsync(context))
-{
-    incremental.AddRow(row);
-    await writer.WriteRowAsync(row);
+    incremental.AddBatch(batch);
+    pool.ReturnRowBatch(batch);
 }
 
 SourceIndex index = incremental.Finalize();
+SourceIndexSet indexSet = SourceIndexSet.Create("data", index);
 ```
 
-### Using DatumIngester
+`AddBatch` is the batch-aware streaming entry point; `AddRow(row, arena)` is also available for per-row callers.
 
-The `DatumIngester` class provides a two-step API: ingest source files into `.datum` format with statistics, then build indexes separately:
+> **Note:** Persisting a `SourceIndexSet` to disk goes through `Indexer.IndexAsync`. The lower-level `SourceIndexBuilder` path is intended for callers that consume the resulting `SourceIndex` in-process (e.g. registering it with a temp-table catalog).
 
-```csharp
-// Step 1: Ingest source file → .datum + manifest + sample preview (no index)
-await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+### Reading and registering indexes
 
-// Access the sample preview (25 representative rows collected via reservoir sampling)
-foreach ((string tableName, SamplePreview preview) in ingestion.Samples)
-{
-    Console.WriteLine($"Table {tableName}: {preview.Features.Count} features, {preview.Samples.Count} samples");
-}
-
-// Serialize the sample preview to JSON
-string sampleJson = SamplePreviewSerializer.Serialize(ingestion.Samples.Values.First());
-await SamplePreviewSerializer.WriteToFileAsync(
-    ingestion.Samples.Values.First(), "data.csv.datum-sample");
-
-// Step 2: Build index from the .datum file
-DatumIndexerOptions options = new()
-{
-    ChunkSize = 10_000,
-    AutoIndexColumns = true,
-    CompressIndexes = true,
-    MaxIndexedColumns = 8,
-};
-
-await using DatumIndexResult index = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
-
-// Optional: receive progress updates during indexing (callback is invoked synchronously)
-await using DatumIndexResult indexWithProgress = await DatumIngester.BuildIndexAsync(
-    "data.csv.datum", options, progress: snapshot =>
-        Console.WriteLine($"{snapshot.TableName}: {snapshot.PercentComplete}% ({snapshot.RowsProcessed}/{snapshot.TotalRows})"));
-```
-
-`DatumIngester.IngestAsync` handles format conversion, statistics collection, and sample preview generation. During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), ensuring a uniform random sample regardless of dataset size. Each row is converted to a JSON-friendly representation:
-
-| Data kind | JSON representation |
-|-----------|---------------------|
-| Float32, UInt8, Boolean | Number or boolean primitive |
-| String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
-| Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
-| Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
-| Tensor | Recursively nested arrays following shape dimensions |
-| Image | `"base64://…"` — resized to fit 64×64 max (aspect-preserving), re-encoded as PNG |
-| UInt8Array | `"[binary data]"` sentinel |
-| Array | Recursively converted element array |
-
-`DatumIngester.BuildIndexAsync` handles index building, compression, and sidecar file writing. See [Programmatic API](api.md) for additional usage patterns.
-
-### Read an index
-
-```csharp
-using FileStream stream = File.OpenRead("data.csv.datum-index");
-IndexReader reader = new();
-SourceIndexSet indexSet = reader.Read(stream);
-
-// Register individual table indexes with the catalog
-foreach (KeyValuePair<string, SourceIndex> entry in indexSet.Tables)
-{
-    catalog.RegisterIndex(entry.Key, entry.Value);
-}
-```
-
-### Sidecar auto-discovery
-
-Instead of manually reading and registering indexes, call `catalog.DiscoverSidecars()` after table registration to auto-discover `.datum-index` (and `.datum-manifest` and `.datum-schema`) sidecar files:
-
-```csharp
-TableCatalog catalog = new();
-catalog.Register("data", "./data.csv");
-catalog.DiscoverSidecars();
-
-// The query planner automatically applies chunk pruning when an index
-// is registered for a table name.
-IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
-```
-
-See [Programmatic API — Sidecar Auto-Discovery](api.md#sidecar-auto-discovery) for details.
-
-### Register for query-time pruning
-
-```csharp
-// The query planner automatically applies chunk pruning when an index
-// is registered for a table name.
-catalog.RegisterIndex("data", index);
-
-// Plan and execute — ScanOperator will prune chunks automatically
-IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
-```
+Reading is handled internally by the table provider chain — there is no public reader class. Indexes registered in the table catalog are picked up automatically by `ScanOperator` for chunk pruning, `IndexScanOperator` for ORDER BY elimination, and join planning for bloom-filter probing. See [Programmatic API](api.md#sidecar-auto-discovery) for the catalog-level registration surface.
 
 ## Temp Table Auto-Indexing
 
