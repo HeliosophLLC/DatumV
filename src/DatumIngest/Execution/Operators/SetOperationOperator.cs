@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -11,15 +10,27 @@ namespace DatumIngest.Execution.Operators;
 /// Supports both ALL (multiset) and DISTINCT (set) semantics for each operation type.
 /// <para>
 /// <strong>UNION ALL</strong> concatenates both streams without deduplication.
-/// <strong>UNION</strong> (distinct) concatenates and deduplicates using a hash set,
-/// with spill-to-disk when the <see cref="ExecutionContext.MemoryBudgetBytes"/> is exceeded.
+/// <strong>UNION DISTINCT</strong> concatenates with a hash-set dedup; once the budget
+/// is exceeded, post-spill rows route to a hash-partitioned <see cref="SpillReaderWriter"/>
+/// and the in-memory set stops growing.
 /// </para>
 /// <para>
 /// <strong>INTERSECT</strong> and <strong>EXCEPT</strong> materialise the right branch
-/// into a hash structure, then probe with rows from the left branch.
-/// ALL variants use counted multisets; distinct variants use simple hash sets.
-/// When the memory budget is exceeded, rows are spilled to hash-partitioned disk files
-/// and processed partition-by-partition in a drain phase.
+/// into a hash structure, then probe with rows from the left branch. Distinct variants
+/// use a hash set + emit-dedup set; ALL variants use a counted multiset and emit per
+/// occurrence. When the budget is exceeded, both sides spill to per-partition files via
+/// paired <see cref="SpillReaderWriter"/> instances (partition-aligned through the same
+/// hash function) and drain partition-by-partition: each partition's local right state
+/// is built from the in-memory subset whose hash routes there plus the spilled right
+/// rows for that partition, then probed against the spilled left rows.
+/// </para>
+/// <para>
+/// All output rows are stabilised into a long-lived <c>hashSetArena</c> rented from the
+/// pool, so emitted batches resolve correctly after their source input batches return.
+/// Per-row pool rentals (output <see cref="DataValue"/>[]s, partition buffers, the
+/// <c>compositeKeyScratch</c>) are returned in each iterator's <c>finally</c>, keeping
+/// <see cref="PoolBacking.ArenaRentCount"/> / <see cref="PoolBacking.RowBatchRentCount"/>
+/// / <see cref="PoolBacking.DataValueArrayRentCount"/> balanced for clean leak detection.
 /// </para>
 /// </summary>
 internal sealed class SetOperationOperator : IQueryOperator, IDisposable
@@ -31,7 +42,6 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     private readonly IQueryOperator _right;
     private readonly SetOperationType _operationType;
     private readonly bool _all;
-    private string? _spillDirectory;
 
     /// <summary>
     /// Creates a new set operation operator combining two input branches.
@@ -114,9 +124,16 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Currently a no-op. Spill resources (per-side <see cref="SpillReaderWriter"/>
+    /// instances and their temp directories / file-backed arenas) are owned by each
+    /// iterator and disposed in its <c>finally</c> block, so consumer-driven dispose
+    /// (e.g. mid-iteration break) flows through that path. Kept on the type so
+    /// <c>using</c> patterns and the <see cref="IDisposable"/> contract continue to
+    /// work transparently.
+    /// </remarks>
     public void Dispose()
     {
-        CleanupSpillDirectory();
     }
 
     /// <summary>
@@ -1730,53 +1747,88 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// When the memory budget is exceeded, both branches are spilled to
     /// hash-partitioned files and processed partition-by-partition.
     /// </summary>
+    /// <remarks>
+    /// Multiset variant of <see cref="ExecuteExceptDistinctAsync"/>. Right side becomes
+    /// a count-per-key dictionary (with spill on budget exceed); left rows decrement
+    /// (consumed by right) or emit (no remaining count). Empty-right is valid: every
+    /// left row passes through.
+    /// </remarks>
     private async IAsyncEnumerable<RowBatch> ExecuteExceptAllAsync(ExecutionContext context)
     {
-        Dictionary<DataValue, int>? rightSingleCounts = null;
-        Dictionary<CompositeKey, int>? rightCompositeCounts = null;
-        DataValue[]? compositeKeyScratch = null;
-        int columnCount = -1;
-
+        Pool pool = context.Pool;
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
-        bool spilling = false;
-        BinaryWriter?[]? rightSpillWriters = null;
-        bool[]? rightSpillSchemaWritten = null;
-        string[]? rightSpillPaths = null;
-        string[]? spillSchemaNames = null;
+
+        Arena? hashSetArena = null;
+        SpillReaderWriter? rightSpiller = null;
+        SpillReaderWriter? leftSpiller = null;
+        RowBatch?[]? rightPartitionBuffers = null;
+        RowBatch?[]? leftPartitionBuffers = null;
+
+        Dictionary<DataValue, int>? rightSingleCounts = null;
+        Dictionary<CompositeKey, int>? rightCompositeCounts = null;
+
+        DataValue[]? compositeKeyScratch = null;
+        int columnCount = -1;
+        ColumnLookup? schema = null;
+        SpillingTriggered = false;
         RowBatch? outputBatch = null;
 
         try
         {
+            // ───── Phase 1: materialise right counted multiset ─────
             await foreach (RowBatch rightBatch in _right.ExecuteAsync(context).ConfigureAwait(false))
             {
-                for (int i = 0; i < rightBatch.Count; i++)
+                try
                 {
-                    Row row = rightBatch[i];
-                    context.CancellationToken.ThrowIfCancellationRequested();
-
-                    if (columnCount == -1)
+                    if (schema is null && rightBatch.Count > 0)
                     {
-                        columnCount = row.FieldCount;
-                        if (columnCount == 1)
-                        {
-                            rightSingleCounts = new Dictionary<DataValue, int>();
-                        }
-                        else
-                        {
-                            rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
-                            compositeKeyScratch = new DataValue[columnCount];
-                        }
+                        schema = rightBatch.ColumnLookup;
+                        hashSetArena = pool.RentArena();
                     }
 
-                    if (spilling)
+                    for (int i = 0; i < rightBatch.Count; i++)
                     {
-                        int hashCode = GetRowHashCode(row, columnCount);
-                        WriteToSpillPartition(row, hashCode, rightSpillWriters!, rightSpillSchemaWritten!,
-                            rightSpillPaths!, spillSchemaNames!);
-                    }
-                    else
-                    {
+                        Row row = rightBatch[i];
+                        context.CancellationToken.ThrowIfCancellationRequested();
+
+                        if (columnCount == -1)
+                        {
+                            columnCount = row.FieldCount;
+                            InitCountedMultisets(columnCount, ref rightSingleCounts,
+                                ref rightCompositeCounts, ref compositeKeyScratch, pool);
+                        }
+
+                        if (SpillingTriggered)
+                        {
+                            int spillHash;
+                            if (columnCount == 1)
+                            {
+                                spillHash = row[0].GetHashCode();
+                            }
+                            else
+                            {
+                                for (int index = 0; index < columnCount; index++)
+                                {
+                                    compositeKeyScratch![index] = row[index];
+                                }
+                                spillHash = CompositeKeyComparer.Instance.GetHashCode(
+                                    compositeKeyScratch.AsSpan(0, columnCount));
+                            }
+
+                            int partition = AssignPartition(spillHash);
+                            rightPartitionBuffers![partition] ??= pool.RentRowBatch(
+                                schema!, context.BatchSize, hashSetArena!);
+                            pool.RentAndCopyToOutput(rightBatch, i, rightPartitionBuffers[partition]!);
+
+                            if (rightPartitionBuffers[partition]!.IsFull)
+                            {
+                                rightSpiller!.Write(rightPartitionBuffers[partition]!, partition);
+                                rightPartitionBuffers[partition] = null;
+                            }
+                            continue;
+                        }
+
                         IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
 
                         if (estimator is not null)
@@ -1791,18 +1843,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                             if (estimatedMemory > memoryBudget!.Value)
                             {
-                                spilling = true;
-                                EnsureSpillDirectory();
-                                rightSpillWriters = new BinaryWriter[SpillPartitionCount];
-                                rightSpillSchemaWritten = new bool[SpillPartitionCount];
-                                rightSpillPaths = new string[SpillPartitionCount];
-                                spillSchemaNames = CaptureSchemaNames(row);
-
-                                if (ExecutionTracer.IsEnabled)
-                                {
-                                    ExecutionTracer.Write(
-                                        $"EXCEPT ALL right spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}");
-                                }
+                                SpillingTriggered = true;
+                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
+                                rightSpiller = new SpillReaderWriter(
+                                    pool, schema!, context.SpillDirectory,
+                                    initialArenaCapacity: hint,
+                                    partitionCount: SpillPartitionCount);
+                                rightPartitionBuffers = new RowBatch?[SpillPartitionCount];
                             }
                             else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
                             {
@@ -1811,12 +1858,45 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                     }
                 }
+                finally
+                {
+                    pool.ReturnRowBatch(rightBatch);
+                }
             }
 
-            if (!spilling)
+            if (rightPartitionBuffers is not null && rightSpiller is not null)
             {
-                await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
+                for (int p = 0; p < rightPartitionBuffers.Length; p++)
                 {
+                    if (rightPartitionBuffers[p] is not null)
+                    {
+                        rightSpiller.Write(rightPartitionBuffers[p]!, p);
+                        rightPartitionBuffers[p] = null;
+                    }
+                }
+            }
+
+            if (SpillingTriggered)
+            {
+                int leftHint = (int)Math.Min(memoryBudget!.Value / 2, int.MaxValue);
+                leftSpiller = new SpillReaderWriter(
+                    pool, schema!, context.SpillDirectory,
+                    initialArenaCapacity: leftHint,
+                    partitionCount: SpillPartitionCount);
+                leftPartitionBuffers = new RowBatch?[SpillPartitionCount];
+            }
+
+            // ───── Phase 2: drain left ─────
+            await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (schema is null && leftBatch.Count > 0)
+                    {
+                        schema = leftBatch.ColumnLookup;
+                        hashSetArena = pool.RentArena();
+                    }
+
                     for (int i = 0; i < leftBatch.Count; i++)
                     {
                         Row row = leftBatch[i];
@@ -1824,138 +1904,203 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (columnCount == -1)
                         {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(row);
-
-                            if (outputBatch.IsFull)
-                            {
-                                yield return outputBatch;
-                                outputBatch = null;
-                            }
-
-                            continue;
+                            columnCount = row.FieldCount;
+                            InitCountedMultisets(columnCount, ref rightSingleCounts,
+                                ref rightCompositeCounts, ref compositeKeyScratch, pool);
                         }
 
-                        if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
+                        int hashCode;
+                        if (columnCount == 1)
                         {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(row);
-
-                            if (outputBatch.IsFull)
-                            {
-                                yield return outputBatch;
-                                outputBatch = null;
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                FlushSpillWriters(rightSpillWriters!);
-
-                BinaryWriter?[] leftSpillWriters = new BinaryWriter[SpillPartitionCount];
-                bool[] leftSpillSchemaWritten = new bool[SpillPartitionCount];
-                string[] leftSpillPaths = new string[SpillPartitionCount];
-
-                HashSet<int> spilledPartitions = new();
-                for (int partition = 0; partition < SpillPartitionCount; partition++)
-                {
-                    if (rightSpillPaths![partition] is not null)
-                    {
-                        spilledPartitions.Add(partition);
-                    }
-                }
-
-                await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
-                {
-                    for (int i = 0; i < leftBatch.Count; i++)
-                    {
-                        Row row = leftBatch[i];
-                        context.CancellationToken.ThrowIfCancellationRequested();
-
-                        int hashCode = GetRowHashCode(row, columnCount);
-                        int partition = AssignPartition(hashCode);
-
-                        if (spilledPartitions.Contains(partition))
-                        {
-                            WriteToLeftSpillPartition(row, hashCode, leftSpillWriters,
-                                leftSpillSchemaWritten, leftSpillPaths, spillSchemaNames!);
+                            hashCode = row[0].GetHashCode();
                         }
                         else
                         {
-                            if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
+                            for (int index = 0; index < columnCount; index++)
                             {
-                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                                outputBatch.Add(row);
+                                compositeKeyScratch![index] = row[index];
+                            }
+                            hashCode = CompositeKeyComparer.Instance.GetHashCode(
+                                compositeKeyScratch.AsSpan(0, columnCount));
+                        }
 
-                                if (outputBatch.IsFull)
-                                {
-                                    yield return outputBatch;
-                                    outputBatch = null;
-                                }
+                        int partition = AssignPartition(hashCode);
+                        bool partitionIsSpilled = SpillingTriggered
+                            && rightSpiller!.RowsWrittenInPartition(partition) > 0;
+
+                        if (partitionIsSpilled)
+                        {
+                            leftPartitionBuffers![partition] ??= pool.RentRowBatch(
+                                schema!, context.BatchSize, hashSetArena!);
+                            pool.RentAndCopyToOutput(leftBatch, i, leftPartitionBuffers[partition]!);
+
+                            if (leftPartitionBuffers[partition]!.IsFull)
+                            {
+                                leftSpiller!.Write(leftPartitionBuffers[partition]!, partition);
+                                leftPartitionBuffers[partition] = null;
+                            }
+                            continue;
+                        }
+
+                        // Inverted from INTERSECT ALL: emit when there is no remaining
+                        // right count to consume the row. DecrementCount returns false
+                        // against null sets, so empty-right correctly emits every left row.
+                        if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
+                        {
+                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            pool.RentAndCopyToOutput(leftBatch, i, outputBatch);
+
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
                             }
                         }
                     }
                 }
+                finally
+                {
+                    pool.ReturnRowBatch(leftBatch);
+                }
+            }
 
-                FlushSpillWriters(leftSpillWriters);
-
-                Dictionary<string, int>? schemaNameIndex = BuildSchemaNameIndex(spillSchemaNames!);
+            // ───── Phase 3: drain spilled partitions ─────
+            if (SpillingTriggered && rightSpiller is not null && leftSpiller is not null)
+            {
+                for (int p = 0; p < leftPartitionBuffers!.Length; p++)
+                {
+                    if (leftPartitionBuffers[p] is not null)
+                    {
+                        leftSpiller.Write(leftPartitionBuffers[p]!, p);
+                        leftPartitionBuffers[p] = null;
+                    }
+                }
 
                 for (int partition = 0; partition < SpillPartitionCount; partition++)
                 {
-                    if (rightSpillPaths![partition] is null)
-                    {
-                        continue;
-                    }
+                    if (rightSpiller.RowsWrittenInPartition(partition) == 0) continue;
+                    if (leftSpiller.RowsWrittenInPartition(partition) == 0) continue;
 
-                    Dictionary<DataValue, int>? partRightSingle = columnCount == 1 ? new() : null;
+                    Dictionary<DataValue, int>? partRightSingle = columnCount == 1
+                        ? new Dictionary<DataValue, int>() : null;
                     Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1
-                        ? new(CompositeKeyComparer.Instance) : null;
-
-                    await foreach (Row row in ReadSpillPartitionAsync(
-                        rightSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
-                    {
-                        IncrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch);
-                    }
+                        ? new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance) : null;
 
                     AddInMemoryCountsForPartition(partition, columnCount,
                         rightSingleCounts, rightCompositeCounts, partRightSingle, partRightComposite);
 
-                    if (leftSpillPaths[partition] is null)
+                    await foreach (RowBatch spilledRightBatch in rightSpiller
+                        .ReplayPartitionAsync(context, schema!, partition).ConfigureAwait(false))
                     {
-                        continue;
+                        try
+                        {
+                            for (int i = 0; i < spilledRightBatch.Count; i++)
+                            {
+                                IncrementCount(spilledRightBatch[i], columnCount,
+                                    partRightSingle, partRightComposite, compositeKeyScratch);
+                            }
+                        }
+                        finally
+                        {
+                            pool.ReturnRowBatch(spilledRightBatch);
+                        }
                     }
 
-                    await foreach (Row row in ReadSpillPartitionAsync(
-                        leftSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
+                    await foreach (RowBatch spilledLeftBatch in leftSpiller
+                        .ReplayPartitionAsync(context, schema!, partition).ConfigureAwait(false))
                     {
-                        if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
+                        try
                         {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(row);
-
-                            if (outputBatch.IsFull)
+                            for (int i = 0; i < spilledLeftBatch.Count; i++)
                             {
-                                yield return outputBatch;
-                                outputBatch = null;
+                                Row row = spilledLeftBatch[i];
+                                context.CancellationToken.ThrowIfCancellationRequested();
+
+                                if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
+                                {
+                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
+
+                                    if (outputBatch.IsFull)
+                                    {
+                                        RowBatch toYield = outputBatch;
+                                        outputBatch = null;
+                                        yield return toYield;
+                                    }
+                                }
                             }
+                        }
+                        finally
+                        {
+                            pool.ReturnRowBatch(spilledLeftBatch);
                         }
                     }
                 }
-
-                CleanupSpillFiles(leftSpillWriters);
             }
 
             if (outputBatch is not null)
             {
-                yield return outputBatch;
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
         finally
         {
-            CleanupSpillFiles(rightSpillWriters);
+            if (rightPartitionBuffers is not null)
+            {
+                for (int p = 0; p < rightPartitionBuffers.Length; p++)
+                {
+                    if (rightPartitionBuffers[p] is not null)
+                    {
+                        pool.ReturnRowBatch(rightPartitionBuffers[p]!);
+                        rightPartitionBuffers[p] = null;
+                    }
+                }
+            }
+
+            if (leftPartitionBuffers is not null)
+            {
+                for (int p = 0; p < leftPartitionBuffers.Length; p++)
+                {
+                    if (leftPartitionBuffers[p] is not null)
+                    {
+                        pool.ReturnRowBatch(leftPartitionBuffers[p]!);
+                        leftPartitionBuffers[p] = null;
+                    }
+                }
+            }
+
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
+            rightSpiller?.Dispose();
+            leftSpiller?.Dispose();
+            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+        }
+    }
+
+    /// <summary>
+    /// Initialises the right-side counted multiset (and the composite-key scratch
+    /// buffer when needed) once <c>columnCount</c> is known. Used by the EXCEPT ALL
+    /// branch where <c>columnCount</c> may be set in either Phase 1 (right has rows)
+    /// or Phase 2 (right is empty).
+    /// </summary>
+    private static void InitCountedMultisets(
+        int columnCount,
+        ref Dictionary<DataValue, int>? rightSingleCounts,
+        ref Dictionary<CompositeKey, int>? rightCompositeCounts,
+        ref DataValue[]? compositeKeyScratch,
+        Pool pool)
+    {
+        if (columnCount == 1)
+        {
+            rightSingleCounts = new Dictionary<DataValue, int>();
+        }
+        else
+        {
+            rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
+            compositeKeyScratch ??= pool.RentDataValues(columnCount);
         }
     }
 
@@ -1974,94 +2119,6 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
 
         return scratch.AsSpan(0, columnCount);
-    }
-
-    /// <summary>
-    /// Computes the hash code for a row based on its columns.
-    /// </summary>
-    private static int GetRowHashCode(Row row, int columnCount)
-    {
-        if (columnCount == 1)
-        {
-            return row[0].GetHashCode();
-        }
-
-        return CompositeKeyComparer.Instance.GetHashCode(row.RawValues.AsSpan(0, columnCount));
-    }
-
-    /// <summary>
-    /// Captures the column names from a row for spill file schemas.
-    /// </summary>
-    private static string[] CaptureSchemaNames(Row row)
-    {
-        string[] names = new string[row.FieldCount];
-        for (int index = 0; index < row.FieldCount; index++)
-        {
-            names[index] = row.ColumnNames[index];
-        }
-
-        return names;
-    }
-
-    /// <summary>
-    /// Builds a case-insensitive column name-to-index dictionary.
-    /// </summary>
-    private static Dictionary<string, int> BuildSchemaNameIndex(string[] schemaNames)
-    {
-        Dictionary<string, int> index = new(schemaNames.Length, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < schemaNames.Length; i++)
-        {
-            index[schemaNames[i]] = i;
-        }
-
-        return index;
-    }
-
-    /// <summary>
-    /// Ensures the spill directory exists, creating it if necessary.
-    /// </summary>
-    private void EnsureSpillDirectory()
-    {
-        if (_spillDirectory is null)
-        {
-            _spillDirectory = Path.Combine(
-                Path.GetTempPath(), $"datum-setop-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(_spillDirectory);
-        }
-    }
-
-    /// <summary>
-    /// Copies in-memory right set entries that hash to the given partition into
-    /// a partition-local hash set for complete partition processing.
-    /// </summary>
-    private static void AddInMemoryRowsForPartition(
-        int partition,
-        int columnCount,
-        HashSet<DataValue>? inMemorySingle,
-        HashSet<CompositeKey>? inMemoryComposite,
-        HashSet<DataValue>? partitionSingle,
-        HashSet<CompositeKey>? partitionComposite)
-    {
-        if (columnCount == 1 && inMemorySingle is not null)
-        {
-            foreach (DataValue key in inMemorySingle)
-            {
-                if (AssignPartition(key.GetHashCode()) == partition)
-                {
-                    partitionSingle!.Add(key);
-                }
-            }
-        }
-        else if (inMemoryComposite is not null)
-        {
-            foreach (CompositeKey key in inMemoryComposite)
-            {
-                if (AssignPartition(key.GetHashCode()) == partition)
-                {
-                    partitionComposite!.Add(key);
-                }
-            }
-        }
     }
 
     /// <summary>
@@ -2115,51 +2172,6 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         {
             yield return batch;
         }
-    }
-
-    /// <summary>
-    /// Adds a row's key to the appropriate hash set.
-    /// </summary>
-    private static void AddRowToSet(
-        Row row,
-        int columnCount,
-        HashSet<DataValue>? singleKeySet,
-        HashSet<CompositeKey>? compositeKeySet,
-        DataValue[]? scratch)
-    {
-        if (columnCount == 1)
-        {
-            singleKeySet!.Add(row[0]);
-        }
-        else
-        {
-            ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
-            compositeKeySet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
-        }
-    }
-
-    /// <summary>
-    /// Tests whether a row's key is contained in the hash set.
-    /// </summary>
-    private static bool ContainsRow(
-        Row row,
-        int columnCount,
-        HashSet<DataValue>? singleKeySet,
-        HashSet<CompositeKey>? compositeKeySet,
-        DataValue[]? scratch)
-    {
-        if (singleKeySet is null && compositeKeySet is null)
-        {
-            return false;
-        }
-
-        if (columnCount == 1)
-        {
-            return singleKeySet!.Contains(row[0]);
-        }
-
-        ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
-        return compositeKeySet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Contains(keySpan);
     }
 
     /// <summary>
@@ -2226,139 +2238,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         return false;
     }
 
-    // ---------------------------------------------------------------
-    //  Spill infrastructure (shared with UNION DISTINCT)
-    // ---------------------------------------------------------------
-
+    /// <summary>Hash-partition routing: <paramref name="hashCode"/> mod
+    /// <see cref="SpillPartitionCount"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AssignPartition(int hashCode)
     {
         return (int)((uint)hashCode % SpillPartitionCount);
-    }
-
-    private void WriteToSpillPartition(
-        Row row,
-        int hashCode,
-        BinaryWriter?[] writers,
-        bool[] schemaWritten,
-        string[] paths,
-        string[] schemaNames)
-    {
-        int partition = AssignPartition(hashCode);
-
-        if (writers[partition] is null)
-        {
-            paths[partition] = Path.Combine(_spillDirectory!, $"setop_{partition}.spill");
-            FileStream fileStream = new(paths[partition], FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-            writers[partition] = new BinaryWriter(fileStream);
-        }
-
-        if (!schemaWritten[partition])
-        {
-            RowSerializer.WriteSchema(writers[partition]!, row);
-            schemaWritten[partition] = true;
-        }
-
-        RowSerializer.WriteRow(writers[partition]!, row);
-    }
-
-    /// <summary>
-    /// Writes a left-side row to a partition-specific spill file, using a separate
-    /// file name prefix to avoid colliding with right-side spill files.
-    /// </summary>
-    private void WriteToLeftSpillPartition(
-        Row row,
-        int hashCode,
-        BinaryWriter?[] writers,
-        bool[] schemaWritten,
-        string[] paths,
-        string[] schemaNames)
-    {
-        int partition = AssignPartition(hashCode);
-
-        if (writers[partition] is null)
-        {
-            paths[partition] = Path.Combine(_spillDirectory!, $"setop_left_{partition}.spill");
-            FileStream fileStream = new(paths[partition], FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-            writers[partition] = new BinaryWriter(fileStream);
-        }
-
-        if (!schemaWritten[partition])
-        {
-            RowSerializer.WriteSchema(writers[partition]!, row);
-            schemaWritten[partition] = true;
-        }
-
-        RowSerializer.WriteRow(writers[partition]!, row);
-    }
-
-    private static void FlushSpillWriters(BinaryWriter?[] writers)
-    {
-        for (int index = 0; index < writers.Length; index++)
-        {
-            if (writers[index] is not null)
-            {
-                writers[index]!.Flush();
-                writers[index]!.Dispose();
-                writers[index] = null;
-            }
-        }
-    }
-
-    private static async IAsyncEnumerable<Row> ReadSpillPartitionAsync(
-        string path,
-        string[] schemaNames,
-        Dictionary<string, int> schemaNameIndex,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        using FileStream fileStream = new(path, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
-        using BinaryReader reader = new(fileStream);
-
-        RowSerializer.ReadSchema(reader, out _, out _);
-
-        while (fileStream.Position < fileStream.Length)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return RowSerializer.ReadRow(reader, schemaNames, schemaNameIndex);
-        }
-
-        await Task.CompletedTask;
-    }
-
-    private void CleanupSpillFiles(BinaryWriter?[]? writers)
-    {
-        if (writers is not null)
-        {
-            for (int index = 0; index < writers.Length; index++)
-            {
-                try
-                {
-                    writers[index]?.Dispose();
-                }
-                catch
-                {
-                    // Best-effort cleanup.
-                }
-            }
-        }
-
-        CleanupSpillDirectory();
-    }
-
-    private void CleanupSpillDirectory()
-    {
-        if (_spillDirectory is not null && Directory.Exists(_spillDirectory))
-        {
-            try
-            {
-                Directory.Delete(_spillDirectory, recursive: true);
-            }
-            catch
-            {
-                // Best-effort cleanup.
-            }
-
-            _spillDirectory = null;
-        }
     }
 }
