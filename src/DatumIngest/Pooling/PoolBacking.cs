@@ -73,6 +73,41 @@ public sealed class PoolBacking
     private readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> accumulatorArrayPools = new();
     private readonly CountedPool<Arena> arenaPools = new();
 
+    // Per-instance leak counters — Interlocked-incremented at every public Rent/Return call site.
+    // Always-on (Interlocked is cheap; not gated on DATUM_DIAGNOSTICS so leak tests work in any
+    // configuration). Per-instance avoids the cross-test race that the global DatumDiagnostics
+    // counters would suffer when xUnit parallelises across collections.
+    private long _dataValueArrayRentCount;
+    private long _dataValueArrayReturnCount;
+    private long _rowBatchRentCount;
+    private long _rowBatchReturnCount;
+    private long _arenaRentCount;
+    private long _arenaFullyReleasedCount;
+
+    /// <summary>Total <see cref="DataValue"/>[] rent calls served by this pool.</summary>
+    internal long DataValueArrayRentCount => Volatile.Read(ref _dataValueArrayRentCount);
+
+    /// <summary>Total <see cref="DataValue"/>[] return calls received by this pool.</summary>
+    internal long DataValueArrayReturnCount => Volatile.Read(ref _dataValueArrayReturnCount);
+
+    /// <summary>Total <see cref="RowBatch"/> rent calls served by this pool.</summary>
+    internal long RowBatchRentCount => Volatile.Read(ref _rowBatchRentCount);
+
+    /// <summary>Total <see cref="RowBatch"/> return calls received by this pool.</summary>
+    internal long RowBatchReturnCount => Volatile.Read(ref _rowBatchReturnCount);
+
+    /// <summary>Total <see cref="Arena"/> rent calls served by this pool.</summary>
+    internal long ArenaRentCount => Volatile.Read(ref _arenaRentCount);
+
+    /// <summary>
+    /// Number of <see cref="TryReturn(Arena)"/> calls that fully released the arena
+    /// (refcount hit zero, arena went into the pool / was disposed). Matches
+    /// <see cref="ArenaRentCount"/> when every rented arena has flowed back through
+    /// the pool, regardless of how many intermediate AddReference / Release pairs
+    /// happened (e.g. RentRowBatch with an explicit arena adds and TryReturn releases).
+    /// </summary>
+    internal long ArenaFullyReleasedCount => Volatile.Read(ref _arenaFullyReleasedCount);
+
 
     /// <summary>
     /// Initializes a new <see cref="PoolBacking"/>.
@@ -115,6 +150,8 @@ public sealed class PoolBacking
     /// </summary>
     public DataValue[] RentDataValues(int length)
     {
+        Interlocked.Increment(ref _dataValueArrayRentCount);
+
         if (dataValuePools.TryGetValue(length, out CountedPool<DataValue[]>? pool)
             && pool.TryDequeue(out DataValue[]? buffer))
         {
@@ -154,6 +191,8 @@ public sealed class PoolBacking
     /// <param name="arena">An optional <see cref="Arena"/> if an arena should not be rented from the pool; if null, a new arena will be rented for the batch.</param> 
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity, Arena? arena = null)
     {
+        Interlocked.Increment(ref _rowBatchRentCount);
+
         if (arena != null)
         {
             arena.AddReference();
@@ -212,6 +251,8 @@ public sealed class PoolBacking
     /// </param>
     public Arena RentArena(int initialCapacity = 0)
     {
+        Interlocked.Increment(ref _arenaRentCount);
+
         bool fromPool;
         if (arenaPools.TryDequeue(out Arena? arena))
         {
@@ -226,6 +267,29 @@ public sealed class PoolBacking
 
         arena.AddReference();
         DatumDiagnostics.RecordPoolArenaRent(fromPool);
+
+        return arena;
+    }
+
+    /// <summary>
+    /// Rents a fresh file-backed <see cref="Arena"/>. File-backed arenas can't be reused
+    /// across queries (file identity is tied to a specific spill operation), so this always
+    /// constructs a new arena and never hits a pool — but it still flows through the pool's
+    /// rent-counter accounting so the leak invariant (<see cref="ArenaRentCount"/> matches
+    /// <see cref="ArenaFullyReleasedCount"/>) covers both arena kinds uniformly.
+    /// </summary>
+    /// <param name="filePath">Path to the backing file. The file must not exist; the OS
+    /// creates it. Terminal release (refcount → 0) deletes the file via
+    /// <see cref="Arena.Dispose"/>.</param>
+    /// <param name="initialCapacity">Pre-size the file to this many bytes. See
+    /// <see cref="Arena.CreateFileBacked"/> for sizing guidance.</param>
+    public Arena RentFileBackedArena(string filePath, int initialCapacity)
+    {
+        Interlocked.Increment(ref _arenaRentCount);
+
+        Arena arena = Arena.CreateFileBacked(filePath, initialCapacity);
+        arena.AddReference();
+        DatumDiagnostics.RecordPoolArenaRent(fromPool: false);
 
         return arena;
     }
@@ -287,6 +351,8 @@ public sealed class PoolBacking
         MarkReturnedWithDiagnostics(buffer);
 #endif
 
+        Interlocked.Increment(ref _dataValueArrayReturnCount);
+
         CountedPool<DataValue[]> pool = dataValuePools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
         bool pooled = pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
         DatumDiagnostics.RecordPoolDataValueArrayReturn(pooled);
@@ -307,6 +373,8 @@ public sealed class PoolBacking
     /// </summary>
     public void Return(RowBatch batch)
     {
+        Interlocked.Increment(ref _rowBatchReturnCount);
+
         for (int i = 0; i < batch.Count; i++)
         {
             Return(batch[i]);
@@ -363,14 +431,17 @@ public sealed class PoolBacking
             // File-backed arenas don't go into the anonymous pool — they have file identity
             // tied to a specific spill operation. Terminal release deletes the file via
             // Arena.Dispose. The shared refcount path keeps RowBatch.Return → TryReturn
-            // working uniformly for both arena kinds.
+            // working uniformly for both arena kinds, and RentFileBackedArena bumps the
+            // rent counter so the fully-released bump here keeps the leak invariant balanced.
             arena.Dispose();
+            Interlocked.Increment(ref _arenaFullyReleasedCount);
             DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: false);
             return true;
         }
         else if (arena.Capacity >= maxArenaCapacity)
         {
             arena.Dispose();
+            Interlocked.Increment(ref _arenaFullyReleasedCount);
             DatumDiagnostics.RecordPoolArenaReturn(pooled: false, disposedOverCap: true);
             return true;
         }
@@ -378,6 +449,7 @@ public sealed class PoolBacking
         arena.Pool();
 
         arenaPools.Enqueue(arena);
+        Interlocked.Increment(ref _arenaFullyReleasedCount);
         DatumDiagnostics.RecordPoolArenaReturn(pooled: true, disposedOverCap: false);
 
         return true;

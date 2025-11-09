@@ -5,6 +5,7 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -469,6 +470,126 @@ public sealed class SetOperationTests : ServiceTestBase
         Assert.Equal(expected, values);
 
         op.Dispose();
+    }
+
+    /// <summary>
+    /// Exposes the Option-A algorithm bug: the in-memory hash set grows unbounded even
+    /// after spill triggers, because every new row is added to the set + emitted
+    /// immediately + also written to a spill partition. The drain phase then seeds its
+    /// partition-local set from the in-memory set and finds every spilled key already
+    /// present, so it emits nothing — the spill machinery is dead code. Output is still
+    /// correct, but multi-tenant memory safety is not delivered.
+    /// </summary>
+    /// <remarks>
+    /// Once fixed (route post-spill rows to spill-only and let drain emit them), this
+    /// test passes because <c>DrainEmittedRowCount</c> is non-zero.
+    /// </remarks>
+    [Fact]
+    public async Task UnionDistinct_AfterSpill_DrainEmitsSpilledRows()
+    {
+        object?[][] leftRows = Enumerable.Range(0, 500).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns);
+        SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+
+        Assert.Equal(500, results.Count);
+
+        Assert.True(
+            op.DrainEmittedRowCount > 0,
+            $"Expected drain phase to emit spilled rows after budget exceeded, but emitted "
+            + $"{op.DrainEmittedRowCount}. The in-memory hash set absorbed every row, so the "
+            + $"spill machinery is dead code and memory growth is unbounded.");
+
+        op.Dispose();
+    }
+
+    // ─────────────── POOL LEAK CHECKS ───────────────
+
+    /// <summary>
+    /// After a single-column UNION DISTINCT with no spill, every rent on the test's
+    /// pool must have a matching return: DataValue[]s, RowBatches, and Arenas.
+    /// Catches output-batch leaks, hashSetArena leaks, and missing per-row returns.
+    /// </summary>
+    [Fact]
+    public async Task UnionDistinct_SingleColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [1f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [3f]);
+        SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        Assert.Equal(3, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    /// <summary>
+    /// Multi-column UNION DISTINCT with no spill exercises the composite-key path,
+    /// which rents <c>compositeKeyScratch</c> from the pool. The scratch buffer must
+    /// be returned in the operator's finally block.
+    /// </summary>
+    [Fact]
+    public async Task UnionDistinct_MultiColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(["a", "b"], [1f, "x"], [2f, "y"], [1f, "x"]);
+        MockOperator right = CreateMockOperator(["a", "b"], [2f, "y"], [3f, "z"]);
+        SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        Assert.Equal(3, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    /// <summary>
+    /// UNION DISTINCT with a tight memory budget forces spill, exercising the spiller's
+    /// per-partition buffers, the file-backed consolidated arena, and the drain phase.
+    /// All of those must return to the pool by the time iteration completes + Dispose runs.
+    /// </summary>
+    [Fact]
+    public async Task UnionDistinct_WithSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        object?[][] leftRows = Enumerable.Range(0, 500).Select(index => new object?[] { (float)index }).ToArray();
+        object?[][] rightRows = Enumerable.Range(250, 500).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
+        SetOperationOperator op = new(left, right, SetOperationType.Union, all: false);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+        op.Dispose();
+
+        Assert.Equal(750, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    /// <summary>
+    /// Asserts that every rent on this pool has a matching return — the "no leak"
+    /// invariant. Run after the operator and any owned RowBatches have been
+    /// disposed/returned.
+    /// </summary>
+    private static void AssertPoolBalanced(Pool pool)
+    {
+        long dvRent = pool.Backing.DataValueArrayRentCount;
+        long dvReturn = pool.Backing.DataValueArrayReturnCount;
+        long rbRent = pool.Backing.RowBatchRentCount;
+        long rbReturn = pool.Backing.RowBatchReturnCount;
+        long arenaRent = pool.Backing.ArenaRentCount;
+        long arenaReleased = pool.Backing.ArenaFullyReleasedCount;
+
+        Assert.True(
+            dvRent == dvReturn && rbRent == rbReturn && arenaRent == arenaReleased,
+            $"Pool not balanced — DataValue[] rent/return: {dvRent}/{dvReturn}, "
+            + $"RowBatch rent/return: {rbRent}/{rbReturn}, "
+            + $"Arena rent/fully-released: {arenaRent}/{arenaReleased}.");
     }
 
     [Fact]

@@ -64,6 +64,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// <summary>Whether ALL (multiset) semantics are used.</summary>
     public bool All => _all;
 
+    /// <summary>
+    /// Number of rows emitted from the drain phase of a spilled UNION DISTINCT.
+    /// Test-only observability: when zero after a query that exceeded its budget, the
+    /// spill machinery is dead code (every row was already emitted from the in-memory
+    /// path). When non-zero, drain is doing real work.
+    /// </summary>
+    internal long DrainEmittedRowCount { get; private set; }
+
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
     {
@@ -123,30 +131,25 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
     /// <summary>
     /// UNION DISTINCT: concatenates both streams with hash-based deduplication,
-    /// spilling to disk when the memory budget is exceeded.
+    /// spilling to hash-partitioned disk files when the memory budget is exceeded.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Known algorithm bug (Option A migration — preserved deliberately).</strong>
-    /// New rows are added to the in-memory hash set unconditionally, even after spill has
-    /// been triggered. This means the in-memory state grows unbounded and the spill files
-    /// are duplicate insurance only — the drain phase's <c>partitionSet.Add(spilledKey)</c>
-    /// returns <see langword="false"/> for every spilled row (already in the in-memory set
-    /// from when isNew was first true), so drain emits nothing. The spill machinery is
-    /// therefore dead code in this implementation. Multi-tenant memory safety is NOT
-    /// delivered for UNION DISTINCT until this is fixed in a follow-up PR. The other four
-    /// dual-side branches (Intersect/Except × Distinct/All) handle this correctly via an
-    /// <c>if (spilling) route-to-spill-only / else update-in-memory</c> gate.
+    /// <strong>Two-phase dedup.</strong> Pre-spill rows are deduplicated against an
+    /// in-memory hash set and emitted immediately. Once the budget is first exceeded,
+    /// every subsequent row is routed to its hash partition's spill buffer (no in-memory
+    /// set update, no immediate emit) — this keeps the in-memory set bounded at the size
+    /// it was when spill triggered. The drain phase then replays each partition,
+    /// deduplicating against a partition-local set seeded from the subset of in-memory
+    /// keys whose hash routes to that partition.
     /// </para>
     /// <para>
-    /// <strong>What this PR migrates.</strong> Just the API surface: <see cref="Pool"/>
-    /// instead of <see cref="LocalBufferPool"/>, <see cref="SpillReaderWriter"/> with
-    /// <c>partitionCount: 64</c> instead of inline <see cref="BinaryWriter"/>[] arrays,
-    /// stabilization of output rows into a long-lived <c>hashSetArena</c> so they survive
-    /// the input batch return, null-before-yield iterator safety. Hash set keys are still
-    /// added raw (no stabilization) — the existing code relies on
-    /// <see cref="DataValue.GetHashCode"/>'s content-based hash for cached-hash strings,
-    /// which makes <see cref="HashSet{T}"/>.Contains lookups robust to recycled arenas.
+    /// Hash set keys are added raw (no stabilization). Single-column lookups copy the
+    /// <see cref="DataValue"/> struct (inline values are self-contained; arena-backed
+    /// strings keep their cached <see cref="DataValue.RawContentHash"/> so lookups stay
+    /// content-stable across recycled arenas). Composite lookups go through
+    /// <see cref="HashSet{T}"/>.AlternateLookup{ReadOnlySpan{DataValue}}, which only
+    /// allocates a <see cref="CompositeKey"/> on insert.
     /// </para>
     /// </remarks>
     private async IAsyncEnumerable<RowBatch> ExecuteUnionDistinctAsync(ExecutionContext context)
@@ -211,18 +214,51 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             {
                                 compositeKeySet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
                                 compositeKeyLookup = compositeKeySet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                                compositeKeyScratch = new DataValue[columnCount];
+                                compositeKeyScratch = pool.RentDataValues(columnCount);
                             }
                         }
 
+                        // Once spilling, route to spill-only: skip in-memory set Add and
+                        // skip the in-memory emit path. The drain phase reads from spill
+                        // partitions and dedupes against a partition-local set seeded from
+                        // the (now-bounded) in-memory set. This is what keeps the in-memory
+                        // hash set bounded and makes the spill machinery actually do work.
+                        if (spilling)
+                        {
+                            int spillHashCode;
+                            if (columnCount == 1)
+                            {
+                                spillHashCode = row[0].GetHashCode();
+                            }
+                            else
+                            {
+                                for (int index = 0; index < columnCount; index++)
+                                {
+                                    compositeKeyScratch![index] = row[index];
+                                }
+                                spillHashCode = CompositeKeyComparer.Instance.GetHashCode(
+                                    compositeKeyScratch.AsSpan(0, columnCount));
+                            }
+
+                            int spillPartition = AssignPartition(spillHashCode);
+                            partitionBuffers![spillPartition] ??= pool.RentRowBatch(
+                                schema!, context.BatchSize, hashSetArena!);
+                            pool.RentAndCopyToOutput(inputBatch, i, partitionBuffers[spillPartition]!);
+
+                            if (partitionBuffers[spillPartition]!.IsFull)
+                            {
+                                spiller!.Write(partitionBuffers[spillPartition]!, spillPartition);
+                                partitionBuffers[spillPartition] = null;
+                            }
+                            continue;
+                        }
+
                         bool isNew;
-                        int hashCode;
 
                         if (columnCount == 1)
                         {
                             DataValue key = row[0];
                             isNew = singleKeySet!.Add(key);
-                            hashCode = key.GetHashCode();
                         }
                         else
                         {
@@ -233,7 +269,6 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                             ReadOnlySpan<DataValue> keySpan = compositeKeyScratch.AsSpan(0, columnCount);
                             isNew = compositeKeyLookup.Add(keySpan);
-                            hashCode = CompositeKeyComparer.Instance.GetHashCode(keySpan);
                         }
 
                         if (isNew)
@@ -250,33 +285,18 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                                 if (estimatedMemory > memoryBudget!.Value)
                                 {
-                                    if (!spilling)
-                                    {
-                                        spilling = true;
-                                        // Initial-arena hint: half the budget, capped at int.MaxValue.
-                                        // Spilled rows' payloads accumulate in spiller.ConsolidatedArena.
-                                        int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
-                                        spiller = new SpillReaderWriter(
-                                            pool, schema!, context.SpillDirectory,
-                                            initialArenaCapacity: hint,
-                                            partitionCount: SpillPartitionCount);
-                                        partitionBuffers = new RowBatch?[SpillPartitionCount];
-                                    }
-
-                                    // Buffer the row into its partition. Buffer's batch shares
-                                    // hashSetArena (so stabilized values resolve until the
-                                    // batch is handed to the spiller, which then re-stabilizes
-                                    // into its own consolidated arena).
-                                    int partition = AssignPartition(hashCode);
-                                    partitionBuffers![partition] ??= pool.RentRowBatch(
-                                        schema!, context.BatchSize, hashSetArena!);
-                                    pool.RentAndCopyToOutput(inputBatch, i, partitionBuffers[partition]!);
-
-                                    if (partitionBuffers[partition]!.IsFull)
-                                    {
-                                        spiller!.Write(partitionBuffers[partition]!, partition);
-                                        partitionBuffers[partition] = null;
-                                    }
+                                    spilling = true;
+                                    // Initial-arena hint: half the budget, capped at int.MaxValue.
+                                    // Spilled rows' payloads accumulate in spiller.ConsolidatedArena.
+                                    int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
+                                    spiller = new SpillReaderWriter(
+                                        pool, schema!, context.SpillDirectory,
+                                        initialArenaCapacity: hint,
+                                        partitionCount: SpillPartitionCount);
+                                    partitionBuffers = new RowBatch?[SpillPartitionCount];
+                                    // The current row stays in the in-memory set + emitted
+                                    // path; subsequent rows hit the `if (spilling)` branch
+                                    // above and go to spill only.
                                 }
                                 else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
                                 {
@@ -284,7 +304,6 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 }
                             }
 
-                            // Always emit (Option A: bug preserved — see method docstring).
                             outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
                             pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
@@ -316,11 +335,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
             }
 
-            // Drain spilled partitions. NOTE (Option A): every spilled row's key was already
-            // added to the in-memory hash set in the main loop, so partitionSet.Add returns
-            // false for all of them — drain emits nothing. Preserved to keep behavior
-            // identical to the pre-migration code; the bug fix in the follow-up PR makes
-            // this loop actually do work.
+            // Drain spilled partitions. Each partition's local set is seeded with the subset
+            // of in-memory keys whose hash routes here, then we replay the partition's spill
+            // file and emit any spilled row whose key isn't already in the seed (i.e. wasn't
+            // already emitted from the in-memory path) and isn't a duplicate of an earlier
+            // row in the same partition.
             if (spilling && spiller is not null)
             {
                 for (int partition = 0; partition < SpillPartitionCount; partition++)
@@ -387,6 +406,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 {
                                     outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
                                     pool.RentAndCopyToOutput(spilledBatch, i, outputBatch);
+                                    DrainEmittedRowCount++;
 
                                     if (outputBatch.IsFull)
                                     {
@@ -431,6 +451,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
             }
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             spiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
         }

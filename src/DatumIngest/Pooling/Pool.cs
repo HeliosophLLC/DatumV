@@ -139,6 +139,15 @@ public sealed class Pool
     public Arena RentArena(int initialCapacity = 0) => Backing.RentArena(initialCapacity);
 
     /// <summary>
+    /// Rents a fresh file-backed <see cref="Arena"/> via the pool. The arena is always
+    /// freshly constructed (file-backed arenas can't be reused across queries) but its
+    /// rent flows through the pool's counter accounting so the leak invariant covers both
+    /// anonymous and file-backed arenas uniformly. Terminal release deletes the backing file.
+    /// </summary>
+    public Arena RentFileBackedArena(string filePath, int initialCapacity)
+        => Backing.RentFileBackedArena(filePath, initialCapacity);
+
+    /// <summary>
     /// Releases one reference on <paramref name="arena"/>. When the refcount hits zero, the
     /// arena is recycled (or disposed if it has grown beyond the pool's per-arena cap).
     /// Returns <see langword="true"/> when the arena was fully released this call;

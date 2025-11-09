@@ -128,12 +128,13 @@ internal sealed class SpillReaderWriter : IDisposable
             _spillFilePaths[i] = Path.Combine(_spillDirectory, $"data_{i}.spill");
         }
 
-        // File-backed: bytes live on disk, OS pages them in/out as touched. The dispose
-        // path routes through pool.ReturnArena → PoolBacking.TryReturn, which sees
-        // IsFileBacked=true and disposes (deleting data.arena) instead of pooling.
+        // File-backed: bytes live on disk, OS pages them in/out as touched. Rented through
+        // the pool so the rent counter covers it; the dispose path routes through
+        // pool.ReturnArena → PoolBacking.TryReturn, which sees IsFileBacked=true and
+        // disposes (deleting data.arena) instead of pooling. The pool's RentFileBackedArena
+        // already AddReferences before returning, so the arena starts with refcount 1.
         string arenaFilePath = Path.Combine(_spillDirectory, "data.arena");
-        _consolidatedArena = Arena.CreateFileBacked(arenaFilePath, initialArenaCapacity);
-        _consolidatedArena.AddReference();
+        _consolidatedArena = pool.RentFileBackedArena(arenaFilePath, initialArenaCapacity);
     }
 
     /// <summary>The consolidated arena that backs every spilled arena-stored payload.</summary>
