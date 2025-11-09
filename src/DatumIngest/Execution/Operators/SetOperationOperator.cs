@@ -520,6 +520,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         RowBatch?[]? rightPartitionBuffers = null;
         RowBatch?[]? leftPartitionBuffers = null;
 
+        // Pool-bound composite-key comparer: rented per execution; every CompositeKey
+        // inserted via this comparer's AlternateLookup.Add path has its parts array
+        // rented from the pool and must be returned via ReturnPooledKeys before exit.
+        CompositeKeyComparer? compositeComparer = null;
+
         HashSet<DataValue>? rightSingleSet = null;
         HashSet<CompositeKey>? rightCompositeSet = null;
         HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> rightCompositeLookup = default;
@@ -562,9 +567,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                             else
                             {
-                                rightCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                                compositeComparer = CompositeKeyComparer.ForPool(pool);
+                                rightCompositeSet = new HashSet<CompositeKey>(compositeComparer);
                                 rightCompositeLookup = rightCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                                emittedCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                                emittedCompositeSet = new HashSet<CompositeKey>(compositeComparer);
                                 emittedCompositeLookup = emittedCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
                                 compositeKeyScratch = pool.RentDataValues(columnCount);
                             }
@@ -798,17 +804,15 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        partRightComposite = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                        // Don't seed partition-local sets from rightCompositeSet — instead
+                        // probe both at lookup time. This keeps ownership clean: each
+                        // partition-local set fully owns the keys it inserts (all rented
+                        // through the shared compositeComparer) and is fully returned at
+                        // end of partition.
+                        partRightComposite = new HashSet<CompositeKey>(compositeComparer!);
                         partRightCompositeLookup = partRightComposite.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                        partEmittedComposite = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                        partEmittedComposite = new HashSet<CompositeKey>(compositeComparer);
                         partEmittedCompositeLookup = partEmittedComposite.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                        foreach (CompositeKey key in rightCompositeSet!)
-                        {
-                            if (AssignPartition(key.GetHashCode()) == partition)
-                            {
-                                partRightComposite.Add(key);
-                            }
-                        }
                     }
 
                     // Add spilled right rows for this partition.
@@ -840,7 +844,9 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                     }
 
-                    // Probe left spilled rows.
+                    // Probe left spilled rows. Match against either the partition-local
+                    // spilled-right set OR the in-memory rightCompositeSet (the partition's
+                    // share of which only contains keys whose hash routes here).
                     await foreach (RowBatch spilledLeftBatch in leftSpiller
                         .ReplayPartitionAsync(context, schema!, partition).ConfigureAwait(false))
                     {
@@ -856,7 +862,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 if (columnCount == 1)
                                 {
                                     DataValue key = row[0];
-                                    matched = partRightSingle!.Contains(key);
+                                    matched = partRightSingle!.Contains(key)
+                                        || rightSingleSet!.Contains(key);
                                     if (!matched) continue;
                                     isNew = partEmittedSingle!.Add(key);
                                 }
@@ -867,7 +874,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                         compositeKeyScratch![index] = row[index];
                                     }
                                     ReadOnlySpan<DataValue> keySpan = compositeKeyScratch.AsSpan(0, columnCount);
-                                    matched = partRightCompositeLookup.Contains(keySpan);
+                                    matched = partRightCompositeLookup.Contains(keySpan)
+                                        || rightCompositeLookup.Contains(keySpan);
                                     if (!matched) continue;
                                     isNew = partEmittedCompositeLookup.Add(keySpan);
                                 }
@@ -890,6 +898,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             pool.ReturnRowBatch(spilledLeftBatch);
                         }
+                    }
+
+                    // Return partition-local rented keys before they go out of scope.
+                    if (compositeComparer is not null)
+                    {
+                        if (partRightComposite is not null) compositeComparer.ReturnPooledKeys(partRightComposite);
+                        if (partEmittedComposite is not null) compositeComparer.ReturnPooledKeys(partEmittedComposite);
                     }
                 }
             }
@@ -929,6 +944,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
+            if (compositeComparer is not null)
+            {
+                if (rightCompositeSet is not null) compositeComparer.ReturnPooledKeys(rightCompositeSet);
+                if (emittedCompositeSet is not null) compositeComparer.ReturnPooledKeys(emittedCompositeSet);
+            }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
@@ -959,6 +979,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
         RowBatch?[]? leftPartitionBuffers = null;
+
+        // Pool-bound composite-key comparer for the multi-column path; null on the
+        // single-column path. Returned in finally / per-partition-end.
+        CompositeKeyComparer? compositeComparer = null;
 
         Dictionary<DataValue, int>? rightSingleCounts = null;
         Dictionary<CompositeKey, int>? rightCompositeCounts = null;
@@ -996,7 +1020,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                             else
                             {
-                                rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
+                                compositeComparer = CompositeKeyComparer.ForPool(pool);
+                                rightCompositeCounts = new Dictionary<CompositeKey, int>(compositeComparer);
                                 compositeKeyScratch = pool.RentDataValues(columnCount);
                             }
                         }
@@ -1173,15 +1198,15 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     if (rightSpiller.RowsWrittenInPartition(partition) == 0) continue;
                     if (leftSpiller.RowsWrittenInPartition(partition) == 0) continue;
 
+                    // Don't seed the partition-local counts from the global multiset —
+                    // probe both at lookup time. DecrementCount on partition-local first;
+                    // if it returns false (count exhausted or key absent), fall through to
+                    // the global multiset. This keeps ownership clean: partRightComposite
+                    // fully owns its rented keys, returnable at end of partition.
                     Dictionary<DataValue, int>? partRightSingle = columnCount == 1
                         ? new Dictionary<DataValue, int>() : null;
                     Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1
-                        ? new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance) : null;
-
-                    // Seed with in-memory right counts for this partition (rows admitted
-                    // before spill triggered).
-                    AddInMemoryCountsForPartition(partition, columnCount,
-                        rightSingleCounts, rightCompositeCounts, partRightSingle, partRightComposite);
+                        ? new Dictionary<CompositeKey, int>(compositeComparer!) : null;
 
                     // Add spilled right rows for this partition.
                     await foreach (RowBatch spilledRightBatch in rightSpiller
@@ -1201,7 +1226,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                     }
 
-                    // Probe left spilled rows; emit per match.
+                    // Probe left spilled rows; emit per match. Decrement partition-local
+                    // first; on miss, fall through to the global counted multiset.
                     await foreach (RowBatch spilledLeftBatch in leftSpiller
                         .ReplayPartitionAsync(context, schema!, partition).ConfigureAwait(false))
                     {
@@ -1212,7 +1238,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 Row row = spilledLeftBatch[i];
                                 context.CancellationToken.ThrowIfCancellationRequested();
 
-                                if (DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
+                                bool decremented =
+                                    DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch)
+                                    || DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
+
+                                if (decremented)
                                 {
                                     outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
@@ -1230,6 +1260,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             pool.ReturnRowBatch(spilledLeftBatch);
                         }
+                    }
+
+                    if (compositeComparer is not null && partRightComposite is not null)
+                    {
+                        compositeComparer.ReturnPooledKeys(partRightComposite.Keys);
                     }
                 }
             }
@@ -1269,6 +1304,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
+            if (compositeComparer is not null && rightCompositeCounts is not null)
+            {
+                compositeComparer.ReturnPooledKeys(rightCompositeCounts.Keys);
+            }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
@@ -1298,6 +1337,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
         RowBatch?[]? leftPartitionBuffers = null;
+
+        // Pool-bound composite-key comparer for the multi-column path; null on the
+        // single-column path. Returned in finally / per-partition-end.
+        CompositeKeyComparer? compositeComparer = null;
 
         HashSet<DataValue>? rightSingleSet = null;
         HashSet<CompositeKey>? rightCompositeSet = null;
@@ -1336,7 +1379,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             columnCount = row.FieldCount;
                             InitDistinctSets(columnCount, ref rightSingleSet, ref rightCompositeSet,
                                 ref rightCompositeLookup, ref emittedSingleSet, ref emittedCompositeSet,
-                                ref emittedCompositeLookup, ref compositeKeyScratch, pool);
+                                ref emittedCompositeLookup, ref compositeComparer,
+                                ref compositeKeyScratch, pool);
                         }
 
                         if (SpillingTriggered)
@@ -1460,7 +1504,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             columnCount = row.FieldCount;
                             InitDistinctSets(columnCount, ref rightSingleSet, ref rightCompositeSet,
                                 ref rightCompositeLookup, ref emittedSingleSet, ref emittedCompositeSet,
-                                ref emittedCompositeLookup, ref compositeKeyScratch, pool);
+                                ref emittedCompositeLookup, ref compositeComparer,
+                                ref compositeKeyScratch, pool);
                         }
 
                         int hashCode;
@@ -1560,31 +1605,20 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     HashSet<CompositeKey>? partEmittedComposite = null;
                     HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> partEmittedCompositeLookup = default;
 
+                    // Don't seed partition-local sets from rightCompositeSet/rightSingleSet
+                    // — probe both at lookup time. Cleaner ownership: partRight* fully owns
+                    // its rented keys, returnable at end of partition.
                     if (columnCount == 1)
                     {
                         partRightSingle = new HashSet<DataValue>();
                         partEmittedSingle = new HashSet<DataValue>();
-                        foreach (DataValue key in rightSingleSet!)
-                        {
-                            if (AssignPartition(key.GetHashCode()) == partition)
-                            {
-                                partRightSingle.Add(key);
-                            }
-                        }
                     }
                     else
                     {
-                        partRightComposite = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                        partRightComposite = new HashSet<CompositeKey>(compositeComparer!);
                         partRightCompositeLookup = partRightComposite.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                        partEmittedComposite = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                        partEmittedComposite = new HashSet<CompositeKey>(compositeComparer);
                         partEmittedCompositeLookup = partEmittedComposite.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                        foreach (CompositeKey key in rightCompositeSet!)
-                        {
-                            if (AssignPartition(key.GetHashCode()) == partition)
-                            {
-                                partRightComposite.Add(key);
-                            }
-                        }
                     }
 
                     await foreach (RowBatch spilledRightBatch in rightSpiller
@@ -1630,7 +1664,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 if (columnCount == 1)
                                 {
                                     DataValue key = row[0];
-                                    inRight = partRightSingle!.Contains(key);
+                                    inRight = partRightSingle!.Contains(key)
+                                        || rightSingleSet!.Contains(key);
                                     if (inRight) continue;
                                     isNew = partEmittedSingle!.Add(key);
                                 }
@@ -1641,7 +1676,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                         compositeKeyScratch![index] = row[index];
                                     }
                                     ReadOnlySpan<DataValue> keySpan = compositeKeyScratch.AsSpan(0, columnCount);
-                                    inRight = partRightCompositeLookup.Contains(keySpan);
+                                    inRight = partRightCompositeLookup.Contains(keySpan)
+                                        || rightCompositeLookup.Contains(keySpan);
                                     if (inRight) continue;
                                     isNew = partEmittedCompositeLookup.Add(keySpan);
                                 }
@@ -1664,6 +1700,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             pool.ReturnRowBatch(spilledLeftBatch);
                         }
+                    }
+
+                    // Return partition-local rented keys before they go out of scope.
+                    if (compositeComparer is not null)
+                    {
+                        if (partRightComposite is not null) compositeComparer.ReturnPooledKeys(partRightComposite);
+                        if (partEmittedComposite is not null) compositeComparer.ReturnPooledKeys(partEmittedComposite);
                     }
                 }
             }
@@ -1703,6 +1746,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
+            if (compositeComparer is not null)
+            {
+                if (rightCompositeSet is not null) compositeComparer.ReturnPooledKeys(rightCompositeSet);
+                if (emittedCompositeSet is not null) compositeComparer.ReturnPooledKeys(emittedCompositeSet);
+            }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
@@ -1713,7 +1761,9 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// Initialises the right-side and emit hash structures (and the composite-key
     /// scratch buffer when needed) once <c>columnCount</c> is known. Used by the
     /// EXCEPT branches where <c>columnCount</c> may be set in either Phase 1 (right
-    /// has rows) or Phase 2 (right is empty).
+    /// has rows) or Phase 2 (right is empty). Lazily constructs
+    /// <paramref name="compositeComparer"/> for the multi-column path so its keys
+    /// flow through the pool.
     /// </summary>
     private static void InitDistinctSets(
         int columnCount,
@@ -1723,6 +1773,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         ref HashSet<DataValue>? emittedSingleSet,
         ref HashSet<CompositeKey>? emittedCompositeSet,
         ref HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> emittedCompositeLookup,
+        ref CompositeKeyComparer? compositeComparer,
         ref DataValue[]? compositeKeyScratch,
         Pool pool)
     {
@@ -1733,9 +1784,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         else
         {
-            rightCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+            compositeComparer ??= CompositeKeyComparer.ForPool(pool);
+            rightCompositeSet = new HashSet<CompositeKey>(compositeComparer);
             rightCompositeLookup = rightCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-            emittedCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+            emittedCompositeSet = new HashSet<CompositeKey>(compositeComparer);
             emittedCompositeLookup = emittedCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
             compositeKeyScratch ??= pool.RentDataValues(columnCount);
         }
@@ -1764,6 +1816,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         SpillReaderWriter? leftSpiller = null;
         RowBatch?[]? rightPartitionBuffers = null;
         RowBatch?[]? leftPartitionBuffers = null;
+
+        // Pool-bound composite-key comparer for the multi-column path; null on the
+        // single-column path. Returned in finally / per-partition-end.
+        CompositeKeyComparer? compositeComparer = null;
 
         Dictionary<DataValue, int>? rightSingleCounts = null;
         Dictionary<CompositeKey, int>? rightCompositeCounts = null;
@@ -1796,7 +1852,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             columnCount = row.FieldCount;
                             InitCountedMultisets(columnCount, ref rightSingleCounts,
-                                ref rightCompositeCounts, ref compositeKeyScratch, pool);
+                                ref rightCompositeCounts, ref compositeComparer,
+                                ref compositeKeyScratch, pool);
                         }
 
                         if (SpillingTriggered)
@@ -1906,7 +1963,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             columnCount = row.FieldCount;
                             InitCountedMultisets(columnCount, ref rightSingleCounts,
-                                ref rightCompositeCounts, ref compositeKeyScratch, pool);
+                                ref rightCompositeCounts, ref compositeComparer,
+                                ref compositeKeyScratch, pool);
                         }
 
                         int hashCode;
@@ -1982,13 +2040,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     if (rightSpiller.RowsWrittenInPartition(partition) == 0) continue;
                     if (leftSpiller.RowsWrittenInPartition(partition) == 0) continue;
 
+                    // Don't seed from rightCompositeCounts — probe both at lookup time.
+                    // Decrement partition-local first; on miss, fall through to global.
+                    // Cleaner ownership: partRightComposite fully owns rented keys.
                     Dictionary<DataValue, int>? partRightSingle = columnCount == 1
                         ? new Dictionary<DataValue, int>() : null;
                     Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1
-                        ? new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance) : null;
-
-                    AddInMemoryCountsForPartition(partition, columnCount,
-                        rightSingleCounts, rightCompositeCounts, partRightSingle, partRightComposite);
+                        ? new Dictionary<CompositeKey, int>(compositeComparer!) : null;
 
                     await foreach (RowBatch spilledRightBatch in rightSpiller
                         .ReplayPartitionAsync(context, schema!, partition).ConfigureAwait(false))
@@ -2017,7 +2075,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                                 Row row = spilledLeftBatch[i];
                                 context.CancellationToken.ThrowIfCancellationRequested();
 
-                                if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
+                                bool decremented =
+                                    DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch)
+                                    || DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
+
+                                if (!decremented)
                                 {
                                     outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
                                     pool.RentAndCopyToOutput(spilledLeftBatch, i, outputBatch);
@@ -2035,6 +2097,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             pool.ReturnRowBatch(spilledLeftBatch);
                         }
+                    }
+
+                    if (compositeComparer is not null && partRightComposite is not null)
+                    {
+                        compositeComparer.ReturnPooledKeys(partRightComposite.Keys);
                     }
                 }
             }
@@ -2074,6 +2141,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
+            if (compositeComparer is not null && rightCompositeCounts is not null)
+            {
+                compositeComparer.ReturnPooledKeys(rightCompositeCounts.Keys);
+            }
             rightSpiller?.Dispose();
             leftSpiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
@@ -2083,13 +2154,16 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// <summary>
     /// Initialises the right-side counted multiset (and the composite-key scratch
     /// buffer when needed) once <c>columnCount</c> is known. Used by the EXCEPT ALL
-    /// branch where <c>columnCount</c> may be set in either Phase 1 (right has rows)
-    /// or Phase 2 (right is empty).
+    /// and INTERSECT ALL branches where <c>columnCount</c> may be set in either
+    /// Phase 1 (right has rows) or Phase 2 (right is empty for EXCEPT ALL).
+    /// Lazily constructs <paramref name="compositeComparer"/> for the multi-column
+    /// path so its keys flow through the pool.
     /// </summary>
     private static void InitCountedMultisets(
         int columnCount,
         ref Dictionary<DataValue, int>? rightSingleCounts,
         ref Dictionary<CompositeKey, int>? rightCompositeCounts,
+        ref CompositeKeyComparer? compositeComparer,
         ref DataValue[]? compositeKeyScratch,
         Pool pool)
     {
@@ -2099,7 +2173,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         else
         {
-            rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
+            compositeComparer ??= CompositeKeyComparer.ForPool(pool);
+            rightCompositeCounts = new Dictionary<CompositeKey, int>(compositeComparer);
             compositeKeyScratch ??= pool.RentDataValues(columnCount);
         }
     }
