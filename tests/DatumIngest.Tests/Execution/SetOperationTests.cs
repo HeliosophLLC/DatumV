@@ -412,6 +412,88 @@ public sealed class SetOperationTests : ServiceTestBase
         Assert.Empty(results);
     }
 
+    [Fact]
+    public async Task IntersectAll_WithSpill()
+    {
+        // Each side has duplicates so the multiset shrinks during drain. With both
+        // sides spilled, the per-partition multiset must seed correctly from in-memory +
+        // spilled right counts, and decrement-emit per left occurrence.
+        // Left has 0..299 each twice (600 rows). Right has 150..449 each once (300 rows).
+        // Intersection multiset: 150..299 each min(2,1) = 1 occurrence → 150 rows.
+        object?[][] leftRows = Enumerable.Range(0, 300)
+            .SelectMany(index => new[] { new object?[] { (float)index }, new object?[] { (float)index } })
+            .ToArray();
+        object?[][] rightRows = Enumerable.Range(150, 300).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
+        SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+
+        Assert.Equal(150, results.Count);
+        Assert.True(op.SpillingTriggered, "Expected the budget to trigger spill so this test exercises the spill path.");
+
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
+        float[] expected = Enumerable.Range(150, 150).Select(index => (float)index).ToArray();
+        Assert.Equal(expected, values);
+
+        op.Dispose();
+    }
+
+    [Fact]
+    public async Task IntersectAll_SingleColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [1f], [2f], [3f]);
+        MockOperator right = CreateMockOperator(XColumns, [1f], [2f], [2f]);
+        SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        // min(2,1)=1 of [1], min(1,2)=1 of [2], min(1,0)=0 of [3] → 2 rows.
+        Assert.Equal(2, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task IntersectAll_MultiColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(["a", "b"], [1f, "x"], [1f, "x"], [2f, "y"]);
+        MockOperator right = CreateMockOperator(["a", "b"], [1f, "x"], [2f, "y"]);
+        SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        Assert.Equal(2, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task IntersectAll_WithSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        object?[][] leftRows = Enumerable.Range(0, 300)
+            .SelectMany(index => new[] { new object?[] { (float)index }, new object?[] { (float)index } })
+            .ToArray();
+        object?[][] rightRows = Enumerable.Range(150, 300).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
+        SetOperationOperator op = new(left, right, SetOperationType.Intersect, all: true);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+
+        Assert.Equal(150, results.Count);
+        Assert.True(op.SpillingTriggered, "Expected the budget to trigger spill so the leak check covers spill paths.");
+
+        op.Dispose();
+        AssertPoolBalanced(pool);
+    }
+
     // ─────────────── EXCEPT DISTINCT ───────────────
 
     [Fact]
@@ -463,6 +545,79 @@ public sealed class SetOperationTests : ServiceTestBase
 
         // EXCEPT DISTINCT returns each row at most once.
         Assert.Single(results);
+    }
+
+    [Fact]
+    public async Task ExceptDistinct_WithSpill()
+    {
+        // 0..499 EXCEPT 250..749 → 0..249 = 250 distinct values. Tight budget forces spill.
+        object?[][] leftRows = Enumerable.Range(0, 500).Select(index => new object?[] { (float)index }).ToArray();
+        object?[][] rightRows = Enumerable.Range(250, 500).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
+        SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+
+        Assert.Equal(250, results.Count);
+        Assert.True(op.SpillingTriggered, "Expected the budget to trigger spill so this test exercises the spill path.");
+
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
+        float[] expected = Enumerable.Range(0, 250).Select(index => (float)index).ToArray();
+        Assert.Equal(expected, values);
+
+        op.Dispose();
+    }
+
+    [Fact]
+    public async Task ExceptDistinct_SingleColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(XColumns, [1f], [2f], [3f]);
+        MockOperator right = CreateMockOperator(XColumns, [2f], [4f]);
+        SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        Assert.Equal(2, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task ExceptDistinct_MultiColumn_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator left = CreateMockOperator(["a", "b"], [1f, "x"], [2f, "y"], [3f, "z"]);
+        MockOperator right = CreateMockOperator(["a", "b"], [2f, "y"], [4f, "w"]);
+        SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
+
+        List<Row> results = await CollectAsync(op);
+        op.Dispose();
+
+        Assert.Equal(2, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task ExceptDistinct_WithSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        object?[][] leftRows = Enumerable.Range(0, 500).Select(index => new object?[] { (float)index }).ToArray();
+        object?[][] rightRows = Enumerable.Range(250, 500).Select(index => new object?[] { (float)index }).ToArray();
+        MockOperator left = CreateMockOperator(XColumns, rows: leftRows);
+        MockOperator right = CreateMockOperator(XColumns, rows: rightRows);
+        SetOperationOperator op = new(left, right, SetOperationType.Except, all: false);
+
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: 1024);
+        List<Row> results = await CollectAsync(op, context);
+
+        Assert.Equal(250, results.Count);
+        Assert.True(op.SpillingTriggered, "Expected the budget to trigger spill so the leak check covers spill paths.");
+
+        op.Dispose();
+        AssertPoolBalanced(pool);
     }
 
     // ─────────────── EXCEPT ALL ───────────────
