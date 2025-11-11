@@ -1,6 +1,7 @@
 using System.Linq;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -56,116 +57,201 @@ public sealed class FoldScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// FOLD/SCAN is a blocking operator: every input row must be materialised before
+    /// any output is emitted, because both the partition assignment and the per-
+    /// partition sort depend on seeing all rows. The materialised rows are stabilised
+    /// into an operator-owned <see cref="Arena"/> so the input batches can be returned
+    /// to the pool immediately instead of being pinned for the operator's lifetime.
+    /// </para>
+    /// <para>
+    /// <strong>Memory bound (Tier 2).</strong> A <see cref="MemoryEstimator"/> tracks
+    /// the materialised-row footprint when <see cref="ExecutionContext.MemoryBudgetBytes"/>
+    /// is set; if the budget is crossed, a <see cref="ExecutionException"/> is thrown
+    /// rather than silently OOMing. Spill-to-disk for the materialised rows + per-
+    /// partition external merge sort is on the roadmap (Tier 3 / Tier 4).
+    /// </para>
+    /// </remarks>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        // Step 1: Materialize all input rows.
+        Pool pool = context.Pool;
+        long? memoryBudget = context.MemoryBudgetBytes;
+        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+
+        // Operator-owned arena: all materialised input rows are stabilised into it via
+        // RentAndCopyDataValues, so the source operator's batches can be returned to
+        // the pool as soon as we've consumed each one. The arena also backs the output
+        // batches (pool.RentRowBatch with this arena), so any arena-backed values from
+        // input columns remain resolvable through the emit phase.
+        Arena? operatorArena = null;
+        ColumnLookup? sourceLookup = null;
         List<Row> allRows = [];
-        await foreach (RowBatch batch in _source.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                allRows.Add(batch[i]);
-            }
-            batch.Return();
-        }
-
-        if (allRows.Count == 0) yield break;
-
-        // Count total output columns across all scan clauses.
-        int totalOutputColumns = 0;
-        foreach (FoldScanColumn column in _scanColumns)
-        {
-            totalOutputColumns += column.OutputNames.Count;
-        }
-
-        int inputFieldCount = allRows[0].FieldCount;
-        int totalFieldCount = inputFieldCount + totalOutputColumns;
-
-        // scanResults[rowIndex][flatOutputIndex]
-        DataValue[][] scanResults = new DataValue[allRows.Count][];
-        for (int i = 0; i < scanResults.Length; i++)
-        {
-            scanResults[i] = new DataValue[totalOutputColumns];
-        }
-
-        // Step 2: Group scan columns by window specification to share
-        // partitioning and sorting work.
-        Dictionary<WindowSpecificationKey, List<int>> specGroups = new();
-        for (int columnIndex = 0; columnIndex < _scanColumns.Count; columnIndex++)
-        {
-            WindowSpecificationKey key = new(_scanColumns[columnIndex].WindowSpecification);
-            if (!specGroups.TryGetValue(key, out List<int>? indices))
-            {
-                indices = [];
-                specGroups[key] = indices;
-            }
-            indices.Add(columnIndex);
-        }
-
-        // Step 3: For each unique spec, partition + sort + fold.
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, store: context.Store);
-        foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
-        {
-            WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;
-            ComputeForSpecification(spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter);
-        }
-
-        // Step 4: Emit all rows in original order with scan output columns appended.
-        string[]? outputNames = null;
-        Dictionary<string, int>? outputNameIndex = null;
-        LocalBufferPool pool = context.LocalBufferPool;
         RowBatch? outputBatch = null;
 
-        for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
+        try
         {
-            Row sourceRow = allRows[rowIndex];
-
-            if (outputNames is null)
+            // ───── Step 1: materialise input into operator-owned arena ─────
+            await foreach (RowBatch batch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                outputNames = new string[totalFieldCount];
-                for (int field = 0; field < inputFieldCount; field++)
+                try
                 {
-                    outputNames[field] = sourceRow.ColumnNames[field];
-                }
-                int outputOffset = 0;
-                foreach (FoldScanColumn column in _scanColumns)
-                {
-                    for (int j = 0; j < column.OutputNames.Count; j++)
+                    if (sourceLookup is null && batch.Count > 0)
                     {
-                        outputNames[inputFieldCount + outputOffset + j] = column.OutputNames[j];
+                        sourceLookup = batch.ColumnLookup;
+                        operatorArena = pool.RentArena();
                     }
-                    outputOffset += column.OutputNames.Count;
+
+                    for (int i = 0; i < batch.Count; i++)
+                    {
+                        context.CancellationToken.ThrowIfCancellationRequested();
+
+                        Row sourceRow = batch[i];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, batch.Arena, operatorArena!);
+                        // Preserve each row's own ColumnLookup (matches pre-migration
+                        // semantics — the source could in principle yield batches with
+                        // different per-batch ColumnLookup references for the same
+                        // logical schema, e.g. UNION ALL of two scans).
+                        allRows.Add(new Row(sourceRow.ColumnLookup, copy));
+
+                        if (estimator is not null)
+                        {
+                            if (estimator.ShouldSample())
+                            {
+                                estimator.RecordSample(sourceRow);
+                            }
+
+                            estimator.IncrementRowCount();
+                            long estimatedMemory = estimator.EstimateTotalBytes();
+
+                            if (estimatedMemory > memoryBudget!.Value)
+                            {
+                                throw new ExecutionException(
+                                    $"FOLD/SCAN exceeded memory budget of {memoryBudget.Value} bytes "
+                                    + $"after materialising {allRows.Count} input rows. FOLD/SCAN currently "
+                                    + $"buffers the entire input in memory; spill-to-disk for this operator "
+                                    + $"is on the roadmap.");
+                            }
+                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                            {
+                                estimator.EscalateToEveryRow();
+                            }
+                        }
+                    }
                 }
-                outputNameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                for (int index = 0; index < outputNames.Length; index++)
+                finally
                 {
-                    outputNameIndex[outputNames[index]] = index;
+                    pool.ReturnRowBatch(batch);
                 }
             }
 
-            DataValue[] values = pool.Rent(totalFieldCount);
+            if (allRows.Count == 0) yield break;
+
+            // Count total output columns across all scan clauses.
+            int totalOutputColumns = 0;
+            foreach (FoldScanColumn column in _scanColumns)
+            {
+                totalOutputColumns += column.OutputNames.Count;
+            }
+
+            int inputFieldCount = allRows[0].FieldCount;
+            int totalFieldCount = inputFieldCount + totalOutputColumns;
+
+            // scanResults[rowIndex][flatOutputIndex] — accumulator results indexed by the
+            // row's *original* materialised position (not its sorted position within a
+            // partition). This is what lets Step 4 emit in original input order with each
+            // row joined to its computed scan values.
+            DataValue[][] scanResults = new DataValue[allRows.Count][];
+            for (int i = 0; i < scanResults.Length; i++)
+            {
+                scanResults[i] = new DataValue[totalOutputColumns];
+            }
+
+            // ───── Step 2: group scan columns by window specification ─────
+            Dictionary<WindowSpecificationKey, List<int>> specGroups = new();
+            for (int columnIndex = 0; columnIndex < _scanColumns.Count; columnIndex++)
+            {
+                WindowSpecificationKey key = new(_scanColumns[columnIndex].WindowSpecification);
+                if (!specGroups.TryGetValue(key, out List<int>? indices))
+                {
+                    indices = [];
+                    specGroups[key] = indices;
+                }
+                indices.Add(columnIndex);
+            }
+
+            // ───── Step 3: per spec, partition + sort + fold ─────
+            ExpressionEvaluator evaluator = new(
+                context.FunctionRegistry, context.QueryMeter, store: context.Store);
+            foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
+            {
+                WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;
+                ComputeForSpecification(
+                    spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter);
+            }
+
+            // ───── Step 4: emit in original input order ─────
+            string[] outputNames = new string[totalFieldCount];
             for (int field = 0; field < inputFieldCount; field++)
             {
-                values[field] = sourceRow[field];
+                outputNames[field] = sourceLookup!.ColumnNames[field];
             }
-            for (int j = 0; j < totalOutputColumns; j++)
+            int outputOffset = 0;
+            foreach (FoldScanColumn column in _scanColumns)
             {
-                values[inputFieldCount + j] = scanResults[rowIndex][j];
+                for (int j = 0; j < column.OutputNames.Count; j++)
+                {
+                    outputNames[inputFieldCount + outputOffset + j] = column.OutputNames[j];
+                }
+                outputOffset += column.OutputNames.Count;
+            }
+            ColumnLookup outputLookup = new(outputNames);
+
+            for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
+            {
+                Row sourceRow = allRows[rowIndex];
+
+                DataValue[] values = pool.RentDataValues(totalFieldCount);
+                for (int field = 0; field < inputFieldCount; field++)
+                {
+                    values[field] = sourceRow[field];
+                }
+                for (int j = 0; j < totalOutputColumns; j++)
+                {
+                    values[inputFieldCount + j] = scanResults[rowIndex][j];
+                }
+
+                outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, operatorArena!);
+                outputBatch.Add(values);
+
+                if (outputBatch.IsFull)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
             }
 
-            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-            outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
-
-            if (outputBatch.IsFull)
+            if (outputBatch is not null)
             {
-                yield return outputBatch;
+                RowBatch toYield = outputBatch;
                 outputBatch = null;
+                yield return toYield;
             }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            // Return the materialised rows' DataValue[] arrays. Each row's parts came
+            // from pool.RentAndCopyDataValues during Step 1; symmetric ReturnRow here.
+            foreach (Row row in allRows)
+            {
+                pool.ReturnRow(row);
+            }
+            allRows.Clear();
+
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
 
@@ -258,11 +344,9 @@ public sealed class FoldScanOperator : IQueryOperator
             augmentedNames[sourceFieldCount + accCount + i] = prevColumnNames[i];
         }
 
-        Dictionary<string, int> augmentedNameIndex = new(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < augmentedNames.Length; i++)
-        {
-            augmentedNameIndex[augmentedNames[i]] = i;
-        }
+        // Single ColumnLookup for every augmented row in this partition fold —
+        // names don't change between rows, only the values do.
+        ColumnLookup augmentedLookup = new(augmentedNames);
 
         // Initialize accumulators from INIT expressions (evaluated against the first row).
         DataValue[] accumulatorValues = new DataValue[accCount];
@@ -309,7 +393,7 @@ public sealed class FoldScanOperator : IQueryOperator
                 }
             }
 
-            Row augmentedRow = new(augmentedNames, augmentedValues, augmentedNameIndex);
+            Row augmentedRow = new(augmentedLookup, augmentedValues);
 
             // Evaluate body expressions → new accumulator values.
             for (int b = 0; b < accCount; b++)

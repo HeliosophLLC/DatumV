@@ -1,7 +1,10 @@
 using DatumIngest.Catalog;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -380,6 +383,67 @@ public sealed class FoldScanTests : ServiceTestBase
         Assert.Equal(10f, results[0]["total"].AsFloat32());
         Assert.Equal(2f, results[1]["rn"].AsFloat32());
         Assert.Equal(30f, results[1]["total"].AsFloat32());
+    }
+
+    // ─────────────── Memory budget enforcement (Tier 2) ───────────────
+
+    /// <summary>
+    /// FOLD/SCAN currently materialises the entire input in memory (Tier 1+2 of
+    /// the migration; spill-to-disk is Tier 3). Under a tight budget the operator
+    /// must throw cleanly with a user-facing message rather than silently OOMing
+    /// or quietly exceeding the budget. Asserts the throw fires at the predictable
+    /// point and identifies the cause.
+    /// </summary>
+    [Fact]
+    public async Task FoldScan_TightBudget_ThrowsBeforeOOM()
+    {
+        // Enough rows that a 64-byte budget is unambiguously exceeded.
+        object?[][] rows = Enumerable.Range(0, 1000)
+            .Select(index => new object?[] { (float)index, (float)(index * 10) })
+            .ToArray();
+
+        TableCatalog catalog = CreateCatalog("t", columns: ["id", "value"], rows);
+
+        ExecutionContext context = CreateExecutionContext(catalog: catalog, memoryBudgetBytes: 64);
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+
+        ExecutionException ex = await Assert.ThrowsAnyAsync<ExecutionException>(
+            () => plan.CollectRowsAsync(context));
+
+        Assert.Contains("FOLD/SCAN", ex.Message);
+        Assert.Contains("memory budget", ex.Message);
+    }
+
+    /// <summary>
+    /// Under a generous budget the same query must complete normally — proves the
+    /// budget check doesn't fire spuriously on small datasets.
+    /// </summary>
+    [Fact]
+    public async Task FoldScan_GenerousBudget_CompletesNormally()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["id", "value"],
+            [1f, 10f],
+            [2f, 20f],
+            [3f, 30f]);
+
+        ExecutionContext context = CreateExecutionContext(catalog: catalog, memoryBudgetBytes: 10 * 1024 * 1024);
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT SCAN s = s + value INIT 0 OVER (ORDER BY id) AS running_sum FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+
+        List<Row> results = await plan.CollectRowsAsync(context);
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal(10f, results[0]["running_sum"].AsFloat32());
+        Assert.Equal(30f, results[1]["running_sum"].AsFloat32());
+        Assert.Equal(60f, results[2]["running_sum"].AsFloat32());
     }
 
     // ─────────────── Helpers ───────────────
