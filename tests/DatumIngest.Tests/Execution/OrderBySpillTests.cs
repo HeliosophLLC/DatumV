@@ -2,6 +2,7 @@ using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -253,6 +254,127 @@ public sealed class OrderBySpillTests : ServiceTestBase
                 memoryResult[index]["x"].AsFloat32(),
                 spillResult[index]["x"].AsFloat32());
         }
+
+        // Validate spill actually executed and the in-memory baseline didn't.
+        Assert.True(spillSort.SpillingTriggered, "Tight budget should have triggered spill across 500 rows.");
+        Assert.True(spillSort.SortedRunCount > 1, $"Expected multiple sorted runs under a 256-byte budget; got {spillSort.SortedRunCount}.");
+        Assert.False(memorySort.SpillingTriggered);
+        Assert.Equal(0, memorySort.SortedRunCount);
+    }
+
+    /// <summary>
+    /// Tight budget with a small dataset must still flip <see cref="OrderByOperator.SpillingTriggered"/>
+    /// — proves the existing 8-row spill tests above aren't silently bypassing
+    /// the spill path.
+    /// </summary>
+    [Fact]
+    public async Task OrderBy_WithSpill_AssertsSpillObserved()
+    {
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f], [1f], [3f], [2f], [4f], [8f], [6f], [7f]);
+        OrderByOperator orderBy = new(
+            source,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
+
+        await CollectAsync(orderBy, CreateContext(TinyBudget));
+
+        Assert.True(orderBy.SpillingTriggered);
+        Assert.True(orderBy.SortedRunCount >= 1);
+    }
+
+    /// <summary>
+    /// Generous budget should never trigger spill — the in-memory sort path is taken.
+    /// </summary>
+    [Fact]
+    public async Task OrderBy_GenerousBudget_NoSpill()
+    {
+        const int rowCount = 200;
+        object?[][] sourceRows = Enumerable.Range(0, rowCount)
+            .Select(index => new object?[] { (float)(rowCount - index) })
+            .ToArray();
+
+        MockOperator source = CreateMockOperator(XColumns, rows: sourceRows);
+        OrderByOperator orderBy = new(
+            source,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
+
+        await CollectAsync(orderBy, CreateContext(memoryBudgetBytes: 10 * 1024 * 1024));
+
+        Assert.False(orderBy.SpillingTriggered);
+        Assert.Equal(0, orderBy.SortedRunCount);
+    }
+
+    // ─────────────── Pool leak balance ───────────────
+
+    [Fact]
+    public async Task OrderBy_NoSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator source = CreateMockOperator(XColumns,
+            [3f], [1f], [4f], [1f], [5f], [9f], [2f], [6f]);
+        OrderByOperator orderBy = new(
+            source,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
+
+        await CollectAsync(orderBy, CreateContext(memoryBudgetBytes: null));
+        orderBy.Dispose();
+
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task OrderBy_WithSpill_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        const int rowCount = 500;
+        object?[][] sourceRows = Enumerable.Range(0, rowCount)
+            .Select(index => new object?[] { (float)(rowCount - index) })
+            .ToArray();
+
+        MockOperator source = CreateMockOperator(XColumns, rows: sourceRows);
+        OrderByOperator orderBy = new(
+            source,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
+
+        await CollectAsync(orderBy, CreateContext(TinyBudget));
+        Assert.True(orderBy.SpillingTriggered);
+
+        orderBy.Dispose();
+        AssertPoolBalanced(pool);
+    }
+
+    [Fact]
+    public async Task OrderBy_TopN_PoolDoesNotLeak()
+    {
+        Pool pool = GetService<Pool>();
+        MockOperator source = CreateMockOperator(XColumns,
+            [5f], [1f], [3f], [2f], [4f], [8f], [6f], [7f]);
+        OrderByOperator orderBy = new(
+            source,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)],
+            topNRows: 3);
+
+        List<Row> results = await CollectAsync(orderBy, CreateContext(memoryBudgetBytes: null));
+        orderBy.Dispose();
+
+        Assert.Equal(3, results.Count);
+        AssertPoolBalanced(pool);
+    }
+
+    private static void AssertPoolBalanced(Pool pool)
+    {
+        long dvRent = pool.Backing.DataValueArrayRentCount;
+        long dvReturn = pool.Backing.DataValueArrayReturnCount;
+        long rbRent = pool.Backing.RowBatchRentCount;
+        long rbReturn = pool.Backing.RowBatchReturnCount;
+        long arenaRent = pool.Backing.ArenaRentCount;
+        long arenaReleased = pool.Backing.ArenaFullyReleasedCount;
+
+        Assert.True(
+            dvRent == dvReturn && rbRent == rbReturn && arenaRent == arenaReleased,
+            $"Pool not balanced — DataValue[] rent/return: {dvRent}/{dvReturn}, "
+            + $"RowBatch rent/return: {rbRent}/{rbReturn}, "
+            + $"Arena rent/fully-released: {arenaRent}/{arenaReleased}.");
     }
 
     private ExecutionContext CreateContext(long? memoryBudgetBytes = null)

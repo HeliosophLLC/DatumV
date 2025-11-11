@@ -1,6 +1,6 @@
-using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -8,11 +8,18 @@ namespace DatumIngest.Execution.Operators;
 /// Sorts the output of a child operator by one or more expressions.
 /// When <see cref="TopNRows"/> is set, uses a bounded max-heap to retain
 /// only the top N rows in O(n log N) time and O(N) memory. Otherwise,
-/// materializes all rows and sorts them.
+/// materialises all rows and sorts them.
 /// <para>
 /// When <see cref="ExecutionContext.MemoryBudgetBytes"/> is set and the sort is
-/// unbounded, the operator spills sorted runs to disk when estimated memory usage
-/// exceeds the budget and merges them with a k-way merge at the end.
+/// unbounded, the operator spills sorted runs to disk via <see cref="SpillReaderWriter"/>
+/// when estimated memory usage exceeds the budget and merges them with a k-way merge
+/// at the end.
+/// </para>
+/// <para>
+/// All input rows are stabilised into an operator-owned <see cref="Arena"/> when
+/// materialised (top-N heap, in-memory buffer, or pre-spill chunk). This lets input
+/// batches return to the pool immediately rather than being pinned for the operator's
+/// lifetime, and ensures sort comparisons / emit reads see live arena bytes.
 /// </para>
 /// </summary>
 public sealed class OrderByOperator : IQueryOperator, IDisposable
@@ -20,7 +27,6 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     private readonly IQueryOperator _source;
     private readonly IReadOnlyList<OrderByItem> _orderByItems;
     private readonly int? _topNRows;
-    private string? _spillDirectory;
 
     /// <summary>
     /// Creates an ORDER BY operator.
@@ -51,6 +57,19 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// The bounded heap size, or <c>null</c> for unbounded full sort.
     /// </summary>
     public int? TopNRows => _topNRows;
+
+    /// <summary>
+    /// Set to <see langword="true"/> the first time the in-memory buffer crosses the
+    /// budget and a sorted run is spilled. Test-only observability for spill tests.
+    /// </summary>
+    internal bool SpillingTriggered { get; private set; }
+
+    /// <summary>
+    /// Number of sorted runs spilled to disk during the unbounded path. Zero when
+    /// the entire sort fit in memory; one or more when external merge sort kicked
+    /// in. Test-only observability.
+    /// </summary>
+    internal int SortedRunCount { get; private set; }
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
@@ -86,214 +105,402 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        Pool pool = context.Pool;
+        ExpressionEvaluator evaluator = new(
+            context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+
+        SpillingTriggered = false;
+        SortedRunCount = 0;
 
         if (_topNRows is int topN and > 0)
         {
-            List<Row> rows = await CollectTopNAsync(topN, evaluator, context).ConfigureAwait(false);
-            rows.Sort((left, right) => CompareRows(left, right, evaluator));
-
-            RowBatch? outputBatch = null;
-            foreach (Row row in rows)
+            await foreach (RowBatch batch in ExecuteTopNAsync(topN, evaluator, context, pool).ConfigureAwait(false))
             {
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(row);
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
+                yield return batch;
             }
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
-            }
-
             yield break;
         }
 
-        // Unbounded sort — spill to disk when memory budget is exceeded.
-        List<string> sortedRunPaths = new();
+        await foreach (RowBatch batch in ExecuteUnboundedAsync(evaluator, context, pool).ConfigureAwait(false))
+        {
+            yield return batch;
+        }
+    }
+
+    // ───────── Top-N path ─────────
+
+    private async IAsyncEnumerable<RowBatch> ExecuteTopNAsync(
+        int topN, ExpressionEvaluator evaluator, ExecutionContext context, Pool pool)
+    {
+        // Heap rows live in bufferArena: stabilised at insertion so input batches can
+        // return to the pool immediately. The heap is a max-heap (reverse comparison)
+        // — its peek is the worst-of-the-best, which is what gets evicted on overflow.
+        Arena? bufferArena = null;
+        ColumnLookup? schema = null;
+        PriorityQueue<Row, Row> heap = new(
+            Comparer<Row>.Create((left, right) => -CompareRows(left, right, evaluator)));
+        RowBatch? outputBatch = null;
 
         try
         {
-            List<Row> buffer = await CollectAllWithSpillAsync(
-                context, evaluator, sortedRunPaths).ConfigureAwait(false);
-
-            if (sortedRunPaths.Count == 0)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                // Everything fit in memory — sort and emit.
-                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
-
-                RowBatch? outputBatch = null;
-                foreach (Row row in buffer)
+                try
                 {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(row);
-                    if (outputBatch.IsFull)
+                    if (schema is null && inputBatch.Count > 0)
                     {
-                        yield return outputBatch;
-                        outputBatch = null;
+                        schema = inputBatch.ColumnLookup;
+                        bufferArena = pool.RentArena();
+                    }
+
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        Row sourceRow = inputBatch[i];
+                        context.CancellationToken.ThrowIfCancellationRequested();
+                        context.QueryMeter?.ThrowIfExceeded();
+
+                        if (heap.Count < topN)
+                        {
+                            DataValue[] copy = pool.RentAndCopyDataValues(
+                                sourceRow, inputBatch.Arena, bufferArena!);
+                            Row stableRow = new(sourceRow.ColumnLookup, copy);
+                            heap.Enqueue(stableRow, stableRow);
+                        }
+                        else
+                        {
+                            // Compare without allocating: peek the worst, decide if the
+                            // new row beats it. If so, evict the worst (return its array
+                            // to the pool) and insert the new row (rented + stabilised).
+                            Row worst = heap.Peek();
+                            if (CompareRows(sourceRow, worst, evaluator) < 0)
+                            {
+                                Row evicted = heap.Dequeue();
+                                pool.ReturnRow(evicted);
+
+                                DataValue[] copy = pool.RentAndCopyDataValues(
+                                    sourceRow, inputBatch.Arena, bufferArena!);
+                                Row stableRow = new(sourceRow.ColumnLookup, copy);
+                                heap.Enqueue(stableRow, stableRow);
+                            }
+                        }
                     }
                 }
-                if (outputBatch is not null)
+                finally
                 {
-                    yield return outputBatch;
+                    pool.ReturnRowBatch(inputBatch);
                 }
             }
-            else
-            {
-                // Flush any remaining in-memory rows as the final sorted run.
-                if (buffer.Count > 0)
-                {
-                    buffer.Sort((left, right) => CompareRows(left, right, evaluator));
-                    string runPath = Path.Combine(_spillDirectory!, $"run_{sortedRunPaths.Count}.spill");
-                    WriteSortedRun(runPath, buffer);
-                    sortedRunPaths.Add(runPath);
-                    buffer.Clear();
-                }
 
-                // K-way merge all sorted runs.
-                await foreach (RowBatch mergeBatch in MergeSortedRunsAsync(
-                    sortedRunPaths, evaluator, context).ConfigureAwait(false))
+            if (heap.Count == 0) yield break;
+
+            // Drain the heap into a list and sort ascending (the heap was max-ordered
+            // for eviction; output wants the natural sort direction).
+            List<Row> sorted = new(heap.Count);
+            while (heap.Count > 0)
+            {
+                sorted.Add(heap.Dequeue());
+            }
+            sorted.Sort((left, right) => CompareRows(left, right, evaluator));
+
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                Row row = sorted[i];
+                outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, bufferArena!);
+                DataValue[] outValues = pool.RentDataValues(row.FieldCount);
+                row.RawValues.CopyTo(outValues);
+                outputBatch.Add(outValues);
+                pool.ReturnRow(row);                // sorted's row is consumed; clear the slot
+                sorted[i] = default;
+
+                if (outputBatch.IsFull)
                 {
-                    yield return mergeBatch;
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
             }
         }
         finally
         {
-            CleanupSpillDirectory();
+            // Drain whatever's left in the heap (mid-cancel).
+            while (heap.Count > 0)
+            {
+                pool.ReturnRow(heap.Dequeue());
+            }
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (bufferArena is not null) pool.ReturnArena(bufferArena);
         }
     }
 
-    /// <summary>
-    /// Materializes rows from the source, spilling sorted runs to disk when
-    /// <see cref="ExecutionContext.MemoryBudgetBytes"/> is exceeded. Returns
-    /// any rows still in memory after the source is exhausted.
-    /// </summary>
-    private async Task<List<Row>> CollectAllWithSpillAsync(
-        ExecutionContext context,
-        ExpressionEvaluator evaluator,
-        List<string> sortedRunPaths)
+    // ───────── Unbounded path with optional spill ─────────
+
+    private async IAsyncEnumerable<RowBatch> ExecuteUnboundedAsync(
+        ExpressionEvaluator evaluator, ExecutionContext context, Pool pool)
     {
-        List<Row> buffer = new();
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        Arena? bufferArena = null;
+        ColumnLookup? schema = null;
+        List<Row> buffer = [];
+        List<SpillReaderWriter> sortedRuns = [];
+        Arena? outputArena = null;
+        RowBatch? outputBatch = null;
+
+        try
         {
-            for (int i = 0; i < inputBatch.Count; i++)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-            Row row = inputBatch[i];
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
-
-            buffer.Add(row);
-
-            if (estimator is not null)
-            {
-                if (estimator.ShouldSample())
+                try
                 {
-                    estimator.RecordSample(row);
-                }
-
-                estimator.IncrementRowCount();
-                long estimatedMemory = estimator.EstimateTotalBytes();
-
-                if (estimatedMemory > memoryBudget!.Value)
-                {
-                    // Sort the in-memory buffer and write it as a sorted run.
-                    if (_spillDirectory is null)
+                    if (schema is null && inputBatch.Count > 0)
                     {
-                        _spillDirectory = Path.Combine(
-                            Path.GetTempPath(), $"datum-orderby-{Guid.NewGuid():N}");
-                        Directory.CreateDirectory(_spillDirectory);
-
-                        if (ExecutionTracer.IsEnabled)
-                        {
-                            ExecutionTracer.Write(
-                                $"ORDER BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  rows={buffer.Count}");
-                        }
+                        schema = inputBatch.ColumnLookup;
+                        bufferArena = pool.RentArena();
                     }
 
-                    buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        Row sourceRow = inputBatch[i];
+                        context.CancellationToken.ThrowIfCancellationRequested();
+                        context.QueryMeter?.ThrowIfExceeded();
 
-                    string runPath = Path.Combine(_spillDirectory, $"run_{sortedRunPaths.Count}.spill");
-                    WriteSortedRun(runPath, buffer);
-                    sortedRunPaths.Add(runPath);
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, inputBatch.Arena, bufferArena!);
+                        buffer.Add(new Row(sourceRow.ColumnLookup, copy));
 
-                    // Reset the buffer and estimator for the next run.
-                    buffer.Clear();
-                    estimator = new MemoryEstimator();
+                        if (estimator is not null)
+                        {
+                            if (estimator.ShouldSample())
+                            {
+                                estimator.RecordSample(sourceRow);
+                            }
+
+                            estimator.IncrementRowCount();
+                            long estimatedMemory = estimator.EstimateTotalBytes();
+
+                            if (estimatedMemory > memoryBudget!.Value)
+                            {
+                                // Sort the in-memory chunk and write it as a sorted run.
+                                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                                SpillReaderWriter run = SpillSortedBuffer(
+                                    pool, schema!, context, bufferArena!, buffer);
+                                sortedRuns.Add(run);
+                                SpillingTriggered = true;
+                                SortedRunCount++;
+
+                                // Reset for next chunk: fresh arena, fresh estimator,
+                                // fresh buffer. Buffer rows' DataValue[]s were transferred
+                                // to the run batch and consumed by the spiller's Write
+                                // (which returned them to the pool); the buffer's list
+                                // entries are now stale slot references.
+                                buffer.Clear();
+                                pool.ReturnArena(bufferArena!);
+                                bufferArena = pool.RentArena();
+                                estimator = new MemoryEstimator();
+                            }
+                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                            {
+                                estimator.EscalateToEveryRow();
+                            }
+                        }
+                    }
                 }
-                else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                finally
                 {
-                    estimator.EscalateToEveryRow();
+                    pool.ReturnRowBatch(inputBatch);
                 }
             }
+
+            if (sortedRuns.Count == 0)
+            {
+                // Everything fit in memory. Sort buffer and emit.
+                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+
+                for (int i = 0; i < buffer.Count; i++)
+                {
+                    Row row = buffer[i];
+                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, bufferArena!);
+                    DataValue[] outValues = pool.RentDataValues(row.FieldCount);
+                    row.RawValues.CopyTo(outValues);
+                    outputBatch.Add(outValues);
+
+                    if (outputBatch.IsFull)
+                    {
+                        RowBatch toYield = outputBatch;
+                        outputBatch = null;
+                        yield return toYield;
+                    }
+                }
+
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
+                yield break;
             }
 
-            inputBatch.Return();
-        }
+            // Flush any remaining in-memory rows as the final sorted run.
+            if (buffer.Count > 0)
+            {
+                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                SpillReaderWriter finalRun = SpillSortedBuffer(
+                    pool, schema!, context, bufferArena!, buffer);
+                sortedRuns.Add(finalRun);
+                SortedRunCount++;
+                buffer.Clear();
+            }
+            // Buffer arena's last round — release it; merge phase uses a separate output arena.
+            if (bufferArena is not null)
+            {
+                pool.ReturnArena(bufferArena);
+                bufferArena = null;
+            }
 
-        if (ExecutionTracer.IsEnabled && sortedRunPaths.Count > 0)
+            // K-way merge across all sorted runs. Output rows are stabilised into
+            // outputArena via RentAndCopyToOutput, so the consumer sees a single
+            // arena regardless of which run a given row came from.
+            outputArena = pool.RentArena();
+            await foreach (RowBatch mergedBatch in MergeSortedRunsAsync(
+                sortedRuns, schema!, evaluator, context, pool, outputArena).ConfigureAwait(false))
+            {
+                yield return mergedBatch;
+            }
+        }
+        finally
         {
-            ExecutionTracer.Write(
-                $"ORDER BY spill done  runs={sortedRunPaths.Count}  remaining_buffer={buffer.Count}");
-        }
+            // Buffer rows still owning DataValue[]s (only present on early exit).
+            foreach (Row row in buffer)
+            {
+                if (row.RawValues is not null) pool.ReturnRow(row);
+            }
+            buffer.Clear();
 
-        return buffer;
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            foreach (SpillReaderWriter run in sortedRuns)
+            {
+                run.Dispose();
+            }
+            if (bufferArena is not null) pool.ReturnArena(bufferArena);
+            if (outputArena is not null) pool.ReturnArena(outputArena);
+        }
     }
 
     /// <summary>
-    /// Retains only the top N rows using a bounded max-heap. The heap keeps
-    /// the "worst" row (last in sort order) at the top so it can be evicted
-    /// when a better row arrives. After streaming all source rows, the heap
-    /// contains exactly the top N rows (or fewer if the source is smaller).
+    /// Wraps a sorted in-memory buffer as a single-partition <see cref="SpillReaderWriter"/>
+    /// run: bundles the buffer's rows into a <see cref="RowBatch"/> over the buffer's
+    /// arena, hands it to the spiller (which stabilises payloads into its own
+    /// consolidated arena and returns the input batch — releasing all the rented
+    /// <see cref="DataValue"/>[]s back to the pool). The spiller is the caller's to
+    /// dispose later.
     /// </summary>
-    private async Task<List<Row>> CollectTopNAsync(
-        int topN, ExpressionEvaluator evaluator, ExecutionContext context)
+    private static SpillReaderWriter SpillSortedBuffer(
+        Pool pool, ColumnLookup schema, ExecutionContext context, Arena bufferArena, List<Row> sortedBuffer)
     {
-        // PriorityQueue is a min-heap. Using reversed comparison makes the
-        // "worst" row (last in desired sort order) the one dequeued first,
-        // turning it into a max-heap for eviction purposes.
-        PriorityQueue<Row, Row> heap = new(
-            Comparer<Row>.Create(
-                (left, right) => -CompareRows(left, right, evaluator)));
+        SpillReaderWriter run = new SpillReaderWriter(
+            pool, schema, context.SpillDirectory, partitionCount: 1);
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        RowBatch runBatch = pool.RentRowBatch(schema, sortedBuffer.Count, bufferArena);
+        foreach (Row row in sortedBuffer)
         {
-            for (int i = 0; i < inputBatch.Count; i++)
-            {
-            Row row = inputBatch[i];
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
-
-            if (heap.Count < topN)
-            {
-                heap.Enqueue(row, row);
-            }
-            else
-            {
-                // EnqueueDequeue adds the new row and immediately removes the
-                // worst. If the new row is worse than all current rows, it is
-                // the one removed — effectively a no-op.
-                heap.EnqueueDequeue(row, row);
-            }
-            }
-
-            inputBatch.Return();
+            runBatch.Add(row.RawValues);
         }
 
-        List<Row> rows = new(heap.Count);
+        run.Write(runBatch, partition: 0);
+        return run;
+    }
 
-        while (heap.Count > 0)
+    /// <summary>
+    /// K-way merge of pre-sorted runs. Each run's <c>ReplayPartitionAsync</c>
+    /// stream is wrapped in a <see cref="RunReader"/> exposing the current row + a
+    /// <c>ReadNextAsync</c> that advances within a batch (no I/O on intra-batch step)
+    /// or pulls the next batch from the run.
+    /// </summary>
+    private async IAsyncEnumerable<RowBatch> MergeSortedRunsAsync(
+        List<SpillReaderWriter> runs,
+        ColumnLookup schema,
+        ExpressionEvaluator evaluator,
+        ExecutionContext context,
+        Pool pool,
+        Arena outputArena)
+    {
+        List<RunReader> readers = new(runs.Count);
+        RowBatch? outputBatch = null;
+
+        try
         {
-            rows.Add(heap.Dequeue());
-        }
+            foreach (SpillReaderWriter run in runs)
+            {
+                RunReader reader = new(run, schema, context, pool);
+                if (await reader.ReadNextAsync().ConfigureAwait(false))
+                {
+                    readers.Add(reader);
+                }
+                else
+                {
+                    await reader.DisposeAsync().ConfigureAwait(false);
+                }
+            }
 
-        return rows;
+            if (readers.Count == 0) yield break;
+
+            PriorityQueue<RunReader, RunReader> heap = new(
+                Comparer<RunReader>.Create((a, b) => CompareRows(a.Current, b.Current, evaluator)));
+            foreach (RunReader r in readers)
+            {
+                heap.Enqueue(r, r);
+            }
+
+            while (heap.Count > 0)
+            {
+                context.CancellationToken.ThrowIfCancellationRequested();
+
+                RunReader winner = heap.Dequeue();
+
+                outputBatch ??= pool.RentRowBatch(schema, context.BatchSize, outputArena);
+                pool.RentAndCopyToOutput(winner.CurrentBatch, winner.CurrentIndex, outputBatch);
+
+                if (outputBatch.IsFull)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
+
+                if (await winner.ReadNextAsync().ConfigureAwait(false))
+                {
+                    heap.Enqueue(winner, winner);
+                }
+                else
+                {
+                    await winner.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
+        }
+        finally
+        {
+            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            foreach (RunReader r in readers)
+            {
+                await r.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     private int CompareRows(Row left, Row right, ExpressionEvaluator evaluator)
@@ -324,7 +531,6 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// </summary>
     internal static int CompareDataValues(DataValue left, DataValue right)
     {
-        // Nulls sort last.
         if (left.IsNull && right.IsNull) return 0;
         if (left.IsNull) return 1;
         if (right.IsNull) return -1;
@@ -332,189 +538,88 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         return DataValueComparer.Compare(left, right);
     }
 
-    // ---------------------------------------------------------------
-    //  Spill-to-disk external sort infrastructure
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// Writes a pre-sorted list of rows to a binary spill file.
-    /// </summary>
-    private static void WriteSortedRun(string path, List<Row> sortedRows)
-    {
-        using FileStream fileStream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-        using BinaryWriter writer = new(fileStream);
-
-        bool schemaWritten = false;
-
-        foreach (Row row in sortedRows)
-        {
-            if (!schemaWritten)
-            {
-                RowSerializer.WriteSchema(writer, row);
-                schemaWritten = true;
-            }
-
-            RowSerializer.WriteRow(writer, row);
-        }
-    }
-
-    /// <summary>
-    /// Performs a k-way merge of pre-sorted run files, yielding rows in global sort order.
-    /// Uses a priority queue where each entry tracks which run it came from, so the next
-    /// row from that run can be loaded when the current one is dequeued.
-    /// </summary>
-    private async IAsyncEnumerable<RowBatch> MergeSortedRunsAsync(
-        List<string> runPaths,
-        ExpressionEvaluator evaluator,
-        ExecutionContext context)
-    {
-        // Open all run files and read their first row.
-        List<RunReader> readers = new(runPaths.Count);
-
-        try
-        {
-            foreach (string path in runPaths)
-            {
-                RunReader runReader = new(path);
-
-                if (runReader.ReadNext())
-                {
-                    readers.Add(runReader);
-                }
-                else
-                {
-                    runReader.Dispose();
-                }
-            }
-
-            if (readers.Count == 0)
-            {
-                yield break;
-            }
-
-            // Build a min-heap keyed by the current row of each run.
-            PriorityQueue<RunReader, RunReader> heap = new(
-                Comparer<RunReader>.Create(
-                    (a, b) => CompareRows(a.Current.GetValueOrDefault(), b.Current.GetValueOrDefault(), evaluator)));
-
-            foreach (RunReader reader in readers)
-            {
-                heap.Enqueue(reader, reader);
-            }
-
-            RowBatch? outputBatch = null;
-
-            while (heap.Count > 0)
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                RunReader winner = heap.Dequeue();
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(winner.Current.GetValueOrDefault());
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
-
-                if (winner.ReadNext())
-                {
-                    heap.Enqueue(winner, winner);
-                }
-                else
-                {
-                    winner.Dispose();
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                yield return outputBatch;
-            }
-        }
-        finally
-        {
-            foreach (RunReader reader in readers)
-            {
-                reader.Dispose();
-            }
-        }
-
-        await Task.CompletedTask;
-    }
-
     /// <inheritdoc />
+    /// <remarks>
+    /// No-op. Spill resources (per-run <see cref="SpillReaderWriter"/> instances and
+    /// their temp directories / file-backed arenas) are owned by the iterator and
+    /// disposed in its <c>finally</c> block, so consumer-driven dispose flows through
+    /// that path. Kept on the type so <see cref="IDisposable"/> contract continues to
+    /// work transparently.
+    /// </remarks>
     public void Dispose()
     {
-        CleanupSpillDirectory();
-    }
-
-    private void CleanupSpillDirectory()
-    {
-        if (_spillDirectory is not null && Directory.Exists(_spillDirectory))
-        {
-            try
-            {
-                Directory.Delete(_spillDirectory, recursive: true);
-            }
-            catch
-            {
-                // Best-effort cleanup.
-            }
-
-            _spillDirectory = null;
-        }
     }
 
     /// <summary>
-    /// Reads rows sequentially from a single sorted run file.
+    /// Streams rows from a single sorted run via <c>SpillReaderWriter.ReplayPartitionAsync</c>,
+    /// exposing a <c>Current</c>+<c>ReadNextAsync</c> interface for the k-way merge
+    /// heap. Each batch is held until exhausted (intra-batch advance is just an index
+    /// bump, no I/O); when it's exhausted we return the batch to the pool and pull
+    /// the next from the underlying enumerator.
     /// </summary>
-    private sealed class RunReader : IDisposable
+    private sealed class RunReader : IAsyncDisposable
     {
-        private readonly FileStream _fileStream;
-        private readonly BinaryReader _binaryReader;
-        private readonly string[] _schemaNames;
-        private readonly Dictionary<string, int> _schemaNameIndex;
+        private readonly SpillReaderWriter _run;
+        private readonly Pool _pool;
+        private readonly IAsyncEnumerator<RowBatch> _enumerator;
+        private RowBatch? _currentBatch;
+        private int _currentIndex;
         private bool _disposed;
 
-        /// <summary>Creates a reader for the given spill file.</summary>
-        /// <param name="path">Path to the sorted run spill file.</param>
-        public RunReader(string path)
+        public RunReader(SpillReaderWriter run, ColumnLookup schema, ExecutionContext context, Pool pool)
         {
-            _fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
-            _binaryReader = new BinaryReader(_fileStream);
-            RowSerializer.ReadSchema(_binaryReader, out _schemaNames, out _schemaNameIndex);
+            _run = run;
+            _pool = pool;
+            _enumerator = run.ReplayPartitionAsync(context, schema, partition: 0).GetAsyncEnumerator(context.CancellationToken);
+            _currentIndex = -1;
         }
 
-        /// <summary>The most recently read row, or <see langword="null"/> before the first read.</summary>
-        public Row? Current { get; private set; }
+        public Row Current => _currentBatch![_currentIndex];
 
-        /// <summary>
-        /// Reads the next row from the run file. Returns <see langword="false"/> when the file is exhausted.
-        /// </summary>
-        public bool ReadNext()
+        public RowBatch CurrentBatch => _currentBatch!;
+
+        public int CurrentIndex => _currentIndex;
+
+        public async ValueTask<bool> ReadNextAsync()
         {
-            if (_fileStream.Position >= _fileStream.Length)
+            if (_currentBatch is not null && _currentIndex + 1 < _currentBatch.Count)
             {
-                Current = null;
-                return false;
+                _currentIndex++;
+                return true;
             }
 
-            Current = RowSerializer.ReadRow(_binaryReader, _schemaNames, _schemaNameIndex);
-            return true;
+            if (_currentBatch is not null)
+            {
+                _pool.ReturnRowBatch(_currentBatch);
+                _currentBatch = null;
+            }
+
+            while (await _enumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                RowBatch next = _enumerator.Current;
+                if (next.Count > 0)
+                {
+                    _currentBatch = next;
+                    _currentIndex = 0;
+                    return true;
+                }
+                _pool.ReturnRowBatch(next);
+            }
+
+            return false;
         }
 
-        /// <inheritdoc />
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
-            if (_disposed)
-            {
-                return;
-            }
-
+            if (_disposed) return;
             _disposed = true;
-            _binaryReader.Dispose();
-            _fileStream.Dispose();
+
+            if (_currentBatch is not null)
+            {
+                _pool.ReturnRowBatch(_currentBatch);
+                _currentBatch = null;
+            }
+            await _enumerator.DisposeAsync().ConfigureAwait(false);
         }
     }
 }
