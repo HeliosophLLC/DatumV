@@ -228,8 +228,10 @@ public sealed class ProjectOperator : IQueryOperator
         private readonly ProjectionSlot[] _slots;
 
         // LET binding support: augmented row layout for memoized evaluation.
-        private readonly string[]? _augmentedNames;
-        private readonly Dictionary<string, int>? _augmentedNameIndex;
+        // _augmentedLookup is null when there are no LET bindings; otherwise it covers
+        // [source columns..., LET binding names...] and is used to construct the
+        // augmented Row passed to the evaluator.
+        private readonly ColumnLookup? _augmentedLookup;
         private readonly Expression[]? _letExpressions;
         private readonly int _sourceFieldCount;
 
@@ -240,8 +242,7 @@ public sealed class ProjectOperator : IQueryOperator
             string[] names,
             Dictionary<string, int> nameIndex,
             ProjectionSlot[] slots,
-            string[]? augmentedNames = null,
-            Dictionary<string, int>? augmentedNameIndex = null,
+            ColumnLookup? augmentedLookup = null,
             Expression[]? letExpressions = null,
             int sourceFieldCount = 0,
             IReadOnlyList<AssertClause>? assertions = null)
@@ -249,8 +250,7 @@ public sealed class ProjectOperator : IQueryOperator
             _names = names;
             _nameIndex = nameIndex;
             _slots = slots;
-            _augmentedNames = augmentedNames;
-            _augmentedNameIndex = augmentedNameIndex;
+            _augmentedLookup = augmentedLookup;
             _letExpressions = letExpressions;
             _sourceFieldCount = sourceFieldCount;
             _assertions = assertions;
@@ -272,13 +272,12 @@ public sealed class ProjectOperator : IQueryOperator
             int letCount = letBindings?.Count ?? 0;
 
             // Build augmented row layout when LET bindings are present.
-            string[]? augmentedNames = null;
-            Dictionary<string, int>? augmentedNameIndex = null;
+            ColumnLookup? augmentedLookup = null;
             Expression[]? letExpressions = null;
 
             if (letCount > 0)
             {
-                augmentedNames = new string[firstRow.FieldCount + letCount];
+                string[] augmentedNames = new string[firstRow.FieldCount + letCount];
                 for (int index = 0; index < firstRow.FieldCount; index++)
                 {
                     augmentedNames[index] = firstRow.ColumnNames[index];
@@ -291,12 +290,7 @@ public sealed class ProjectOperator : IQueryOperator
                     letExpressions[index] = letBindings[index].Expression;
                 }
 
-                augmentedNameIndex =
-                    new Dictionary<string, int>(augmentedNames.Length, StringComparer.OrdinalIgnoreCase);
-                for (int index = 0; index < augmentedNames.Length; index++)
-                {
-                    augmentedNameIndex[augmentedNames[index]] = index;
-                }
+                augmentedLookup = new ColumnLookup(augmentedNames);
             }
 
             // Build output column layout.
@@ -387,7 +381,7 @@ public sealed class ProjectOperator : IQueryOperator
 
             return new ProjectionSchema(
                 nameArray, nameIndex, slots.ToArray(),
-                augmentedNames, augmentedNameIndex, letExpressions, firstRow.FieldCount,
+                augmentedLookup, letExpressions, firstRow.FieldCount,
                 assertions);
         }
 
@@ -521,7 +515,7 @@ public sealed class ProjectOperator : IQueryOperator
 
                 // The Row constructor stores the array by reference, so mutations
                 // to augmentedValues are visible through the Row's indexers.
-                Row augmentedRow = new(_augmentedNames!, augmentedValues, _augmentedNameIndex!);
+                Row augmentedRow = new(_augmentedLookup!, augmentedValues);
                 EvaluationFrame augmentedFrame = sourceFrame.WithRow(augmentedRow);
 
                 // Evaluate each LET binding sequentially. Each binding's result
