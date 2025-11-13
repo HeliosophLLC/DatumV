@@ -37,7 +37,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private readonly IReadOnlyList<Expression> _groupByExpressions;
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
     private readonly bool _streamingSorted;
-    private string? _spillDirectory;
 
     /// <summary>
     /// Per-accumulator memory budget for DISTINCT hash sets. Computed once at the
@@ -402,10 +401,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             desiredWorkers = Math.Max(1, acquiredFromBudget);
         }
 
-        // Per-worker spill arrays allocated by the keyed path and cleaned up in finally.
-        BinaryWriter?[]?[]? workerSpillWriters = null;
-        string?[]? workerSpillDirectories = null;
-
         try
         {
             int workerCount = desiredWorkers;
@@ -521,342 +516,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 yield break;
             }
 
-            // ----------------------------------------------------------------
-            // Keyed aggregation path: partitioned fan-out by GROUP BY key hash.
-            //
-            // The feeder evaluates the GROUP BY keys for each input row and
-            // writes the row to inputChannels[(uint)keyHash % workerCount].
-            // Because every row that maps to a given group key always routes to
-            // the same worker, each worker's hash table contains a disjoint
-            // subset of the full key space. Total memory across all workers
-            // equals the single-threaded cost; no merge phase is needed.
-            // ----------------------------------------------------------------
-            Channel<Row>[] inputChannels = new Channel<Row>[workerCount];
-            for (int i = 0; i < workerCount; i++)
-            {
-                inputChannels[i] = Channel.CreateBounded<Row>(
-                    new BoundedChannelOptions(64)
-                    {
-                        SingleWriter = true,
-                        SingleReader = true,
-                    });
-            }
-
-            // Allocate only the table array that matches the key arity.
-            Dictionary<DataValue, GroupState>[] singleKeyTables =
-                new Dictionary<DataValue, GroupState>[useSingleKey ? workerCount : 0];
-            for (int i = 0; i < singleKeyTables.Length; i++)
-            {
-                singleKeyTables[i] = new();
-            }
-
-            Dictionary<CompositeKey, GroupState>[] compositeKeyTables =
-                new Dictionary<CompositeKey, GroupState>[useSingleKey ? 0 : workerCount];
-            for (int i = 0; i < compositeKeyTables.Length; i++)
-            {
-                compositeKeyTables[i] = new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance);
-            }
-
-            // Per-worker spill infrastructure. Workers own disjoint key partitions so their
-            // spill files are also disjoint — no cross-worker coordination is needed during drain.
-            long? memoryBudget = context.MemoryBudgetBytes;
-            long? workerBudget = memoryBudget.HasValue ? memoryBudget.Value / workerCount : null;
-
-            MemoryEstimator?[] workerEstimators = new MemoryEstimator?[workerCount];
-            bool[] workerSpilling = new bool[workerCount];
-            bool[]?[] workerSchemaWritten = new bool[]?[workerCount];
-            string[]?[] workerLocalSpillPaths = new string[]?[workerCount];
-            SpillSchemaState[] workerSchemaStates = new SpillSchemaState[workerCount];
-
-            for (int i = 0; i < workerCount; i++)
-            {
-                workerSchemaStates[i] = new SpillSchemaState();
-                if (workerBudget.HasValue)
-                {
-                    workerEstimators[i] = new MemoryEstimator();
-                }
-            }
-
-            // Initialise the outer cleanup arrays before any worker runs.
-            workerSpillWriters = new BinaryWriter?[]?[workerCount];
-            workerSpillDirectories = new string?[workerCount];
-
-            // Feeder: evaluates GROUP BY keys and routes each row to the owning partition.
-            Task feederTask = Task.Run(async () =>
-            {
-                ExpressionEvaluator routingEvaluator = new(
-                    context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
-                try
-                {
-                    await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
-                    {
-                        for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
-                        {
-                        context.QueryMeter?.ThrowIfExceeded();
-                        Row row = inputBatch[batchIndex];
-                        int partition;
-
-                        if (useSingleKey)
-                        {
-                            DataValue key = routingEvaluator.Evaluate(_groupByExpressions[0], row);
-                            partition = (int)((uint)key.GetHashCode() % (uint)workerCount);
-                        }
-                        else
-                        {
-                            HashCode keyHash = new();
-                            for (int k = 0; k < _groupByExpressions.Count; k++)
-                            {
-                                keyHash.Add(routingEvaluator.Evaluate(_groupByExpressions[k], row));
-                            }
-
-                            partition = (int)((uint)keyHash.ToHashCode() % (uint)workerCount);
-                        }
-
-                        await inputChannels[partition].Writer.WriteAsync(row, cancellationToken)
-                            .ConfigureAwait(false);
-                        }
-
-                        pool.ReturnRowBatch(inputBatch);
-                    }
-                }
-                finally
-                {
-                    foreach (Channel<Row> channel in inputChannels)
-                    {
-                        channel.Writer.Complete();
-                    }
-                }
-            }, cancellationToken);
-
-            // Workers: each reads its dedicated channel and accumulates its disjoint key partition.
-            Task[] workers = new Task[workerCount];
-            for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
-            {
-                int wi = workerIndex;
-                workers[wi] = Task.Run(async () =>
-                {
-                    ExpressionEvaluator workerEvaluator = new(
-                        context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
-                    MemoryEstimator? estimator = workerEstimators[wi];
-
-                    (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
-                        CreateAggregateArgumentScratch();
-
-                    await foreach (Row row in inputChannels[wi].Reader.ReadAllAsync(cancellationToken)
-                        .ConfigureAwait(false))
-                    {
-                        // Evaluate group keys once for both accumulation and spill routing.
-                        DataValue singleKeyValue = default;
-                        DataValue[]? keyValues = null;
-
-                        if (useSingleKey)
-                        {
-                            singleKeyValue = workerEvaluator.Evaluate(_groupByExpressions[0], row);
-                        }
-                        else
-                        {
-                            keyValues = new DataValue[_groupByExpressions.Count];
-                            for (int k = 0; k < _groupByExpressions.Count; k++)
-                            {
-                                keyValues[k] = workerEvaluator.Evaluate(_groupByExpressions[k], row);
-                            }
-                        }
-
-                        EvaluateAggregateArgumentsInto(
-                            workerEvaluator, row, workerArgScratch, workerSortScratch);
-
-                        if (workerSpilling[wi])
-                        {
-                            // Route to a per-worker spill partition file.
-                            int hashCode = useSingleKey
-                                ? singleKeyValue.GetHashCode()
-                                : new CompositeKey(keyValues!).GetHashCode();
-
-                            ReadOnlySpan<DataValue> workerSpillKeySpan = useSingleKey
-                                ? MemoryMarshal.CreateReadOnlySpan(ref singleKeyValue, 1)
-                                : keyValues!;
-                            WriteSpillRow(
-                                hashCode, workerSpillKeySpan,
-                                workerArgScratch, workerSortScratch,
-                                workerSpillWriters![wi]!, workerSchemaWritten[wi]!,
-                                workerLocalSpillPaths[wi]!, workerSchemaStates[wi],
-                                workerSpillDirectories![wi]!);
-
-                            // Also accumulate into any pre-existing in-memory group so that
-                            // rows arriving after spill starts are not lost for those keys.
-                            // ReaggregatePartition skips these keys during drain because
-                            // they are already present in the worker's in-memory table.
-                            GroupState? existingGroup = null;
-
-                            if (useSingleKey)
-                            {
-                                singleKeyTables[wi].TryGetValue(singleKeyValue, out existingGroup);
-                            }
-                            else
-                            {
-                                compositeKeyTables[wi].TryGetValue(
-                                    new CompositeKey(keyValues!), out existingGroup);
-                            }
-
-                            if (existingGroup is not null)
-                            {
-                                AccumulateRow(existingGroup, workerArgScratch, workerSortScratch, context);
-                            }
-                        }
-                        else
-                        {
-                            // Accumulate in memory.
-                            GroupState group;
-
-                            if (useSingleKey)
-                            {
-                                if (!singleKeyTables[wi].TryGetValue(singleKeyValue, out GroupState? existing))
-                                {
-                                    existing = CreateGroupState(pool);
-                                    existing.KeyValues = [singleKeyValue];
-                                    singleKeyTables[wi][singleKeyValue] = existing;
-                                }
-
-                                group = existing!;
-                            }
-                            else
-                            {
-                                CompositeKey compositeKey = new(keyValues!);
-
-                                if (!compositeKeyTables[wi].TryGetValue(compositeKey, out GroupState? existing))
-                                {
-                                    existing = CreateGroupState(pool);
-                                    existing.KeyValues = keyValues;
-                                    compositeKeyTables[wi][compositeKey] = existing;
-                                }
-
-                                group = existing;
-                            }
-
-                            AccumulateRow(group, workerArgScratch, workerSortScratch, context);
-
-                            // Per-worker memory estimation against the worker's share of the budget.
-                            if (estimator is not null)
-                            {
-                                if (estimator.ShouldSample())
-                                {
-                                    estimator.RecordSample(row);
-                                }
-
-                                estimator.IncrementRowCount();
-                                long groupCount = useSingleKey
-                                    ? (long)singleKeyTables[wi].Count
-                                    : (long)compositeKeyTables[wi].Count;
-                                long estimatedMemory = estimator.EstimateBytesForRowCount(groupCount);
-
-                                if (estimatedMemory > workerBudget!.Value)
-                                {
-                                    workerSpilling[wi] = true;
-                                    workerSpillDirectories![wi] = Path.Combine(
-                                        Path.GetTempPath(), $"datum-groupby-{Guid.NewGuid():N}-w{wi}");
-                                    Directory.CreateDirectory(workerSpillDirectories![wi]!);
-                                    workerSpillWriters![wi] = new BinaryWriter?[SpillPartitionCount];
-                                    workerSchemaWritten[wi] = new bool[SpillPartitionCount];
-                                    workerLocalSpillPaths[wi] = new string[SpillPartitionCount];
-
-                                    if (ExecutionTracer.IsEnabled)
-                                    {
-                                        ExecutionTracer.Write(
-                                            $"GROUP BY parallel spill start  worker={wi}  budget={ExecutionTracer.FormatBytes(workerBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
-                                    }
-                                }
-                                else if (estimatedMemory > (long)(workerBudget!.Value * MemoryEstimator.EscalationThreshold))
-                                {
-                                    estimator.EscalateToEveryRow();
-                                }
-                            }
-                        }
-                    }
-                }, cancellationToken);
-            }
-
-            await feederTask.ConfigureAwait(false);
-            await Task.WhenAll(workers).ConfigureAwait(false);
-
-            // No merge needed — every group key was routed to exactly one worker.
-            // Flush ordered buffers, emit in-memory groups, then drain any spill files per worker.
-            ColumnLookup? outputLookup = null;
-
-            bool hasOrderedAggregates = _aggregateColumns.Any(
-                column => column.OrderBy is not null);
-
-            RowBatch? outputBatch = null;
-
-            for (int i = 0; i < workerCount; i++)
-            {
-                IEnumerable<GroupState> workerGroups = useSingleKey
-                    ? (IEnumerable<GroupState>)singleKeyTables[i].Values
-                    : compositeKeyTables[i].Values;
-
-                if (hasOrderedAggregates)
-                {
-                    FlushOrderedBuffers(workerGroups, context);
-                }
-
-                foreach (GroupState group in workerGroups)
-                {
-                    Row emitted = EmitGroupRow(
-                        group, isGlobalAggregation: false, pool, ref outputLookup);
-                    operatorArena ??= pool.RentArena();
-                    outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                    outputBatch.Add(emitted.RawValues);
-                    if (outputBatch.IsFull)
-                    {
-                        RowBatch toYield = outputBatch;
-                        outputBatch = null;
-                        yield return toYield;
-                    }
-                }
-
-                // Return completed in-memory GroupState objects to the static pool.
-                pool.Backing.Return(workerGroups, _aggregateColumns.Count);
-
-                // Drain phase: re-aggregate spill files for this worker, skipping keys
-                // already complete in the worker's in-memory table.
-                if (workerSpilling[i])
-                {
-                    FlushSpillWriters(workerSpillWriters![i]!);
-
-                    for (int partition = 0; partition < SpillPartitionCount; partition++)
-                    {
-                        if (workerLocalSpillPaths[i] is null || workerLocalSpillPaths[i]![partition] is null)
-                        {
-                            continue;
-                        }
-
-                        foreach (Row groupRow in ReaggregatePartition(
-                            workerLocalSpillPaths[i]![partition],
-                            useSingleKey,
-                            useSingleKey ? singleKeyTables[i] : null,
-                            useSingleKey ? null : compositeKeyTables[i],
-                            hasOrderedAggregates, context,
-                            pool, ref outputLookup))
-                        {
-                            operatorArena ??= pool.RentArena();
-                            outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                            outputBatch.Add(groupRow.RawValues);
-                            if (outputBatch.IsFull)
-                            {
-                                RowBatch toYield = outputBatch;
-                                outputBatch = null;
-                                yield return toYield;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (outputBatch is not null)
-            {
-                RowBatch toYield = outputBatch;
-                outputBatch = null;
-                yield return toYield;
-            }
         }
         finally
         {
@@ -865,28 +524,26 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 context.ParallelismBudget!.Release(acquiredFromBudget);
             }
 
-            // Best-effort cleanup of any per-worker spill state created by the keyed path.
-            if (workerSpillWriters is not null)
-            {
-                for (int i = 0; i < workerSpillWriters.Length; i++)
-                {
-                    CleanupSpillFiles(workerSpillWriters[i]);
-                }
-            }
-
-            CleanupWorkerSpillDirectories(workerSpillDirectories);
-
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
 
     /// <summary>
     /// Single-worker hash aggregation: reads input batches synchronously into one
-    /// hash table (or one global GroupState) and spills to disk when the memory
-    /// budget is exceeded. No channels, no Tasks — avoids the per-row race in the
-    /// multi-worker path where the feeder may return an input batch before workers
-    /// finish reading rows from the channel.
+    /// hash table (or one global GroupState) and spills via <see cref="SpillReaderWriter"/>
+    /// when the memory budget is exceeded. No channels, no Tasks — avoids the per-row
+    /// race in the multi-worker path where the feeder may return an input batch before
+    /// workers finish reading rows from the channel.
     /// </summary>
+    /// <remarks>
+    /// Spill flow: each row whose hash routes to partition <c>p</c> is staged into
+    /// <c>partitionBuffers[p]</c> (a <see cref="RowBatch"/> over a per-operator
+    /// <c>bufferArena</c>) and flushed to the spiller when full. The spiller stabilises
+    /// into its consolidated arena, so spilled values resolve correctly during replay
+    /// regardless of which input batch produced them. Drain replays each partition,
+    /// builds a partition-local hash table, and emits one row per group, skipping keys
+    /// already represented in the in-memory table.
+    /// </remarks>
     private async IAsyncEnumerable<RowBatch> ExecuteHashSingleWorkerAsync(
         ExecutionContext context,
         Pool pool,
@@ -894,6 +551,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         bool isGlobalAggregation)
     {
         Arena? operatorArena = null;
+        Arena? bufferArena = null;
         ExpressionEvaluator evaluator = new(
             context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
@@ -907,10 +565,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
             ? new MemoryEstimator() : null;
 
-        BinaryWriter?[]? spillWriters = null;
-        bool[]? spillSchemaWritten = null;
-        string[]? spillPaths = null;
-        SpillSchemaState spillSchemaState = new();
+        SpillReaderWriter? spiller = null;
+        ColumnLookup? spillSchema = null;
+        RowBatch?[]? partitionBuffers = null;
         bool spilling = false;
 
         (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
@@ -959,18 +616,61 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                 ? singleKey.GetHashCode()
                                 : CompositeKeyHashMap<GroupState>.ComputeHash(
                                     compositeKeyScratch!.AsSpan(0, keyCount));
+                            int partition = (int)((uint)hashCode % SpillPartitionCount);
 
-                            ReadOnlySpan<DataValue> spillKeySpan = useSingleKey
-                                ? MemoryMarshal.CreateReadOnlySpan(ref singleKey, 1)
-                                : compositeKeyScratch!.AsSpan(0, keyCount);
-                            WriteSpillRow(
-                                hashCode, spillKeySpan,
-                                argumentScratch, sortKeyScratch,
-                                spillWriters!, spillSchemaWritten!, spillPaths!,
-                                spillSchemaState, _spillDirectory!);
+                            partitionBuffers![partition] ??= pool.RentRowBatch(
+                                spillSchema!, context.BatchSize, bufferArena!);
 
-                            // Accumulate into pre-existing in-memory groups so pre-spill
-                            // rows are not lost. ReaggregatePartition skips these during drain.
+                            DataValue[] flatValues = pool.RentDataValues(spillSchema!.Count);
+                            try
+                            {
+                                int offset = 0;
+                                if (useSingleKey)
+                                {
+                                    flatValues[offset++] = DataValueRetention.Stabilize(
+                                        singleKey, inputBatch.Arena, bufferArena!);
+                                }
+                                else
+                                {
+                                    for (int k = 0; k < keyCount; k++)
+                                    {
+                                        flatValues[offset++] = DataValueRetention.Stabilize(
+                                            compositeKeyScratch![k], inputBatch.Arena, bufferArena!);
+                                    }
+                                }
+                                for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+                                {
+                                    DataValue[] argValues = argumentScratch[aggregateIndex];
+                                    for (int argIndex = 0; argIndex < argValues.Length; argIndex++)
+                                    {
+                                        flatValues[offset++] = DataValueRetention.Stabilize(
+                                            argValues[argIndex], inputBatch.Arena, bufferArena!);
+                                    }
+                                    if (sortKeyScratch?[aggregateIndex] is DataValue[] sortKeys)
+                                    {
+                                        for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
+                                        {
+                                            flatValues[offset++] = DataValueRetention.Stabilize(
+                                                sortKeys[sortIndex], inputBatch.Arena, bufferArena!);
+                                        }
+                                    }
+                                }
+                                partitionBuffers[partition]!.Add(flatValues);
+                                flatValues = null!;
+                            }
+                            finally
+                            {
+                                if (flatValues is not null) pool.Backing.Return(flatValues);
+                            }
+
+                            if (partitionBuffers[partition]!.IsFull)
+                            {
+                                spiller!.Write(partitionBuffers[partition]!, partition);
+                                partitionBuffers[partition] = null;
+                            }
+
+                            // Pre-existing in-memory groups still receive new rows so pre-spill
+                            // data is not lost. Drain skips these keys via partition-local dedup.
                             GroupState? existing = null;
                             if (useSingleKey)
                                 singleKeyTable!.TryGetValue(singleKey, out existing);
@@ -1023,17 +723,19 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             if (estimatedMemory > memoryBudget!.Value)
                             {
                                 spilling = true;
-                                _spillDirectory = Path.Combine(
-                                    Path.GetTempPath(), $"datum-groupby-{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(_spillDirectory);
-                                spillWriters = new BinaryWriter?[SpillPartitionCount];
-                                spillSchemaWritten = new bool[SpillPartitionCount];
-                                spillPaths = new string[SpillPartitionCount];
+                                spillSchema = BuildSpillSchema();
+                                bufferArena = pool.RentArena();
+                                int hint = (int)Math.Min(memoryBudget.Value / 2, int.MaxValue);
+                                spiller = new SpillReaderWriter(
+                                    pool, spillSchema, context.SpillDirectory,
+                                    initialArenaCapacity: hint,
+                                    partitionCount: SpillPartitionCount);
+                                partitionBuffers = new RowBatch?[SpillPartitionCount];
 
                                 if (ExecutionTracer.IsEnabled)
                                 {
                                     ExecutionTracer.Write(
-                                        $"GROUP BY single-worker spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
+                                        $"GROUP BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
                                 }
                             }
                             else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
@@ -1046,6 +748,19 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 finally
                 {
                     pool.ReturnRowBatch(inputBatch);
+                }
+            }
+
+            // Flush remaining partition buffers before drain.
+            if (spiller is not null && partitionBuffers is not null)
+            {
+                for (int p = 0; p < partitionBuffers.Length; p++)
+                {
+                    if (partitionBuffers[p] is not null)
+                    {
+                        spiller.Write(partitionBuffers[p]!, p);
+                        partitionBuffers[p] = null;
+                    }
                 }
             }
 
@@ -1088,24 +803,103 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
             }
 
-            // Drain spill files (if any).
+            // Drain spilled partitions: rebuild partition-local hash tables from the
+            // replayed spill rows, skipping keys already represented in the in-memory
+            // table (those rows have already been accumulated into the in-memory group
+            // via the during-spill side-channel).
             if (spilling)
             {
-                FlushSpillWriters(spillWriters!);
-
                 for (int partition = 0; partition < SpillPartitionCount; partition++)
                 {
-                    if (spillPaths![partition] is null) continue;
+                    if (spiller!.RowsWrittenInPartition(partition) == 0) continue;
 
-                    foreach (Row groupRow in ReaggregatePartition(
-                        spillPaths[partition], useSingleKey,
-                        useSingleKey ? singleKeyTable : null,
-                        useSingleKey ? null : compositeKeyTable,
-                        hasOrderedAggregates, context, pool, ref outputLookup))
+                    Dictionary<DataValue, GroupState>? partSingleGroups = useSingleKey
+                        ? new Dictionary<DataValue, GroupState>() : null;
+                    Dictionary<CompositeKey, GroupState>? partCompositeGroups = !useSingleKey
+                        ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance) : null;
+
+                    await foreach (RowBatch spillBatch in spiller.ReplayPartitionAsync(
+                        context, spillSchema!, partition).ConfigureAwait(false))
                     {
+                        try
+                        {
+                            for (int sb = 0; sb < spillBatch.Count; sb++)
+                            {
+                                Row spillRow = spillBatch[sb];
+                                int offset = 0;
+
+                                DataValue[] partKey = new DataValue[keyCount];
+                                for (int k = 0; k < keyCount; k++)
+                                {
+                                    partKey[k] = spillRow[offset++];
+                                }
+
+                                bool isAlreadyInMemory = useSingleKey
+                                    ? singleKeyTable!.ContainsKey(partKey[0])
+                                    : compositeKeyTable!.ContainsKey(new CompositeKey(partKey));
+                                if (isAlreadyInMemory) continue;
+
+                                GroupState partGroup;
+                                if (useSingleKey)
+                                {
+                                    if (!partSingleGroups!.TryGetValue(partKey[0], out GroupState? pg))
+                                    {
+                                        pg = CreateGroupState(pool);
+                                        pg.KeyValues = partKey;
+                                        partSingleGroups[partKey[0]] = pg;
+                                    }
+                                    partGroup = pg;
+                                }
+                                else
+                                {
+                                    CompositeKey partCk = new(partKey);
+                                    if (!partCompositeGroups!.TryGetValue(partCk, out GroupState? pg))
+                                    {
+                                        pg = CreateGroupState(pool);
+                                        pg.KeyValues = partKey;
+                                        partCompositeGroups[partCk] = pg;
+                                    }
+                                    partGroup = pg;
+                                }
+
+                                for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+                                {
+                                    DataValue[] argValues = argumentScratch[aggregateIndex];
+                                    for (int argIndex = 0; argIndex < argValues.Length; argIndex++)
+                                    {
+                                        argValues[argIndex] = spillRow[offset++];
+                                    }
+                                    if (sortKeyScratch?[aggregateIndex] is DataValue[] sortKeys)
+                                    {
+                                        for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
+                                        {
+                                            sortKeys[sortIndex] = spillRow[offset++];
+                                        }
+                                    }
+                                }
+
+                                AccumulateRow(partGroup, argumentScratch, sortKeyScratch, context);
+                            }
+                        }
+                        finally
+                        {
+                            pool.ReturnRowBatch(spillBatch);
+                        }
+                    }
+
+                    IEnumerable<GroupState> partGroups = useSingleKey
+                        ? partSingleGroups!.Values
+                        : partCompositeGroups!.Values;
+
+                    if (hasOrderedAggregates)
+                        FlushOrderedBuffers(partGroups, context);
+
+                    foreach (GroupState pg in partGroups)
+                    {
+                        Row emitted = EmitGroupRow(pg, isGlobalAggregation: false, pool, ref outputLookup);
                         operatorArena ??= pool.RentArena();
                         outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
-                        outputBatch.Add(groupRow.RawValues);
+                        outputBatch.Add(emitted.RawValues);
                         if (outputBatch.IsFull)
                         {
                             RowBatch toYield = outputBatch;
@@ -1113,11 +907,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             yield return toYield;
                         }
                     }
+
+                    pool.Backing.Return(partGroups, _aggregateColumns.Count);
                 }
             }
 
-            // In-memory groups are returned via Dispose's pool.Backing.Return path
-            // for symmetry with the multi-worker emit pattern.
             pool.Backing.Return(inMemoryGroups, _aggregateColumns.Count);
 
             if (outputBatch is not null)
@@ -1129,8 +923,18 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         }
         finally
         {
-            CleanupSpillFiles(spillWriters);
-            CleanupSpillDirectory();
+            if (partitionBuffers is not null)
+            {
+                for (int p = 0; p < partitionBuffers.Length; p++)
+                {
+                    if (partitionBuffers[p] is not null)
+                    {
+                        pool.ReturnRowBatch(partitionBuffers[p]!);
+                    }
+                }
+            }
+            spiller?.Dispose();
+            if (bufferArena is not null) pool.ReturnArena(bufferArena);
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
@@ -1221,6 +1025,57 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// Uses <see cref="_distinctMemoryBudgetBytes"/> (computed once by
     /// <see cref="InitializeDistinctBudgets"/>) for per-group DISTINCT spill budgets.
     /// </remarks>
+    /// <summary>
+    /// Builds the schema used by spilled rows: <c>__key_0...__key_{N-1}</c> for the GROUP BY
+    /// keys, then per aggregate <c>__arg_{i}_{j}</c> for each argument expression and
+    /// <c>__sort_{i}_{k}</c> for each ORDER BY expression. CountStar contributes no args.
+    /// Captured once on first spill and reused by every partition.
+    /// </summary>
+    private ColumnLookup BuildSpillSchema()
+    {
+        int keyCount = _groupByExpressions.Count;
+        int extraCount = 0;
+        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+        {
+            AggregateColumn column = _aggregateColumns[aggregateIndex];
+            if (!column.IsCountStar)
+            {
+                extraCount += column.ArgumentExpressions.Count;
+            }
+            if (column.OrderBy is not null)
+            {
+                extraCount += column.OrderBy.Count;
+            }
+        }
+
+        string[] names = new string[keyCount + extraCount];
+        int next = 0;
+        for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            names[next++] = $"__key_{keyIndex}";
+        }
+        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+        {
+            AggregateColumn column = _aggregateColumns[aggregateIndex];
+            if (!column.IsCountStar)
+            {
+                for (int argIndex = 0; argIndex < column.ArgumentExpressions.Count; argIndex++)
+                {
+                    names[next++] = $"__arg_{aggregateIndex}_{argIndex}";
+                }
+            }
+            if (column.OrderBy is not null)
+            {
+                for (int sortIndex = 0; sortIndex < column.OrderBy.Count; sortIndex++)
+                {
+                    names[next++] = $"__sort_{aggregateIndex}_{sortIndex}";
+                }
+            }
+        }
+
+        return new ColumnLookup(names);
+    }
+
     private GroupState CreateGroupState(Pool pool)
     {
         int count = _aggregateColumns.Count;
@@ -1526,424 +1381,15 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         return new Row(outputLookup, values);
     }
 
-    // ---------------------------------------------------------------
-    //  Spill-to-disk infrastructure
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// Writes a spill row containing group keys and all aggregate arguments.
-    /// The schema is: key_0, ..., key_N, arg_0_0, ..., arg_M_K, [sort_0_0, ...].
-    /// </summary>
-    private void WriteSpillRow(
-        int hashCode,
-        ReadOnlySpan<DataValue> keyValues,
-        DataValue[][] allArguments,
-        DataValue[]?[]? allSortKeys,
-        BinaryWriter?[] writers,
-        bool[] schemaWritten,
-        string[] paths,
-        SpillSchemaState schemaState,
-        string spillDirectory)
-    {
-        int partition = AssignPartition(hashCode);
-
-        if (writers[partition] is null)
-        {
-            paths[partition] = Path.Combine(spillDirectory, $"groupby_{partition}.spill");
-            FileStream fileStream = new(paths[partition], FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-            writers[partition] = new BinaryWriter(fileStream);
-        }
-
-        // Build the schema once (all spill rows share the same layout).
-        if (schemaState.SchemaNames is null)
-        {
-            List<string> names = new();
-
-            for (int index = 0; index < keyValues.Length; index++)
-            {
-                names.Add($"__key_{index}");
-            }
-
-            for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-            {
-                for (int argIndex = 0; argIndex < allArguments[aggregateIndex].Length; argIndex++)
-                {
-                    names.Add($"__arg_{aggregateIndex}_{argIndex}");
-                }
-
-                if (allSortKeys?[aggregateIndex] is DataValue[] sortKeys)
-                {
-                    for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
-                    {
-                        names.Add($"__sort_{aggregateIndex}_{sortIndex}");
-                    }
-                }
-            }
-
-            schemaState.SchemaNames = names.ToArray();
-            schemaState.ColumnCount = names.Count;
-            schemaState.FlatValues = new DataValue[names.Count];
-            schemaState.SchemaLookup = new ColumnLookup(schemaState.SchemaNames);
-            schemaState.SpillRow = new Row(schemaState.SchemaLookup, schemaState.FlatValues);
-        }
-
-        // Build the flat values array (reuses the buffer cached on schemaState).
-        DataValue[] flatValues = schemaState.FlatValues!;
-        int offset = 0;
-
-        for (int index = 0; index < keyValues.Length; index++)
-        {
-            flatValues[offset++] = keyValues[index];
-        }
-
-        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-        {
-            for (int argIndex = 0; argIndex < allArguments[aggregateIndex].Length; argIndex++)
-            {
-                flatValues[offset++] = allArguments[aggregateIndex][argIndex];
-            }
-
-            if (allSortKeys?[aggregateIndex] is DataValue[] sortKeys)
-            {
-                for (int sortIndex = 0; sortIndex < sortKeys.Length; sortIndex++)
-                {
-                    flatValues[offset++] = sortKeys[sortIndex];
-                }
-            }
-        }
-
-        Row spillRow = schemaState.SpillRow.GetValueOrDefault();
-
-        if (!schemaWritten[partition])
-        {
-            RowSerializer.WriteSchema(writers[partition]!, spillRow);
-            schemaWritten[partition] = true;
-        }
-
-        RowSerializer.WriteRow(writers[partition]!, spillRow);
-    }
-
-    /// <summary>
-    /// Reads back a spill partition and re-aggregates its rows, returning one output
-    /// row per group. Groups that were already aggregated in memory are skipped.
-    /// </summary>
-    /// <summary>
-    /// Re-aggregates a single spill partition file, skipping groups that
-    /// already exist in the caller's in-memory hash table (Dictionary-based).
-    /// Used by the parallel aggregation path.
-    /// </summary>
-    private List<Row> ReaggregatePartition(
-        string path,
-        bool useSingleKey,
-        Dictionary<DataValue, GroupState>? inMemorySingleKeyGroups,
-        Dictionary<CompositeKey, GroupState>? inMemoryCompositeKeyGroups,
-        bool hasOrderedAggregates,
-        ExecutionContext context,
-        Pool pool,
-        ref ColumnLookup? outputLookup)
-    {
-        Func<DataValue[], bool> isKeyInMemory = useSingleKey
-            ? keyValues => inMemorySingleKeyGroups!.ContainsKey(keyValues[0])
-            : keyValues => inMemoryCompositeKeyGroups!.ContainsKey(new CompositeKey(keyValues));
-
-        return ReaggregatePartitionCore(
-            path, useSingleKey, isKeyInMemory, hasOrderedAggregates,
-            context, pool, ref outputLookup);
-    }
-
-    /// <summary>
-    /// Re-aggregates a single spill partition file, skipping groups that
-    /// already exist in the caller's in-memory custom hash maps.
-    /// Used by the serial aggregation path.
-    /// </summary>
-    private List<Row> ReaggregatePartition(
-        string path,
-        bool useSingleKey,
-        DataValueHashMap<GroupState>? inMemorySingleKeyGroups,
-        CompositeKeyHashMap<GroupState>? inMemoryCompositeKeyGroups,
-        bool hasOrderedAggregates,
-        ExecutionContext context,
-        Pool pool,
-        ref ColumnLookup? outputLookup)
-    {
-        Func<DataValue[], bool> isKeyInMemory = useSingleKey
-            ? keyValues => inMemorySingleKeyGroups!.ContainsKey(keyValues[0])
-            : keyValues => inMemoryCompositeKeyGroups!.ContainsKey(keyValues.AsSpan());
-
-        return ReaggregatePartitionCore(
-            path, useSingleKey, isKeyInMemory, hasOrderedAggregates,
-            context, pool, ref outputLookup);
-    }
-
-    /// <summary>
-    /// Core spill-partition re-aggregation logic shared by both the
-    /// <see cref="Dictionary{TKey,TValue}"/>-based and custom hash map overloads.
-    /// </summary>
-    private List<Row> ReaggregatePartitionCore(
-        string path,
-        bool useSingleKey,
-        Func<DataValue[], bool> isKeyInMemory,
-        bool hasOrderedAggregates,
-        ExecutionContext context,
-        Pool pool,
-        ref ColumnLookup? outputLookup)
-    {
-        int keyCount = _groupByExpressions.Count;
-        Dictionary<DataValue, GroupState>? partitionSingleGroups =
-            useSingleKey ? new() : null;
-        Dictionary<CompositeKey, GroupState>? partitionCompositeGroups =
-            !useSingleKey ? new() : null;
-
-        using FileStream fileStream = new(path, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
-        using BinaryReader reader = new(fileStream);
-
-        RowSerializer.ReadSchema(reader, out ColumnLookup spillSchemaLookup);
-
-        // Pre-allocate scratch buffers for aggregate arguments and sort keys during
-        // reaggregation, sized to the maximum counts across all aggregates.
-        int maxArgCount = 0;
-        int maxSortCount = 0;
-        for (int i = 0; i < _aggregateColumns.Count; i++)
-        {
-            if (!_aggregateColumns[i].IsCountStar)
-                maxArgCount = Math.Max(maxArgCount, _aggregateColumns[i].ArgumentExpressions.Count);
-            if (_aggregateColumns[i].OrderBy is not null)
-                maxSortCount = Math.Max(maxSortCount, _aggregateColumns[i].OrderBy!.Count);
-        }
-        DataValue[]? spillArgScratch = maxArgCount > 0 ? new DataValue[maxArgCount] : null;
-        DataValue[]? spillSortScratch = maxSortCount > 0 ? new DataValue[maxSortCount] : null;
-
-        while (fileStream.Position < fileStream.Length)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-
-            Row spillRow = new(spillSchemaLookup, RowSerializer.ReadRow(reader, pool, spillSchemaLookup));
-
-            // Extract group keys from the spill row.
-            DataValue[] keyValues = new DataValue[keyCount];
-            for (int index = 0; index < keyCount; index++)
-            {
-                keyValues[index] = spillRow[index];
-            }
-
-            // Skip rows whose group was already aggregated in memory.
-            if (isKeyInMemory(keyValues))
-            {
-                continue;
-            }
-
-            // Resolve or create the group for this partition.
-            GroupState group;
-
-            if (useSingleKey)
-            {
-                if (!partitionSingleGroups!.TryGetValue(keyValues[0], out group!))
-                {
-                    group = CreateGroupState(pool);
-                    group.KeyValues = keyValues;
-                    partitionSingleGroups[keyValues[0]] = group;
-                }
-            }
-            else
-            {
-                CompositeKey compositeKey = new(keyValues);
-
-                if (!partitionCompositeGroups!.TryGetValue(compositeKey, out group!))
-                {
-                    group = CreateGroupState(pool);
-                    group.KeyValues = keyValues;
-                    partitionCompositeGroups[compositeKey] = group;
-                }
-            }
-
-            // Extract aggregate arguments from the spill row and accumulate.
-            int offset = keyCount;
-
-            for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-            {
-                AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
-
-                if (aggregateColumn.IsCountStar)
-                {
-                    group.Accumulators[aggregateIndex].Accumulate(ReadOnlySpan<DataValue>.Empty);
-                }
-                else
-                {
-                    int argCount = aggregateColumn.ArgumentExpressions.Count;
-
-                    if (aggregateColumn.OrderBy is not null)
-                    {
-                        // Ordered aggregate: read arguments and sort keys into
-                        // pre-allocated scratch buffers, then append to the flat buffer.
-                        for (int argIndex = 0; argIndex < argCount; argIndex++)
-                        {
-                            spillArgScratch![argIndex] = spillRow[offset++];
-                        }
-
-                        int sortCount = aggregateColumn.OrderBy.Count;
-                        for (int sortIndex = 0; sortIndex < sortCount; sortIndex++)
-                        {
-                            spillSortScratch![sortIndex] = spillRow[offset++];
-                        }
-
-                        group.OrderedBuffers![aggregateIndex]!.Add(
-                            spillArgScratch!, spillSortScratch!);
-                    }
-                    else
-                    {
-                        // Non-ordered aggregate: reuse the pre-allocated scratch
-                        // buffer — Accumulate reads the span synchronously and
-                        // does not retain a reference.
-                        for (int argIndex = 0; argIndex < argCount; argIndex++)
-                        {
-                            spillArgScratch![argIndex] = spillRow[offset++];
-                        }
-
-                        group.Accumulators[aggregateIndex].Accumulate(
-                            spillArgScratch!.AsSpan(0, argCount));
-                    }
-                }
-            }
-        }
-
-        // Flush ordered buffers for this partition.
-        if (hasOrderedAggregates)
-        {
-            IEnumerable<GroupState> partitionGroups = useSingleKey
-                ? partitionSingleGroups!.Values
-                : partitionCompositeGroups!.Values;
-
-            FlushOrderedBuffers(partitionGroups, context);
-        }
-
-        // Emit one row per group in this partition.
-        IEnumerable<GroupState> allPartitionGroups = useSingleKey
-            ? partitionSingleGroups!.Values
-            : partitionCompositeGroups!.Values;
-
-        List<Row> results = new();
-        foreach (GroupState group in allPartitionGroups)
-        {
-            results.Add(EmitGroupRow(group, isGlobalAggregation: false, pool, ref outputLookup));
-        }
-
-        // Return partition GroupState objects to the static pool.
-        pool.Backing.Return(allPartitionGroups, _aggregateColumns.Count);
-
-        return results;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int AssignPartition(int hashCode)
-    {
-        return (int)((uint)hashCode % SpillPartitionCount);
-    }
-
-    private static void FlushSpillWriters(BinaryWriter?[] writers)
-    {
-        for (int index = 0; index < writers.Length; index++)
-        {
-            if (writers[index] is not null)
-            {
-                writers[index]!.Flush();
-                writers[index]!.Dispose();
-                writers[index] = null;
-            }
-        }
-    }
-
-    private void CleanupSpillFiles(BinaryWriter?[]? writers)
-    {
-        if (writers is not null)
-        {
-            for (int index = 0; index < writers.Length; index++)
-            {
-                try
-                {
-                    writers[index]?.Dispose();
-                }
-                catch
-                {
-                    // Best-effort cleanup.
-                }
-            }
-        }
-
-        CleanupSpillDirectory();
-    }
-
-    private void CleanupSpillDirectory()
-    {
-        if (_spillDirectory is not null && Directory.Exists(_spillDirectory))
-        {
-            try
-            {
-                Directory.Delete(_spillDirectory, recursive: true);
-            }
-            catch
-            {
-                // Best-effort cleanup.
-            }
-
-            _spillDirectory = null;
-        }
-    }
-
-    /// <summary>
-    /// Deletes each non-null directory in <paramref name="directories"/> created by
-    /// <see cref="ExecuteHashAsync"/> workers during spill-to-disk.
-    /// Called from the method's <see langword="finally"/> block; errors are silently swallowed.
-    /// </summary>
-    private static void CleanupWorkerSpillDirectories(string?[]? directories)
-    {
-        if (directories is null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < directories.Length; i++)
-        {
-            if (directories[i] is not null && Directory.Exists(directories[i]))
-            {
-                try
-                {
-                    Directory.Delete(directories[i]!, recursive: true);
-                }
-                catch
-                {
-                    // Best-effort cleanup.
-                }
-            }
-        }
-    }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        CleanupSpillDirectory();
+        // SpillReaderWriter ownership is per-iterator (constructed inside
+        // ExecuteHashSingleWorkerAsync, disposed in its finally block). No
+        // operator-scoped spill state remains.
     }
 
-    /// <summary>
-    /// Mutable spill-row schema state for one spill file set. Built lazily on the first
-    /// row written and reused for all subsequent rows in the same spill context.
-    /// </summary>
-    private sealed class SpillSchemaState
-    {
-        /// <summary>Column names for the flat spill row layout.</summary>
-        public string[]? SchemaNames;
-
-        /// <summary>Column lookup paired with <see cref="SchemaNames"/>.</summary>
-        public ColumnLookup? SchemaLookup;
-
-        /// <summary>Total number of columns in the spill row layout.</summary>
-        public int ColumnCount;
-
-        /// <summary>Reusable flat values buffer, allocated once when schema is built.</summary>
-        public DataValue[]? FlatValues;
-
-        /// <summary>Reusable spill row, allocated once when schema is built.</summary>
-        public Row? SpillRow;
-    }
 
 }
 
