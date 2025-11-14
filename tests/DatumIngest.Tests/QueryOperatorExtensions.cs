@@ -15,7 +15,10 @@ internal static class QueryOperatorExtensions
 {
     /// <summary>
     /// Executes the operator and collects all rows into a list with deep-copied
-    /// backing arrays. Safe to use after the query stream and pool are disposed.
+    /// backing arrays whose arena-backed payloads are stabilised into
+    /// <c>context.Store</c>. Safe to use after the query stream and pool are
+    /// disposed; assertions reading non-inline values should pass
+    /// <c>context.Store</c> as the resolution store.
     /// </summary>
     internal static async Task<List<Row>> CollectRowsAsync(
         this IQueryOperator plan, ExecutionContext context)
@@ -26,7 +29,7 @@ internal static class QueryOperatorExtensions
         {
             for (int i = 0; i < batch.Count; i++)
             {
-                rows.Add(batch[i].CloneForTest());
+                rows.Add(batch[i].CloneForTest(batch.Arena, context.Store));
             }
 
             context.Pool.ReturnRowBatch(batch);

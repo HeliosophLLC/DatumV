@@ -31,7 +31,7 @@ public sealed class CountFunction : IAggregateFunction
     {
         private long _count;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments.Length == 0)
             {
@@ -52,7 +52,7 @@ public sealed class CountFunction : IAggregateFunction
             _count += otherAccumulator._count;
         }
 
-        public DataValue Result => DataValue.FromInt64(_count);
+        public DataValue Result(in InvocationFrame frame) => DataValue.FromInt64(_count);
 
         /// <inheritdoc />
         public void Reset()

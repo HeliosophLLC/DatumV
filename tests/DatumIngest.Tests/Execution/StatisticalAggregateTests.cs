@@ -14,6 +14,8 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class StatisticalAggregateTests : ServiceTestBase
 {
+    private static readonly DatumIngest.Functions.InvocationFrame _testFrame = DatumIngest.Functions.InvocationFrame.Symmetric(new DatumIngest.Model.Arena());
+
     private static readonly string[] XColumns = ["x"];
     private static readonly string[] CatXColumns = ["cat", "x"];
     private static readonly string[] XpColumns = ["x", "p"];
@@ -175,8 +177,8 @@ public class StatisticalAggregateTests : ServiceTestBase
 
         Assert.Equal(2, results.Count);
 
-        Row groupA = results.First(row => row["cat"].AsString() == "A");
-        Row groupB = results.First(row => row["cat"].AsString() == "B");
+        Row groupA = results.First(row => row["cat"].AsString(_testFrame.Target) == "A");
+        Row groupB = results.First(row => row["cat"].AsString(_testFrame.Target) == "B");
 
         Assert.Equal(4.0, groupA["VARIANCE(x)"].AsFloat64(), 0.001);
         Assert.Equal(0.0, groupB["VARIANCE(x)"].AsFloat64(), 0.001);
@@ -414,8 +416,8 @@ public class StatisticalAggregateTests : ServiceTestBase
 
         Assert.Equal(2, results.Count);
 
-        Row groupA = results.First(row => row["cat"].AsString() == "A");
-        Row groupB = results.First(row => row["cat"].AsString() == "B");
+        Row groupA = results.First(row => row["cat"].AsString(_testFrame.Target) == "A");
+        Row groupB = results.First(row => row["cat"].AsString(_testFrame.Target) == "B");
 
         Assert.Equal(20.0, groupA["MEDIAN(x)"].AsFloat64());
         Assert.Equal(2.5, groupB["MEDIAN(x)"].AsFloat64());
@@ -622,7 +624,7 @@ public class StatisticalAggregateTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         Assert.Throws<ArgumentException>(() =>
-            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1.5f)]));
+            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1.5f)], in _testFrame));
     }
 
     [Fact]
@@ -632,7 +634,7 @@ public class StatisticalAggregateTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         Assert.Throws<ArgumentException>(() =>
-            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(-0.1f)]));
+            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(-0.1f)], in _testFrame));
     }
 
     // ─────────────── Argument validation ───────────────

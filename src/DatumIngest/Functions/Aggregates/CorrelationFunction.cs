@@ -65,7 +65,7 @@ public sealed class CorrelationFunction : IAggregateFunction
         private double _m2X;
         private double _coMoment;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull || arguments[1].IsNull) return;
 
@@ -120,24 +120,21 @@ public sealed class CorrelationFunction : IAggregateFunction
             _count = combinedCount;
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_count < 2)
             {
-                if (_count < 2)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                double denominator = System.Math.Sqrt(_m2Y * _m2X);
-
-                if (denominator == 0.0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                return DataValue.FromFloat64(_coMoment / denominator);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            double denominator = System.Math.Sqrt(_m2Y * _m2X);
+
+            if (denominator == 0.0)
+            {
+                return DataValue.Null(DataKind.Float64);
+            }
+
+            return DataValue.FromFloat64(_coMoment / denominator);
         }
 
         /// <inheritdoc />

@@ -28,6 +28,15 @@ public sealed class ExpressionEvaluator
     /// behaviour should invoke the <see cref="EvaluationFrame"/>-based overloads instead.
     /// </summary>
     private readonly IValueStore? _store;
+
+    /// <summary>
+    /// The persistent value store this evaluator was constructed with, or <see langword="null"/>
+    /// if none was supplied. Exposed so callers that don't have a separate
+    /// <see cref="EvaluationFrame"/>/<see cref="InvocationFrame"/> in scope can still build one
+    /// keyed off the same store.
+    /// </summary>
+    public IValueStore? Store => _store;
+
     private readonly Row? _outerRow;
     private readonly Schema? _sourceSchema;
 

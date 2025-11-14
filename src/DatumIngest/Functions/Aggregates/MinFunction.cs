@@ -39,7 +39,7 @@ public sealed class MinFunction : IAggregateFunction
         // carries the correct input kind rather than an arbitrary default.
         private DataKind _inputKind = DataKind.Float64;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             DataValue value = arguments[0];
             if (value.IsNull) return;
@@ -68,7 +68,7 @@ public sealed class MinFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result => _minimum ?? DataValue.Null(_inputKind);
+        public DataValue Result(in InvocationFrame frame) => _minimum ?? DataValue.Null(_inputKind);
 
         /// <inheritdoc />
         public void Reset()

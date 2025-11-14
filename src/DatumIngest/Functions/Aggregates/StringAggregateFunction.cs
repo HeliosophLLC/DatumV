@@ -15,7 +15,7 @@ namespace DatumIngest.Functions.Aggregates;
 /// <para>
 /// Returns null if all values are null. Null values are skipped.
 /// When ORDER BY is specified, the GroupByOperator
-/// sorts buffered rows before calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue})"/>.
+/// sorts buffered rows before calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue}, in InvocationFrame)"/>.
 /// </para>
 /// </summary>
 public sealed class StringAggregateFunction : IAggregateFunction
@@ -64,31 +64,17 @@ public sealed class StringAggregateFunction : IAggregateFunction
         private string _separator = "";
         private bool _separatorCaptured;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (!_separatorCaptured && !arguments[1].IsNull)
             {
-                _separator = arguments[1].AsString();
+                _separator = arguments[1].AsString(frame.Source);
                 _separatorCaptured = true;
             }
 
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsString());
-        }
-
-        /// <inheritdoc />
-        public void Accumulate(ReadOnlySpan<DataValue> arguments, IValueStore store)
-        {
-            if (!_separatorCaptured && !arguments[1].IsNull)
-            {
-                _separator = arguments[1].AsString(store);
-                _separatorCaptured = true;
-            }
-
-            if (arguments[0].IsNull) return;
-
-            _values.Add(arguments[0].AsString(store));
+            _values.Add(arguments[0].AsString(frame.Source));
         }
 
         /// <inheritdoc/>
@@ -104,17 +90,14 @@ public sealed class StringAggregateFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_values.Count == 0)
             {
-                if (_values.Count == 0)
-                {
-                    return DataValue.Null(DataKind.String);
-                }
-
-                return DataValue.FromString(string.Join(_separator, _values));
+                return DataValue.Null(DataKind.String);
             }
+
+            return DataValue.FromString(string.Join(_separator, _values), frame.Target);
         }
 
         /// <inheritdoc />

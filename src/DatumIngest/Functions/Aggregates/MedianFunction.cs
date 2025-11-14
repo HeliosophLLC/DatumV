@@ -48,7 +48,7 @@ public sealed class MedianFunction : IAggregateFunction
     {
         private readonly List<double> _values = [];
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -62,28 +62,25 @@ public sealed class MedianFunction : IAggregateFunction
             _values.AddRange(otherAccumulator._values);
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_values.Count == 0)
             {
-                if (_values.Count == 0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                _values.Sort();
-                int count = _values.Count;
-                int mid = count / 2;
-
-                if (count % 2 == 1)
-                {
-                    return DataValue.FromFloat64(_values[mid]);
-                }
-
-                // Even count: average of the two middle values.
-                double median = (_values[mid - 1] + _values[mid]) / 2.0;
-                return DataValue.FromFloat64(median);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            _values.Sort();
+            int count = _values.Count;
+            int mid = count / 2;
+
+            if (count % 2 == 1)
+            {
+                return DataValue.FromFloat64(_values[mid]);
+            }
+
+            // Even count: average of the two middle values.
+            double median = (_values[mid - 1] + _values[mid]) / 2.0;
+            return DataValue.FromFloat64(median);
         }
 
         /// <inheritdoc />

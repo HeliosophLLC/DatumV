@@ -261,18 +261,23 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
             int pivotCellCount = pivotValues.Count * _aggregateColumns.Count;
             int totalOutputFields = keyCount + pivotCellCount;
 
+            // Pivot's spill+replay arena story is unfixed (see project_spill_operators_broken.md);
+            // for now use the per-query Arena as both Source and Target so accumulators have a
+            // long-lived store regardless of which input batch contributed each row.
+            InvocationFrame frame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
+
             // Pass 2: group by key columns, accumulate aggregates per (pivot value, aggregate) cell.
             Dictionary<DataValue, PivotGroupState> singleKeyGroups = new();
             Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups = new();
             PivotGroupState? globalGroup = keyColumnNames.Count == 0
-                ? CreateGroupState(pivotValues.Count)
+                ? CreateGroupState(pivotValues.Count, in frame)
                 : null;
 
             // Process in-memory rows.
             foreach (Row row in bufferedRows)
             {
                 AccumulatePivotRow(row, evaluator, pivotValueIndex, keyColumnNames,
-                    singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count);
+                    singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count, in frame);
             }
 
             // Process spilled rows.
@@ -290,7 +295,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     Row row = RowSerializer.ReadRow(reader, schemaNames, schemaNameIndex);
 
                     AccumulatePivotRow(row, evaluator, pivotValueIndex, keyColumnNames,
-                        singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count);
+                        singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count, in frame);
                 }
             }
 
@@ -318,7 +323,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
                 for (int cellIndex = 0; cellIndex < pivotCellCount; cellIndex++)
                 {
-                    values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result;
+                    values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result(in frame);
                 }
 
                 outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
@@ -354,7 +359,8 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
         Dictionary<DataValue, PivotGroupState> singleKeyGroups,
         Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups,
         PivotGroupState? globalGroup,
-        int pivotValueCount)
+        int pivotValueCount,
+        in InvocationFrame frame)
     {
         DataValue pivotValue = evaluator.Evaluate(_pivotColumnExpression, row);
 
@@ -365,7 +371,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
         PivotGroupState group = ResolveGroup(
             row, keyColumnNames, evaluator, singleKeyGroups, compositeKeyGroups, globalGroup,
-            pivotValueCount, out DataValue[]? keyValues);
+            pivotValueCount, in frame, out DataValue[]? keyValues);
 
         for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
         {
@@ -374,7 +380,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
             if (aggregateColumn.IsCountStar)
             {
-                group.CellAccumulators[cellIndex].Accumulate(ReadOnlySpan<DataValue>.Empty);
+                group.CellAccumulators[cellIndex].Accumulate(ReadOnlySpan<DataValue>.Empty, in frame);
             }
             else
             {
@@ -384,7 +390,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     arguments[argIndex] = evaluator.Evaluate(aggregateColumn.ArgumentExpressions[argIndex], row);
                 }
 
-                group.CellAccumulators[cellIndex].Accumulate(arguments);
+                group.CellAccumulators[cellIndex].Accumulate(arguments, in frame);
             }
         }
 
@@ -446,6 +452,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
         Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups,
         PivotGroupState? globalGroup,
         int pivotValueCount,
+        in InvocationFrame frame,
         out DataValue[]? keyValues)
     {
         if (keyColumnNames.Count == 0)
@@ -460,7 +467,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
             if (!singleKeyGroups.TryGetValue(key, out PivotGroupState? group))
             {
-                group = CreateGroupState(pivotValueCount);
+                group = CreateGroupState(pivotValueCount, in frame);
                 singleKeyGroups[key] = group;
                 keyValues = [key];
                 return group;
@@ -481,7 +488,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
         if (!compositeKeyGroups.TryGetValue(compositeKey, out PivotGroupState? compositeGroup))
         {
-            compositeGroup = CreateGroupState(pivotValueCount);
+            compositeGroup = CreateGroupState(pivotValueCount, in frame);
             compositeKeyGroups[compositeKey] = compositeGroup;
             keyValues = keyParts;
             return compositeGroup;
@@ -491,7 +498,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
         return compositeGroup;
     }
 
-    private PivotGroupState CreateGroupState(int pivotValueCount)
+    private PivotGroupState CreateGroupState(int pivotValueCount, in InvocationFrame frame)
     {
         int cellCount = pivotValueCount * _aggregateColumns.Count;
         IAggregateAccumulator[] accumulators = new IAggregateAccumulator[cellCount];

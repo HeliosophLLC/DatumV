@@ -41,6 +41,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     private readonly int _argumentCount;
     private readonly long? _memoryBudgetBytes;
     private readonly Func<IAggregateAccumulator>? _accumulatorFactory;
+    private readonly InvocationFrame _capturedFrame;
     private HashSet<DataValue>? _singleArgumentSet;
     private HashSet<CompositeKey>? _multiArgumentSet;
 
@@ -65,6 +66,11 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// The number of arguments the aggregate function expects.
     /// Determines whether single-key or composite-key deduplication is used.
     /// </param>
+    /// <param name="frame">
+    /// Captured per-call invocation context, reused for inner-accumulator
+    /// <c>Accumulate</c>/<c>Result</c> calls during <c>Merge</c> and spill drain
+    /// where no per-call frame flows through.
+    /// </param>
     /// <param name="memoryBudgetBytes">
     /// Optional memory budget in bytes. When the in-memory hash set's estimated size
     /// exceeds this budget, values are spilled to hash-partitioned temporary files.
@@ -83,6 +89,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     public DistinctAccumulatorDecorator(
         IAggregateAccumulator inner,
         int argumentCount,
+        in InvocationFrame frame,
         long? memoryBudgetBytes = null,
         Func<IAggregateAccumulator>? accumulatorFactory = null,
         int estimatedDistinctCount = 0)
@@ -91,6 +98,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
         _argumentCount = argumentCount;
         _memoryBudgetBytes = memoryBudgetBytes;
         _accumulatorFactory = accumulatorFactory;
+        _capturedFrame = frame;
 
         if (argumentCount <= 1)
         {
@@ -107,7 +115,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     }
 
     /// <inheritdoc />
-    public void Accumulate(ReadOnlySpan<DataValue> arguments)
+    public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         if (_spilling)
         {
@@ -135,7 +143,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
         if (isNew)
         {
-            _inner.Accumulate(arguments);
+            _inner.Accumulate(arguments, in frame);
 
             // Check whether the hash set has grown beyond the memory budget.
             if (_memoryBudgetBytes.HasValue)
@@ -172,7 +180,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             {
                 if (_singleArgumentSet.Add(value))
                 {
-                    _inner.Accumulate([value]);
+                    _inner.Accumulate([value], in _capturedFrame);
                 }
             }
         }
@@ -182,20 +190,17 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             {
                 if (_multiArgumentSet.Add(key))
                 {
-                    _inner.Accumulate(key.Values);
+                    _inner.Accumulate(key.Values, in _capturedFrame);
                 }
             }
         }
     }
 
     /// <inheritdoc />
-    public DataValue Result
+    public DataValue Result(in InvocationFrame frame)
     {
-        get
-        {
-            DrainSpilledPartitions();
-            return _inner.Result;
-        }
+        DrainSpilledPartitions();
+        return _inner.Result(in frame);
     }
 
     /// <inheritdoc />
@@ -346,7 +351,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
                     if (partitionSet.Add(value))
                     {
-                        partitionAccumulator.Accumulate([value]);
+                        partitionAccumulator.Accumulate([value], in _capturedFrame);
                     }
                 }
             }
@@ -360,7 +365,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
                     if (partitionSet.Add(new CompositeKey(values)))
                     {
-                        partitionAccumulator.Accumulate(values);
+                        partitionAccumulator.Accumulate(values, in _capturedFrame);
                     }
                 }
             }

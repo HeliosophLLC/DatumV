@@ -11,7 +11,7 @@ namespace DatumIngest.Functions.Aggregates;
 /// Supports intra-aggregate <c>ORDER BY</c> to control element order:
 /// <c>ARRAY_AGG(name ORDER BY name ASC)</c>. When ORDER BY is specified, the
 /// <see cref="Execution.Operators.GroupByOperator"/> sorts buffered rows before
-/// calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue})"/>.
+/// calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue}, in InvocationFrame)"/>.
 /// </para>
 /// <para>
 /// Returns null if all values are null. Null values are skipped.
@@ -55,7 +55,7 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
         private readonly List<DataValue> _elements = [];
         private DataKind? _elementKind;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -71,17 +71,14 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
             _elements.AddRange(otherAccumulator._elements);
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_elements.Count == 0)
             {
-                if (_elements.Count == 0)
-                {
-                    return DataValue.NullArray(_elementKind ?? DataKind.Float32);
-                }
-
-                return DataValue.FromArray(_elementKind!.Value, [.. _elements]);
+                return DataValue.NullArray(_elementKind ?? DataKind.Float32);
             }
+
+            return DataValue.FromArray(_elementKind!.Value, _elements, frame.Target);
         }
 
         /// <inheritdoc />

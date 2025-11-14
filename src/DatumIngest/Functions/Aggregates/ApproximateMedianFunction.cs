@@ -56,7 +56,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
         private readonly Random _random = new(42);
         private long _totalCount;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -98,28 +98,25 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_samples.Count == 0)
             {
-                if (_samples.Count == 0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                _samples.Sort();
-
-                int count = _samples.Count;
-                int mid = count / 2;
-
-                if (count % 2 == 1)
-                {
-                    return DataValue.FromFloat64(_samples[mid]);
-                }
-
-                double median = (_samples[mid - 1] + _samples[mid]) / 2.0;
-                return DataValue.FromFloat64(median);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            _samples.Sort();
+
+            int count = _samples.Count;
+            int mid = count / 2;
+
+            if (count % 2 == 1)
+            {
+                return DataValue.FromFloat64(_samples[mid]);
+            }
+
+            double median = (_samples[mid - 1] + _samples[mid]) / 2.0;
+            return DataValue.FromFloat64(median);
         }
 
         /// <inheritdoc />

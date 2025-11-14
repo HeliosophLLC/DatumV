@@ -190,10 +190,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             {
                 try
                 {
-                    if (operatorArena is null && inputBatch.Count > 0)
-                    {
-                        operatorArena = pool.RentArena();
-                    }
+                    if (inputBatch.Count == 0) continue;
+
+                    operatorArena ??= pool.RentArena();
+
+                    InvocationFrame frame = new(
+                        inputBatch.Arena,
+                        operatorArena,
+                        context.SidecarRegistry);
 
                     for (int i = 0; i < inputBatch.Count; i++)
                     {
@@ -208,9 +212,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (currentGroup is not null && !key.Equals(currentSingleKey!))
                             {
-                                FlushOrderedBuffersForGroup(currentGroup, context);
+                                FlushOrderedBuffersForGroup(currentGroup, context, in frame);
                                 Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                                    pool, ref outputLookup);
+                                    pool, ref outputLookup, in frame);
                                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
                                 outputBatch.Add(emitted.RawValues);
                                 pool.Backing.Return(currentGroup);
@@ -225,7 +229,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (currentGroup is null)
                             {
-                                currentGroup = CreateGroupState(pool);
+                                currentGroup = CreateGroupState(pool, in frame);
                                 currentGroup.KeyValues = [key];
                                 currentSingleKey = key;
                             }
@@ -239,9 +243,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
                             {
-                                FlushOrderedBuffersForGroup(currentGroup, context);
+                                FlushOrderedBuffersForGroup(currentGroup, context, in frame);
                                 Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                                    pool, ref outputLookup);
+                                    pool, ref outputLookup, in frame);
                                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena!);
                                 outputBatch.Add(emitted.RawValues);
                                 pool.Backing.Return(currentGroup);
@@ -258,7 +262,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             {
                                 // Copy scratch into permanent storage only at group boundaries.
                                 DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
-                                currentGroup = CreateGroupState(pool);
+                                currentGroup = CreateGroupState(pool, in frame);
                                 currentGroup.KeyValues = permanentKey;
                                 currentKeyValues = permanentKey;
                             }
@@ -266,7 +270,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                         // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
                         EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
-                        AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context);
+                        AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context, in frame);
                     }
                 }
                 finally
@@ -278,10 +282,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Emit the final group.
             if (currentGroup is not null)
             {
-                FlushOrderedBuffersForGroup(currentGroup, context);
-                Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                    pool, ref outputLookup);
                 operatorArena ??= pool.RentArena();
+                InvocationFrame trailingFrame = new(operatorArena, operatorArena, context.SidecarRegistry);
+                FlushOrderedBuffersForGroup(currentGroup, context, in trailingFrame);
+                Row emitted = EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                    pool, ref outputLookup, in trailingFrame);
                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(emitted.RawValues);
                 pool.Backing.Return(currentGroup);
@@ -436,10 +441,17 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         SingleReader = false,
                     });
 
+                // Worker accumulator state lives in context.Store (per-query, long-lived);
+                // worker-side Source is filled in per-row from each batch's arena before
+                // the channel hop, but the worker reads from context.Store after the
+                // batch is returned, so we use context.Store for both.
+                InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
+                    context.Store, context.SidecarRegistry);
+
                 GroupState[] workerGlobalGroups = new GroupState[workerCount];
                 for (int i = 0; i < workerCount; i++)
                 {
-                    workerGlobalGroups[i] = CreateGroupState(pool);
+                    workerGlobalGroups[i] = CreateGroupState(pool, in workerAccumFrame);
                 }
 
                 Task globalFeeder = Task.Run(async () =>
@@ -481,7 +493,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         {
                             EvaluateAggregateArgumentsInto(
                                 workerEvaluator, row, workerArgScratch, workerSortScratch);
-                            AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context);
+                            AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context, in workerAccumFrame);
                             // Row values extracted — batch-level ReturnBatch handles array return.
                         }
                     }, cancellationToken);
@@ -500,15 +512,18 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 bool globalHasOrderedAggregates = _aggregateColumns.Any(
                     column => column.OrderBy is not null);
 
+                operatorArena ??= pool.RentArena();
+                InvocationFrame globalEmitFrame = new(
+                    context.Store, operatorArena, context.SidecarRegistry);
+
                 if (globalHasOrderedAggregates)
                 {
-                    FlushOrderedBuffers([workerGlobalGroups[0]], context);
+                    FlushOrderedBuffers([workerGlobalGroups[0]], context, in globalEmitFrame);
                 }
 
                 Row globalEmitted = EmitGroupRow(
                     workerGlobalGroups[0], isGlobalAggregation: true,
-                    pool, ref globalOutputLookup);
-                operatorArena ??= pool.RentArena();
+                    pool, ref globalOutputLookup, in globalEmitFrame);
                 RowBatch globalOutputBatch = pool.RentRowBatch(globalOutputLookup!, context.BatchSize, operatorArena);
                 globalOutputBatch.Add(globalEmitted.RawValues);
                 yield return globalOutputBatch;
@@ -559,7 +574,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             ? new Dictionary<DataValue, GroupState>() : null;
         Dictionary<CompositeKey, GroupState>? compositeKeyTable = !useSingleKey && !isGlobalAggregation
             ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance) : null;
-        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState(pool) : null;
+
+        // Long-lived frame captured by accumulators that need a stable Target arena
+        // (e.g. DistinctAccumulatorDecorator's _capturedFrame for replay merges).
+        // context.Store survives the query's lifetime.
+        InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
+        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState(pool, in initFrame) : null;
 
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
@@ -583,6 +603,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             {
                 try
                 {
+                    if (inputBatch.Count == 0) continue;
+
+                    // Per-batch accumulation frame: Source = batch arena (where this row's
+                    // arena-backed values resolve), Target = context.Store (long-lived for
+                    // anything an accumulator wants to persist across batches).
+                    InvocationFrame accumFrame = new(
+                        inputBatch.Arena, context.Store, context.SidecarRegistry);
+
                     for (int i = 0; i < inputBatch.Count; i++)
                     {
                         Row row = inputBatch[i];
@@ -606,7 +634,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                         if (isGlobalAggregation)
                         {
-                            AccumulateRow(globalGroup!, argumentScratch, sortKeyScratch, context);
+                            AccumulateRow(globalGroup!, argumentScratch, sortKeyScratch, context, in accumFrame);
                             continue;
                         }
 
@@ -680,7 +708,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     out existing);
 
                             if (existing is not null)
-                                AccumulateRow(existing, argumentScratch, sortKeyScratch, context);
+                                AccumulateRow(existing, argumentScratch, sortKeyScratch, context, in accumFrame);
                             continue;
                         }
 
@@ -689,7 +717,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         {
                             if (!singleKeyTable!.TryGetValue(singleKey, out GroupState? existingGroup))
                             {
-                                existingGroup = CreateGroupState(pool);
+                                existingGroup = CreateGroupState(pool, in accumFrame);
                                 existingGroup.KeyValues = [singleKey];
                                 singleKeyTable[singleKey] = existingGroup;
                             }
@@ -701,14 +729,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             CompositeKey ck = new(permanentKey);
                             if (!compositeKeyTable!.TryGetValue(ck, out GroupState? existingGroup))
                             {
-                                existingGroup = CreateGroupState(pool);
+                                existingGroup = CreateGroupState(pool, in accumFrame);
                                 existingGroup.KeyValues = permanentKey;
                                 compositeKeyTable[ck] = existingGroup;
                             }
                             group = existingGroup;
                         }
 
-                        AccumulateRow(group, argumentScratch, sortKeyScratch, context);
+                        AccumulateRow(group, argumentScratch, sortKeyScratch, context, in accumFrame);
 
                         if (estimator is not null)
                         {
@@ -767,13 +795,18 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Emit phase.
             bool hasOrderedAggregates = _aggregateColumns.Any(c => c.OrderBy is not null);
 
+            // Output frame: Source = context.Store (where accumulator state lives),
+            // Target = operatorArena (where result-batch values land). Lazily build
+            // operatorArena since the global path may need it before in-memory emit.
+            operatorArena ??= pool.RentArena();
+            InvocationFrame emitFrame = new(context.Store, operatorArena, context.SidecarRegistry);
+
             if (isGlobalAggregation)
             {
                 if (hasOrderedAggregates)
-                    FlushOrderedBuffers([globalGroup!], context);
+                    FlushOrderedBuffers([globalGroup!], context, in emitFrame);
 
-                Row globalEmitted = EmitGroupRow(globalGroup!, isGlobalAggregation: true, pool, ref outputLookup);
-                operatorArena ??= pool.RentArena();
+                Row globalEmitted = EmitGroupRow(globalGroup!, isGlobalAggregation: true, pool, ref outputLookup, in emitFrame);
                 outputBatch = pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(globalEmitted.RawValues);
                 RowBatch globalToYield = outputBatch;
@@ -787,12 +820,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 : compositeKeyTable!.Values;
 
             if (hasOrderedAggregates)
-                FlushOrderedBuffers(inMemoryGroups, context);
+                FlushOrderedBuffers(inMemoryGroups, context, in emitFrame);
 
             foreach (GroupState g in inMemoryGroups)
             {
-                Row emitted = EmitGroupRow(g, isGlobalAggregation: false, pool, ref outputLookup);
-                operatorArena ??= pool.RentArena();
+                Row emitted = EmitGroupRow(g, isGlobalAggregation: false, pool, ref outputLookup, in emitFrame);
                 outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                 outputBatch.Add(emitted.RawValues);
                 if (outputBatch.IsFull)
@@ -809,6 +841,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // via the during-spill side-channel).
             if (spilling)
             {
+                // Drain frame: replayed batches' values resolve against the spiller's
+                // consolidated arena (Source). Accumulator state still lives in
+                // context.Store (Target) so it can outlive the replayed batches.
+                InvocationFrame drainFrame = new(
+                    spiller!.ConsolidatedArena, context.Store, context.SidecarRegistry);
+
                 for (int partition = 0; partition < SpillPartitionCount; partition++)
                 {
                     if (spiller!.RowsWrittenInPartition(partition) == 0) continue;
@@ -844,7 +882,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                 {
                                     if (!partSingleGroups!.TryGetValue(partKey[0], out GroupState? pg))
                                     {
-                                        pg = CreateGroupState(pool);
+                                        pg = CreateGroupState(pool, in drainFrame);
                                         pg.KeyValues = partKey;
                                         partSingleGroups[partKey[0]] = pg;
                                     }
@@ -855,7 +893,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     CompositeKey partCk = new(partKey);
                                     if (!partCompositeGroups!.TryGetValue(partCk, out GroupState? pg))
                                     {
-                                        pg = CreateGroupState(pool);
+                                        pg = CreateGroupState(pool, in drainFrame);
                                         pg.KeyValues = partKey;
                                         partCompositeGroups[partCk] = pg;
                                     }
@@ -878,7 +916,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     }
                                 }
 
-                                AccumulateRow(partGroup, argumentScratch, sortKeyScratch, context);
+                                AccumulateRow(partGroup, argumentScratch, sortKeyScratch, context, in drainFrame);
                             }
                         }
                         finally
@@ -892,12 +930,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         : partCompositeGroups!.Values;
 
                     if (hasOrderedAggregates)
-                        FlushOrderedBuffers(partGroups, context);
+                        FlushOrderedBuffers(partGroups, context, in emitFrame);
 
                     foreach (GroupState pg in partGroups)
                     {
-                        Row emitted = EmitGroupRow(pg, isGlobalAggregation: false, pool, ref outputLookup);
-                        operatorArena ??= pool.RentArena();
+                        Row emitted = EmitGroupRow(pg, isGlobalAggregation: false, pool, ref outputLookup, in emitFrame);
                         outputBatch ??= pool.RentRowBatch(outputLookup!, context.BatchSize, operatorArena);
                         outputBatch.Add(emitted.RawValues);
                         if (outputBatch.IsFull)
@@ -1076,7 +1113,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         return new ColumnLookup(names);
     }
 
-    private GroupState CreateGroupState(Pool pool)
+    private GroupState CreateGroupState(Pool pool, in InvocationFrame frame)
     {
         int count = _aggregateColumns.Count;
         GroupState state = pool.Backing.RentGroupState(count);
@@ -1122,6 +1159,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     accumulator = new DistinctAccumulatorDecorator(
                         accumulator,
                         column.ArgumentExpressions.Count,
+                        in frame,
                         _distinctMemoryBudgetBytes,
                         _distinctMemoryBudgetBytes.HasValue
                             ? column.Function.CreateAccumulator
@@ -1169,7 +1207,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         GroupState group,
         DataValue[][] allArguments,
         DataValue[]?[]? allSortKeys,
-        ExecutionContext context)
+        ExecutionContext context,
+        in InvocationFrame frame)
     {
         for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
         {
@@ -1185,7 +1224,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
             else
             {
-                group.Accumulators[aggregateIndex].Accumulate(allArguments[aggregateIndex]);
+                group.Accumulators[aggregateIndex].Accumulate(allArguments[aggregateIndex], in frame);
                 context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
         }
@@ -1194,11 +1233,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// <summary>
     /// Flushes ordered aggregate buffers by sorting and accumulating deferred rows.
     /// </summary>
-    private void FlushOrderedBuffers(IEnumerable<GroupState> groups, ExecutionContext context)
+    private void FlushOrderedBuffers(IEnumerable<GroupState> groups, ExecutionContext context, in InvocationFrame frame)
     {
         foreach (GroupState groupState in groups)
         {
-            FlushOrderedBuffersForGroup(groupState, context);
+            FlushOrderedBuffersForGroup(groupState, context, in frame);
         }
     }
 
@@ -1206,7 +1245,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// Flushes ordered aggregate buffers for a single group by sorting and
     /// accumulating deferred rows.
     /// </summary>
-    private void FlushOrderedBuffersForGroup(GroupState groupState, ExecutionContext context)
+    private void FlushOrderedBuffersForGroup(GroupState groupState, ExecutionContext context, in InvocationFrame frame)
     {
         for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
         {
@@ -1239,7 +1278,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             int rowCount = buffer.Count;
             for (int row = 0; row < rowCount; row++)
             {
-                groupState.Accumulators[aggregateIndex].Accumulate(buffer.GetArguments(row));
+                groupState.Accumulators[aggregateIndex].Accumulate(buffer.GetArguments(row), in frame);
                 context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
 
@@ -1342,7 +1381,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         GroupState group,
         bool isGlobalAggregation,
         Pool pool,
-        ref ColumnLookup? outputLookup)
+        ref ColumnLookup? outputLookup,
+        in InvocationFrame frame)
     {
         int outputFieldCount = _groupByExpressions.Count + _aggregateColumns.Count;
 
@@ -1375,7 +1415,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         for (int index = 0; index < _aggregateColumns.Count; index++)
         {
-            values[_groupByExpressions.Count + index] = group.Accumulators[index].Result;
+            values[_groupByExpressions.Count + index] = group.Accumulators[index].Result(in frame);
         }
 
         return new Row(outputLookup, values);

@@ -72,7 +72,7 @@ public sealed class VarianceFunction : IAggregateFunction
             _usePopulation = usePopulation;
         }
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -109,22 +109,19 @@ public sealed class VarianceFunction : IAggregateFunction
             _count = combinedCount;
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_usePopulation)
             {
-                if (_usePopulation)
-                {
-                    return _count > 0
-                        ? DataValue.FromFloat64(_m2 / _count)
-                        : DataValue.Null(DataKind.Float64);
-                }
-
-                // Sample variance requires at least 2 values (N-1 denominator).
-                return _count > 1
-                    ? DataValue.FromFloat64(_m2 / (_count - 1))
+                return _count > 0
+                    ? DataValue.FromFloat64(_m2 / _count)
                     : DataValue.Null(DataKind.Float64);
             }
+
+            // Sample variance requires at least 2 values (N-1 denominator).
+            return _count > 1
+                ? DataValue.FromFloat64(_m2 / (_count - 1))
+                : DataValue.Null(DataKind.Float64);
         }
 
         /// <inheritdoc />

@@ -20,8 +20,11 @@ public interface IAggregateFunction
     DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds);
 
     /// <summary>
-    /// Creates a new accumulator instance for a single group.
-    /// Each group in a GROUP BY query gets its own accumulator.
+    /// Creates a new accumulator instance for a single group. Each group in a
+    /// GROUP BY query gets its own accumulator. Per-call context (source/target
+    /// stores, sidecar registry) flows in through the
+    /// <see cref="InvocationFrame"/> passed to <c>Accumulate</c> and
+    /// <c>Result</c>; the accumulator does not need it at construction time.
     /// </summary>
     IAggregateAccumulator CreateAccumulator();
 
@@ -52,18 +55,16 @@ public interface IAggregateFunction
 public interface IAggregateAccumulator
 {
     /// <summary>
-    /// Incorporates one row's argument values into the running aggregate.
+    /// Incorporates one row's argument values into the running aggregate. The
+    /// <paramref name="frame"/> resolves arena-backed argument payloads through
+    /// <see cref="InvocationFrame.Source"/> and provides
+    /// <see cref="InvocationFrame.Target"/> for any state the accumulator must
+    /// stabilise across the source batch's lifetime (e.g. running min/max
+    /// strings, accumulated string lists).
     /// </summary>
     /// <param name="arguments">The evaluated argument values for this row.</param>
-    void Accumulate(ReadOnlySpan<DataValue> arguments);
-
-    /// <summary>
-    /// Incorporates one row's argument values with an explicit value store
-    /// for resolving reference-type payloads.
-    /// </summary>
-    /// <param name="arguments">The evaluated argument values for this row.</param>
-    /// <param name="store">The value store for reading/writing reference-type payloads.</param>
-    void Accumulate(ReadOnlySpan<DataValue> arguments, IValueStore store) => Accumulate(arguments);
+    /// <param name="frame">Per-call invocation context.</param>
+    void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame);
 
     /// <summary>
     /// Merges the state of another accumulator (of the same concrete type) into
@@ -77,9 +78,14 @@ public interface IAggregateAccumulator
     void Merge(IAggregateAccumulator other);
 
     /// <summary>
-    /// The current aggregate result after all rows have been accumulated.
+    /// Computes the current aggregate result. The <paramref name="frame"/>'s
+    /// <see cref="InvocationFrame.Target"/> is the home for any non-inline
+    /// payloads in the returned <see cref="DataValue"/> — string concatenations,
+    /// array constructions, etc. Inline-result accumulators (Sum, Count, Avg)
+    /// may ignore the frame.
     /// </summary>
-    DataValue Result { get; }
+    /// <param name="frame">Per-emit invocation context.</param>
+    DataValue Result(in InvocationFrame frame);
 
     /// <summary>
     /// Resets the accumulator to its initial (empty) state so it can be reused

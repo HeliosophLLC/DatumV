@@ -957,12 +957,13 @@ public class AdvancedAggregateTests : ServiceTestBase
                     "result"),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
         DataValue result = results[0]["result"];
         Assert.Equal(DataKind.Array, result.Kind);
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArray(ctx.Store);
         Assert.Equal(3, elements.Length);
         Assert.Equal(1f, elements[0].AsFloat32());
         Assert.Equal(2f, elements[1].AsFloat32());
@@ -1012,13 +1013,14 @@ public class AdvancedAggregateTests : ServiceTestBase
                     "result"),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray();
+        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
         Assert.Equal(2, elements.Length);
-        Assert.Equal("a", elements[0].AsString());
-        Assert.Equal("c", elements[1].AsString());
+        Assert.Equal("a", elements[0].AsString(ctx.Store));
+        Assert.Equal("c", elements[1].AsString(ctx.Store));
     }
 
     [Fact]
@@ -1041,19 +1043,20 @@ public class AdvancedAggregateTests : ServiceTestBase
                     "result"),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Equal(2, results.Count);
 
-        Row groupA = results.First(row => row["cat"].AsString() == "A");
-        Row groupB = results.First(row => row["cat"].AsString() == "B");
+        Row groupA = results.First(row => row["cat"].AsString(ctx.Store) == "A");
+        Row groupB = results.First(row => row["cat"].AsString(ctx.Store) == "B");
 
-        DataValue[] elementsA = groupA["result"].AsArray();
+        DataValue[] elementsA = groupA["result"].AsArray(ctx.Store);
         Assert.Equal(2, elementsA.Length);
         Assert.Equal(1f, elementsA[0].AsFloat32());
         Assert.Equal(2f, elementsA[1].AsFloat32());
 
-        DataValue[] elementsB = groupB["result"].AsArray();
+        DataValue[] elementsB = groupB["result"].AsArray(ctx.Store);
         Assert.Equal(2, elementsB.Length);
         Assert.Equal(10f, elementsB[0].AsFloat32());
         Assert.Equal(20f, elementsB[1].AsFloat32());
@@ -1079,10 +1082,11 @@ public class AdvancedAggregateTests : ServiceTestBase
                     OrderBy: [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray();
+        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
         Assert.Equal(1f, elements[0].AsFloat32());
         Assert.Equal(2f, elements[1].AsFloat32());
         Assert.Equal(3f, elements[2].AsFloat32());
@@ -1108,10 +1112,11 @@ public class AdvancedAggregateTests : ServiceTestBase
                     OrderBy: [new OrderByItem(new ColumnReference("x"), SortDirection.Descending)]),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray();
+        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
         Assert.Equal(3f, elements[0].AsFloat32());
         Assert.Equal(2f, elements[1].AsFloat32());
         Assert.Equal(1f, elements[2].AsFloat32());
@@ -1139,14 +1144,15 @@ public class AdvancedAggregateTests : ServiceTestBase
                     Distinct: true),
             ]);
 
-        List<Row> results = await CollectAsync(groupBy);
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray();
+        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
         Assert.Equal(3, elements.Length);
 
         // DISTINCT should yield exactly {"a", "b", "c"} in some order
-        string[] values = elements.Select(e => e.AsString()).Order().ToArray();
+        string[] values = elements.Select(e => e.AsString(ctx.Store)).Order().ToArray();
         Assert.Equal(["a", "b", "c"], values);
     }
 

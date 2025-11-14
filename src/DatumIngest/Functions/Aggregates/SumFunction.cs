@@ -49,7 +49,7 @@ public sealed class SumFunction : IAggregateFunction
         private bool _isIntegerKind;
         private bool _isFloat64Kind;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             DataValue arg = arguments[0];
             if (arg.IsNull) return;
@@ -92,24 +92,21 @@ public sealed class SumFunction : IAggregateFunction
             _hasValue |= otherAccumulator._hasValue;
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (!_hasValue)
             {
-                if (!_hasValue)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                if (_isIntegerKind)
-                {
-                    return DataValue.FromInt64(_longSum);
-                }
-
-                return _isFloat64Kind
-                    ? DataValue.FromFloat64(_doubleSum)
-                    : DataValue.FromFloat32((float)_doubleSum);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            if (_isIntegerKind)
+            {
+                return DataValue.FromInt64(_longSum);
+            }
+
+            return _isFloat64Kind
+                ? DataValue.FromFloat64(_doubleSum)
+                : DataValue.FromFloat32((float)_doubleSum);
         }
 
         /// <inheritdoc />

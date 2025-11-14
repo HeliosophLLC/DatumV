@@ -62,7 +62,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
         private double _fraction;
         private bool _fractionCaptured;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             // Capture the fraction from the first non-null invocation.
             if (!_fractionCaptured && !arguments[1].IsNull)
@@ -98,30 +98,27 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_values.Count == 0)
             {
-                if (_values.Count == 0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                _values.Sort();
-
-                // SQL-standard continuous percentile interpolation.
-                double row = _fraction * (_values.Count - 1);
-                int lower = (int)System.Math.Floor(row);
-                int upper = (int)System.Math.Ceiling(row);
-
-                if (lower == upper)
-                {
-                    return DataValue.FromFloat64(_values[lower]);
-                }
-
-                double interpolated = _values[lower] + (_values[upper] - _values[lower]) * (row - lower);
-                return DataValue.FromFloat64(interpolated);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            _values.Sort();
+
+            // SQL-standard continuous percentile interpolation.
+            double row = _fraction * (_values.Count - 1);
+            int lower = (int)System.Math.Floor(row);
+            int upper = (int)System.Math.Ceiling(row);
+
+            if (lower == upper)
+            {
+                return DataValue.FromFloat64(_values[lower]);
+            }
+
+            double interpolated = _values[lower] + (_values[upper] - _values[lower]) * (row - lower);
+            return DataValue.FromFloat64(interpolated);
         }
 
         /// <inheritdoc />

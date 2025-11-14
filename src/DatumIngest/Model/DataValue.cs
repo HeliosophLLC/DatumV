@@ -2150,7 +2150,10 @@ public readonly struct DataValue : IEquatable<DataValue>
                     $"Cannot read ArrayElementKind on a {_kind} value.");
             }
 
-            return (DataKind)_meta;
+            // Layout split: typed nulls (NullArray) store the element kind in _meta
+            // because _p1 isn't carrying a length; non-null arrays (FromArray) store
+            // it in _p2 because _meta would alias _p1's length low bytes.
+            return IsNull ? (DataKind)_meta : (DataKind)_p2;
         }
     }
 

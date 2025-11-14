@@ -76,7 +76,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
         private double _fraction;
         private bool _fractionCaptured;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
@@ -111,23 +111,20 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_values.Count == 0)
             {
-                if (_values.Count == 0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                _values.Sort();
-
-                // Nearest-rank method: index = ceil(fraction * count) - 1, clamped.
-                int index = (int)System.Math.Ceiling(_fraction * _values.Count) - 1;
-                index = System.Math.Clamp(index, 0, _values.Count - 1);
-
-                return DataValue.FromFloat64(_values[index]);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            _values.Sort();
+
+            // Nearest-rank method: index = ceil(fraction * count) - 1, clamped.
+            int index = (int)System.Math.Ceiling(_fraction * _values.Count) - 1;
+            index = System.Math.Clamp(index, 0, _values.Count - 1);
+
+            return DataValue.FromFloat64(_values[index]);
         }
 
         /// <inheritdoc />

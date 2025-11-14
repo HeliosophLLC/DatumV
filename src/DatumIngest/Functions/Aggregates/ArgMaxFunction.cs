@@ -74,7 +74,7 @@ public sealed class ArgMaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             DataValue value = arguments[0];
             DataValue key = arguments[1];
@@ -110,7 +110,7 @@ public sealed class ArgMaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public DataValue Result => _hasValue ? _bestValue : DataValue.Null(_valueKind);
+        public DataValue Result(in InvocationFrame frame) => _hasValue ? _bestValue : DataValue.Null(_valueKind);
 
         /// <inheritdoc/>
         public void Reset()

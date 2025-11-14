@@ -9,6 +9,8 @@ namespace DatumIngest.Tests.Functions;
 /// </summary>
 public class ArrayAggregateTests : ServiceTestBase
 {
+    private static readonly DatumIngest.Functions.InvocationFrame _testFrame = DatumIngest.Functions.InvocationFrame.Symmetric(new DatumIngest.Model.Arena());
+
     // ─────────────── VALIDATION ───────────────
 
     [Fact]
@@ -81,15 +83,15 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromFloat32(10f)]);
-        accumulator.Accumulate([DataValue.FromFloat32(20f)]);
-        accumulator.Accumulate([DataValue.FromFloat32(30f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(10f)], in _testFrame);
+        accumulator.Accumulate([DataValue.FromFloat32(20f)], in _testFrame);
+        accumulator.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
-        DataValue result = accumulator.Result;
+        DataValue result = accumulator.Result(in _testFrame);
         Assert.Equal(DataKind.Array, result.Kind);
         Assert.Equal(DataKind.Float32, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArray(_testFrame.Target);
         Assert.Equal(3, elements.Length);
         Assert.Equal(10f, elements[0].AsFloat32());
         Assert.Equal(20f, elements[1].AsFloat32());
@@ -104,19 +106,19 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromString("apple")]);
-        accumulator.Accumulate([DataValue.FromString("banana")]);
-        accumulator.Accumulate([DataValue.FromString("cherry")]);
+        accumulator.Accumulate([DataValue.FromString("apple")], in _testFrame);
+        accumulator.Accumulate([DataValue.FromString("banana")], in _testFrame);
+        accumulator.Accumulate([DataValue.FromString("cherry")], in _testFrame);
 
-        DataValue result = accumulator.Result;
+        DataValue result = accumulator.Result(in _testFrame);
         Assert.Equal(DataKind.Array, result.Kind);
         Assert.Equal(DataKind.String, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArray(_testFrame.Target);
         Assert.Equal(3, elements.Length);
-        Assert.Equal("apple", elements[0].AsString());
-        Assert.Equal("banana", elements[1].AsString());
-        Assert.Equal("cherry", elements[2].AsString());
+        Assert.Equal("apple", elements[0].AsString(_testFrame.Target));
+        Assert.Equal("banana", elements[1].AsString(_testFrame.Target));
+        Assert.Equal("cherry", elements[2].AsString(_testFrame.Target));
     }
 
     // ─────────────── DATE VALUES ───────────────
@@ -130,13 +132,13 @@ public class ArrayAggregateTests : ServiceTestBase
         DateOnly date1 = new(2024, 1, 15);
         DateOnly date2 = new(2024, 6, 30);
 
-        accumulator.Accumulate([DataValue.FromDate(date1)]);
-        accumulator.Accumulate([DataValue.FromDate(date2)]);
+        accumulator.Accumulate([DataValue.FromDate(date1)], in _testFrame);
+        accumulator.Accumulate([DataValue.FromDate(date2)], in _testFrame);
 
-        DataValue result = accumulator.Result;
+        DataValue result = accumulator.Result(in _testFrame);
         Assert.Equal(DataKind.Date, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArray(_testFrame.Target);
         Assert.Equal(2, elements.Length);
         Assert.Equal(date1, elements[0].AsDate());
         Assert.Equal(date2, elements[1].AsDate());
@@ -150,12 +152,12 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromFloat32(1f)]);
-        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
-        accumulator.Accumulate([DataValue.FromFloat32(3f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(1f)], in _testFrame);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
+        accumulator.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
 
-        DataValue result = accumulator.Result;
-        DataValue[] elements = result.AsArray();
+        DataValue result = accumulator.Result(in _testFrame);
+        DataValue[] elements = result.AsArray(_testFrame.Target);
         Assert.Equal(2, elements.Length);
         Assert.Equal(1f, elements[0].AsFloat32());
         Assert.Equal(3f, elements[1].AsFloat32());
@@ -167,10 +169,10 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
-        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
 
-        DataValue result = accumulator.Result;
+        DataValue result = accumulator.Result(in _testFrame);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Array, result.Kind);
     }
@@ -181,7 +183,7 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue result = accumulator.Result;
+        DataValue result = accumulator.Result(in _testFrame);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Array, result.Kind);
     }
@@ -194,10 +196,10 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromFloat32(42f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(42f)], in _testFrame);
 
-        DataValue result = accumulator.Result;
-        DataValue[] elements = result.AsArray();
+        DataValue result = accumulator.Result(in _testFrame);
+        DataValue[] elements = result.AsArray(_testFrame.Target);
         Assert.Single(elements);
         Assert.Equal(42f, elements[0].AsFloat32());
     }
@@ -210,13 +212,13 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromString("c")]);
-        accumulator.Accumulate([DataValue.FromString("a")]);
-        accumulator.Accumulate([DataValue.FromString("b")]);
+        accumulator.Accumulate([DataValue.FromString("c")], in _testFrame);
+        accumulator.Accumulate([DataValue.FromString("a")], in _testFrame);
+        accumulator.Accumulate([DataValue.FromString("b")], in _testFrame);
 
-        DataValue[] elements = accumulator.Result.AsArray();
-        Assert.Equal("c", elements[0].AsString());
-        Assert.Equal("a", elements[1].AsString());
-        Assert.Equal("b", elements[2].AsString());
+        DataValue[] elements = accumulator.Result(in _testFrame).AsArray(_testFrame.Target);
+        Assert.Equal("c", elements[0].AsString(_testFrame.Target));
+        Assert.Equal("a", elements[1].AsString(_testFrame.Target));
+        Assert.Equal("b", elements[2].AsString(_testFrame.Target));
     }
 }

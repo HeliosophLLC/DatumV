@@ -39,7 +39,7 @@ public sealed class MaxFunction : IAggregateFunction
         // carries the correct input kind rather than an arbitrary default.
         private DataKind _inputKind = DataKind.Float64;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             DataValue value = arguments[0];
             if (value.IsNull) return;
@@ -68,7 +68,7 @@ public sealed class MaxFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result => _maximum ?? DataValue.Null(_inputKind);
+        public DataValue Result(in InvocationFrame frame) => _maximum ?? DataValue.Null(_inputKind);
 
         /// <inheritdoc />
         public void Reset()

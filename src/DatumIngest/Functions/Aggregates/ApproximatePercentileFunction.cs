@@ -71,7 +71,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
         private double _fraction;
         private bool _fractionCaptured;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
@@ -134,29 +134,26 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_samples.Count == 0)
             {
-                if (_samples.Count == 0)
-                {
-                    return DataValue.Null(DataKind.Float64);
-                }
-
-                _samples.Sort();
-
-                double row = _fraction * (_samples.Count - 1);
-                int lower = (int)System.Math.Floor(row);
-                int upper = (int)System.Math.Ceiling(row);
-
-                if (lower == upper)
-                {
-                    return DataValue.FromFloat64(_samples[lower]);
-                }
-
-                double interpolated = _samples[lower] + (_samples[upper] - _samples[lower]) * (row - lower);
-                return DataValue.FromFloat64(interpolated);
+                return DataValue.Null(DataKind.Float64);
             }
+
+            _samples.Sort();
+
+            double row = _fraction * (_samples.Count - 1);
+            int lower = (int)System.Math.Floor(row);
+            int upper = (int)System.Math.Ceiling(row);
+
+            if (lower == upper)
+            {
+                return DataValue.FromFloat64(_samples[lower]);
+            }
+
+            double interpolated = _samples[lower] + (_samples[upper] - _samples[lower]) * (row - lower);
+            return DataValue.FromFloat64(interpolated);
         }
 
         /// <inheritdoc />

@@ -34,4 +34,20 @@ internal static class RowExtensions
         row.RawValues.CopyTo(copy.AsSpan());
         return new Row(row.ColumnLookup, copy);
     }
+
+    /// <summary>
+    /// Deep-clones a <see cref="Row"/> into <paramref name="retentionStore"/> by
+    /// stabilising each value's payload via <see cref="DataValueRetention.Stabilize"/>.
+    /// Use when a test needs to read arena-backed values (strings, arrays, JSON, etc.)
+    /// after the source <see cref="Pooling.Pool"/> has reclaimed the producing batch's arena.
+    /// </summary>
+    public static Row CloneForTest(this Row row, IValueStore sourceStore, IValueStore retentionStore)
+    {
+        DataValue[] copy = new DataValue[row.RawValues.Length];
+        for (int i = 0; i < row.RawValues.Length; i++)
+        {
+            copy[i] = DataValueRetention.Stabilize(row.RawValues[i], sourceStore, retentionStore);
+        }
+        return new Row(row.ColumnLookup, copy);
+    }
 }

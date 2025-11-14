@@ -87,6 +87,12 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             WindowFrame? frame,
             DataValue[] results)
         {
+            // The evaluator's store doubles as both Source and Target for window-aggregate
+            // accumulator state. The window operator buffers its partition rows in memory
+            // before calling Compute, so a single per-query store keeps things simple
+            // without per-batch arena bookkeeping.
+            InvocationFrame frameInv = BuildFrame(evaluator);
+
             // When no frame is specified and no ORDER BY, the whole partition
             // is the frame for every row — use whole-partition aggregate.
             if (frame is null && partitionRows.Count > 0)
@@ -97,10 +103,10 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                 for (int i = 0; i < partitionRows.Count; i++)
                 {
                     EvaluateArguments(argumentExpressions, evaluator, partitionRows[i], argumentBuffer);
-                    wholeAccumulator.Accumulate(argumentBuffer);
+                    wholeAccumulator.Accumulate(argumentBuffer, in frameInv);
                 }
 
-                DataValue wholeResult = wholeAccumulator.Result;
+                DataValue wholeResult = wholeAccumulator.Result(in frameInv);
                 for (int i = 0; i < partitionRows.Count; i++)
                 {
                     results[i] = wholeResult;
@@ -117,7 +123,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             for (int i = 0; i < partitionRows.Count; i++)
             {
                 EvaluateArguments(argumentExpressions, evaluator, partitionRows[i], arguments);
-                accumulator.Accumulate(arguments);
+                accumulator.Accumulate(arguments, in frameInv);
 
                 (int _, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, i, partitionRows.Count);
 
@@ -126,7 +132,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                 // If end < i, the frame has shrunk past the accumulator — fall back to recompute.
                 if (end >= i)
                 {
-                    results[i] = accumulator.Result;
+                    results[i] = accumulator.Result(in frameInv);
                 }
                 else
                 {
@@ -161,6 +167,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             int currentIndex)
         {
             (int start, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, currentIndex, partitionRows.Count);
+            InvocationFrame frameInv = BuildFrame(evaluator);
             IAggregateAccumulator accumulator = _aggregate.CreateAccumulator();
 
             DataValue[] arguments = new DataValue[argumentExpressions.Count];
@@ -168,10 +175,10 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             for (int j = start; j <= end; j++)
             {
                 EvaluateArguments(argumentExpressions, evaluator, partitionRows[j], arguments);
-                accumulator.Accumulate(arguments);
+                accumulator.Accumulate(arguments, in frameInv);
             }
 
-            return accumulator.Result;
+            return accumulator.Result(in frameInv);
         }
 
         private static void EvaluateArguments(
@@ -184,6 +191,20 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             {
                 buffer[i] = evaluator.Evaluate(argumentExpressions[i], row);
             }
+        }
+
+        /// <summary>
+        /// Pulls the evaluator's per-query store and builds a symmetric
+        /// <see cref="InvocationFrame"/>. The window operator buffers all partition
+        /// rows in memory before computation, so a single store works for both reading
+        /// arena-backed argument values and writing accumulator state.
+        /// </summary>
+        private static InvocationFrame BuildFrame(ExpressionEvaluator evaluator)
+        {
+            IValueStore store = evaluator.Store
+                ?? throw new InvalidOperationException(
+                    "AggregateWindowAdapter requires the evaluator to be constructed with an IValueStore.");
+            return InvocationFrame.Symmetric(store);
         }
     }
 }

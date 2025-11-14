@@ -16,14 +16,14 @@ public class WindowFunctionTests : ServiceTestBase
 {
     private static ExpressionEvaluator CreateEvaluator()
     {
-        return new ExpressionEvaluator(FunctionRegistry.CreateDefault());
+        return new ExpressionEvaluator(FunctionRegistry.CreateDefault(), store: new Arena());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(c => c.Name).ToArray();
         DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
+        return new Row(new ColumnLookup(names), values);
     }
 
     /// <summary>

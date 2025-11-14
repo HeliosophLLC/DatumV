@@ -40,7 +40,7 @@ public sealed class AvgFunction : IAggregateFunction
         private double _sum;
         private long _count;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -56,7 +56,7 @@ public sealed class AvgFunction : IAggregateFunction
             _count += otherAccumulator._count;
         }
 
-        public DataValue Result => _count > 0
+        public DataValue Result(in InvocationFrame frame) => _count > 0
             ? DataValue.FromFloat64(_sum / _count)
             : DataValue.Null(DataKind.Float64);
 

@@ -54,7 +54,7 @@ public sealed class ModeFunction : IAggregateFunction
         private readonly List<DataValue> _insertionOrder = [];
         private DataKind _kind = DataKind.Float32;
 
-        public void Accumulate(ReadOnlySpan<DataValue> arguments)
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
         {
             if (arguments[0].IsNull) return;
 
@@ -98,32 +98,29 @@ public sealed class ModeFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result
+        public DataValue Result(in InvocationFrame frame)
         {
-            get
+            if (_frequencies.Count == 0)
             {
-                if (_frequencies.Count == 0)
-                {
-                    return DataValue.Null(_kind);
-                }
-
-                DataValue modeValue = _insertionOrder[0];
-                long maxFrequency = _frequencies[modeValue];
-
-                for (int index = 1; index < _insertionOrder.Count; index++)
-                {
-                    DataValue candidate = _insertionOrder[index];
-                    long candidateFrequency = _frequencies[candidate];
-
-                    if (candidateFrequency > maxFrequency)
-                    {
-                        modeValue = candidate;
-                        maxFrequency = candidateFrequency;
-                    }
-                }
-
-                return modeValue;
+                return DataValue.Null(_kind);
             }
+
+            DataValue modeValue = _insertionOrder[0];
+            long maxFrequency = _frequencies[modeValue];
+
+            for (int index = 1; index < _insertionOrder.Count; index++)
+            {
+                DataValue candidate = _insertionOrder[index];
+                long candidateFrequency = _frequencies[candidate];
+
+                if (candidateFrequency > maxFrequency)
+                {
+                    modeValue = candidate;
+                    maxFrequency = candidateFrequency;
+                }
+            }
+
+            return modeValue;
         }
 
         /// <inheritdoc />

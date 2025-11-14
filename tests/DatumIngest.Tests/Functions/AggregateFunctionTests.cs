@@ -10,6 +10,8 @@ namespace DatumIngest.Tests.Functions;
 /// </summary>
 public class AggregateFunctionTests : ServiceTestBase
 {
+    private static readonly DatumIngest.Functions.InvocationFrame _testFrame = DatumIngest.Functions.InvocationFrame.Symmetric(new DatumIngest.Model.Arena());
+
     // ─────────────── COUNT ───────────────
 
     [Fact]
@@ -18,11 +20,11 @@ public class AggregateFunctionTests : ServiceTestBase
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
-        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
-        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
+        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
+        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
+        accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
 
-        Assert.Equal(3L, accumulator.Result.AsInt64());
+        Assert.Equal(3L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     [Fact]
@@ -34,11 +36,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nonNull = [DataValue.FromFloat32(10f)];
         DataValue[] nullValue = [DataValue.Null(DataKind.Float32)];
 
-        accumulator.Accumulate(nonNull);
-        accumulator.Accumulate(nullValue);
-        accumulator.Accumulate(nonNull);
+        accumulator.Accumulate(nonNull, in _testFrame);
+        accumulator.Accumulate(nullValue, in _testFrame);
+        accumulator.Accumulate(nonNull, in _testFrame);
 
-        Assert.Equal(2L, accumulator.Result.AsInt64());
+        Assert.Equal(2L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     [Fact]
@@ -47,7 +49,7 @@ public class AggregateFunctionTests : ServiceTestBase
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        Assert.Equal(0L, accumulator.Result.AsInt64());
+        Assert.Equal(0L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     // ─────────────── SUM ───────────────
@@ -62,11 +64,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromFloat32(20f)];
         DataValue[] val3 = [DataValue.FromFloat32(30f)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(60f, accumulator.Result.AsFloat32());
+        Assert.Equal(60f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     [Fact]
@@ -78,11 +80,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val1 = [DataValue.FromFloat32(5f)];
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(nullVal);
-        accumulator.Accumulate(val1);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(nullVal, in _testFrame);
+        accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(10f, accumulator.Result.AsFloat32());
+        Assert.Equal(10f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     [Fact]
@@ -92,10 +94,10 @@ public class AggregateFunctionTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
-        accumulator.Accumulate(nullVal);
-        accumulator.Accumulate(nullVal);
+        accumulator.Accumulate(nullVal, in _testFrame);
+        accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result.IsNull);
+        Assert.True(accumulator.Result(in _testFrame).IsNull);
     }
 
     // ─────────────── AVG ───────────────
@@ -110,11 +112,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromFloat32(20f)];
         DataValue[] val3 = [DataValue.FromFloat32(30f)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(20.0, accumulator.Result.AsFloat64());
+        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -127,12 +129,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         DataValue[] val2 = [DataValue.FromFloat32(30f)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(nullVal);
-        accumulator.Accumulate(val2);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(nullVal, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
 
         // AVG of 10 and 30, ignoring NULL = 20
-        Assert.Equal(20.0, accumulator.Result.AsFloat64());
+        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -142,10 +144,10 @@ public class AggregateFunctionTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
-        accumulator.Accumulate(nullVal);
+        accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result.IsNull);
-        Assert.Equal(DataKind.Float64, accumulator.Result.Kind);
+        Assert.True(accumulator.Result(in _testFrame).IsNull);
+        Assert.Equal(DataKind.Float64, accumulator.Result(in _testFrame).Kind);
     }
 
     // ─────────────── MIN ───────────────
@@ -160,11 +162,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromFloat32(10f)];
         DataValue[] val3 = [DataValue.FromFloat32(20f)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(10f, accumulator.Result.AsFloat32());
+        Assert.Equal(10f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     [Fact]
@@ -177,11 +179,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromString("apple")];
         DataValue[] val3 = [DataValue.FromString("banana")];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal("apple", accumulator.Result.AsString());
+        Assert.Equal("apple", accumulator.Result(in _testFrame).AsString(_testFrame.Target));
     }
 
     [Fact]
@@ -193,10 +195,10 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         DataValue[] val1 = [DataValue.FromFloat32(5f)];
 
-        accumulator.Accumulate(nullVal);
-        accumulator.Accumulate(val1);
+        accumulator.Accumulate(nullVal, in _testFrame);
+        accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(5f, accumulator.Result.AsFloat32());
+        Assert.Equal(5f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     [Fact]
@@ -206,9 +208,9 @@ public class AggregateFunctionTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
-        accumulator.Accumulate(nullVal);
+        accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result.IsNull);
+        Assert.True(accumulator.Result(in _testFrame).IsNull);
     }
 
     // ─────────────── MAX ───────────────
@@ -223,11 +225,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromFloat32(30f)];
         DataValue[] val3 = [DataValue.FromFloat32(20f)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal(30f, accumulator.Result.AsFloat32());
+        Assert.Equal(30f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     [Fact]
@@ -240,11 +242,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromString("cherry")];
         DataValue[] val3 = [DataValue.FromString("banana")];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
-        Assert.Equal("cherry", accumulator.Result.AsString());
+        Assert.Equal("cherry", accumulator.Result(in _testFrame).AsString(_testFrame.Target));
     }
 
     [Fact]
@@ -256,10 +258,10 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         DataValue[] val1 = [DataValue.FromFloat32(5f)];
 
-        accumulator.Accumulate(nullVal);
-        accumulator.Accumulate(val1);
+        accumulator.Accumulate(nullVal, in _testFrame);
+        accumulator.Accumulate(val1, in _testFrame);
 
-        Assert.Equal(5f, accumulator.Result.AsFloat32());
+        Assert.Equal(5f, accumulator.Result(in _testFrame).AsFloat32());
     }
 
     // ─────────────── FunctionRegistry ───────────────
@@ -314,12 +316,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromInt32(200)];
         DataValue[] val3 = [DataValue.FromInt32(300)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(600L, accumulator.Result.AsInt64());
+        Assert.Equal(600L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     [Fact]
@@ -332,11 +334,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val1 = [DataValue.FromInt64(1_000_000_000L)];
         DataValue[] val2 = [DataValue.FromInt64(2_000_000_000L)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(3_000_000_000L, accumulator.Result.AsInt64());
+        Assert.Equal(3_000_000_000L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     [Fact]
@@ -349,11 +351,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val1 = [DataValue.FromFloat64(1.5)];
         DataValue[] val2 = [DataValue.FromFloat64(2.5)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(4.0, accumulator.Result.AsFloat64());
+        Assert.Equal(4.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -363,9 +365,9 @@ public class AggregateFunctionTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         DataValue[] nullVal = [DataValue.Null(DataKind.Int32)];
-        accumulator.Accumulate(nullVal);
+        accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result.IsNull);
+        Assert.True(accumulator.Result(in _testFrame).IsNull);
     }
 
     [Fact]
@@ -379,12 +381,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromInt32(20)];
         DataValue[] val3 = [DataValue.FromInt32(30)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(20.0, accumulator.Result.AsFloat64());
+        Assert.Equal(20.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -397,11 +399,11 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val1 = [DataValue.FromFloat64(1.0)];
         DataValue[] val2 = [DataValue.FromFloat64(3.0)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result.AsFloat64());
+        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -415,12 +417,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromInt32(10)];
         DataValue[] val3 = [DataValue.FromInt32(20)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int32, outputKind);
-        Assert.Equal(10, accumulator.Result.AsInt32());
+        Assert.Equal(10, accumulator.Result(in _testFrame).AsInt32());
     }
 
     [Fact]
@@ -434,12 +436,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromInt64(300L)];
         DataValue[] val3 = [DataValue.FromInt64(200L)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Int64, outputKind);
-        Assert.Equal(300L, accumulator.Result.AsInt64());
+        Assert.Equal(300L, accumulator.Result(in _testFrame).AsInt64());
     }
 
     [Fact]
@@ -449,9 +451,9 @@ public class AggregateFunctionTests : ServiceTestBase
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         DataValue[] nullVal = [DataValue.Null(DataKind.Int32)];
-        accumulator.Accumulate(nullVal);
+        accumulator.Accumulate(nullVal, in _testFrame);
 
-        Assert.True(accumulator.Result.IsNull);
+        Assert.True(accumulator.Result(in _testFrame).IsNull);
     }
 
     [Fact]
@@ -465,12 +467,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromInt32(2)];
         DataValue[] val3 = [DataValue.FromInt32(3)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result.AsFloat64());
+        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -484,12 +486,12 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val3 = [DataValue.FromInt32(3)];
         DataValue[] val4 = [DataValue.FromInt32(4)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
-        accumulator.Accumulate(val4);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
+        accumulator.Accumulate(val4, in _testFrame);
 
-        Assert.Equal(2.5, accumulator.Result.AsFloat64());
+        Assert.Equal(2.5, accumulator.Result(in _testFrame).AsFloat64());
     }
 
     [Fact]
@@ -502,11 +504,11 @@ public class AggregateFunctionTests : ServiceTestBase
         // Population stddev of {2, 4, 4, 4, 5, 5, 7, 9} = 2.0
         foreach (int v in new[] { 2, 4, 4, 4, 5, 5, 7, 9 })
         {
-            accumulator.Accumulate([DataValue.FromInt32(v)]);
+            accumulator.Accumulate([DataValue.FromInt32(v)], in _testFrame);
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(2.0, accumulator.Result.AsFloat64(), precision: 10);
+        Assert.Equal(2.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
     }
 
     [Fact]
@@ -520,13 +522,13 @@ public class AggregateFunctionTests : ServiceTestBase
         DataValue[] val2 = [DataValue.FromFloat64(4.0)];
         DataValue[] val3 = [DataValue.FromFloat64(6.0)];
 
-        accumulator.Accumulate(val1);
-        accumulator.Accumulate(val2);
-        accumulator.Accumulate(val3);
+        accumulator.Accumulate(val1, in _testFrame);
+        accumulator.Accumulate(val2, in _testFrame);
+        accumulator.Accumulate(val3, in _testFrame);
 
         // Sample variance of {2, 4, 6} = 4.0
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(4.0, accumulator.Result.AsFloat64(), precision: 10);
+        Assert.Equal(4.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
     }
 
     [Fact]
@@ -539,11 +541,11 @@ public class AggregateFunctionTests : ServiceTestBase
         // Perfect positive correlation: y = x
         foreach (int v in new[] { 1, 2, 3, 4, 5 })
         {
-            accumulator.Accumulate([DataValue.FromInt32(v), DataValue.FromInt32(v)]);
+            accumulator.Accumulate([DataValue.FromInt32(v), DataValue.FromInt32(v)], in _testFrame);
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(1.0, accumulator.Result.AsFloat64(), precision: 10);
+        Assert.Equal(1.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
     }
 
     [Fact]
@@ -556,10 +558,10 @@ public class AggregateFunctionTests : ServiceTestBase
         // COVAR_SAMP({1,2,3}, {1,2,3}) = 1.0
         foreach (int v in new[] { 1, 2, 3 })
         {
-            accumulator.Accumulate([DataValue.FromInt32(v), DataValue.FromInt32(v)]);
+            accumulator.Accumulate([DataValue.FromInt32(v), DataValue.FromInt32(v)], in _testFrame);
         }
 
         Assert.Equal(DataKind.Float64, outputKind);
-        Assert.Equal(1.0, accumulator.Result.AsFloat64(), precision: 10);
+        Assert.Equal(1.0, accumulator.Result(in _testFrame).AsFloat64(), precision: 10);
     }
 }
