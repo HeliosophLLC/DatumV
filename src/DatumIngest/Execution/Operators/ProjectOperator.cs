@@ -365,7 +365,23 @@ public sealed class ProjectOperator : IQueryOperator
                         {
                             aliasedPositions.Add(names.Count - 1);
                         }
-                        slots.Add(ProjectionSlot.Evaluate(column.Expression));
+
+                        // ColumnReference passthrough: resolve to a CopyOrdinal slot so the
+                        // value flows through DataValueRetention.Stabilize at projection time
+                        // (transferring arena-backed bytes into the output batch's arena).
+                        // The Evaluate slot path would return the DataValue as-is — its
+                        // _p0/_p1 still pointing into the input batch's arena — and silently
+                        // produce a stale-pointer hazard once the value lands in an output
+                        // batch whose arena owns none of those bytes.
+                        if (column.Expression is ColumnReference colRef
+                            && TryResolveColumnOrdinal(colRef, firstRow, out int columnOrdinal))
+                        {
+                            slots.Add(ProjectionSlot.CopyOrdinal(columnOrdinal));
+                        }
+                        else
+                        {
+                            slots.Add(ProjectionSlot.Evaluate(column.Expression));
+                        }
                         break;
                 }
             }
@@ -617,6 +633,40 @@ public sealed class ProjectOperator : IQueryOperator
 
         internal static ProjectionSlot Evaluate(Expression expression) =>
             new() { SourceOrdinal = -1, Expression = expression };
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="ColumnReference"/> to its ordinal in <paramref name="row"/>.
+    /// Tries the qualified name first (when present), then the unqualified column name —
+    /// mirroring <c>ExpressionEvaluator.EvaluateColumn</c> so the projection plan stays
+    /// in step with how the evaluator would resolve the same reference.
+    /// </summary>
+    /// <param name="column">The column reference being resolved.</param>
+    /// <param name="row">A representative row whose schema defines the available column ordinals.</param>
+    /// <param name="ordinal">On success, the matching column ordinal; on failure, <c>-1</c>.</param>
+    /// <returns><see langword="true"/> when the reference resolves to a column in
+    /// <paramref name="row"/>'s schema; <see langword="false"/> when no match is found
+    /// (e.g. correlated outer reference or a name that only resolves at evaluation time).</returns>
+    internal static bool TryResolveColumnOrdinal(
+        ColumnReference column,
+        Row row,
+        out int ordinal)
+    {
+        IReadOnlyDictionary<string, int> nameIndex = row.ColumnLookup.NameIndex;
+
+        if (column.QualifiedName is not null
+            && nameIndex.TryGetValue(column.QualifiedName, out ordinal))
+        {
+            return true;
+        }
+
+        if (nameIndex.TryGetValue(column.ColumnName, out ordinal))
+        {
+            return true;
+        }
+
+        ordinal = -1;
+        return false;
     }
 
     /// <summary>

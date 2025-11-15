@@ -47,6 +47,15 @@ public sealed class Arena : IValueStore, IDisposable
     private bool _pooled;
     private int _refCount;
 
+    private static int s_nextId;
+
+    /// <summary>
+    /// Process-wide unique identifier assigned at construction. Diagnostic only —
+    /// surfaces in <see cref="GetSpanForRead"/> error messages so a stale-DataValue
+    /// reference can be correlated with the specific arena that produced/owned it.
+    /// </summary>
+    public int Id { get; } = System.Threading.Interlocked.Increment(ref s_nextId);
+
     // Side-list for managed objects that cannot be byte-serialized (e.g. ImageHandle).
     // Accessed under _writeLock for thread safety.
     private List<object>? _objects;
@@ -312,7 +321,10 @@ public sealed class Arena : IValueStore, IDisposable
     {
         ThrowIfPooled();
         if (_pointer == null)
-            throw new InvalidOperationException("Arena has not been allocated. No data has been written.");
+            throw new InvalidOperationException(
+                $"Arena[#{Id}] has not been allocated. " +
+                $"Disposed={_disposed} Pooled={_pooled} Capacity={_capacity} Position={_position} RefCount={_refCount} " +
+                $"GetString at offset={offset} length={length}");
         return Encoding.UTF8.GetString(_pointer + offset, length);
     }
 
@@ -715,7 +727,10 @@ public sealed class Arena : IValueStore, IDisposable
     {
         ThrowIfPooled();
         if (_pointer == null)
-            throw new InvalidOperationException("Arena has not been allocated. No data has been written.");
+            throw new InvalidOperationException(
+                $"Arena[#{Id}] has not been allocated. " +
+                $"Disposed={_disposed} Pooled={_pooled} Capacity={_capacity} Position={_position} RefCount={_refCount} " +
+                $"Read at offset={offset} length={length}");
         return new(_pointer + offset, length);
     }
 }
