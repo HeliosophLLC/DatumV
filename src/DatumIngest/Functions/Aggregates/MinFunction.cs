@@ -45,9 +45,16 @@ public sealed class MinFunction : IAggregateFunction
             if (value.IsNull) return;
 
             _inputKind = value.Kind;
-            if (_minimum is null || CompareValues(value, _minimum.Value) < 0)
+
+            // _minimum was stabilised into frame.Target by a previous Accumulate (or is
+            // null on the first call). New candidate's payload still lives in frame.Source.
+            // Compare across the two stores, then stabilise the new winner into Target so
+            // the captured DataValue's offsets stay valid after the input batch's arena
+            // is recycled.
+            if (_minimum is null
+                || DataValueComparer.Compare(value, frame.Source, _minimum.Value, frame.Target) < 0)
             {
-                _minimum = value;
+                _minimum = DataValueRetention.Stabilize(value, frame.Source, frame.Target);
             }
         }
 
@@ -68,7 +75,14 @@ public sealed class MinFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result(in InvocationFrame frame) => _minimum ?? DataValue.Null(_inputKind);
+        public DataValue Result(in InvocationFrame frame)
+        {
+            if (_minimum is null) return DataValue.Null(_inputKind);
+            // _minimum lives in the Target arena passed during Accumulate (typically
+            // context.Store). Restabilise into the emit Target so result-batch readers
+            // resolve against the right arena.
+            return DataValueRetention.Stabilize(_minimum.Value, frame.Source, frame.Target);
+        }
 
         /// <inheritdoc />
         public void Reset()

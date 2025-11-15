@@ -45,9 +45,16 @@ public sealed class MaxFunction : IAggregateFunction
             if (value.IsNull) return;
 
             _inputKind = value.Kind;
-            if (_maximum is null || CompareValues(value, _maximum.Value) > 0)
+
+            // _maximum was stabilised into frame.Target by a previous Accumulate (or is
+            // null on the first call). New candidate's payload still lives in frame.Source.
+            // Compare across the two stores, then stabilise the new winner into Target so
+            // the captured DataValue's offsets stay valid after the input batch's arena
+            // is recycled.
+            if (_maximum is null
+                || DataValueComparer.Compare(value, frame.Source, _maximum.Value, frame.Target) > 0)
             {
-                _maximum = value;
+                _maximum = DataValueRetention.Stabilize(value, frame.Source, frame.Target);
             }
         }
 
@@ -68,7 +75,14 @@ public sealed class MaxFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result(in InvocationFrame frame) => _maximum ?? DataValue.Null(_inputKind);
+        public DataValue Result(in InvocationFrame frame)
+        {
+            if (_maximum is null) return DataValue.Null(_inputKind);
+            // _maximum lives in the Target arena passed during Accumulate (typically
+            // context.Store). Restabilise into the emit Target so result-batch readers
+            // resolve against the right arena.
+            return DataValueRetention.Stabilize(_maximum.Value, frame.Source, frame.Target);
+        }
 
         /// <inheritdoc />
         public void Reset()

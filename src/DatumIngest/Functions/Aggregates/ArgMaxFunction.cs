@@ -84,10 +84,15 @@ public sealed class ArgMaxFunction : IAggregateFunction
 
             _valueKind = value.Kind;
 
-            if (!_hasValue || IsBetter(key, _bestKey))
+            // _bestKey was stabilised into frame.Target by a previous Accumulate (or is
+            // default on the first call). New candidate's payload still lives in
+            // frame.Source. Compare across the two stores, then stabilise both the new
+            // winning value and key into Target so their offsets stay valid after the
+            // input batch's arena is recycled.
+            if (!_hasValue || IsBetter(key, frame.Source, _bestKey, frame.Target))
             {
-                _bestValue = value;
-                _bestKey = key;
+                _bestValue = DataValueRetention.Stabilize(value, frame.Source, frame.Target);
+                _bestKey = DataValueRetention.Stabilize(key, frame.Source, frame.Target);
                 _hasValue = true;
             }
         }
@@ -110,7 +115,14 @@ public sealed class ArgMaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public DataValue Result(in InvocationFrame frame) => _hasValue ? _bestValue : DataValue.Null(_valueKind);
+        public DataValue Result(in InvocationFrame frame)
+        {
+            if (!_hasValue) return DataValue.Null(_valueKind);
+            // _bestValue lives in the Target arena passed during Accumulate (typically
+            // context.Store). Restabilise into the emit Target so result-batch readers
+            // resolve against the right arena.
+            return DataValueRetention.Stabilize(_bestValue, frame.Source, frame.Target);
+        }
 
         /// <inheritdoc/>
         public void Reset()
@@ -128,6 +140,14 @@ public sealed class ArgMaxFunction : IAggregateFunction
         private bool IsBetter(DataValue candidate, DataValue current)
         {
             int comparison = DataValueComparer.Compare(candidate, current);
+            return _findMaximum ? comparison > 0 : comparison < 0;
+        }
+
+        private bool IsBetter(
+            DataValue candidate, IValueStore candidateStore,
+            DataValue current, IValueStore currentStore)
+        {
+            int comparison = DataValueComparer.Compare(candidate, candidateStore, current, currentStore);
             return _findMaximum ? comparison > 0 : comparison < 0;
         }
     }
