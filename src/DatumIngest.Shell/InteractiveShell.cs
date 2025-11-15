@@ -27,6 +27,7 @@ internal sealed class InteractiveShell
     private readonly LanguageService _languageService;
     private CancellationTokenSource? _activeQueryCts;
     private bool _timerEnabled;
+    private bool _imagesEnabled;
 
     public InteractiveShell(TableCatalog catalog)
     {
@@ -142,6 +143,22 @@ internal sealed class InteractiveShell
                         continue;
                     }
 
+                    if (trimmed.StartsWith(".images", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string arg = trimmed[".images".Length..].Trim().ToLowerInvariant();
+                        if (arg == "on" || arg == "" && !_imagesEnabled) _imagesEnabled = true;
+                        else if (arg == "off" || arg == "" && _imagesEnabled) _imagesEnabled = false;
+                        else
+                        {
+                            AnsiConsole.MarkupLine($"[red]Usage: .images on|off (or just .images to toggle)[/]");
+                            continue;
+                        }
+                        AnsiConsole.MarkupLine(_imagesEnabled
+                            ? "[green]Images on. Results render one record at a time with Sixel-encoded image cells.[/]"
+                            : "[yellow]Images off. Image cells render as a hex preview.[/]");
+                        continue;
+                    }
+
                     AnsiConsole.MarkupLine($"[red]Unknown command: {Markup.Escape(trimmed)}[/]");
                     continue;
                 }
@@ -225,7 +242,14 @@ internal sealed class InteractiveShell
         Stopwatch? sw = _timerEnabled ? Stopwatch.StartNew() : null;
         try
         {
-            await PaginateAsync(plan, cts.Token).ConfigureAwait(false);
+            if (_imagesEnabled)
+            {
+                await PaginateExpandedAsync(plan, cts.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await PaginateAsync(plan, cts.Token).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -320,6 +344,107 @@ internal sealed class InteractiveShell
         {
             await enumerator.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Renders results one record at a time in vertical (key: value) form, with
+    /// image-typed cells emitted as inline Sixel escape sequences. Pagination
+    /// is per-row — Enter advances to the next record, Esc/Q stops. Used when
+    /// <c>.images on</c> is set.
+    /// </summary>
+    private async Task PaginateExpandedAsync(IQueryPlan plan, CancellationToken cancellationToken)
+    {
+        SidecarRegistry registry = _catalog.SidecarRegistry;
+
+        IAsyncEnumerator<RowBatch> enumerator = plan.ExecuteAsync(cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            if (!await enumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                AnsiConsole.MarkupLine("[grey](0 rows)[/]");
+                return;
+            }
+
+            Schema schema = DeriveSchema(enumerator.Current);
+            int nameWidth = schema.Columns.Max(c => c.Name.Length);
+            long recordIndex = 0;
+            bool hasMore = true;
+            int batchOffset = 0;
+
+            while (hasMore)
+            {
+                RowBatch batch = enumerator.Current;
+                Arena arena = batch.Arena;
+                Row row = batch[batchOffset];
+                recordIndex++;
+
+                RenderExpandedRow(row, schema, arena, registry, recordIndex, nameWidth);
+
+                batchOffset++;
+                if (batchOffset >= batch.Count)
+                {
+                    hasMore = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                    batchOffset = 0;
+                }
+
+                if (!hasMore) break;
+
+                if (!PromptContinue())
+                {
+                    AnsiConsole.MarkupLine($"[grey](stopped after {recordIndex:N0} records)[/]");
+                    return;
+                }
+            }
+
+            AnsiConsole.MarkupLine($"[grey]({recordIndex:N0} {(recordIndex == 1 ? "record" : "records")})[/]");
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static void RenderExpandedRow(
+        Row row, Schema schema, Arena arena, SidecarRegistry registry, long recordIndex, int nameWidth)
+    {
+        AnsiConsole.MarkupLine($"[grey]── Record {recordIndex} {new string('─', Math.Max(8, 60 - nameWidth))}[/]");
+
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            ColumnInfo column = schema.Columns[i];
+            DataValue value = row[i];
+
+            bool isImageKind = column.Kind is DataKind.Image or DataKind.UInt8Array;
+            string label = column.Name.PadRight(nameWidth);
+
+            if (isImageKind && !value.IsNull)
+            {
+                // Print the label, then dump the Sixel block on the line(s) below.
+                // We bypass AnsiConsole because Spectre.Console treats `[` as markup
+                // syntax — the Sixel sequence has to reach stdout untouched.
+                Console.Out.WriteLine($"{label} | <image>");
+                try
+                {
+                    ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+                    string sixel = SixelEncoder.EncodeImage(bytes);
+                    Console.Out.Write(sixel);
+                    Console.Out.WriteLine();
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"  [red](image render failed: {Markup.Escape(ex.Message)})[/]");
+                }
+            }
+            else
+            {
+                string text = value.IsNull
+                    ? "NULL"
+                    : TableFormatter.FormatValue(value, arena, registry, column.Fields);
+                Console.Out.WriteLine($"{label} | {text}");
+            }
+        }
+        Console.Out.WriteLine();
     }
 
     /// <summary>
@@ -484,6 +609,7 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green]EXPLAIN ANALYZE <sql>;[/]       Run the query and show the plan with runtime metrics");
         AnsiConsole.MarkupLine("  [green].tables[/]                      List registered tables and row counts");
         AnsiConsole.MarkupLine("  [green].timer[/]                       Toggle elapsed-time reporting after each query");
+        AnsiConsole.MarkupLine("  [green].images on[/] / [green].images off[/]      Render image cells as inline Sixel (one record at a time)");
         AnsiConsole.MarkupLine("  [green].help[/]                        Show this help");
         AnsiConsole.MarkupLine("  [green].quit[/] / [green].exit[/]                Exit the shell");
         AnsiConsole.MarkupLine("  [grey]Tab[/] / [grey]Ctrl+Space[/]              Trigger SQL completion (Ctrl+Space if Tab is swallowed by the terminal)");
