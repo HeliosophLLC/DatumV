@@ -98,14 +98,17 @@ public sealed class ArgMaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             ArgMaxAccumulator otherAccumulator = (ArgMaxAccumulator)other;
 
             if (!otherAccumulator._hasValue)
                 return;
 
-            if (!_hasValue || IsBetter(otherAccumulator._bestKey, _bestKey))
+            // Both sides' captured keys/values were Stabilized into the same Target
+            // store during their Accumulate calls (per the parallel-aggregate contract:
+            // workers share context.Store). Compare keys against that shared store.
+            if (!_hasValue || IsBetter(otherAccumulator._bestKey, frame.Target, _bestKey, frame.Target))
             {
                 _bestValue = otherAccumulator._bestValue;
                 _bestKey = otherAccumulator._bestKey;
@@ -137,12 +140,6 @@ public sealed class ArgMaxFunction : IAggregateFunction
         /// Returns <see langword="true"/> when <paramref name="candidate"/> is strictly
         /// better than <paramref name="current"/> (greater for ARG_MAX, less for ARG_MIN).
         /// </summary>
-        private bool IsBetter(DataValue candidate, DataValue current)
-        {
-            int comparison = DataValueComparer.Compare(candidate, current);
-            return _findMaximum ? comparison > 0 : comparison < 0;
-        }
-
         private bool IsBetter(
             DataValue candidate, IValueStore candidateStore,
             DataValue current, IValueStore currentStore)

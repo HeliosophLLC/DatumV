@@ -99,7 +99,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             PercentileDiscreteAccumulator otherAccumulator = (PercentileDiscreteAccumulator)other;
             _values.AddRange(otherAccumulator._values);

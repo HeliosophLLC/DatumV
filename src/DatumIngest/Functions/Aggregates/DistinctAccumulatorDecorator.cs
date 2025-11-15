@@ -166,7 +166,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// The other decorator's inner accumulator is not merged directly — its state
     /// is redundant because all distinct values are replayed through this inner.
     /// </remarks>
-    public void Merge(IAggregateAccumulator other)
+    public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
     {
         DistinctAccumulatorDecorator otherDecorator = (DistinctAccumulatorDecorator)other;
 
@@ -372,7 +372,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
             // Merge the partition's inner accumulator into the main inner.
             // Since partitions are hash-disjoint, no cross-partition dedup is needed.
-            _inner.Merge(partitionAccumulator);
+            _inner.Merge(partitionAccumulator, in _capturedFrame);
         }
 
         if (ExecutionTracer.IsEnabled)

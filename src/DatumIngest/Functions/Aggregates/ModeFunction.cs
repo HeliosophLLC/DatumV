@@ -73,7 +73,7 @@ public sealed class ModeFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             ModeAccumulator otherAccumulator = (ModeAccumulator)other;
 

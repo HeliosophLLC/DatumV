@@ -59,7 +59,7 @@ public sealed class MinFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             MinAccumulator otherAccumulator = (MinAccumulator)other;
 
@@ -69,7 +69,11 @@ public sealed class MinFunction : IAggregateFunction
             }
 
             _inputKind = otherAccumulator._inputKind;
-            if (_minimum is null || CompareValues(otherAccumulator._minimum.Value, _minimum.Value) < 0)
+            // Both sides' captured values were Stabilized into the same Target store
+            // during their Accumulate calls (per the parallel-aggregate contract:
+            // workers share context.Store). Compare against that shared store.
+            if (_minimum is null
+                || DataValueComparer.Compare(otherAccumulator._minimum.Value, _minimum.Value, frame.Target) < 0)
             {
                 _minimum = otherAccumulator._minimum;
             }
@@ -90,8 +94,5 @@ public sealed class MinFunction : IAggregateFunction
             _minimum = null;
             _inputKind = DataKind.Float64;
         }
-
-        private static int CompareValues(DataValue left, DataValue right) =>
-            DataValueComparer.Compare(left, right);
     }
 }

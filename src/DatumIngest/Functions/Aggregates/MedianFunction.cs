@@ -52,11 +52,11 @@ public sealed class MedianFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            _values.Add(AvgFunction.ExtractAsDouble(arguments[0]));
+            _values.Add(arguments[0].ToDouble());
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             MedianAccumulator otherAccumulator = (MedianAccumulator)other;
             _values.AddRange(otherAccumulator._values);

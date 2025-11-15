@@ -64,7 +64,7 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             ArrayAggregateAccumulator otherAccumulator = (ArrayAggregateAccumulator)other;
             _elementKind ??= otherAccumulator._elementKind;

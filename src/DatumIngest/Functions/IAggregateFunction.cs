@@ -71,11 +71,21 @@ public interface IAggregateAccumulator
     /// this one. Used by parallel hash aggregate to combine thread-local partial
     /// aggregations into a single result per group. The <paramref name="other"/>
     /// accumulator must not be used after merging.
+    /// <para>
+    /// Both accumulators were constructed and accumulated against the same Target
+    /// store (per the parallel-aggregate contract — workers share
+    /// <c>context.Store</c>), so any arena-backed payloads in either side resolve
+    /// against <paramref name="frame"/>'s stores. Frame-aware Merge lets
+    /// implementations like <c>Min</c>/<c>Max</c>/<c>ArgMax</c> use the store-aware
+    /// <c>DataValueComparer.Compare</c> overload when comparing captured values
+    /// across the merge.
+    /// </para>
     /// </summary>
     /// <param name="other">
     /// The accumulator to merge into this one. Must be the same concrete type.
     /// </param>
-    void Merge(IAggregateAccumulator other);
+    /// <param name="frame">Per-call invocation context.</param>
+    void Merge(IAggregateAccumulator other, in InvocationFrame frame);
 
     /// <summary>
     /// Computes the current aggregate result. The <paramref name="frame"/>'s

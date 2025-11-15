@@ -79,7 +79,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             ReservoirMedianAccumulator otherAccumulator = (ReservoirMedianAccumulator)other;
             _totalCount += otherAccumulator._totalCount;

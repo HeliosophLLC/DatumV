@@ -89,8 +89,8 @@ public sealed class CovarianceFunction : IAggregateFunction
         {
             if (arguments[0].IsNull || arguments[1].IsNull) return;
 
-            double y = AvgFunction.ExtractAsDouble(arguments[0]);
-            double x = AvgFunction.ExtractAsDouble(arguments[1]);
+            double y = arguments[0].ToDouble();
+            double x = arguments[1].ToDouble();
 
             _count++;
 
@@ -105,7 +105,7 @@ public sealed class CovarianceFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             CovarianceAccumulator otherAccumulator = (CovarianceAccumulator)other;
 

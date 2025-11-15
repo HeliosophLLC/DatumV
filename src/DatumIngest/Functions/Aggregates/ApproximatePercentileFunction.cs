@@ -109,7 +109,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             ReservoirPercentileAccumulator otherAccumulator = (ReservoirPercentileAccumulator)other;
             _totalCount += otherAccumulator._totalCount;

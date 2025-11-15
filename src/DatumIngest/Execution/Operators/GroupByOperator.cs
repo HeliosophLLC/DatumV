@@ -504,7 +504,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 for (int i = 1; i < workerCount; i++)
                 {
-                    MergeGroupState(workerGlobalGroups[0], workerGlobalGroups[i]);
+                    MergeGroupState(workerGlobalGroups[0], workerGlobalGroups[i], in workerAccumFrame);
                 }
 
                 ColumnLookup? globalOutputLookup = null;
@@ -982,7 +982,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// For non-ordered aggregates, calls <see cref="IAggregateAccumulator.Merge"/>.
     /// For ordered aggregates, concatenates the ordered buffers (sorted at flush time).
     /// </summary>
-    private void MergeGroupState(GroupState target, GroupState source)
+    private void MergeGroupState(GroupState target, GroupState source, in InvocationFrame frame)
     {
         for (int i = 0; i < _aggregateColumns.Count; i++)
         {
@@ -996,7 +996,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
             else
             {
-                target.Accumulators[i].Merge(source.Accumulators[i]);
+                target.Accumulators[i].Merge(source.Accumulators[i], in frame);
             }
         }
     }

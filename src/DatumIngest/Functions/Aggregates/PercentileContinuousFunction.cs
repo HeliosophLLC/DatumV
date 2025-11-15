@@ -86,7 +86,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             PercentileContinuousAccumulator otherAccumulator = (PercentileContinuousAccumulator)other;
             _values.AddRange(otherAccumulator._values);

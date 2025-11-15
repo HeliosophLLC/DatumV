@@ -77,7 +77,7 @@ public sealed class SumFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             SumAccumulator otherAccumulator = (SumAccumulator)other;
             _longSum += otherAccumulator._longSum;

@@ -20,7 +20,7 @@ public sealed class AvgFunction : IAggregateFunction
             throw new ArgumentException("AVG() requires exactly one argument.");
         }
 
-        if (!IsNumericKind(argumentKinds[0]))
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
             throw new ArgumentException($"AVG() requires a numeric argument, got {argumentKinds[0]}.");
         }
@@ -31,10 +31,6 @@ public sealed class AvgFunction : IAggregateFunction
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new AvgAccumulator();
 
-    private static bool IsNumericKind(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
-
-    internal static double ExtractAsDouble(DataValue value) => value.ToDouble();
-
     private sealed class AvgAccumulator : IAggregateAccumulator
     {
         private double _sum;
@@ -44,12 +40,12 @@ public sealed class AvgFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            _sum += ExtractAsDouble(arguments[0]);
+            _sum += arguments[0].ToDouble();
             _count++;
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             AvgAccumulator otherAccumulator = (AvgAccumulator)other;
             _sum += otherAccumulator._sum;

@@ -76,7 +76,7 @@ public sealed class VarianceFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            double value = AvgFunction.ExtractAsDouble(arguments[0]);
+            double value = arguments[0].ToDouble();
             _count++;
             double delta = value - _mean;
             _mean += delta / _count;
@@ -85,7 +85,7 @@ public sealed class VarianceFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             WelfordVarianceAccumulator otherAccumulator = (WelfordVarianceAccumulator)other;
 

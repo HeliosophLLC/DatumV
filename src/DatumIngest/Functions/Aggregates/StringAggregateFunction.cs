@@ -78,7 +78,7 @@ public sealed class StringAggregateFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             StringAggregateAccumulator otherAccumulator = (StringAggregateAccumulator)other;
             _values.AddRange(otherAccumulator._values);

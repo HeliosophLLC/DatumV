@@ -46,7 +46,7 @@ public sealed class CountFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             CountAccumulator otherAccumulator = (CountAccumulator)other;
             _count += otherAccumulator._count;

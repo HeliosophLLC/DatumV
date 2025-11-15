@@ -59,7 +59,7 @@ public sealed class MaxFunction : IAggregateFunction
         }
 
         /// <inheritdoc/>
-        public void Merge(IAggregateAccumulator other)
+        public void Merge(IAggregateAccumulator other, in InvocationFrame frame)
         {
             MaxAccumulator otherAccumulator = (MaxAccumulator)other;
 
@@ -69,7 +69,11 @@ public sealed class MaxFunction : IAggregateFunction
             }
 
             _inputKind = otherAccumulator._inputKind;
-            if (_maximum is null || CompareValues(otherAccumulator._maximum.Value, _maximum.Value) > 0)
+            // Both sides' captured values were Stabilized into the same Target store
+            // during their Accumulate calls (per the parallel-aggregate contract:
+            // workers share context.Store). Compare against that shared store.
+            if (_maximum is null
+                || DataValueComparer.Compare(otherAccumulator._maximum.Value, _maximum.Value, frame.Target) > 0)
             {
                 _maximum = otherAccumulator._maximum;
             }
@@ -90,8 +94,5 @@ public sealed class MaxFunction : IAggregateFunction
             _maximum = null;
             _inputKind = DataKind.Float64;
         }
-
-        private static int CompareValues(DataValue left, DataValue right) =>
-            DataValueComparer.Compare(left, right);
     }
 }
