@@ -229,7 +229,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (currentGroup is null)
                             {
-                                currentGroup = CreateGroupState(pool, in frame);
+                                currentGroup = CreateGroupState(pool, context, in frame);
                                 currentGroup.KeyValues = [key];
                                 currentSingleKey = key;
                             }
@@ -262,7 +262,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             {
                                 // Copy scratch into permanent storage only at group boundaries.
                                 DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
-                                currentGroup = CreateGroupState(pool, in frame);
+                                currentGroup = CreateGroupState(pool, context, in frame);
                                 currentGroup.KeyValues = permanentKey;
                                 currentKeyValues = permanentKey;
                             }
@@ -451,7 +451,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 GroupState[] workerGlobalGroups = new GroupState[workerCount];
                 for (int i = 0; i < workerCount; i++)
                 {
-                    workerGlobalGroups[i] = CreateGroupState(pool, in workerAccumFrame);
+                    workerGlobalGroups[i] = CreateGroupState(pool, context, in workerAccumFrame);
                 }
 
                 Task globalFeeder = Task.Run(async () =>
@@ -579,7 +579,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         // (e.g. DistinctAccumulatorDecorator's _capturedFrame for replay merges).
         // context.Store survives the query's lifetime.
         InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
-        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState(pool, in initFrame) : null;
+        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState(pool, context, in initFrame) : null;
 
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
@@ -717,7 +717,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         {
                             if (!singleKeyTable!.TryGetValue(singleKey, out GroupState? existingGroup))
                             {
-                                existingGroup = CreateGroupState(pool, in accumFrame);
+                                existingGroup = CreateGroupState(pool, context, in accumFrame);
                                 existingGroup.KeyValues = [singleKey];
                                 singleKeyTable[singleKey] = existingGroup;
                             }
@@ -729,7 +729,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             CompositeKey ck = new(permanentKey);
                             if (!compositeKeyTable!.TryGetValue(ck, out GroupState? existingGroup))
                             {
-                                existingGroup = CreateGroupState(pool, in accumFrame);
+                                existingGroup = CreateGroupState(pool, context, in accumFrame);
                                 existingGroup.KeyValues = permanentKey;
                                 compositeKeyTable[ck] = existingGroup;
                             }
@@ -882,7 +882,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                 {
                                     if (!partSingleGroups!.TryGetValue(partKey[0], out GroupState? pg))
                                     {
-                                        pg = CreateGroupState(pool, in drainFrame);
+                                        pg = CreateGroupState(pool, context, in drainFrame);
                                         pg.KeyValues = partKey;
                                         partSingleGroups[partKey[0]] = pg;
                                     }
@@ -893,7 +893,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     CompositeKey partCk = new(partKey);
                                     if (!partCompositeGroups!.TryGetValue(partCk, out GroupState? pg))
                                     {
-                                        pg = CreateGroupState(pool, in drainFrame);
+                                        pg = CreateGroupState(pool, context, in drainFrame);
                                         pg.KeyValues = partKey;
                                         partCompositeGroups[partCk] = pg;
                                     }
@@ -1113,7 +1113,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         return new ColumnLookup(names);
     }
 
-    private GroupState CreateGroupState(Pool pool, in InvocationFrame frame)
+    private GroupState CreateGroupState(Pool pool, ExecutionContext context, in InvocationFrame frame)
     {
         int count = _aggregateColumns.Count;
         GroupState state = pool.Backing.RentGroupState(count);
@@ -1160,6 +1160,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         accumulator,
                         column.ArgumentExpressions.Count,
                         in frame,
+                        context,
                         _distinctMemoryBudgetBytes,
                         _distinctMemoryBudgetBytes.HasValue
                             ? column.Function.CreateAccumulator

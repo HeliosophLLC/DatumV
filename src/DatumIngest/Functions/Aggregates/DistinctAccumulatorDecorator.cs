@@ -1,6 +1,7 @@
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Functions.Aggregates;
 
@@ -16,18 +17,28 @@ namespace DatumIngest.Functions.Aggregates;
 /// element-wise equality.
 /// </para>
 /// <para>
-/// When a memory budget is provided, the decorator spills to hash-partitioned temporary
-/// files once estimated memory exceeds the budget. Values are partitioned by their hash
-/// code so each partition contains a non-overlapping subset of distinct values. During
-/// the drain phase (triggered by <see cref="Result"/>), partitions are processed
-/// sequentially with fresh accumulators and merged into the final result, keeping peak
-/// memory proportional to the largest partition rather than the total distinct count.
+/// When a memory budget is provided, the decorator spills to a hash-partitioned
+/// <see cref="SpillReaderWriter"/> once estimated memory exceeds the budget. Values are
+/// partitioned by their hash code so each partition contains a non-overlapping subset
+/// of distinct values. During the drain phase (triggered by <see cref="Result"/>),
+/// partitions are processed sequentially with fresh accumulators and merged into the
+/// final result, keeping peak memory proportional to the largest partition rather than
+/// the total distinct count.
+/// </para>
+/// <para>
+/// Hash-set keys are stabilised into the captured <see cref="InvocationFrame.Target"/>
+/// store on insertion so their offsets stay valid after the per-call source arena
+/// (typically <c>inputBatch.Arena</c>) recycles. Spill values are restabilised into the
+/// spiller's consolidated arena via <c>SpillReaderWriter.Write</c>.
 /// </para>
 /// </summary>
 internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDisposable
 {
     /// <summary>Number of hash partitions used when spilling to disk.</summary>
     private const int SpillPartitionCount = 64;
+
+    /// <summary>Per-partition row buffer capacity before flushing to the spiller.</summary>
+    private const int SpillBufferRows = 64;
 
     /// <summary>
     /// Conservative per-entry overhead estimate for the <see cref="HashSet{T}"/>.
@@ -42,15 +53,17 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     private readonly long? _memoryBudgetBytes;
     private readonly Func<IAggregateAccumulator>? _accumulatorFactory;
     private readonly InvocationFrame _capturedFrame;
+    private readonly ExecutionContext _context;
     private HashSet<DataValue>? _singleArgumentSet;
     private HashSet<CompositeKey>? _multiArgumentSet;
 
     // ── Spill state ──
     private bool _spilling;
     private bool _drained;
-    private string? _spillDirectory;
-    private BinaryWriter?[]? _spillWriters;
-    private string?[]? _spillPaths;
+    private SpillReaderWriter? _spiller;
+    private RowBatch?[]? _partitionBuffers;
+    private Arena? _bufferArena;
+    private ColumnLookup? _spillSchema;
 
     /// <summary>
     /// The wrapped accumulator. Exposed so pooling infrastructure can return
@@ -67,13 +80,21 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// Determines whether single-key or composite-key deduplication is used.
     /// </param>
     /// <param name="frame">
-    /// Captured per-call invocation context, reused for inner-accumulator
-    /// <c>Accumulate</c>/<c>Result</c> calls during <c>Merge</c> and spill drain
-    /// where no per-call frame flows through.
+    /// Captured per-call invocation context. <see cref="InvocationFrame.Target"/>
+    /// is the stabilisation home for distinct-set keys (so they outlive their
+    /// originating input batch). Reused for inner-accumulator <c>Accumulate</c>/<c>Merge</c>
+    /// calls during drain where no per-call frame flows through.
+    /// </param>
+    /// <param name="context">
+    /// Execution context — provides <see cref="ExecutionContext.Pool"/>,
+    /// <see cref="ExecutionContext.SpillDirectory"/>, batch size, and cancellation
+    /// token used by the <see cref="SpillReaderWriter"/> when budget-triggered spill
+    /// kicks in. Required even when no budget is set so the decorator can rent the
+    /// per-partition staging arena and resolve replay batches consistently.
     /// </param>
     /// <param name="memoryBudgetBytes">
     /// Optional memory budget in bytes. When the in-memory hash set's estimated size
-    /// exceeds this budget, values are spilled to hash-partitioned temporary files.
+    /// exceeds this budget, values are spilled to a hash-partitioned <c>SpillReaderWriter</c>.
     /// <c>null</c> disables spill-to-disk (unbounded in-memory accumulation).
     /// </param>
     /// <param name="accumulatorFactory">
@@ -90,6 +111,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
         IAggregateAccumulator inner,
         int argumentCount,
         in InvocationFrame frame,
+        ExecutionContext context,
         long? memoryBudgetBytes = null,
         Func<IAggregateAccumulator>? accumulatorFactory = null,
         int estimatedDistinctCount = 0)
@@ -99,6 +121,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
         _memoryBudgetBytes = memoryBudgetBytes;
         _accumulatorFactory = accumulatorFactory;
         _capturedFrame = frame;
+        _context = context;
 
         if (argumentCount <= 1)
         {
@@ -119,7 +142,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     {
         if (_spilling)
         {
-            WriteToSpillPartition(arguments);
+            WriteToSpillPartition(arguments, in frame);
             return;
         }
 
@@ -130,14 +153,21 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             // Single-argument path: deduplicate on the argument value directly.
             // COUNT(DISTINCT col) with no arguments (COUNT(*)) should never reach here
             // because COUNT(DISTINCT *) is rejected during validation.
-            DataValue key = arguments.Length > 0 ? arguments[0] : DataValue.UnknownNull();
+            DataValue raw = arguments.Length > 0 ? arguments[0] : DataValue.UnknownNull();
+            // Stabilise into the captured Target so the hash-set entry stays valid
+            // after the per-call source arena (e.g. inputBatch.Arena) recycles.
+            // Inline values pass through unchanged; non-inline values get a copy.
+            DataValue key = DataValueRetention.Stabilize(raw, frame.Source, _capturedFrame.Target);
             isNew = _singleArgumentSet.Add(key);
         }
         else
         {
             // Multi-argument path (rare): deduplicate on the composite key.
             DataValue[] parts = new DataValue[arguments.Length];
-            arguments.CopyTo(parts);
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                parts[i] = DataValueRetention.Stabilize(arguments[i], frame.Source, _capturedFrame.Target);
+            }
             isNew = _multiArgumentSet!.Add(new CompositeKey(parts));
         }
 
@@ -172,7 +202,10 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
         // Drain any spilled partitions before merging so the decorator sets
         // and inner accumulators represent the complete state.
-        otherDecorator.DrainSpilledPartitions();
+        if (otherDecorator._spilling && !otherDecorator._drained)
+        {
+            otherDecorator.DrainSpilledPartitionsAsync().GetAwaiter().GetResult();
+        }
 
         if (_singleArgumentSet is not null && otherDecorator._singleArgumentSet is not null)
         {
@@ -199,7 +232,10 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// <inheritdoc />
     public DataValue Result(in InvocationFrame frame)
     {
-        DrainSpilledPartitions();
+        if (_spilling && !_drained)
+        {
+            DrainSpilledPartitionsAsync().GetAwaiter().GetResult();
+        }
         return _inner.Result(in frame);
     }
 
@@ -221,19 +257,26 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     // ─────────────── Spill infrastructure ───────────────
 
     /// <summary>
-    /// Transitions to spill mode: redistributes all values currently in the hash set
-    /// to hash-partitioned temporary files, clears the set, and resets the inner
-    /// accumulator. All subsequent <see cref="Accumulate"/> calls write directly to
-    /// partition files without touching the in-memory set.
+    /// Transitions to spill mode: stands up the <see cref="SpillReaderWriter"/> +
+    /// per-partition staging buffers, redistributes existing hash-set entries into
+    /// those buffers, clears the set, and resets the inner accumulator. All subsequent
+    /// <see cref="Accumulate"/> calls bypass the in-memory set and route directly to
+    /// partition buffers.
     /// </summary>
     private void BeginSpill()
     {
         _spilling = true;
-        _spillDirectory = Path.Combine(
-            Path.GetTempPath(), $"datum-distinct-agg-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_spillDirectory);
-        _spillWriters = new BinaryWriter[SpillPartitionCount];
-        _spillPaths = new string[SpillPartitionCount];
+        _spillSchema = BuildSpillSchema();
+        _bufferArena = _context.Pool.RentArena();
+
+        int hint = _memoryBudgetBytes.HasValue
+            ? (int)System.Math.Min(_memoryBudgetBytes.Value / 2, int.MaxValue)
+            : 1024 * 1024;
+        _spiller = new SpillReaderWriter(
+            _context.Pool, _spillSchema, _context.SpillDirectory,
+            initialArenaCapacity: hint,
+            partitionCount: SpillPartitionCount);
+        _partitionBuffers = new RowBatch?[SpillPartitionCount];
 
         if (ExecutionTracer.IsEnabled)
         {
@@ -246,14 +289,15 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
                 $"entries={count}");
         }
 
-        // Redistribute existing hash set values to partition files.
+        // Redistribute existing hash-set entries into per-partition buffers. The
+        // entries' arena-backed payloads already live in _capturedFrame.Target
+        // (Stabilise-on-Accumulate above), so source = _capturedFrame.Target.
         if (_singleArgumentSet is not null)
         {
             foreach (DataValue value in _singleArgumentSet)
             {
                 int partition = AssignPartition(value.GetHashCode());
-                EnsureSpillWriter(partition);
-                RowSerializer.WriteDataValue(_spillWriters[partition]!, value);
+                AddToPartitionBuffer(partition, [value], _capturedFrame.Target);
             }
 
             _singleArgumentSet.Clear();
@@ -264,59 +308,89 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             foreach (CompositeKey key in _multiArgumentSet!)
             {
                 int partition = AssignPartition(key.GetHashCode());
-                EnsureSpillWriter(partition);
-                WriteCompositeKey(_spillWriters[partition]!, key);
+                AddToPartitionBuffer(partition, key.Values, _capturedFrame.Target);
             }
 
             _multiArgumentSet.Clear();
             _multiArgumentSet.TrimExcess();
         }
 
-        // All distinct values are now in partition files — reset the inner.
+        // All distinct values are now in partition buffers / spill — reset the inner.
         _inner.Reset();
     }
 
     /// <summary>
-    /// Writes argument values to the appropriate hash-partitioned spill file.
+    /// Routes a post-spill row to its hash-partitioned buffer. Each value is stabilised
+    /// into <see cref="_bufferArena"/> first; when the partition buffer fills, the
+    /// spiller restabilises into its consolidated arena and the buffer is recycled.
     /// </summary>
-    private void WriteToSpillPartition(ReadOnlySpan<DataValue> arguments)
+    private void WriteToSpillPartition(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         int hashCode;
-        int partition;
+        DataValue[] values;
 
         if (_argumentCount <= 1)
         {
             DataValue key = arguments.Length > 0 ? arguments[0] : DataValue.UnknownNull();
             hashCode = key.GetHashCode();
-            partition = AssignPartition(hashCode);
-            EnsureSpillWriter(partition);
-            RowSerializer.WriteDataValue(_spillWriters![partition]!, key);
+            values = [key];
         }
         else
         {
             HashCode hashCodeBuilder = new();
-            DataValue[] parts = new DataValue[arguments.Length];
-            for (int index = 0; index < arguments.Length; index++)
+            values = new DataValue[arguments.Length];
+            for (int i = 0; i < arguments.Length; i++)
             {
-                parts[index] = arguments[index];
-                hashCodeBuilder.Add(arguments[index]);
+                values[i] = arguments[i];
+                hashCodeBuilder.Add(arguments[i]);
             }
 
             hashCode = hashCodeBuilder.ToHashCode();
-            partition = AssignPartition(hashCode);
-            EnsureSpillWriter(partition);
-            WriteCompositeKey(_spillWriters![partition]!, new CompositeKey(parts));
+        }
+
+        int partition = AssignPartition(hashCode);
+        AddToPartitionBuffer(partition, values, frame.Source);
+    }
+
+    /// <summary>
+    /// Stabilises <paramref name="values"/> from <paramref name="sourceStore"/> into
+    /// <see cref="_bufferArena"/> and appends them as a row to the partition's staging
+    /// buffer. Flushes to the spiller when the buffer reaches <see cref="SpillBufferRows"/>.
+    /// </summary>
+    private void AddToPartitionBuffer(int partition, ReadOnlySpan<DataValue> values, IValueStore sourceStore)
+    {
+        _partitionBuffers![partition] ??= _context.Pool.RentRowBatch(
+            _spillSchema!, SpillBufferRows, _bufferArena!);
+
+        DataValue[] flatValues = _context.Pool.RentDataValues(values.Length);
+        try
+        {
+            for (int i = 0; i < values.Length; i++)
+            {
+                flatValues[i] = DataValueRetention.Stabilize(values[i], sourceStore, _bufferArena!);
+            }
+            _partitionBuffers[partition]!.Add(flatValues);
+            flatValues = null!;
+        }
+        finally
+        {
+            if (flatValues is not null) _context.Pool.Backing.Return(flatValues);
+        }
+
+        if (_partitionBuffers[partition]!.IsFull)
+        {
+            _spiller!.Write(_partitionBuffers[partition]!, partition);
+            _partitionBuffers[partition] = null;
         }
     }
 
     /// <summary>
-    /// Processes all spill partition files sequentially, deduplicating within each
-    /// partition and merging partial results into <see cref="_inner"/>. Each partition
-    /// is processed with a temporary hash set and a fresh inner accumulator, so peak
-    /// memory is proportional to the largest single partition rather than the total
-    /// distinct count.
+    /// Replays each non-empty spill partition through a fresh inner accumulator, then
+    /// merges those partial inners into <see cref="_inner"/>. Each partition's local
+    /// hash set deduplicates its disjoint key range, so peak memory is proportional to
+    /// the largest partition rather than the total distinct count.
     /// </summary>
-    private void DrainSpilledPartitions()
+    private async Task DrainSpilledPartitionsAsync()
     {
         if (!_spilling || _drained)
         {
@@ -325,54 +399,73 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
         _drained = true;
 
-        // Flush and close all partition writers.
-        FlushSpillWriters();
+        // Flush any partial buffers to the spiller before replay.
+        if (_partitionBuffers is not null && _spiller is not null)
+        {
+            for (int p = 0; p < SpillPartitionCount; p++)
+            {
+                if (_partitionBuffers[p] is not null)
+                {
+                    _spiller.Write(_partitionBuffers[p]!, p);
+                    _partitionBuffers[p] = null;
+                }
+            }
+        }
+
+        // Replay frame: spill bytes resolve against the consolidated arena; the inner
+        // accumulator's own stabilisation logic decides where to retain (typically the
+        // captured Target). SidecarRegistry threads through unchanged.
+        InvocationFrame drainFrame = new(
+            _spiller!.ConsolidatedArena, _capturedFrame.Target, _capturedFrame.SidecarRegistry);
 
         for (int partition = 0; partition < SpillPartitionCount; partition++)
         {
-            if (_spillPaths?[partition] is null)
-            {
-                continue;
-            }
-
-            using FileStream stream = new(
-                _spillPaths[partition]!, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
-            using BinaryReader reader = new(stream);
+            if (_spiller!.RowsWrittenInPartition(partition) == 0) continue;
 
             IAggregateAccumulator partitionAccumulator = _accumulatorFactory!();
+            HashSet<DataValue>? partitionSingleSet = _argumentCount <= 1 ? new() : null;
+            HashSet<CompositeKey>? partitionCompositeSet = _argumentCount > 1 ? new() : null;
 
-            if (_argumentCount <= 1)
+            await foreach (RowBatch batch in _spiller.ReplayPartitionAsync(
+                _context, _spillSchema!, partition).ConfigureAwait(false))
             {
-                HashSet<DataValue> partitionSet = new();
-
-                while (stream.Position < stream.Length)
+                try
                 {
-                    DataValue value = RowSerializer.ReadDataValue(reader);
-
-                    if (partitionSet.Add(value))
+                    for (int row = 0; row < batch.Count; row++)
                     {
-                        partitionAccumulator.Accumulate([value], in _capturedFrame);
+                        Row spillRow = batch[row];
+
+                        if (_argumentCount <= 1)
+                        {
+                            DataValue value = spillRow[0];
+                            if (partitionSingleSet!.Add(value))
+                            {
+                                partitionAccumulator.Accumulate([value], in drainFrame);
+                            }
+                        }
+                        else
+                        {
+                            DataValue[] parts = new DataValue[_argumentCount];
+                            for (int i = 0; i < _argumentCount; i++)
+                            {
+                                parts[i] = spillRow[i];
+                            }
+                            if (partitionCompositeSet!.Add(new CompositeKey(parts)))
+                            {
+                                partitionAccumulator.Accumulate(parts, in drainFrame);
+                            }
+                        }
                     }
                 }
-            }
-            else
-            {
-                HashSet<CompositeKey> partitionSet = new();
-
-                while (stream.Position < stream.Length)
+                finally
                 {
-                    DataValue[] values = ReadCompositeKeyValues(reader);
-
-                    if (partitionSet.Add(new CompositeKey(values)))
-                    {
-                        partitionAccumulator.Accumulate(values, in _capturedFrame);
-                    }
+                    _context.Pool.ReturnRowBatch(batch);
                 }
             }
 
             // Merge the partition's inner accumulator into the main inner.
             // Since partitions are hash-disjoint, no cross-partition dedup is needed.
-            _inner.Merge(partitionAccumulator, in _capturedFrame);
+            _inner.Merge(partitionAccumulator, in drainFrame);
         }
 
         if (ExecutionTracer.IsEnabled)
@@ -380,59 +473,22 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             ExecutionTracer.Write("DISTINCT accumulator spill drain complete");
         }
 
-        CleanupSpillFiles();
+        CleanupSpillState();
     }
 
-    private void EnsureSpillWriter(int partition)
+    private ColumnLookup BuildSpillSchema()
     {
-        if (_spillWriters![partition] is null)
+        if (_argumentCount <= 1)
         {
-            _spillPaths![partition] = Path.Combine(_spillDirectory!, $"distinct_{partition}.spill");
-            FileStream stream = new(
-                _spillPaths[partition]!, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-            _spillWriters[partition] = new BinaryWriter(stream);
-        }
-    }
-
-    private void FlushSpillWriters()
-    {
-        if (_spillWriters is null)
-        {
-            return;
+            return new ColumnLookup(["__value"]);
         }
 
-        for (int index = 0; index < _spillWriters.Length; index++)
+        string[] names = new string[_argumentCount];
+        for (int i = 0; i < _argumentCount; i++)
         {
-            if (_spillWriters[index] is not null)
-            {
-                _spillWriters[index]!.Flush();
-                _spillWriters[index]!.Dispose();
-                _spillWriters[index] = null;
-            }
+            names[i] = $"__arg_{i}";
         }
-    }
-
-    private static void WriteCompositeKey(BinaryWriter writer, CompositeKey key)
-    {
-        writer.Write(key.Values.Length);
-
-        foreach (DataValue value in key.Values)
-        {
-            RowSerializer.WriteDataValue(writer, value);
-        }
-    }
-
-    private static DataValue[] ReadCompositeKeyValues(BinaryReader reader)
-    {
-        int count = reader.ReadInt32();
-        DataValue[] values = new DataValue[count];
-
-        for (int index = 0; index < count; index++)
-        {
-            values[index] = RowSerializer.ReadDataValue(reader);
-        }
-
-        return values;
+        return new ColumnLookup(names);
     }
 
     private static int AssignPartition(int hashCode)
@@ -444,27 +500,28 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     {
         _spilling = false;
         _drained = false;
-        FlushSpillWriters();
-        CleanupSpillFiles();
-    }
 
-    private void CleanupSpillFiles()
-    {
-        _spillWriters = null;
-        _spillPaths = null;
-
-        if (_spillDirectory is not null && Directory.Exists(_spillDirectory))
+        if (_partitionBuffers is not null)
         {
-            try
+            for (int p = 0; p < SpillPartitionCount; p++)
             {
-                Directory.Delete(_spillDirectory, recursive: true);
+                if (_partitionBuffers[p] is not null)
+                {
+                    _context.Pool.ReturnRowBatch(_partitionBuffers[p]!);
+                    _partitionBuffers[p] = null;
+                }
             }
-            catch
-            {
-                // Best-effort cleanup — files are in the OS temp directory.
-            }
+            _partitionBuffers = null;
+        }
 
-            _spillDirectory = null;
+        _spiller?.Dispose();
+        _spiller = null;
+        _spillSchema = null;
+
+        if (_bufferArena is not null)
+        {
+            _context.Pool.ReturnArena(_bufferArena);
+            _bufferArena = null;
         }
     }
 }

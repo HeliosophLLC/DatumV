@@ -443,8 +443,9 @@ public class AccumulatorMergeTests : ServiceTestBase
         IAggregateAccumulator leftInner = function.CreateAccumulator();
         IAggregateAccumulator rightInner = function.CreateAccumulator();
 
-        DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame);
-        DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame);
+        DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext();
+        DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame, ctx);
+        DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame, ctx);
 
         // Left sees: 1, 2, 3
         left.Accumulate([DataValue.FromFloat32(1f)], in _testFrame);
@@ -469,8 +470,9 @@ public class AccumulatorMergeTests : ServiceTestBase
         IAggregateAccumulator leftInner = function.CreateAccumulator();
         IAggregateAccumulator rightInner = function.CreateAccumulator();
 
-        DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame);
-        DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame);
+        DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext();
+        DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame, ctx);
+        DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame, ctx);
 
         left.Accumulate([DataValue.FromFloat32(1f)], in _testFrame);
         left.Accumulate([DataValue.FromFloat32(1f)], in _testFrame);
