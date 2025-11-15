@@ -21,13 +21,13 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
     [Fact]
     public void TypeKeywords_CoversAllDataKindNames()
     {
-        HashSet<string> monarchTypes = new(MonarchGrammarFactory.TypeKeywords(), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> monarchTypes = new(SqlKeywordRegistry.TypeKeywords, StringComparer.OrdinalIgnoreCase);
 
         foreach (string kindName in Enum.GetNames<DataKind>())
         {
             Assert.True(
                 monarchTypes.Contains(kindName),
-                $"DataKind.{kindName} is missing from MonarchGrammarFactory.TypeKeywords(). " +
+                $"DataKind.{kindName} is missing from SqlKeywordRegistry.TypeKeywords. " +
                 $"Add \"{kindName}\" so it gets syntax highlighting.");
         }
     }
@@ -67,12 +67,12 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
     /// takes precedence and they would never match the function case anyway.
     /// </summary>
     private static readonly HashSet<string> KeywordOverlaps =
-        new(MonarchGrammarFactory.ClauseKeywords(), StringComparer.OrdinalIgnoreCase);
+        new(SqlKeywordRegistry.ClauseKeywords, StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void BuiltinFunctions_CoversAllDocumentedFunctions()
     {
-        HashSet<string> monarchFunctions = new(MonarchGrammarFactory.BuiltinFunctions(), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> monarchFunctions = new(SqlKeywordRegistry.BuiltinFunctions, StringComparer.OrdinalIgnoreCase);
 
         List<string> missing = [];
         foreach (FunctionSignature function in FunctionDocumentation.All)
@@ -90,7 +90,7 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
 
         Assert.True(
             missing.Count == 0,
-            $"The following documented functions are missing from MonarchGrammarFactory.BuiltinFunctions(): " +
+            $"The following documented functions are missing from SqlKeywordRegistry.BuiltinFunctions: " +
             $"{string.Join(", ", missing)}. Add them so they get syntax highlighting.");
     }
 
@@ -102,7 +102,7 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
             StringComparer.OrdinalIgnoreCase);
 
         List<string> stale = [];
-        foreach (string name in MonarchGrammarFactory.BuiltinFunctions())
+        foreach (string name in SqlKeywordRegistry.BuiltinFunctions)
         {
             if (!documentedNames.Contains(name) && !KeywordOverlaps.Contains(name))
             {
@@ -112,14 +112,14 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
 
         Assert.True(
             stale.Count == 0,
-            $"The following entries in MonarchGrammarFactory.BuiltinFunctions() are not in FunctionDocumentation: " +
+            $"The following entries in SqlKeywordRegistry.BuiltinFunctions are not in FunctionDocumentation: " +
             $"{string.Join(", ", stale)}. Remove them or add documentation.");
     }
 
     // ───────────────────── Date part keyword sync ─────────────────────
 
     /// <summary>
-    /// Every name in <see cref="MonarchGrammarFactory.DatePartKeywords"/> and
+    /// Every name in <see cref="SqlKeywordRegistry.DatePartKeywords"/> and
     /// <see cref="KeywordRegistry.DatePartFieldNames"/> must be accepted by
     /// <see cref="DatePartFunction"/> without throwing. This detects drift when
     /// a field name is added to highlighting/completions but not to the runtime,
@@ -135,7 +135,7 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
             new DateTimeOffset(2026, 6, 15, 14, 30, 45, 500, TimeSpan.FromHours(5)));
 
         HashSet<string> allNames = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string name in MonarchGrammarFactory.DatePartKeywords())
+        foreach (string name in SqlKeywordRegistry.DatePartKeywords)
             allNames.Add(name);
         foreach (string name in KeywordRegistry.DatePartFieldNames)
             allNames.Add(name);
@@ -161,7 +161,7 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
 
     /// <summary>
     /// Ensures <see cref="KeywordRegistry.DatePartFieldNames"/> is a superset of
-    /// <see cref="MonarchGrammarFactory.DatePartKeywords"/> — every highlighted name
+    /// <see cref="SqlKeywordRegistry.DatePartKeywords"/> — every highlighted name
     /// should also be offered in autocomplete.
     /// </summary>
     [Fact]
@@ -170,7 +170,7 @@ public sealed class MonarchGrammarSyncTests : ServiceTestBase
         HashSet<string> completions = new(KeywordRegistry.DatePartFieldNames, StringComparer.OrdinalIgnoreCase);
 
         List<string> missing = [];
-        foreach (string name in MonarchGrammarFactory.DatePartKeywords())
+        foreach (string name in SqlKeywordRegistry.DatePartKeywords)
         {
             if (!completions.Contains(name))
             {

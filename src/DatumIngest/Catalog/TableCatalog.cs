@@ -56,6 +56,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly SidecarRegistry _sidecarRegistry = new();
 
     /// <summary>
+    /// The function registry used by <see cref="Plan(string)"/> for SQL planning.
+    /// Defaults to <see cref="FunctionRegistry.CreateDefault"/> per catalog. Exposed
+    /// for tooling that needs to enumerate registered functions (e.g. building a
+    /// language-server manifest).
+    /// </summary>
+    public FunctionRegistry Functions => _functions;
+
+    /// <summary>
     /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
     /// and disposes everything when <see cref="Dispose"/> is called. The table name
     /// defaults to <see cref="PathDetector.DeriveTableName(string)"/> if not supplied.

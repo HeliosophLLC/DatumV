@@ -1,6 +1,11 @@
+using System.Diagnostics;
 using System.Text;
 using DatumIngest.Catalog;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.LanguageServer;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using RadLine;
 using Spectre.Console;
@@ -15,14 +20,27 @@ namespace DatumIngest.Shell;
 /// </summary>
 internal sealed class InteractiveShell
 {
+    /// <summary>Number of rows shown per page before prompting to continue.</summary>
+    private const int PageSize = 1000;
+
     private readonly TableCatalog _catalog;
-    private readonly TableFormatter _formatter;
+    private readonly LanguageService _languageService;
     private CancellationTokenSource? _activeQueryCts;
+    private bool _timerEnabled;
 
     public InteractiveShell(TableCatalog catalog)
     {
         _catalog = catalog;
-        _formatter = new TableFormatter(catalog.SidecarRegistry);
+
+        // Build a manifest snapshot from the live catalog and seed the language
+        // server. The manifest covers every currently-registered table's schema
+        // plus every function name in the catalog's registry — enough for the
+        // completion provider to suggest tables, columns, functions, and
+        // keywords. AddFile after this point won't be reflected until the
+        // shell rebuilds the manifest (out of scope here).
+        LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, catalog.Functions);
+        _languageService = new LanguageService();
+        _languageService.Initialize(manifest);
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)
@@ -39,7 +57,14 @@ internal sealed class InteractiveShell
             Prompt = new LineEditorPrompt("[green]datum>[/]"),
             MultiLine = false,
             Highlighter = new ShellHighlighter(),
+            Completion = new SqlCompletion(_languageService),
         };
+
+        // Tab is the default completion key (bound by RadLine), but VS Code's
+        // integrated terminal swallows Tab for focus traversal. Bind Ctrl+Space
+        // as a fallback so completions still trigger inside the IDE.
+        editor.KeyBindings.Add(ConsoleKey.Spacebar, ConsoleModifiers.Control,
+            () => new AutoCompleteCommand(AutoComplete.Next));
 
         // Single Ctrl+C handler: cancels the active query if one is running.
         // RadLine handles Ctrl+C at the prompt itself (clears buffer / returns null).
@@ -99,6 +124,21 @@ internal sealed class InteractiveShell
                     if (trimmed.Equals(".help", StringComparison.OrdinalIgnoreCase))
                     {
                         PrintHelp();
+                        continue;
+                    }
+
+                    if (trimmed.Equals(".timer", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _timerEnabled = !_timerEnabled;
+                        AnsiConsole.MarkupLine(_timerEnabled
+                            ? "[green]Timer on.[/]"
+                            : "[yellow]Timer off.[/]");
+                        continue;
+                    }
+
+                    if (trimmed.Equals(".tables", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ListTables();
                         continue;
                     }
 
@@ -182,30 +222,10 @@ internal sealed class InteractiveShell
 
         using CancellationTokenSource cts = new();
         _activeQueryCts = cts;
+        Stopwatch? sw = _timerEnabled ? Stopwatch.StartNew() : null;
         try
         {
-            // Prefetch the first batch to derive a Schema for TableFormatter.
-            IAsyncEnumerator<RowBatch> enumerator = plan.ExecuteAsync(cts.Token).GetAsyncEnumerator(cts.Token);
-            try
-            {
-                if (!await enumerator.MoveNextAsync().ConfigureAwait(false))
-                {
-                    AnsiConsole.MarkupLine("[grey](0 rows)[/]");
-                    return;
-                }
-
-                RowBatch first = enumerator.Current;
-                Schema schema = DeriveSchema(first);
-
-                // Chain the prefetched batch back into the stream so TableFormatter
-                // sees every row, not just batches 2..N.
-                await _formatter.FormatAsync(ChainBatches(first, enumerator), schema, Console.Out)
-                    .ConfigureAwait(false);
-            }
-            finally
-            {
-                await enumerator.DisposeAsync().ConfigureAwait(false);
-            }
+            await PaginateAsync(plan, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -218,7 +238,154 @@ internal sealed class InteractiveShell
         finally
         {
             _activeQueryCts = null;
+            ReportElapsed(sw);
         }
+    }
+
+    /// <summary>
+    /// Drives <see cref="IQueryPlan.ExecuteAsync"/> page by page, prompting the
+    /// user between pages when more rows remain. Buffers up to <see cref="PageSize"/>
+    /// rows of formatted cell strings per page, so the per-page <see cref="TableFormatter"/>
+    /// has the data it needs to compute column widths.
+    /// </summary>
+    private async Task PaginateAsync(IQueryPlan plan, CancellationToken cancellationToken)
+    {
+        SidecarRegistry registry = _catalog.SidecarRegistry;
+
+        IAsyncEnumerator<RowBatch> enumerator = plan.ExecuteAsync(cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            if (!await enumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                AnsiConsole.MarkupLine("[grey](0 rows)[/]");
+                return;
+            }
+
+            Schema schema = DeriveSchema(enumerator.Current);
+            int columnCount = schema.Columns.Count;
+            long totalRows = 0;
+            bool hasMore = true;
+            int rowOffsetInBatch = 0;
+            bool headerPrinted = false;
+
+            while (hasMore)
+            {
+                List<string[]> page = new(PageSize);
+
+                while (page.Count < PageSize && hasMore)
+                {
+                    RowBatch batch = enumerator.Current;
+                    Arena arena = batch.Arena;
+                    int i = rowOffsetInBatch;
+                    while (i < batch.Count && page.Count < PageSize)
+                    {
+                        Row row = batch[i];
+                        string[] cells = new string[columnCount];
+                        for (int c = 0; c < columnCount; c++)
+                        {
+                            DataValue value = row[c];
+                            cells[c] = value.IsNull
+                                ? "NULL"
+                                : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields);
+                        }
+                        page.Add(cells);
+                        i++;
+                    }
+                    rowOffsetInBatch = i;
+
+                    if (rowOffsetInBatch == batch.Count)
+                    {
+                        hasMore = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                        rowOffsetInBatch = 0;
+                    }
+                }
+
+                totalRows += page.Count;
+                TableFormatter.RenderPage(page, schema, printHeader: !headerPrinted, Console.Out);
+                headerPrinted = true;
+
+                if (!hasMore) break;
+
+                if (!PromptContinue())
+                {
+                    AnsiConsole.MarkupLine($"[grey](stopped after {totalRows:N0} rows)[/]");
+                    return;
+                }
+            }
+
+            AnsiConsole.MarkupLine($"[grey]({totalRows:N0} rows)[/]");
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Blocks for a single keystroke between pages. Enter/Space continues to the
+    /// next page; Esc/Q stops. Other keys are ignored.
+    /// </summary>
+    private static bool PromptContinue()
+    {
+        AnsiConsole.Markup("[grey]-- more — Enter to continue, q/Esc to stop --[/]");
+        try
+        {
+            while (true)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+                switch (key.Key)
+                {
+                    case ConsoleKey.Enter:
+                    case ConsoleKey.Spacebar:
+                        AnsiConsole.WriteLine();
+                        return true;
+                    case ConsoleKey.Escape:
+                    case ConsoleKey.Q:
+                        AnsiConsole.WriteLine();
+                        return false;
+                }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Stdin redirected — no interactive prompt available; keep going.
+            AnsiConsole.WriteLine();
+            return true;
+        }
+    }
+
+    private void ReportElapsed(Stopwatch? stopwatch)
+    {
+        if (stopwatch is null) return;
+        stopwatch.Stop();
+        AnsiConsole.MarkupLine($"[grey]elapsed: {stopwatch.Elapsed.TotalMilliseconds:F1} ms[/]");
+    }
+
+    private void ListTables()
+    {
+        List<(string Name, long Rows)> entries = new();
+        foreach (ITableProvider provider in _catalog)
+        {
+            long rows;
+            try { rows = provider.GetRowCount(); }
+            catch { rows = -1; }
+            entries.Add((provider.Name, rows));
+        }
+
+        if (entries.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[grey](no tables registered)[/]");
+            return;
+        }
+
+        int nameWidth = Math.Max(5, entries.Max(e => e.Name.Length));
+        foreach ((string name, long rows) in entries)
+        {
+            string rowDisplay = rows >= 0 ? $"{rows:N0}" : "?";
+            AnsiConsole.WriteLine($"  {name.PadRight(nameWidth)}   rows: {rowDisplay}");
+        }
+        AnsiConsole.MarkupLine($"[grey]({entries.Count} {(entries.Count == 1 ? "table" : "tables")})[/]");
     }
 
     private async Task ExplainAsync(string sql, bool analyze)
@@ -234,6 +401,7 @@ internal sealed class InteractiveShell
             return;
         }
 
+        Stopwatch? sw = _timerEnabled ? Stopwatch.StartNew() : null;
         ExplainPlanNode tree;
         if (analyze)
         {
@@ -272,16 +440,7 @@ internal sealed class InteractiveShell
         }
 
         RenderExplainPlan(tree);
-    }
-
-    private static async IAsyncEnumerable<RowBatch> ChainBatches(
-        RowBatch first, IAsyncEnumerator<RowBatch> rest)
-    {
-        yield return first;
-        while (await rest.MoveNextAsync().ConfigureAwait(false))
-        {
-            yield return rest.Current;
-        }
+        ReportElapsed(sw);
     }
 
     private static Schema DeriveSchema(RowBatch batch)
@@ -323,11 +482,15 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green]<sql>;[/]                       Execute a SQL statement");
         AnsiConsole.MarkupLine("  [green]EXPLAIN <sql>;[/]               Show the static query plan");
         AnsiConsole.MarkupLine("  [green]EXPLAIN ANALYZE <sql>;[/]       Run the query and show the plan with runtime metrics");
+        AnsiConsole.MarkupLine("  [green].tables[/]                      List registered tables and row counts");
+        AnsiConsole.MarkupLine("  [green].timer[/]                       Toggle elapsed-time reporting after each query");
         AnsiConsole.MarkupLine("  [green].help[/]                        Show this help");
         AnsiConsole.MarkupLine("  [green].quit[/] / [green].exit[/]                Exit the shell");
+        AnsiConsole.MarkupLine("  [grey]Tab[/] / [grey]Ctrl+Space[/]              Trigger SQL completion (Ctrl+Space if Tab is swallowed by the terminal)");
         AnsiConsole.MarkupLine("  [grey]Ctrl+C[/]                      Cancel the running query (does not exit)");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]Multi-line SQL is supported — keep typing until ;[/]");
+        AnsiConsole.MarkupLine($"[grey]Long results paginate every {PageSize:N0} rows — Enter to continue, q/Esc to stop.[/]");
     }
 
     private static void RenderExplainPlan(ExplainPlanNode root)

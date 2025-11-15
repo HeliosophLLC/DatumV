@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
     <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
   </ItemGroup>
 

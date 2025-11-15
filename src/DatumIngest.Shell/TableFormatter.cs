@@ -5,64 +5,32 @@ using DatumIngest.Model;
 namespace DatumIngest.Shell;
 
 /// <summary>
-/// Formats streaming rows into psql-style aligned tables with column headers,
-/// separator lines, right-aligned numerics, and a row-count footer.
+/// Renders rows into psql-style aligned tables. The shell drives row buffering
+/// and pagination itself; this class only formats one page worth of already-
+/// converted string cells, plus shared helpers for converting individual
+/// <see cref="DataValue"/>s to display strings.
 /// </summary>
-internal sealed class TableFormatter
+internal static class TableFormatter
 {
-    /// <summary>Maximum number of rows buffered before truncating output.</summary>
-    private const int MaxBufferedRows = 1000;
-
     /// <summary>Maximum display width for any single column.</summary>
     private const int MaxColumnWidth = 40;
 
-    private readonly SidecarRegistry _sidecarRegistry;
-
-    public TableFormatter(SidecarRegistry sidecarRegistry)
-    {
-        _sidecarRegistry = sidecarRegistry;
-    }
-
     /// <summary>
-    /// Formats an asynchronous stream of rows into a psql-style table written to a <see cref="TextWriter"/>.
+    /// Renders one page of rows. <paramref name="cells"/> holds the already-
+    /// formatted string for every cell in the page, indexed [row][column].
+    /// When <paramref name="printHeader"/> is <see langword="true"/>, the
+    /// column-name header and separator line are emitted before the rows.
     /// </summary>
-    public async Task FormatAsync(IAsyncEnumerable<RowBatch> rows, Schema schema, TextWriter writer)
+    public static void RenderPage(
+        IReadOnlyList<string[]> cells,
+        Schema schema,
+        bool printHeader,
+        TextWriter writer)
     {
-        List<string[]> bufferedCells = new();
         int columnCount = schema.Columns.Count;
-        bool truncated = false;
-
-        await foreach (RowBatch batch in rows.ConfigureAwait(false))
-        {
-            // Each batch carries its own arena; arena-backed DataValues from this batch
-            // must be dereferenced through *this* arena, not a shared one.
-            Arena arena = batch.Arena;
-            for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
-            {
-                Row row = batch[rowIndex];
-                if (bufferedCells.Count >= MaxBufferedRows)
-                {
-                    truncated = true;
-                    continue;
-                }
-
-                string[] cells = new string[columnCount];
-                for (int i = 0; i < columnCount; i++)
-                {
-                    DataValue value = row[i];
-                    cells[i] = value.IsNull
-                        ? "NULL"
-                        : FormatValue(value, arena, _sidecarRegistry, schema.Columns[i].Fields);
-                }
-
-                bufferedCells.Add(cells);
-            }
-            // Batches are auto-returned by the facade's IQueryPlan.ExecuteAsync iterator.
-        }
-
         if (columnCount == 0)
         {
-            await writer.WriteLineAsync("(empty result)").ConfigureAwait(false);
+            writer.WriteLine("(empty result)");
             return;
         }
 
@@ -72,13 +40,13 @@ internal sealed class TableFormatter
             widths[i] = schema.Columns[i].Name.Length;
         }
 
-        foreach (string[] cells in bufferedCells)
+        foreach (string[] row in cells)
         {
             for (int i = 0; i < columnCount; i++)
             {
-                if (cells[i].Length > widths[i])
+                if (row[i].Length > widths[i])
                 {
-                    widths[i] = cells[i].Length;
+                    widths[i] = row[i].Length;
                 }
             }
         }
@@ -90,52 +58,39 @@ internal sealed class TableFormatter
             {
                 widths[i] = MaxColumnWidth;
             }
-
             rightAlign[i] = IsNumericScalar(schema.Columns[i].Kind);
         }
 
         StringBuilder line = new();
-        FormatRow(line, schema.Columns.Select(c => c.Name).ToArray(), widths, rightAlign);
-        await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
-
-        line.Clear();
-        for (int i = 0; i < columnCount; i++)
+        if (printHeader)
         {
-            if (i > 0)
-            {
-                line.Append("-+-");
-            }
+            FormatRow(line, schema.Columns.Select(c => c.Name).ToArray(), widths, rightAlign);
+            writer.WriteLine(line.ToString());
 
-            line.Append('-', widths[i]);
+            line.Clear();
+            for (int i = 0; i < columnCount; i++)
+            {
+                if (i > 0) line.Append("-+-");
+                line.Append('-', widths[i]);
+            }
+            writer.WriteLine(line.ToString());
         }
 
-        await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
-
-        foreach (string[] cells in bufferedCells)
+        foreach (string[] row in cells)
         {
             line.Clear();
-            FormatRow(line, cells, widths, rightAlign);
-            await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
+            FormatRow(line, row, widths, rightAlign);
+            writer.WriteLine(line.ToString());
         }
-
-        string rowLabel = bufferedCells.Count == 1 ? "row" : "rows";
-        string footer = truncated
-            ? $"({bufferedCells.Count} {rowLabel}, truncated)"
-            : $"({bufferedCells.Count} {rowLabel})";
-        await writer.WriteLineAsync(footer).ConfigureAwait(false);
     }
 
     private static void FormatRow(StringBuilder builder, string[] values, int[] widths, bool[] rightAlign)
     {
         for (int i = 0; i < values.Length; i++)
         {
-            if (i > 0)
-            {
-                builder.Append(" | ");
-            }
+            if (i > 0) builder.Append(" | ");
 
             string value = values[i];
-
             if (value.Length > widths[i])
             {
                 value = string.Concat(value.AsSpan(0, widths[i] - 1), "~");
@@ -152,7 +107,7 @@ internal sealed class TableFormatter
         }
     }
 
-    internal static string FormatValue(
+    public static string FormatValue(
         DataValue value,
         Arena arena,
         SidecarRegistry? registry,
