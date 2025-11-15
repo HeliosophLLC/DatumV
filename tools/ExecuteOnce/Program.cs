@@ -3,13 +3,7 @@ using System.Text;
 using DatumIngest.Catalog;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
 using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
 
 // execute-once <datum-file> "<sql>"
 //
@@ -50,53 +44,24 @@ string sql = opts.SqlFile is not null
     ? await File.ReadAllTextAsync(opts.SqlFile)
     : opts.Sql!;
 
-string tableName = opts.TableName ?? PathDetector.DeriveTableName(opts.DatumPath);
+using TableCatalog catalog = TableCatalog.FromFile(opts.DatumPath, opts.TableName);
 
-PoolBacking backing = new();
-Pool pool = new(backing);
-using TableCatalog catalog = new(pool);
-catalog.Add(new TableDescriptor(Name: tableName, FilePath: opts.DatumPath));
-
-FunctionRegistry functions = FunctionRegistry.CreateDefault();
-
-QueryExpression query;
+IQueryPlan plan;
 try
 {
-    query = SqlParser.Parse(sql);
+    plan = catalog.Plan(sql);
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"Parse error: {ex.Message}");
-    return 1;
-}
-
-QueryPlanner planner = new(catalog, functions);
-
-IQueryOperator plan;
-try
-{
-    plan = planner.Plan(query);
-}
-catch (Exception ex)
-{
-    Console.Error.WriteLine($"Planning error: {ex.Message}");
+    Console.Error.WriteLine($"Plan error: {ex.Message}");
     return 1;
 }
 
 using CancellationTokenSource cts = new();
 Console.CancelKeyPress += (_, e) => { cts.Cancel(); e.Cancel = true; };
 
-using LocalBufferPool localBufferPool = new(backing);
-DatumIngest.Execution.ExecutionContext executionContext = new(
-    cts.Token, functions, catalog, localBufferPool, pool);
-
-// Hoist literal expressions: materialize each literal's DataValue into the long-lived
-// context store exactly once, so per-row evaluation returns the cached value instead
-// of re-encoding on every row. Big win on WHERE-heavy scans; no-op on queries with
-// no predicates.
-plan = plan.RewriteExpressions(expr => LiteralHoister.Hoist(expr, executionContext.Store));
-
-Console.WriteLine($"Table:  {tableName}");
+string displayTableName = opts.TableName ?? DatumIngest.Serialization.PathDetector.DeriveTableName(opts.DatumPath);
+Console.WriteLine($"Table:  {displayTableName}");
 Console.WriteLine($"Source: {opts.DatumPath}");
 Console.WriteLine($"SQL:    {sql.Trim().ReplaceLineEndings(" ")}");
 Console.WriteLine();
@@ -124,43 +89,36 @@ bool truncated = false;
 
 try
 {
-    await foreach (RowBatch batch in plan.ExecuteAsync(executionContext).WithCancellation(cts.Token))
+    await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token))
     {
-        try
+        batchCount++;
+
+        for (int i = 0; i < batch.Count; i++)
         {
-            batchCount++;
+            Row row = batch[i];
+            totalRows++;
 
-            for (int i = 0; i < batch.Count; i++)
+            if (!headerPrinted)
             {
-                Row row = batch[i];
-                totalRows++;
-
-                if (!headerPrinted)
-                {
-                    Console.WriteLine(string.Join('\t', row.ColumnNames));
-                    Console.WriteLine(new string('─', 80));
-                    headerPrinted = true;
-                }
-
-                if (opts.PrintAll || printedRows < opts.Limit)
-                {
-                    Console.WriteLine(FormatRow(row, batch.Arena, executionContext.SidecarRegistry));
-                    printedRows++;
-                }
-                else
-                {
-                    truncated = true;
-                }
+                Console.WriteLine(string.Join('\t', row.ColumnNames));
+                Console.WriteLine(new string('─', 80));
+                headerPrinted = true;
             }
 
-            // Sample peak managed heap at batch boundaries — cheap (no Process.Refresh).
-            long heapNow = GC.GetTotalMemory(forceFullCollection: false);
-            if (heapNow > peakManagedHeap) peakManagedHeap = heapNow;
+            if (opts.PrintAll || printedRows < opts.Limit)
+            {
+                Console.WriteLine(FormatRow(row, batch.Arena, catalog.SidecarRegistry));
+                printedRows++;
+            }
+            else
+            {
+                truncated = true;
+            }
         }
-        finally
-        {
-            pool.ReturnRowBatch(batch);
-        }
+
+        // Sample peak managed heap at batch boundaries — cheap (no Process.Refresh).
+        long heapNow = GC.GetTotalMemory(forceFullCollection: false);
+        if (heapNow > peakManagedHeap) peakManagedHeap = heapNow;
     }
 }
 catch (OperationCanceledException)

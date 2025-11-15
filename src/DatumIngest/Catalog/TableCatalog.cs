@@ -4,9 +4,13 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
 
@@ -38,14 +42,77 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public TableCatalog(Pool pool)
     {
         this.Pool = pool;
+        this._backing = pool.Backing;
+        this._functions = FunctionRegistry.CreateDefault();
         this.Tables = new();
     }
 
 
     private TableCatalog? Parent { get; }
-    private Pool Pool { get;}
+    internal Pool Pool { get; }
+    private readonly PoolBacking _backing;
+    private readonly FunctionRegistry _functions;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
+
+    /// <summary>
+    /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
+    /// and disposes everything when <see cref="Dispose"/> is called. The table name
+    /// defaults to <see cref="PathDetector.DeriveTableName(string)"/> if not supplied.
+    /// </summary>
+    /// <param name="path">Path to the <c>.datum</c> file.</param>
+    /// <param name="name">Optional override for the SQL table name.</param>
+    public static TableCatalog FromFile(string path, string? name = null)
+    {
+        TableCatalog catalog = new(new Pool(new PoolBacking()));
+        catalog.AddFile(path, name);
+        return catalog;
+    }
+
+    /// <summary>
+    /// Opens a new catalog populated with every <c>.datum</c> file in the given
+    /// directory. Each file is registered using its derived table name. Owns its
+    /// own pool.
+    /// </summary>
+    /// <param name="path">Path to a directory containing <c>.datum</c> files.</param>
+    /// <param name="recursive">When <see langword="true"/>, recursively scans subdirectories.</param>
+    public static TableCatalog FromDirectory(string path, bool recursive = false)
+    {
+        TableCatalog catalog = new(new Pool(new PoolBacking()));
+        SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
+        {
+            catalog.AddFile(file);
+        }
+        return catalog;
+    }
+
+    /// <summary>
+    /// Registers a <c>.datum</c> file as a queryable table. Returns this catalog
+    /// for fluent chaining.
+    /// </summary>
+    /// <param name="path">Path to the <c>.datum</c> file.</param>
+    /// <param name="name">Optional override for the SQL table name. Defaults to <see cref="PathDetector.DeriveTableName(string)"/>.</param>
+    public TableCatalog AddFile(string path, string? name = null)
+    {
+        Add(new TableDescriptor(Name: name ?? PathDetector.DeriveTableName(path), FilePath: path));
+        return this;
+    }
+
+    /// <summary>
+    /// Parses and plans <paramref name="sql"/> against this catalog, returning an
+    /// <see cref="IQueryPlan"/> that may be inspected (<see cref="IQueryPlan.ExplainTree"/>),
+    /// analyzed (<see cref="IQueryPlan.AnalyzeAsync"/>), or executed
+    /// (<see cref="IQueryPlan.ExecuteAsync"/>). Literal payloads are pre-materialized
+    /// (hoisted) into a plan-scoped arena so per-row evaluation skips re-encoding.
+    /// </summary>
+    public IQueryPlan Plan(string sql)
+    {
+        QueryExpression query = SqlParser.Parse(sql);
+        QueryPlanner planner = new(this, _functions);
+        IQueryOperator op = planner.Plan(query);
+        return new QueryPlan(op, this, _functions, _backing);
+    }
 
     /// <summary>
     /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each

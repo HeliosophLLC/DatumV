@@ -1,118 +1,69 @@
-// Disabled until a programmatic DatumIngest API replaces the gRPC compute client.
-// To re-enable, delete the `#if DATUM_SHELL` / `#endif` markers at the top and bottom.
-#if DATUM_SHELL
-using DatumIngest.Compute.Grpc;
+using DatumIngest.Catalog;
 using DatumIngest.Shell;
-using Grpc.Core;
-using Grpc.Net.Client;
 using Spectre.Console;
 
-using GrpcClient = global::DatumIngest.Compute.Grpc.DatumCompute.DatumComputeClient;
+// datum-shell <path>...
+//
+//   Opens an interactive SQL REPL over one or more .datum files or directories.
+//   Each path may be a single .datum file or a directory of .datum files.
+//   Inside the REPL, type SQL terminated by `;` to execute; type `EXPLAIN <sql>;`
+//   or `EXPLAIN ANALYZE <sql>;` to inspect the plan; `.help`, `.quit`, `.exit`.
 
-string? serverUrl = null;
-string? token = null;
-string role = "admin";
-string? datasetId = null;
-
-for (int i = 0; i < args.Length; i++)
+if (args.Length == 0 || args[0] is "--help" or "-h")
 {
-    switch (args[i])
-    {
-        case "--server":
-            if (i + 1 >= args.Length) return FailUsage("--server requires a URL argument");
-            serverUrl = args[++i];
-            break;
-
-        case "--token":
-            if (i + 1 >= args.Length) return FailUsage("--token requires a bearer value");
-            token = args[++i];
-            break;
-
-        case "--role":
-            if (i + 1 >= args.Length) return FailUsage("--role requires a value");
-            role = args[++i];
-            break;
-
-        case "--dataset":
-            if (i + 1 >= args.Length) return FailUsage("--dataset requires a dataset id");
-            datasetId = args[++i];
-            break;
-
-        case "--help":
-        case "-h":
-            PrintUsage();
-            return 0;
-
-        default:
-            return FailUsage($"Unknown argument: {args[i]}");
-    }
+    PrintUsage();
+    return args.Length == 0 ? 1 : 0;
 }
 
-if (string.IsNullOrWhiteSpace(serverUrl))
-{
-    serverUrl = Environment.GetEnvironmentVariable("DATUM_SERVER") ?? "http://localhost:5000";
-}
-
-token ??= Environment.GetEnvironmentVariable("DATUM_TOKEN");
-
-GrpcChannelOptions channelOptions = new();
-if (!string.IsNullOrEmpty(token))
-{
-    CallCredentials credentials = CallCredentials.FromInterceptor((_, metadata) =>
-    {
-        metadata.Add("authorization", $"Bearer {token}");
-        return Task.CompletedTask;
-    });
-    channelOptions.Credentials = ChannelCredentials.Create(ChannelCredentials.SecureSsl, credentials);
-}
-
-using GrpcChannel channel = GrpcChannel.ForAddress(serverUrl, channelOptions);
-GrpcClient client = new(channel);
-
-CreateSessionRequest sessionRequest = new() { Role = role };
-if (datasetId is not null)
-{
-    sessionRequest.DatasetId = datasetId;
-}
-
-CreateSessionResponse sessionResp;
+TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.PoolBacking()));
 try
 {
-    sessionResp = await client.CreateSessionAsync(sessionRequest);
+    foreach (string path in args)
+    {
+        if (Directory.Exists(path))
+        {
+            foreach (string file in Directory.EnumerateFiles(path, "*.datum", SearchOption.TopDirectoryOnly))
+            {
+                catalog.AddFile(file);
+            }
+        }
+        else if (File.Exists(path))
+        {
+            catalog.AddFile(path);
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[red]Path not found: {Markup.Escape(path)}[/]");
+            catalog.Dispose();
+            return 1;
+        }
+    }
 }
-catch (RpcException ex)
+catch (Exception ex)
 {
-    AnsiConsole.MarkupLine($"[red]Failed to create session on {serverUrl}: {Markup.Escape(ex.Status.Detail)}[/]");
+    AnsiConsole.MarkupLine($"[red]Failed to register tables: {Markup.Escape(ex.Message)}[/]");
+    catalog.Dispose();
     return 1;
 }
 
-CreateQueryContextResponse contextResp = await client.CreateQueryContextAsync(new CreateQueryContextRequest
+if (catalog.Count == 0)
 {
-    SessionId = sessionResp.SessionId,
-    Label = "shell",
-});
-
-AnsiConsole.MarkupLine($"[grey]Connected to {serverUrl}  session={sessionResp.SessionId[..Math.Min(8, sessionResp.SessionId.Length)]}…[/]");
-
-InteractiveShell shell = new(client, sessionResp.SessionId, contextResp.ContextId);
-return await shell.RunAsync(CancellationToken.None);
-
-static int FailUsage(string message)
-{
-    Console.Error.WriteLine($"Error: {message}");
-    PrintUsage();
+    AnsiConsole.MarkupLine("[red]No .datum files registered.[/]");
+    catalog.Dispose();
     return 1;
+}
+
+using (catalog)
+{
+    InteractiveShell shell = new(catalog);
+    return await shell.RunAsync(CancellationToken.None);
 }
 
 static void PrintUsage()
 {
-    Console.Error.WriteLine("Usage: datum-shell [options]");
+    Console.Error.WriteLine("Usage: datum-shell <path>...");
     Console.Error.WriteLine();
-    Console.Error.WriteLine("Options:");
-    Console.Error.WriteLine("  --server <url>       gRPC server URL (default: $DATUM_SERVER or http://localhost:5000)");
-    Console.Error.WriteLine("  --token <bearer>     Bearer token (default: $DATUM_TOKEN)");
-    Console.Error.WriteLine("  --role <role>        Session role (default: admin)");
-    Console.Error.WriteLine("  --dataset <id>       Dataset identifier");
-    Console.Error.WriteLine("  --help, -h           Show this help");
+    Console.Error.WriteLine("  Each <path> is either a .datum file or a directory of .datum files.");
+    Console.Error.WriteLine("  Inside the REPL: SQL terminated by `;`, `EXPLAIN [ANALYZE] <sql>;`,");
+    Console.Error.WriteLine("                   `.help`, `.quit`, `.exit`. Ctrl+C cancels a running query.");
 }
-#endif

@@ -1,7 +1,5 @@
-// Disabled until a programmatic DatumIngest API replaces the gRPC compute client.
-// To re-enable, delete the `#if DATUM_SHELL` / `#endif` markers at the top and bottom.
-#if DATUM_SHELL
 using System.Text;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 
 namespace DatumIngest.Shell;
@@ -18,6 +16,13 @@ internal sealed class TableFormatter
     /// <summary>Maximum display width for any single column.</summary>
     private const int MaxColumnWidth = 40;
 
+    private readonly SidecarRegistry _sidecarRegistry;
+
+    public TableFormatter(SidecarRegistry sidecarRegistry)
+    {
+        _sidecarRegistry = sidecarRegistry;
+    }
+
     /// <summary>
     /// Formats an asynchronous stream of rows into a psql-style table written to a <see cref="TextWriter"/>.
     /// </summary>
@@ -29,6 +34,9 @@ internal sealed class TableFormatter
 
         await foreach (RowBatch batch in rows.ConfigureAwait(false))
         {
+            // Each batch carries its own arena; arena-backed DataValues from this batch
+            // must be dereferenced through *this* arena, not a shared one.
+            Arena arena = batch.Arena;
             for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
             {
                 Row row = batch[rowIndex];
@@ -42,12 +50,14 @@ internal sealed class TableFormatter
                 for (int i = 0; i < columnCount; i++)
                 {
                     DataValue value = row[i];
-                    cells[i] = value.IsNull ? "NULL" : FormatValue(value, schema.Columns[i].Fields);
+                    cells[i] = value.IsNull
+                        ? "NULL"
+                        : FormatValue(value, arena, _sidecarRegistry, schema.Columns[i].Fields);
                 }
 
                 bufferedCells.Add(cells);
             }
-            batch.Return();
+            // Batches are auto-returned by the facade's IQueryPlan.ExecuteAsync iterator.
         }
 
         if (columnCount == 0)
@@ -142,14 +152,51 @@ internal sealed class TableFormatter
         }
     }
 
-    internal static string FormatValue(DataValue value, IReadOnlyList<ColumnInfo>? structFields = null)
+    internal static string FormatValue(
+        DataValue value,
+        Arena arena,
+        SidecarRegistry? registry,
+        IReadOnlyList<ColumnInfo>? structFields = null)
     {
         if (structFields is not null && value.Kind == DataKind.Struct)
         {
-            return FormatStructValue(value, structFields);
+            return FormatStructValue(value, arena, registry, structFields);
         }
 
-        return value.ToDisplayString();
+        return value.Kind switch
+        {
+            DataKind.Boolean => value.AsBoolean() ? "true" : "false",
+            DataKind.UInt8 => value.AsUInt8().ToString(),
+            DataKind.Int8 => value.AsInt8().ToString(),
+            DataKind.UInt16 => value.AsUInt16().ToString(),
+            DataKind.Int16 => value.AsInt16().ToString(),
+            DataKind.UInt32 => value.AsUInt32().ToString(),
+            DataKind.Int32 => value.AsInt32().ToString(),
+            DataKind.UInt64 => value.AsUInt64().ToString(),
+            DataKind.Int64 => value.AsInt64().ToString(),
+            DataKind.Float32 => value.AsFloat32().ToString("G"),
+            DataKind.Float64 => value.AsFloat64().ToString("G"),
+            DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
+            DataKind.DateTime => value.AsDateTime().ToString("yyyy-MM-dd HH:mm:ss"),
+            DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
+            DataKind.Duration => value.AsDuration().ToString(),
+            DataKind.Uuid => value.AsUuid().ToString(),
+            DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena),
+            DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena),
+            DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, registry),
+            _ => value.ToDisplayString(),
+        };
+    }
+
+    private static string FormatBlobPreview(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        const int PreviewBytes = 8;
+        ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+        int previewLength = Math.Min(PreviewBytes, bytes.Length);
+        string hex = Convert.ToHexString(bytes[..previewLength]);
+        return bytes.Length > PreviewBytes
+            ? $"0x{hex}... ({bytes.Length:N0} bytes)"
+            : $"0x{hex} ({bytes.Length:N0} bytes)";
     }
 
     private static bool IsNumericScalar(DataKind kind) => kind is
@@ -159,16 +206,23 @@ internal sealed class TableFormatter
         DataKind.Int64 or DataKind.UInt64 or
         DataKind.Float32 or DataKind.Float64;
 
-    private static string FormatStructValue(DataValue value, IReadOnlyList<ColumnInfo>? fields)
+    private static string FormatStructValue(
+        DataValue value,
+        Arena arena,
+        SidecarRegistry? registry,
+        IReadOnlyList<ColumnInfo>? fields)
     {
         DataValue[] fieldValues = value.AsStruct();
         IEnumerable<string> parts = fieldValues.Select((fieldValue, index) =>
         {
             string name = fields is not null && index < fields.Count ? fields[index].Name : $"f{index}";
-            string formatted = fieldValue.ToDisplayString();
+            IReadOnlyList<ColumnInfo>? nestedFields =
+                fields is not null && index < fields.Count ? fields[index].Fields : null;
+            string formatted = fieldValue.IsNull
+                ? "NULL"
+                : FormatValue(fieldValue, arena, registry, nestedFields);
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";
     }
 }
-#endif

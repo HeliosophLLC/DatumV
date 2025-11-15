@@ -74,6 +74,34 @@
 			"stopAtEntry": false,
 			"preLaunchTask": "Release: Build ExecuteOnce"
 		},
+		{
+			"name": "Shell: Debug",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/DatumIngest.Shell/bin/Debug/net10.0/datum-shell.dll",
+			"args": [
+				"${input:shellDatumPath}"
+			],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build Shell"
+		},
+		{
+			"name": "Shell: Release",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/DatumIngest.Shell/bin/Release/net10.0/datum-shell.dll",
+			"args": [
+				"${input:shellDatumPath}"
+			],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Release: Build Shell"
+		},
 	],
 	"inputs": [
 		{
@@ -111,6 +139,12 @@
 			"type": "promptString",
 			"description": "SQL to explain (quote spaces)",
 			"default": "SELECT * LIMIT 10"
+		},
+		{
+			"id": "shellDatumPath",
+			"type": "promptString",
+			"description": "Path to a .datum file or directory of .datum files",
+			"default": "E:\\Datasets\\Chicago Crimes Dataset\\Crimes_-_2001_to_Present_20260331.datum"
 		}
 	]
 }
