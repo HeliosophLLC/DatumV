@@ -27,7 +27,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
         right.Accumulate(ReadOnlySpan<DataValue>.Empty, in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(3L, left.Result(in _testFrame).AsInt64());
     }
@@ -47,7 +47,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate(nonNull, in _testFrame);
         right.Accumulate(nonNull, in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // 1 non-null from left + 2 from right = 3
         Assert.Equal(3L, left.Result(in _testFrame).AsInt64());
@@ -66,7 +66,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.FromFloat32(20f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(60f, left.Result(in _testFrame).AsFloat32());
     }
@@ -78,7 +78,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         IAggregateAccumulator left = function.CreateAccumulator();
         IAggregateAccumulator right = function.CreateAccumulator();
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.True(left.Result(in _testFrame).IsNull);
     }
@@ -92,7 +92,7 @@ public class AccumulatorMergeTests : ServiceTestBase
 
         right.Accumulate([DataValue.FromFloat32(42f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(42f, left.Result(in _testFrame).AsFloat32());
     }
@@ -113,7 +113,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         // Right: 30 → sum=30, count=1
         right.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // Combined: sum=60, count=3 → avg=20
         Assert.Equal(20.0, left.Result(in _testFrame).AsFloat64());
@@ -130,7 +130,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.Null(DataKind.Float32)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // AVG of 10 and 30 = 20 (null skipped)
         Assert.Equal(20.0, left.Result(in _testFrame).AsFloat64());
@@ -150,7 +150,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(10f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(3f, left.Result(in _testFrame).AsFloat32());
     }
@@ -164,7 +164,7 @@ public class AccumulatorMergeTests : ServiceTestBase
 
         right.Accumulate([DataValue.FromFloat32(7f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(7f, left.Result(in _testFrame).AsFloat32());
     }
@@ -183,7 +183,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(20f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(20f, left.Result(in _testFrame).AsFloat32());
     }
@@ -216,7 +216,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             right.Accumulate([DataValue.FromFloat32(value)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(reference.Result(in _testFrame).AsFloat64(), left.Result(in _testFrame).AsFloat64(), precision: 6);
     }
@@ -245,7 +245,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             right.Accumulate([DataValue.FromFloat32(value)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(reference.Result(in _testFrame).AsFloat64(), left.Result(in _testFrame).AsFloat64(), precision: 6);
     }
@@ -276,7 +276,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             right.Accumulate([DataValue.FromFloat32(value)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(reference.Result(in _testFrame).AsFloat64(), left.Result(in _testFrame).AsFloat64(), precision: 5);
     }
@@ -309,7 +309,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             right.Accumulate([DataValue.FromFloat32(y), DataValue.FromFloat32(x)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(reference.Result(in _testFrame).AsFloat64(), left.Result(in _testFrame).AsFloat64(), precision: 5);
     }
@@ -342,7 +342,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             right.Accumulate([DataValue.FromFloat32(y), DataValue.FromFloat32(x)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal(reference.Result(in _testFrame).AsFloat64(), left.Result(in _testFrame).AsFloat64(), precision: 5);
     }
@@ -360,7 +360,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(5f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // Median of [1, 3, 5] = 3
         Assert.Equal(3.0, left.Result(in _testFrame).AsFloat64());
@@ -385,7 +385,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate([DataValue.FromString("B")], in _testFrame);
         right.Accumulate([DataValue.FromString("B")], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // Combined: A=2, B=4 → mode is B
         Assert.Equal("B", left.Result(in _testFrame).AsString(_testFrame.Target));
@@ -404,7 +404,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.FromFloat32(2f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         DataValue result = left.Result(in _testFrame);
         Assert.Equal(DataKind.Array, result.Kind);
@@ -425,7 +425,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.FromString("b"), DataValue.FromString(",")], in _testFrame);
         right.Accumulate([DataValue.FromString("c"), DataValue.FromString(",")], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         string result = left.Result(in _testFrame).AsString(_testFrame.Target);
         // Should contain all three values separated by commas.
@@ -456,7 +456,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(4f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // SUM(DISTINCT) of {1, 2, 3, 4} = 10
         Assert.Equal(10f, left.Result(in _testFrame).AsFloat32());
@@ -479,7 +479,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         right.Accumulate([DataValue.FromFloat32(2f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // COUNT(DISTINCT) of {1, 2, 3} = 3
         Assert.Equal(3L, left.Result(in _testFrame).AsInt64());
@@ -498,7 +498,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
         right.Accumulate([DataValue.FromFloat32(5f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         // Exact median of [1, 3, 5] = 3 (small sample, no approximation error)
         Assert.Equal(3.0, left.Result(in _testFrame).AsFloat64());
@@ -520,7 +520,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         }
 
         // Right is empty — merge should not change left's result.
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         IAggregateAccumulator reference = function.CreateAccumulator();
         foreach (float value in new[] { 2f, 4f, 6f, 8f })
@@ -545,7 +545,7 @@ public class AccumulatorMergeTests : ServiceTestBase
             left.Accumulate([DataValue.FromFloat32(y), DataValue.FromFloat32(x)], in _testFrame);
         }
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         IAggregateAccumulator reference = function.CreateAccumulator();
         foreach ((float y, float x) in data)

@@ -126,7 +126,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
         left.Accumulate([DataValue.FromString("left_winner"), DataValue.FromFloat32(50f)], in _testFrame);
         right.Accumulate([DataValue.FromString("right_winner"), DataValue.FromFloat32(80f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal("right_winner", left.Result(in _testFrame).AsString(_testFrame.Target));
     }
@@ -141,7 +141,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
         left.Accumulate([DataValue.FromString("left_winner"), DataValue.FromFloat32(90f)], in _testFrame);
         right.Accumulate([DataValue.FromString("right_loser"), DataValue.FromFloat32(10f)], in _testFrame);
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal("left_winner", left.Result(in _testFrame).AsString(_testFrame.Target));
     }
@@ -156,7 +156,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
         left.Accumulate([DataValue.FromString("only"), DataValue.FromFloat32(1f)], in _testFrame);
         // right is empty — no rows accumulated.
 
-        left.Merge(right);
+        left.Merge(right, in _testFrame);
 
         Assert.Equal("only", left.Result(in _testFrame).AsString(_testFrame.Target));
     }
