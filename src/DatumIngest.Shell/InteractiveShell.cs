@@ -426,7 +426,7 @@ internal sealed class InteractiveShell
                 Console.Out.WriteLine($"{label} | <image>");
                 try
                 {
-                    ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+                    byte[] bytes = ResolveImageBytes(value, arena, registry);
                     string sixel = SixelEncoder.EncodeImage(bytes);
                     Console.Out.Write(sixel);
                     Console.Out.WriteLine();
@@ -445,6 +445,31 @@ internal sealed class InteractiveShell
             }
         }
         Console.Out.WriteLine();
+    }
+
+    /// <summary>
+    /// Returns encoded image bytes regardless of how the value was stored — sidecar-
+    /// backed, raw bytes in the arena, or an <see cref="DatumIngest.Functions.Image.ImageHandle"/>
+    /// object placed in the arena's object side-list by an image transform function.
+    /// <see cref="DataValue.AsByteSpan"/> only covers the first two; an image produced
+    /// by <c>blur(...)</c>, <c>resize(...)</c>, etc. lives as an ImageHandle and has to be
+    /// asked to encode itself.
+    /// </summary>
+    private static byte[] ResolveImageBytes(DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        if (value.Kind == DataKind.Image)
+        {
+            // Don't dispose the handle: when the value was produced by an image transform
+            // function the handle lives in the arena's object side-list and is owned by
+            // the row, not by us. Disposing would trash the SKBitmap the arena still
+            // references. The bytes-from-arena/sidecar path creates a transient handle
+            // wrapping pre-encoded bytes; GetEncodedBytes returns them without decoding,
+            // so there's no SKBitmap to leak even when we don't dispose.
+            DatumIngest.Functions.Image.ImageHandle handle = value.GetImageHandle(arena, registry);
+            return handle.GetEncodedBytes();
+        }
+
+        return value.AsByteSpan(arena, registry).ToArray();
     }
 
     /// <summary>

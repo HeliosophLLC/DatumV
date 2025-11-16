@@ -149,11 +149,15 @@ public sealed class ProjectOperator : IQueryOperator
                 try
                 {
                     // Source arena: where the input row's non-inline values live (input batch).
-                    // Target arena: the long-lived context store, since projected output values
-                    // must outlive the input batch (which is returned to the pool before this
-                    // method yields the output batch downstream).
+                    // Target arena: the OUTPUT batch's arena. Projected expression results
+                    // (e.g. blur(image), substr(s, 1, 5)) materialize here so their offsets
+                    // resolve against the same arena consumers see when they read batch.Arena.
+                    // The output batch's lifetime extends until the downstream consumer is done
+                    // with it, which is exactly the lifetime projected values need — using
+                    // context.Store instead would make values outlive the batch they're in but
+                    // would also strand consumers that resolve via batch.Arena (which is what
+                    // FormatValue / GetImageHandle / AsByteSpan do).
                     IValueStore sourceArena = inputBatch.Arena;
-                    IValueStore targetArena = context.Store;
 
                     for (int index = 0; index < inputBatch.Count; index++)
                     {
@@ -162,7 +166,7 @@ public sealed class ProjectOperator : IQueryOperator
                         schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
                         outputBatch ??= pool.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
 
-                        EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
+                        EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.OuterRow, context.SidecarRegistry);
 
                         DataValue[]? projected = schema.Project(
                             frame,

@@ -2008,10 +2008,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>
     /// Returns an <see cref="ImageHandle"/> for this image value, reconstructing from
     /// encoded bytes stored in the given <see cref="IValueStore"/> (arena-backed) or
-    /// resolved through <paramref name="registry"/> (sidecar-backed). The bitmap is
-    /// not decoded until explicitly requested.
+    /// resolved through <paramref name="registry"/> (sidecar-backed), or — when the
+    /// value was produced by an image transform function — unwrapping the
+    /// <see cref="ImageHandle"/> object from the arena's object side-list. The bitmap
+    /// is not decoded until explicitly requested via <see cref="ImageHandle.GetBitmap"/>;
+    /// encoded bytes are produced lazily via <see cref="ImageHandle.GetEncodedBytes"/>.
     /// </summary>
-    internal ImageHandle GetImageHandle(IValueStore store, SidecarRegistry? registry = null)
+    public ImageHandle GetImageHandle(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
 
