@@ -5,70 +5,93 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// A single hash partition in a Grace hash join that can hold rows in memory
-/// or spill them to a temporary file on disk when memory pressure is reached.
+/// or spill them to disk when memory pressure is reached.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Each partition maintains separate build-side and probe-side row collections.
-/// Build-side rows are stored with pool-rented <see cref="DataValue"/> arrays
-/// (via <see cref="LocalBufferPool.RentCopy"/>) so the input batch can be
-/// returned immediately. When <see cref="SpillBuildToDisk"/> or
-/// <see cref="SpillProbeToDisk"/> is called, the in-memory rows are flushed
-/// to a temporary file via <see cref="RowSerializer"/> and pool-rented arrays
-/// are returned. Subsequent rows are appended directly to the spill file.
-/// Reading spilled rows back uses <see cref="ReadSpilledBuildRows"/> /
-/// <see cref="ReadSpilledProbeRows"/>.
+/// In-memory rows are stabilised into a per-partition retention <see cref="Arena"/>
+/// so input batches can be returned without invalidating the rows we keep.
 /// </para>
 /// <para>
-/// Callers must call <see cref="Dispose"/> to delete temporary files and
-/// return any remaining pool-rented arrays.
+/// When <see cref="SpillBuildToDisk"/> or <see cref="SpillProbeToDisk"/> is called,
+/// rows are flushed to a per-partition <see cref="SpillReaderWriter"/> with two
+/// internal partitions (build = 0, probe = 1) that share a single consolidated arena.
+/// The shared arena is the critical invariant: build-side keys and probe-side keys
+/// land in the same arena, so equality comparison "just works" without per-side copies.
+/// </para>
+/// <para>
+/// Reading spilled rows back via <see cref="ReadSpilledBuildRows"/> /
+/// <see cref="ReadSpilledProbeRows"/> drives the spiller's async replay synchronously
+/// and retains the yielded batches until <see cref="Dispose"/> — the consumer
+/// (Grace hash join) holds <see cref="Row"/> references into those batches throughout
+/// the join phase.
 /// </para>
 /// </remarks>
 internal sealed class SpillPartition : IDisposable
 {
+    /// <summary>SpillReaderWriter sub-partition index for build rows.</summary>
+    private const int BuildSlot = 0;
+
+    /// <summary>SpillReaderWriter sub-partition index for probe rows.</summary>
+    private const int ProbeSlot = 1;
+
+    /// <summary>Capacity of the staging buffer used to accumulate post-spill rows before flushing.</summary>
+    private const int SpillStagingCapacity = 256;
+
     private List<Row>? _buildRows = new();
     private List<Row>? _probeRows = new();
 
-    private string? _buildSpillPath;
-    private string? _probeSpillPath;
-    private BinaryWriter? _buildSpillWriter;
-    private BinaryWriter? _probeSpillWriter;
-    private bool _buildSchemaWritten;
-    private bool _probeSchemaWritten;
+    private SpillReaderWriter? _spiller;
+    private bool _buildSpilled;
+    private bool _probeSpilled;
     private int _spilledBuildRowCount;
     private int _spilledProbeRowCount;
 
+    private RowBatch? _buildStaging;
+    private RowBatch? _probeStaging;
+
+    /// <summary>
+    /// Batches yielded by replay that callers still hold <see cref="Row"/> references into.
+    /// Returned to the pool on <see cref="Dispose"/>.
+    /// </summary>
+    private List<RowBatch>? _replayBatches;
+
     private readonly string _spillDirectory;
-    private readonly int _partitionIndex;
     private readonly LocalBufferPool? _pool;
     private readonly Pool _arenaPool;
+    private readonly ExecutionContext _context;
     private Arena? _retentionArena;
+    private ColumnLookup? _spillSchema;
 
     /// <summary>
     /// Creates a new partition.
     /// </summary>
-    /// <param name="spillDirectory">The temporary directory for spill files.</param>
-    /// <param name="partitionIndex">The zero-based index of this partition (used in file names).</param>
-    /// <param name="arenaPool">
-    /// The arena-aware pool. Used to lazy-rent a per-partition retention arena that holds
-    /// stabilized payload bytes for arena-backed values, so input batches can be safely
-    /// returned without invalidating the rows we keep.
-    /// </param>
+    /// <param name="spillDirectory">Parent directory for spill files.</param>
+    /// <param name="partitionIndex">Zero-based index of this partition (used in file names / diagnostics).</param>
+    /// <param name="arenaPool">Arena-aware pool used for retention arena and spill replay batches.</param>
+    /// <param name="context">Execution context — supplies <c>BatchSize</c> and <c>CancellationToken</c> for replay.</param>
     /// <param name="estimatedBuildRows">
-    /// Estimated number of build-side rows for this partition. Used to pre-size the
-    /// internal list and avoid repeated LOH-crossing doublings that drive Gen2 GC pressure.
-    /// Zero or negative values fall back to the default list capacity.
+    /// Estimated number of build-side rows. Used to pre-size the in-memory list and avoid
+    /// LOH-crossing list doublings. Zero or negative falls back to default capacity.
     /// </param>
     /// <param name="pool">
-    /// Optional buffer pool for renting <see cref="DataValue"/> array copies.
-    /// When provided, <see cref="AddBuildRow"/> copies the row's values into a
-    /// pool-rented array so the input batch can be returned immediately.
+    /// Optional buffer pool for renting <see cref="DataValue"/> array copies. When provided,
+    /// <see cref="AddBuildRow"/> / <see cref="AddProbeRow"/> rent each in-memory row's value
+    /// array from this pool; otherwise they allocate.
     /// </param>
-    internal SpillPartition(string spillDirectory, int partitionIndex, Pool arenaPool, int estimatedBuildRows = 0, LocalBufferPool? pool = null)
+    internal SpillPartition(
+        string spillDirectory,
+        int partitionIndex,
+        Pool arenaPool,
+        ExecutionContext context,
+        int estimatedBuildRows = 0,
+        LocalBufferPool? pool = null)
     {
+        _ = partitionIndex;
         _spillDirectory = spillDirectory;
-        _partitionIndex = partitionIndex;
         _arenaPool = arenaPool;
+        _context = context;
         _pool = pool;
         if (estimatedBuildRows > 0)
         {
@@ -77,10 +100,9 @@ internal sealed class SpillPartition : IDisposable
     }
 
     /// <summary>
-    /// The retention arena for this partition. Holds stabilized payload bytes for any
-    /// arena-backed values added via <see cref="AddBuildRow"/> / <see cref="AddProbeRow"/>.
-    /// Lazily allocated on first stabilization. Exposed so callers handing rows from one
-    /// partition to another (e.g. recursive repartitioning) can pass it as the source arena.
+    /// Retention arena for in-memory rows. Lazily allocated on first stabilization.
+    /// Exposed so callers handing rows from one partition to another (e.g. recursive
+    /// repartitioning) can pass it as the source arena.
     /// </summary>
     internal Arena? RetentionArena => _retentionArena;
 
@@ -90,37 +112,37 @@ internal sealed class SpillPartition : IDisposable
     /// <summary>The number of probe-side rows currently held in memory.</summary>
     internal int InMemoryProbeRowCount => _probeRows?.Count ?? 0;
 
-    /// <summary>The total number of build-side rows (in-memory + spilled).</summary>
-    internal int TotalBuildRowCount => InMemoryBuildRowCount + _spilledBuildRowCount;
+    /// <summary>The total number of build-side rows (in-memory + spilled, including any staged-but-not-flushed rows).</summary>
+    internal int TotalBuildRowCount => InMemoryBuildRowCount + _spilledBuildRowCount + (_buildStaging?.Count ?? 0);
 
-    /// <summary>The total number of probe-side rows (in-memory + spilled).</summary>
-    internal int TotalProbeRowCount => InMemoryProbeRowCount + _spilledProbeRowCount;
+    /// <summary>The total number of probe-side rows (in-memory + spilled, including any staged-but-not-flushed rows).</summary>
+    internal int TotalProbeRowCount => InMemoryProbeRowCount + _spilledProbeRowCount + (_probeStaging?.Count ?? 0);
 
     /// <summary>Whether build-side rows have been spilled to disk.</summary>
-    internal bool IsBuildSpilled => _buildSpillPath is not null;
+    internal bool IsBuildSpilled => _buildSpilled;
 
     /// <summary>Whether probe-side rows have been spilled to disk.</summary>
-    internal bool IsProbeSpilled => _probeSpillPath is not null;
+    internal bool IsProbeSpilled => _probeSpilled;
 
     /// <summary>
-    /// Adds a build-side row. The row's values are stabilized into the partition's
-    /// retention arena so the source batch can be returned without invalidating the
-    /// arena offsets in arena-backed payloads. If the partition has already been
-    /// spilled, the row is written directly to the spill file.
+    /// Adds a build-side row. While the partition is in memory, the row's values are stabilised
+    /// into the retention arena; once spilled, the row is staged into a buffer batch and flushed
+    /// to the spiller when the buffer is full.
     /// </summary>
     /// <param name="row">The row to add.</param>
     /// <param name="sourceArena">
-    /// The arena holding the row's payload bytes (typically the source batch's arena,
-    /// or the prior partition's <see cref="RetentionArena"/> when re-partitioning).
-    /// May be null when the caller cannot supply one (e.g. rows read back from a spill
-    /// file via the legacy codec, where only inline values are reliably round-tripped);
-    /// in that case the row is stored without arena stabilization.
+    /// The arena holding the row's payload bytes (typically the source batch's arena, or the
+    /// prior partition's <see cref="RetentionArena"/> when re-partitioning). May be null for
+    /// inline-only rows; arena-backed values with a null source arena will be stored without
+    /// stabilization and may become stale once their original arena is recycled.
     /// </param>
     internal void AddBuildRow(Row row, Arena? sourceArena)
     {
-        if (_buildSpillWriter is not null)
+        _spillSchema ??= row.ColumnLookup;
+
+        if (_buildSpilled)
         {
-            WriteRowToSpill(_buildSpillWriter, row, ref _buildSchemaWritten);
+            AppendToStaging(ref _buildStaging, row, sourceArena, BuildSlot);
             _spilledBuildRowCount++;
         }
         else
@@ -130,24 +152,15 @@ internal sealed class SpillPartition : IDisposable
     }
 
     /// <summary>
-    /// Adds a probe-side row. The row's values are stabilized into the partition's
-    /// retention arena so the source batch can be returned without invalidating the
-    /// arena offsets in arena-backed payloads. If the partition has already been
-    /// spilled, the row is written directly to the spill file.
+    /// Adds a probe-side row. See <see cref="AddBuildRow"/> for stabilization semantics.
     /// </summary>
-    /// <param name="row">The row to add.</param>
-    /// <param name="sourceArena">
-    /// The arena holding the row's payload bytes (typically the source batch's arena,
-    /// or the prior partition's <see cref="RetentionArena"/> when re-partitioning).
-    /// May be null when the caller cannot supply one (e.g. rows read back from a spill
-    /// file via the legacy codec, where only inline values are reliably round-tripped);
-    /// in that case the row is stored without arena stabilization.
-    /// </param>
     internal void AddProbeRow(Row row, Arena? sourceArena)
     {
-        if (_probeSpillWriter is not null)
+        _spillSchema ??= row.ColumnLookup;
+
+        if (_probeSpilled)
         {
-            WriteRowToSpill(_probeSpillWriter, row, ref _probeSchemaWritten);
+            AppendToStaging(ref _probeStaging, row, sourceArena, ProbeSlot);
             _spilledProbeRowCount++;
         }
         else
@@ -165,9 +178,6 @@ internal sealed class SpillPartition : IDisposable
 
         if (sourceArena is null)
         {
-            // Legacy path — caller didn't supply an arena. Fall back to a shallow array
-            // copy. Safe for inline values; arena-backed values will become stale once
-            // the source arena is recycled. Step C will tighten this.
             for (int i = 0; i < source.Length; i++)
             {
                 copy[i] = source[i];
@@ -185,69 +195,142 @@ internal sealed class SpillPartition : IDisposable
         return new Row(row.RawNames, copy, row.RawNameIndex);
     }
 
-    /// <summary>
-    /// Flushes in-memory build rows to a temporary file and clears them from memory.
-    /// Pool-rented <see cref="DataValue"/> arrays are returned after serialization.
-    /// Subsequent <see cref="AddBuildRow"/> calls write directly to the spill file.
-    /// </summary>
-    internal void SpillBuildToDisk()
+    private void AppendToStaging(ref RowBatch? staging, Row row, Arena? sourceArena, int spillSlot)
     {
-        if (_buildSpillWriter is not null)
+        EnsureSpiller();
+        if (staging is null)
         {
-            return;
+            staging = _arenaPool.RentRowBatch(_spillSchema!, SpillStagingCapacity, arena: null);
         }
 
-        Directory.CreateDirectory(_spillDirectory);
-        _buildSpillPath = Path.Combine(_spillDirectory, $"build_{_partitionIndex}.spill");
-        FileStream fileStream = new(_buildSpillPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-        _buildSpillWriter = new BinaryWriter(fileStream);
-
-        if (_buildRows is not null)
+        DataValue[] values = _arenaPool.RentDataValues(row.RawValues.Length);
+        if (sourceArena is null)
         {
-            foreach (Row row in _buildRows)
+            for (int i = 0; i < row.RawValues.Length; i++)
             {
-                WriteRowToSpill(_buildSpillWriter, row, ref _buildSchemaWritten);
-                _spilledBuildRowCount++;
-
-                // Return pool-rented arrays — the row is now serialized to disk.
-                if (_pool is not null)
-                {
-                    _pool.ReturnValues(row);
-                }
+                values[i] = row.RawValues[i];
             }
+        }
+        else
+        {
+            for (int i = 0; i < row.RawValues.Length; i++)
+            {
+                values[i] = DataValueRetention.Stabilize(row.RawValues[i], sourceArena, staging.Arena);
+            }
+        }
+        staging.Add(values);
 
-            _buildRows.Clear();
-            _buildRows = null;
+        if (staging.IsFull)
+        {
+            _spiller!.Write(staging, spillSlot);
+            staging = null;
         }
     }
 
     /// <summary>
-    /// Flushes in-memory probe rows to a temporary file and clears them from memory.
-    /// Subsequent <see cref="AddProbeRow"/> calls write directly to the spill file.
+    /// Flushes in-memory build rows to disk. Subsequent <see cref="AddBuildRow"/> calls
+    /// stage rows into a buffer batch that is flushed when full.
     /// </summary>
-    internal void SpillProbeToDisk()
+    internal void SpillBuildToDisk()
     {
-        if (_probeSpillWriter is not null)
+        if (_buildSpilled)
         {
             return;
         }
 
-        Directory.CreateDirectory(_spillDirectory);
-        _probeSpillPath = Path.Combine(_spillDirectory, $"probe_{_partitionIndex}.spill");
-        FileStream fileStream = new(_probeSpillPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
-        _probeSpillWriter = new BinaryWriter(fileStream);
+        EnsureSpiller();
+        FlushInMemoryRowsToSpill(_buildRows, BuildSlot);
+        ReturnInMemoryArrays(_buildRows);
+        _buildRows = null;
+        _buildSpilled = true;
+    }
 
-        if (_probeRows is not null)
+    /// <summary>
+    /// Flushes in-memory probe rows to disk. Subsequent <see cref="AddProbeRow"/> calls
+    /// stage rows into a buffer batch that is flushed when full.
+    /// </summary>
+    internal void SpillProbeToDisk()
+    {
+        if (_probeSpilled)
         {
-            foreach (Row row in _probeRows)
+            return;
+        }
+
+        EnsureSpiller();
+        FlushInMemoryRowsToSpill(_probeRows, ProbeSlot);
+        ReturnInMemoryArrays(_probeRows);
+        _probeRows = null;
+        _probeSpilled = true;
+    }
+
+    private void EnsureSpiller()
+    {
+        if (_spiller is not null)
+        {
+            return;
+        }
+
+        if (_spillSchema is null)
+        {
+            // No rows ever added — defer until something is actually written. The spill
+            // flag is set regardless so future AddBuildRow/AddProbeRow take the spilled path,
+            // which captures the schema from the first row.
+            return;
+        }
+
+        Directory.CreateDirectory(_spillDirectory);
+        _spiller = new SpillReaderWriter(_arenaPool, _spillSchema, _spillDirectory, partitionCount: 2);
+    }
+
+    private void FlushInMemoryRowsToSpill(List<Row>? rows, int spillSlot)
+    {
+        if (rows is null || rows.Count == 0 || _spillSchema is null)
+        {
+            return;
+        }
+
+        EnsureSpiller();
+
+        // Chunk the in-memory rows into batches that share the retention arena. Stabilize is a
+        // no-op when source equals target, so the spiller's Stabilize-on-write detects that the
+        // values already point at the retention arena and copies into the consolidated arena
+        // exactly once.
+        Arena? retention = _retentionArena;
+        int total = rows.Count;
+        int chunkSize = SpillStagingCapacity;
+
+        for (int start = 0; start < total; start += chunkSize)
+        {
+            int batchSize = System.Math.Min(chunkSize, total - start);
+            RowBatch batch = _arenaPool.RentRowBatch(_spillSchema, batchSize, retention);
+
+            for (int i = 0; i < batchSize; i++)
             {
-                WriteRowToSpill(_probeSpillWriter, row, ref _probeSchemaWritten);
-                _spilledProbeRowCount++;
+                batch.Add(rows[start + i].RawValues);
             }
 
-            _probeRows.Clear();
-            _probeRows = null;
+            // Spiller.Write returns the batch (releasing the retention-arena reference rented above).
+            // Each Row's RawValues array was rented from _pool; the spiller's pool returns it via
+            // pool.ReturnRowBatch → PoolBacking.ReturnRowBatch. Both LocalBufferPool.Rent and
+            // PoolBacking.RentDataValues hand out arrays from the same backing PoolBacking, so the
+            // return path is symmetric.
+            _spiller!.Write(batch, spillSlot);
+            if (spillSlot == BuildSlot) _spilledBuildRowCount += batchSize;
+            else _spilledProbeRowCount += batchSize;
         }
+    }
+
+    private void ReturnInMemoryArrays(List<Row>? rows)
+    {
+        if (rows is null || _pool is null)
+        {
+            return;
+        }
+
+        // The spiller's Write already returned the DataValue arrays via pool.ReturnRowBatch,
+        // so this is a defensive no-op for the post-spill path. Kept for the (currently
+        // unreachable) future case where in-memory rows are dropped without being spilled.
+        _ = rows;
     }
 
     /// <summary>
@@ -267,37 +350,99 @@ internal sealed class SpillPartition : IDisposable
     }
 
     /// <summary>
-    /// Reads all spilled build-side rows from disk. The spill writer is flushed and closed
-    /// before reading. Only valid when <see cref="IsBuildSpilled"/> is true.
+    /// Reads all spilled build-side rows. Only valid when <see cref="IsBuildSpilled"/> is true.
+    /// Yielded rows reference batches retained by this partition until <see cref="Dispose"/>.
     /// </summary>
     internal IEnumerable<Row> ReadSpilledBuildRows()
     {
-        FlushAndCloseWriter(ref _buildSpillWriter);
-        return ReadSpilledRows(_buildSpillPath, _spilledBuildRowCount);
+        FlushStagingToSpill(ref _buildStaging, BuildSlot);
+        return ReplaySlot(BuildSlot);
     }
 
     /// <summary>
-    /// Reads all spilled probe-side rows from disk. The spill writer is flushed and closed
-    /// before reading. Only valid when <see cref="IsProbeSpilled"/> is true.
+    /// Reads all spilled probe-side rows. Only valid when <see cref="IsProbeSpilled"/> is true.
+    /// Yielded rows reference batches retained by this partition until <see cref="Dispose"/>.
     /// </summary>
     internal IEnumerable<Row> ReadSpilledProbeRows()
     {
-        FlushAndCloseWriter(ref _probeSpillWriter);
-        return ReadSpilledRows(_probeSpillPath, _spilledProbeRowCount);
+        FlushStagingToSpill(ref _probeStaging, ProbeSlot);
+        return ReplaySlot(ProbeSlot);
+    }
+
+    private void FlushStagingToSpill(ref RowBatch? staging, int spillSlot)
+    {
+        if (staging is null || staging.Count == 0)
+        {
+            if (staging is not null)
+            {
+                _arenaPool.ReturnRowBatch(staging);
+                staging = null;
+            }
+            return;
+        }
+
+        _spiller!.Write(staging, spillSlot);
+        staging = null;
+    }
+
+    private IEnumerable<Row> ReplaySlot(int spillSlot)
+    {
+        if (_spiller is null)
+        {
+            yield break;
+        }
+
+        _replayBatches ??= new List<RowBatch>();
+
+        IAsyncEnumerator<RowBatch> enumerator = _spiller
+            .ReplayPartitionAsync(_context, _spillSchema!, spillSlot)
+            .GetAsyncEnumerator(_context.CancellationToken);
+
+        try
+        {
+            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+                RowBatch batch = enumerator.Current;
+                _replayBatches.Add(batch);
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    yield return batch[i];
+                }
+            }
+        }
+        finally
+        {
+            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>
-    /// Disposes the partition, closing any open spill writers, deleting temporary files,
-    /// and returning any pool-rented <see cref="DataValue"/> arrays still held in memory.
+    /// Disposes the partition: closes spill files, returns retained replay batches and the
+    /// retention arena, and deletes the temporary spill directory.
     /// </summary>
     public void Dispose()
     {
-        _buildSpillWriter?.Dispose();
-        _buildSpillWriter = null;
-        _probeSpillWriter?.Dispose();
-        _probeSpillWriter = null;
+        if (_buildStaging is not null)
+        {
+            _arenaPool.ReturnRowBatch(_buildStaging);
+            _buildStaging = null;
+        }
 
-        // Return pool-rented build row arrays that weren't spilled.
+        if (_probeStaging is not null)
+        {
+            _arenaPool.ReturnRowBatch(_probeStaging);
+            _probeStaging = null;
+        }
+
+        if (_replayBatches is not null)
+        {
+            foreach (RowBatch batch in _replayBatches)
+            {
+                _arenaPool.ReturnRowBatch(batch);
+            }
+            _replayBatches = null;
+        }
+
         if (_buildRows is not null && _pool is not null)
         {
             foreach (Row row in _buildRows)
@@ -306,7 +451,6 @@ internal sealed class SpillPartition : IDisposable
             }
         }
 
-        // Probe rows also use pool-rented arrays since stabilization rents from the same pool.
         if (_probeRows is not null && _pool is not null)
         {
             foreach (Row row in _probeRows)
@@ -318,63 +462,13 @@ internal sealed class SpillPartition : IDisposable
         _buildRows = null;
         _probeRows = null;
 
+        _spiller?.Dispose();
+        _spiller = null;
+
         if (_retentionArena is not null)
         {
             _arenaPool.Backing.TryReturn(_retentionArena);
             _retentionArena = null;
-        }
-
-        if (_buildSpillPath is not null && File.Exists(_buildSpillPath))
-        {
-            File.Delete(_buildSpillPath);
-            _buildSpillPath = null;
-        }
-
-        if (_probeSpillPath is not null && File.Exists(_probeSpillPath))
-        {
-            File.Delete(_probeSpillPath);
-            _probeSpillPath = null;
-        }
-    }
-
-    private static void WriteRowToSpill(BinaryWriter writer, Row row, ref bool schemaWritten)
-    {
-        if (!schemaWritten)
-        {
-            RowSerializer.WriteSchema(writer, row);
-            schemaWritten = true;
-        }
-
-        RowSerializer.WriteRow(writer, row);
-    }
-
-    private static void FlushAndCloseWriter(ref BinaryWriter? writer)
-    {
-        if (writer is not null)
-        {
-            writer.Flush();
-            writer.Dispose();
-            writer = null;
-        }
-    }
-
-    private static IEnumerable<Row> ReadSpilledRows(
-        string? spillPath,
-        int rowCount)
-    {
-        if (spillPath is null || rowCount == 0)
-        {
-            yield break;
-        }
-
-        using FileStream fileStream = new(spillPath, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
-        using BinaryReader reader = new(fileStream);
-
-        RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
-
-        for (int index = 0; index < rowCount; index++)
-        {
-            yield return RowSerializer.ReadRow(reader, names, nameIndex);
         }
     }
 }

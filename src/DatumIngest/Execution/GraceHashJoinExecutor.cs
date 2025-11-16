@@ -128,7 +128,7 @@ internal sealed class GraceHashJoinExecutor
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
-        SpillPartition[] partitions = CreatePartitions(partitionCount, context.Pool, context.LocalBufferPool);
+        SpillPartition[] partitions = CreatePartitions(partitionCount, context.Pool, context.LocalBufferPool, context);
 
         ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
@@ -938,7 +938,7 @@ internal sealed class GraceHashJoinExecutor
 
         for (int index = 0; index < subPartitionCount; index++)
         {
-            subPartitions[index] = new SpillPartition(subSpillDir, index, context.Pool, pool: context.LocalBufferPool);
+            subPartitions[index] = new SpillPartition(subSpillDir, index, context.Pool, context, pool: context.LocalBufferPool);
         }
 
         DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
@@ -1085,7 +1085,7 @@ internal sealed class GraceHashJoinExecutor
         return 0;
     }
 
-    private SpillPartition[] CreatePartitions(int count, Pool arenaPool, LocalBufferPool pool)
+    private SpillPartition[] CreatePartitions(int count, Pool arenaPool, LocalBufferPool pool, ExecutionContext context)
     {
         int perPartitionEstimate = _estimatedBuildRows.HasValue
             ? (int)Math.Min(_estimatedBuildRows.Value / count, int.MaxValue)
@@ -1094,7 +1094,7 @@ internal sealed class GraceHashJoinExecutor
         SpillPartition[] partitions = new SpillPartition[count];
         for (int index = 0; index < count; index++)
         {
-            partitions[index] = new SpillPartition(_spillDirectory, index, arenaPool, perPartitionEstimate, pool);
+            partitions[index] = new SpillPartition(_spillDirectory, index, arenaPool, context, perPartitionEstimate, pool);
         }
 
         return partitions;
