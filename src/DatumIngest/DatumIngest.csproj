@@ -33,6 +33,7 @@
   <ItemGroup>
     <PackageReference Include="CardinalityEstimation" Version="1.14.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.4" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.0" />

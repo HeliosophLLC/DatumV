@@ -300,6 +300,28 @@ public static class SqlParser
         .OptionalOrDefault();
 
     /// <summary>
+    /// Function name with optional namespace qualifier: <c>name</c> or <c>namespace.name</c>.
+    /// The namespaced form is disambiguated from a <see cref="ColumnReference"/> like
+    /// <c>t.col</c> by lookahead to the opening <c>(</c> in <see cref="FunctionCall"/>:
+    /// when <c>IDENT '.' IDENT '('</c> matches we commit to the function-call branch;
+    /// otherwise the parent parser falls back to <see cref="QualifiedColumn"/>.
+    /// </summary>
+    /// <remarks>
+    /// Returns the raw <see cref="Token{TKind}"/> for the unqualified name (used for
+    /// <c>SourceSpan</c>) plus the optional namespace string. Callers fold the namespace
+    /// into the function name with a dot — <c>"models.classify"</c> — so
+    /// <see cref="FunctionCallExpression"/>'s string-keyed lookup picks the right entry
+    /// without an AST change.
+    /// </remarks>
+    private static readonly TokenListParser<SqlToken, (string? Namespace, Superpower.Model.Token<SqlToken> Name)> NamespacedFunctionName =
+        (from ns in Token.EqualTo(SqlToken.Identifier)
+         from dot in Token.EqualTo(SqlToken.Dot)
+         from name in Token.EqualTo(SqlToken.Identifier)
+         select ((string?)GetTokenText(ns), name))
+        .Try()
+        .Or(Token.EqualTo(SqlToken.Identifier).Select(name => ((string?)null, name)));
+
+    /// <summary>
     /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] )
     /// [WITHIN GROUP ( ORDER BY ... )]
     /// [FROM FIRST | FROM LAST] [IGNORE NULLS | RESPECT NULLS] [OVER window_spec]
@@ -320,9 +342,11 @@ public static class SqlParser
     /// contextual identifiers — they are not reserved keywords.
     /// The optional <c>IGNORE NULLS</c> / <c>RESPECT NULLS</c> clause controls
     /// null handling for value window functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE).
+    /// Function names may be namespaced (<c>models.classify</c>); the namespace is
+    /// folded into the function name with a dot for registry lookup.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
-        from name in Token.EqualTo(SqlToken.Identifier)
+        from nameTuple in NamespacedFunctionName
         from open in Token.EqualTo(SqlToken.LeftParen)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
         from args in Token.EqualTo(SqlToken.Star)
@@ -357,16 +381,20 @@ public static class SqlParser
              select NullHandling.RespectNulls)
             .Try().OptionalOrDefault()
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
+        let name = nameTuple.Name
+        let qualifiedName = nameTuple.Namespace is null
+            ? GetTokenText(nameTuple.Name)
+            : $"{nameTuple.Namespace}.{GetTokenText(nameTuple.Name)}"
         select withinGroup is not null
             ? (Expression)new FunctionCallExpression(
-                GetTokenText(name),
+                qualifiedName,
                 [.. withinGroup.Select(item => item.Expression), .. args],
                 OrderBy: withinGroup,
                 Distinct: distinct.HasValue,
                 Span: ToSpan(name))
             : windowSpec is not null
-                ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
-                : (Expression)new FunctionCallExpression(GetTokenText(name), args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
+                ? (Expression)new WindowFunctionCallExpression(qualifiedName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
+                : (Expression)new FunctionCallExpression(qualifiedName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =

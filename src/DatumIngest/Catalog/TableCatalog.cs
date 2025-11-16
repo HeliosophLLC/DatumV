@@ -136,6 +136,28 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public SidecarRegistry SidecarRegistry => Parent?.SidecarRegistry ?? _sidecarRegistry;
 
     /// <summary>
+    /// Server-wide model catalog. <see langword="null"/> until set by the host
+    /// (typically at startup via <c>BuiltinModels.Register</c>); inherited from a
+    /// parent catalog when nested. Held on the table catalog so query planning
+    /// has uniform access to it without threading a separate parameter through
+    /// every entry point.
+    /// </summary>
+    public Models.ModelCatalog? Models
+    {
+        get => _modelCatalog ?? Parent?.Models;
+        set
+        {
+            if (Parent is not null && value is not null)
+            {
+                throw new InvalidOperationException(
+                    "Models cannot be set on a nested table catalog — set it on the root.");
+            }
+            _modelCatalog = value;
+        }
+    }
+    private Models.ModelCatalog? _modelCatalog;
+
+    /// <summary>
     /// Gets the total number of tables registered in this catalog, including
     /// those inherited from the parent catalog if present.
     /// </summary>

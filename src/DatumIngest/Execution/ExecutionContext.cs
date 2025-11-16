@@ -229,4 +229,24 @@ public sealed class ExecutionContext
     /// scoped (not per-query) so storeId assignments are stable across queries.
     /// </summary>
     public SidecarRegistry SidecarRegistry => Catalog.SidecarRegistry;
+
+    /// <summary>
+    /// Server-wide model catalog. Holds <see cref="DatumIngest.Models.ModelCatalogEntry"/>
+    /// records for every registered model and the <see cref="DatumIngest.Models.IModel"/>
+    /// instances they have been resolved into. Lives on <see cref="ExecutionContext"/>
+    /// for plumbing convenience but is itself process-scoped — model residency is
+    /// amortised across queries, sessions, and tenants.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="TableCatalog.Models"/> on the active catalog so callers
+    /// that set models at the catalog level don't have to thread the reference through
+    /// every <see cref="ExecutionContext"/> construction. Tests that need to override
+    /// (e.g. inject a mock catalog) can set it explicitly via init.
+    /// </remarks>
+    public DatumIngest.Models.ModelCatalog? Models
+    {
+        get => _modelsOverride ?? Catalog.Models;
+        init => _modelsOverride = value;
+    }
+    private readonly DatumIngest.Models.ModelCatalog? _modelsOverride;
 }

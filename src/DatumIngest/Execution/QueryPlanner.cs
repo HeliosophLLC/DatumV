@@ -109,14 +109,30 @@ public sealed class QueryPlanner
 
     /// <summary>
     /// Required-for-correctness rewrites applied to every plan, regardless of entry point.
-    /// Currently lowers <c>image(source, lambda)</c> calls into
-    /// <see cref="FusedImagePipelineExpression"/> nodes. <see cref="LiteralHoister"/> is
-    /// intentionally <em>not</em> here — it's a per-plan-instance optimisation that lives
-    /// in <see cref="DatumIngest.Catalog.QueryPlan"/> because the hoist arena's lifetime
-    /// is tied to that instance, not to the planner.
+    /// Two passes:
     /// </summary>
-    private IQueryOperator Finalize(IQueryOperator op) =>
-        op.RewriteExpressions(expr => ImagePipelineLowerer.Lower(expr, _functionRegistry));
+    /// <list type="number">
+    ///   <item><description>
+    ///     <see cref="ImagePipelineLowerer"/> — lowers <c>image(source, lambda)</c> and
+    ///     bare image function calls into <see cref="FusedImagePipelineExpression"/> nodes.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <see cref="ModelInvocationHoister"/> — hoists <c>models.*</c> calls out of
+    ///     expressions into <see cref="Operators.ModelInvocationOperator"/> nodes so
+    ///     model dispatch happens once per batch instead of once per row.
+    ///   </description></item>
+    /// </list>
+    /// <remarks>
+    /// <see cref="LiteralHoister"/> is intentionally <em>not</em> here — it's a per-plan-
+    /// instance optimisation that lives in <see cref="DatumIngest.Catalog.QueryPlan"/>
+    /// because the hoist arena's lifetime is tied to that instance, not to the planner.
+    /// </remarks>
+    private IQueryOperator Finalize(IQueryOperator op)
+    {
+        IQueryOperator imageLowered = op.RewriteExpressions(
+            expr => ImagePipelineLowerer.Lower(expr, _functionRegistry));
+        return ModelInvocationHoister.Hoist(imageLowered, _catalog.Models);
+    }
 
     /// <summary>
     /// Plans a compound set operation (UNION, INTERSECT, EXCEPT) by recursively

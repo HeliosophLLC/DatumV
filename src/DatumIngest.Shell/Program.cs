@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Models;
 using DatumIngest.Shell;
 using Spectre.Console;
 
@@ -16,6 +17,13 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
 }
 
 TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.PoolBacking()));
+
+// Register the built-in model catalog so `models.*` calls resolve. Demo 0.5
+// ships MobileNetV2; if the ONNX file isn't present at the catalog's
+// ModelDirectory the loader will throw on first use, not at startup.
+ModelCatalog modelCatalog = new();
+BuiltinModels.RegisterMobileNetV2(modelCatalog);
+catalog.Models = modelCatalog;
 try
 {
     foreach (string path in args)
