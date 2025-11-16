@@ -34,6 +34,30 @@ public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
                 $"crop() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+        {
+            throw new ArgumentException(
+                $"crop() second argument (x) must be numeric, got {argumentKinds[1]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[2]))
+        {
+            throw new ArgumentException(
+                $"crop() third argument (y) must be numeric, got {argumentKinds[2]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[3]))
+        {
+            throw new ArgumentException(
+                $"crop() fourth argument (width) must be numeric, got {argumentKinds[3]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[4]))
+        {
+            throw new ArgumentException(
+                $"crop() fifth argument (height) must be numeric, got {argumentKinds[4]}.");
+        }
+
         if (argumentKinds.Length == 6 && argumentKinds[5] != DataKind.String)
         {
             throw new ArgumentException(
@@ -54,10 +78,10 @@ public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        int x = (int)arguments[1].AsFloat32();
-        int y = (int)arguments[2].AsFloat32();
-        int cropWidth = (int)arguments[3].AsFloat32();
-        int cropHeight = (int)arguments[4].AsFloat32();
+        int x = arguments[1].ToInt32();
+        int y = arguments[2].ToInt32();
+        int cropWidth = arguments[3].ToInt32();
+        int cropHeight = arguments[4].ToInt32();
 
         string? formatOverride = arguments.Length == 6 ? arguments[5].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -88,10 +112,10 @@ public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        int x = (int)arguments[1].AsFloat32();
-        int y = (int)arguments[2].AsFloat32();
-        int cropWidth = (int)arguments[3].AsFloat32();
-        int cropHeight = (int)arguments[4].AsFloat32();
+        int x = arguments[1].ToInt32();
+        int y = arguments[2].ToInt32();
+        int cropWidth = arguments[3].ToInt32();
+        int cropHeight = arguments[4].ToInt32();
 
         string? formatOverride = arguments.Length == 6 ? arguments[5].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

@@ -34,6 +34,36 @@ public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunctio
                 $"affine_transform() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+        {
+            throw new ArgumentException(
+                $"affine_transform() second argument (angle) must be numeric, got {argumentKinds[1]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[2]))
+        {
+            throw new ArgumentException(
+                $"affine_transform() third argument (scale_x) must be numeric, got {argumentKinds[2]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[3]))
+        {
+            throw new ArgumentException(
+                $"affine_transform() fourth argument (scale_y) must be numeric, got {argumentKinds[3]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[4]))
+        {
+            throw new ArgumentException(
+                $"affine_transform() fifth argument (shear_x) must be numeric, got {argumentKinds[4]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[5]))
+        {
+            throw new ArgumentException(
+                $"affine_transform() sixth argument (shear_y) must be numeric, got {argumentKinds[5]}.");
+        }
+
         if (argumentKinds.Length == 7 && argumentKinds[6] != DataKind.String)
         {
             throw new ArgumentException(
@@ -54,11 +84,11 @@ public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunctio
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float angleDegrees = arguments[1].AsFloat32();
-        float scaleX = arguments[2].AsFloat32();
-        float scaleY = arguments[3].AsFloat32();
-        float shearX = arguments[4].AsFloat32();
-        float shearY = arguments[5].AsFloat32();
+        float angleDegrees = arguments[1].ToFloat();
+        float scaleX = arguments[2].ToFloat();
+        float scaleY = arguments[3].ToFloat();
+        float shearX = arguments[4].ToFloat();
+        float shearY = arguments[5].ToFloat();
 
         string? formatOverride = arguments.Length == 7 ? arguments[6].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -112,11 +142,11 @@ public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunctio
         }
 
         ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float angleDegrees = arguments[1].AsFloat32();
-        float scaleX = arguments[2].AsFloat32();
-        float scaleY = arguments[3].AsFloat32();
-        float shearX = arguments[4].AsFloat32();
-        float shearY = arguments[5].AsFloat32();
+        float angleDegrees = arguments[1].ToFloat();
+        float scaleX = arguments[2].ToFloat();
+        float scaleY = arguments[3].ToFloat();
+        float shearX = arguments[4].ToFloat();
+        float shearY = arguments[5].ToFloat();
 
         string? formatOverride = arguments.Length == 7 ? arguments[6].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

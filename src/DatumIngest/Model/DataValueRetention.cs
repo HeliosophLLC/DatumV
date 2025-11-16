@@ -89,8 +89,18 @@ public static class DataValueRetention
                 value.AsUInt8Array(sourceStore),
                 retentionStore),
 
-            DataKind.Image => DataValue.FromImage(
-                value.AsImage(sourceStore),
+            // Image payloads can live two ways in the source store: as raw encoded
+            // bytes (the bytes path) or as an ImageHandle in the arena's object side-
+            // list (the path image transform functions like blur()/resize() take —
+            // they hand out a decoded SKBitmap that downstream functions can use
+            // without re-decoding). GetImageHandle handles both: bytes are wrapped in
+            // a fresh transient ImageHandle, and an existing handle is returned as-is.
+            // Re-storing the handle into retentionStore via FromImageHandle keeps the
+            // lazy-decode semantics intact, and an inadvertent AsImage call here would
+            // trip on a Capacity=0 source arena when the only thing ever written was
+            // a side-list object.
+            DataKind.Image => DataValue.FromImageHandle(
+                value.GetImageHandle(sourceStore),
                 retentionStore),
 
             // Recursively stabilise each element into the retention store, then store the

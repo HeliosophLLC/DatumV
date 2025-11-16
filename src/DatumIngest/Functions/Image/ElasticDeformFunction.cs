@@ -34,6 +34,18 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
                 $"elastic_deform() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+        {
+            throw new ArgumentException(
+                $"elastic_deform() second argument (alpha) must be numeric, got {argumentKinds[1]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[2]))
+        {
+            throw new ArgumentException(
+                $"elastic_deform() third argument (sigma) must be numeric, got {argumentKinds[2]}.");
+        }
+
         if (argumentKinds.Length == 4 && argumentKinds[3] != DataKind.String)
         {
             throw new ArgumentException(
@@ -54,8 +66,8 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float alpha = arguments[1].AsFloat32();
-        float sigma = arguments[2].AsFloat32();
+        float alpha = arguments[1].ToFloat();
+        float sigma = arguments[2].ToFloat();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -241,8 +253,8 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float alpha = arguments[1].AsFloat32();
-        float sigma = arguments[2].AsFloat32();
+        float alpha = arguments[1].ToFloat();
+        float sigma = arguments[2].ToFloat();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

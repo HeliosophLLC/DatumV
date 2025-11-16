@@ -39,6 +39,12 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         // Two-argument form: noise(image, value) — defaults to gaussian.
         if (argumentKinds.Length == 2)
         {
+            if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+            {
+                throw new ArgumentException(
+                    $"noise() second argument (value) must be numeric, got {argumentKinds[1]}.");
+            }
+
             return DataKind.Image;
         }
 
@@ -46,6 +52,12 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         {
             throw new ArgumentException(
                 $"noise() second argument (type) must be String, got {argumentKinds[1]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[2]))
+        {
+            throw new ArgumentException(
+                $"noise() third argument (value) must be numeric, got {argumentKinds[2]}.");
         }
 
         if (argumentKinds.Length == 4 && argumentKinds[3] != DataKind.String)
@@ -77,13 +89,13 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         if (arguments.Length == 2)
         {
             noiseType = "GAUSSIAN";
-            value = arguments[1].AsFloat32();
+            value = arguments[1].ToFloat();
             formatOverride = null;
         }
         else
         {
             noiseType = arguments[1].AsString().ToUpperInvariant();
-            value = arguments[2].AsFloat32();
+            value = arguments[2].ToFloat();
             formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         }
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -206,13 +218,13 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         if (arguments.Length == 2)
         {
             noiseType = "GAUSSIAN";
-            value = arguments[1].AsFloat32();
+            value = arguments[1].ToFloat();
             formatOverride = null;
         }
         else
         {
             noiseType = arguments[1].AsString(frame.Source).ToUpperInvariant();
-            value = arguments[2].AsFloat32();
+            value = arguments[2].ToFloat();
             formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
         }
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

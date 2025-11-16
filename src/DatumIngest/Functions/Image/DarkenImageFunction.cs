@@ -33,6 +33,12 @@ public sealed class DarkenImageFunction : IScalarFunction, ICostAwareFunction
                 $"darken() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+        {
+            throw new ArgumentException(
+                $"darken() second argument (intensity) must be numeric, got {argumentKinds[1]}.");
+        }
+
         if (argumentKinds.Length == 3 && argumentKinds[2] != DataKind.String)
         {
             throw new ArgumentException(
@@ -53,7 +59,7 @@ public sealed class DarkenImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float intensity = arguments[1].AsFloat32();
+        float intensity = arguments[1].ToFloat();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -93,7 +99,7 @@ public sealed class DarkenImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float intensity = arguments[1].AsFloat32();
+        float intensity = arguments[1].ToFloat();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

@@ -545,9 +545,28 @@ public sealed class ExpressionEvaluator
         DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
         try
         {
+            // Args land in two different arenas depending on what the AST node is:
+            //   - ColumnReference: payloads in frame.Source (the input batch's arena).
+            //   - Inner FunctionCallExpression / literal-with-string / etc.: payloads
+            //     in frame.Target (where the inner Execute / FromX wrote them).
+            //
+            // The function's IScalarFunction.Execute(args, in frame) overload reads with
+            // a single store. To keep that contract, we unify all args into frame.Target
+            // before the call and pass an InvocationFrame whose Source = Target. Inline
+            // and sidecar-backed values pass through Stabilize unchanged; arena-backed
+            // column values get copied from frame.Source to frame.Target.
+            //
+            // Without this, a nested call like blur(sobel(file), 10) breaks: sobel's
+            // ImageHandle lands in frame.Target's object slot, but blur's GetImageHandle
+            // is handed frame.Source — looks for the slot in the wrong arena, falls
+            // through to RetrieveBytes(0,0), and trips the Capacity=0 read.
             for (int index = 0; index < argumentCount; index++)
             {
-                arguments[index] = Evaluate(function.Arguments[index], frame);
+                Expression argExpr = function.Arguments[index];
+                DataValue raw = Evaluate(argExpr, frame);
+                arguments[index] = argExpr is ColumnReference
+                    ? DataValueRetention.Stabilize(raw, frame.Source, frame.Target)
+                    : raw;
             }
 
             // Run ValidateArguments once per call site. Argument kinds are static for the
@@ -562,7 +581,7 @@ public sealed class ExpressionEvaluator
                 ValidateScalarCallSiteOrThrow(scalarFunction, function, arguments.AsSpan(0, argumentCount));
             }
 
-            InvocationFrame invocationFrame = new(frame.Source, frame.Target, frame.SidecarRegistry);
+            InvocationFrame invocationFrame = new(frame.Target, frame.Target, frame.SidecarRegistry);
             DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in invocationFrame);
 
             _meter?.Add(scalarFunction.QueryUnitCost);

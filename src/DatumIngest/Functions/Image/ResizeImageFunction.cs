@@ -34,6 +34,18 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
                 $"resize() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsNumericScalarKind(argumentKinds[1]))
+        {
+            throw new ArgumentException(
+                $"resize() second argument (width) must be numeric, got {argumentKinds[1]}.");
+        }
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[2]))
+        {
+            throw new ArgumentException(
+                $"resize() third argument (height) must be numeric, got {argumentKinds[2]}.");
+        }
+
         if (argumentKinds.Length == 4 && argumentKinds[3] != DataKind.String)
         {
             throw new ArgumentException(
@@ -54,8 +66,8 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        int targetWidth = (int)arguments[1].AsFloat32();
-        int targetHeight = (int)arguments[2].AsFloat32();
+        int targetWidth = arguments[1].ToInt32();
+        int targetHeight = arguments[2].ToInt32();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
@@ -81,8 +93,8 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        int targetWidth = (int)arguments[1].AsFloat32();
-        int targetHeight = (int)arguments[2].AsFloat32();
+        int targetWidth = arguments[1].ToInt32();
+        int targetHeight = arguments[2].ToInt32();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
