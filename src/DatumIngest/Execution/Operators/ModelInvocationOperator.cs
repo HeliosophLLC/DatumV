@@ -168,10 +168,24 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
             }
 
-            // Step 1: evaluate the input expressions against every source row to build
-            // the row-major input matrix the model consumes. Inputs share the source
-            // batch's arena, which is fine — the model produces fresh DataValues that
-            // we'll stabilise into the output arena on scatter.
+            // Step 1: rent the output batch up-front so we can stabilise inputs and
+            // outputs into a single arena. The output arena becomes the unified
+            // store for all DataValues the model sees.
+            RowBatch outputBatch = pool.RentRowBatch(outputLookup, sourceBatch.Count);
+
+            // Step 2: evaluate the input expressions against every source row, then
+            // stabilise each non-inline value into outputBatch.Arena so the model
+            // gets a single coherent inputStore. Inputs come from one of three
+            // arenas depending on the expression type:
+            //   - column reference  → sourceBatch.Arena
+            //   - LiteralExpression → frame.Target (= sourceBatch.Arena, since we
+            //     set it that way below; the evaluator writes here on the fly)
+            //   - LiteralValueExpression (hoisted literal) → context.Store
+            //     (LiteralHoister runs at plan time and writes payloads into the
+            //     plan-scoped hoist store, which QueryPlan plumbs as context.Store)
+            // StabilizeInput tries each candidate arena until it finds one whose
+            // capacity covers the value's offsets, then copies the bytes into
+            // outputBatch.Arena.
             DataValue[][] inputs = new DataValue[sourceBatch.Count][];
             for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
             {
@@ -181,22 +195,20 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 DataValue[] rowInputs = new DataValue[_inputExpressions.Count];
                 for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                 {
-                    rowInputs[argIdx] = evaluator.Evaluate(_inputExpressions[argIdx], frame);
+                    DataValue raw = evaluator.Evaluate(_inputExpressions[argIdx], frame);
+                    rowInputs[argIdx] = StabilizeInput(raw, sourceBatch.Arena, context.Store, outputBatch.Arena);
                 }
                 inputs[rowIdx] = rowInputs;
             }
 
-            // Step 2: rent the output batch up-front so the model can stabilise non-inline
-            // results directly into the consumer-visible arena.
-            RowBatch outputBatch = pool.RentRowBatch(outputLookup, sourceBatch.Count);
-
-            // Step 3: dispatch the whole batch in one async call. Inputs reference
-            // the source batch's arena (or a sidecar via the registry); the model
-            // materialises non-inline outputs into the output batch's arena.
+            // Step 3: dispatch the whole batch in one async call. All input
+            // DataValue payloads now live in outputBatch.Arena, so we pass it as
+            // the inputStore. The model materialises non-inline outputs into the
+            // same arena.
             IReadOnlyList<DataValue> modelOutputs = await model
                 .InferBatchAsync(
                     inputs,
-                    sourceBatch.Arena,
+                    outputBatch.Arena,
                     context.SidecarRegistry,
                     outputBatch.Arena,
                     cancellationToken)
@@ -231,5 +243,50 @@ public sealed class ModelInvocationOperator : IQueryOperator
             pool.ReturnRowBatch(sourceBatch);
             yield return outputBatch;
         }
+    }
+
+    /// <summary>
+    /// Stabilises an input <see cref="DataValue"/> into <paramref name="target"/>,
+    /// routing the source-store lookup by the value's flag bits. Three cases:
+    /// <list type="bullet">
+    /// <item><description>
+    /// <strong>Inline / sidecar / inline-array / null</strong> — self-contained,
+    /// no store dereference needed. Pass-through (<see cref="Arena"/> argument is
+    /// only used by <see cref="DataValueRetention.Stabilize"/> for sidecar
+    /// resolution if applicable).
+    /// </description></item>
+    /// <item><description>
+    /// <strong>In context store</strong> (<see cref="DataValue.IsInContextStore"/>) —
+    /// the dual-flag pattern set by <see cref="LiteralHoister"/>. Read via
+    /// <paramref name="contextStore"/>, the plan-scoped persistent hoist arena
+    /// plumbed as <c>ExecutionContext.Store</c>.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>Arena-backed</strong> — read via <paramref name="primarySource"/>,
+    /// the source batch's arena (where column-reference values live).
+    /// </description></item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// The flag-based dispatch replaces an earlier <see cref="Arena.BytesWritten"/>
+    /// heuristic that probed which arena had bytes. The heuristic was fragile
+    /// against pool-recycled arenas: a freshly rented arena's
+    /// <see cref="Arena.Capacity"/> persists from a prior use even when nothing
+    /// has been written this rental, so heuristics on capacity returned stale
+    /// bytes from the previous tenant.
+    /// </remarks>
+    private static DataValue StabilizeInput(
+        DataValue value,
+        Arena primarySource,
+        IValueStore contextStore,
+        IValueStore target)
+    {
+        if (value.IsNull || value.IsInline || value.IsInSidecar || value.IsInlineArray)
+        {
+            return DataValueRetention.Stabilize(value, primarySource, target);
+        }
+
+        IValueStore source = value.IsInContextStore ? contextStore : primarySource;
+        return DataValueRetention.Stabilize(value, source, target);
     }
 }

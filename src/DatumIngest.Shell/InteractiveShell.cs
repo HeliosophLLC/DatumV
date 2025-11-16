@@ -258,6 +258,7 @@ internal sealed class InteractiveShell
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(ex.ToString())}[/]");
         }
         finally
         {

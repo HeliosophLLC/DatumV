@@ -171,7 +171,39 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// cannot satisfy reads against sidecar-backed values because the coordinate space
     /// is 64-bit, not 32-bit.
     /// </summary>
-    public bool IsInSidecar => (_flags & DataValueFlags.InSidecar) != 0;
+    /// <remarks>
+    /// Mutually exclusive with <see cref="IsInContextStore"/>. The dual flag pattern
+    /// (both <c>InArena</c> and <c>InSidecar</c> set) means "in <c>ExecutionContext.Store</c>",
+    /// not "in a sidecar". Existing callers that branch on <see cref="IsInSidecar"/>
+    /// first are still correct — they just won't match context-store values.
+    /// </remarks>
+    public bool IsInSidecar => (_flags & (DataValueFlags.InArena | DataValueFlags.InSidecar)) == DataValueFlags.InSidecar;
+
+    /// <summary>
+    /// Whether this value's payload lives in <c>ExecutionContext.Store</c> — the
+    /// plan-scoped, persistent (within-query) arena. Encoded as the dual-flag
+    /// combination <c>InArena | InSidecar</c>, which is otherwise illegal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Why a third tier?</strong> Sidecars are durable read-only heaps built
+    /// at ingest time, so a sidecar storeId is stable across queries.
+    /// <c>ExecutionContext.Store</c> is constructed at plan time and lives for the
+    /// query's duration but is not pool-recycled — so unlike batch arenas, it
+    /// doesn't suffer the "Capacity persists, Position resets, stale bytes
+    /// remain" problem. <c>LiteralHoister</c> uses it; consumers of hoisted
+    /// literal-value expressions must route reads through it.
+    /// </para>
+    /// <para>
+    /// <strong>Why dual-flag rather than a new bit?</strong> The combination is
+    /// currently undefined (a value can't simultaneously be in a transient arena
+    /// AND a sidecar), so it's free to repurpose without consuming one of the
+    /// reserved 0x20/0x40/0x80 bits.
+    /// </para>
+    /// </remarks>
+    public bool IsInContextStore =>
+        (_flags & (DataValueFlags.InArena | DataValueFlags.InSidecar))
+            == (DataValueFlags.InArena | DataValueFlags.InSidecar);
 
     /// <summary>
     /// Whether this value is a typed array of <see cref="Kind"/> elements (rather than
@@ -971,7 +1003,22 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// strings/JSON whose UTF-8 form exceeds 16 bytes or were produced via
     /// <see cref="FromStringSlice(int, int)"/>.
     /// </summary>
-    public bool IsArenaBacked => (_flags & DataValueFlags.InArena) != 0;
+    public bool IsArenaBacked => (_flags & (DataValueFlags.InArena | DataValueFlags.InSidecar)) == DataValueFlags.InArena;
+
+    /// <summary>
+    /// Returns a copy of this value re-tagged as living in
+    /// <c>ExecutionContext.Store</c> (dual-flag <c>InArena | InSidecar</c>).
+    /// For values that are already inline / sidecar / null / context-store, returns
+    /// the value unchanged. <c>LiteralHoister</c> calls this after writing a
+    /// literal's bytes into the hoist store so consumers know to resolve the value
+    /// via <c>ExecutionContext.Store</c> rather than guessing which arena it came from.
+    /// </summary>
+    internal DataValue WithContextStoreFlag()
+    {
+        if (!IsArenaBacked) return this;
+        DataValueFlags newFlags = _flags | DataValueFlags.InSidecar;
+        return new DataValue(_kind, newFlags, _p0, _p1, _p2, _p3, _charCount);
+    }
 
     /// <summary>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised

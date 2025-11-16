@@ -18,11 +18,12 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
 
 TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.PoolBacking()));
 
-// Register the built-in model catalog so `models.*` calls resolve. Demo 0.5
-// ships MobileNetV2; if the ONNX file isn't present at the catalog's
-// ModelDirectory the loader will throw on first use, not at startup.
+// Register the built-in model catalog so `models.*` calls resolve. Each
+// model loads lazily on first use, so missing files don't block startup —
+// `models.foo(...)` calls fail at the moment they're actually evaluated.
 ModelCatalog modelCatalog = new();
 BuiltinModels.RegisterMobileNetV2(modelCatalog);
+BuiltinModels.RegisterLlama31(modelCatalog);
 catalog.Models = modelCatalog;
 try
 {

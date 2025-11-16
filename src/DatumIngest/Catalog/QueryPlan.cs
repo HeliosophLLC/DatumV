@@ -45,8 +45,14 @@ internal sealed class QueryPlan : IQueryPlan
         InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(_operator);
 
         using LocalBufferPool localBufferPool = new(_backing);
+        // Plumb the hoist store as context.Store so any operator that needs to
+        // resolve a hoisted-literal DataValue's payload (offsets reference
+        // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
+        // Without this, hoisted string literals >16 bytes are stranded in
+        // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool);
+            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
+            store: _hoistStore);
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
         {
@@ -62,8 +68,14 @@ internal sealed class QueryPlan : IQueryPlan
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using LocalBufferPool localBufferPool = new(_backing);
+        // Plumb the hoist store as context.Store so any operator that needs to
+        // resolve a hoisted-literal DataValue's payload (offsets reference
+        // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
+        // Without this, hoisted string literals >16 bytes are stranded in
+        // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool);
+            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
+            store: _hoistStore);
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice

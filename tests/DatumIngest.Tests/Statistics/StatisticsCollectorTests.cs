@@ -233,18 +233,4 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         return new Row(columnLookup, values);
     }
-
-    private static Row CreateRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = new string[columns.Length];
-        DataValue[] values = new DataValue[columns.Length];
-
-        for (int i = 0; i < columns.Length; i++)
-        {
-            names[i] = columns[i].Name;
-            values[i] = columns[i].Value;
-        }
-
-        return new Row(names, values);
-    }
 }

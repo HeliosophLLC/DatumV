@@ -12,8 +12,27 @@ namespace DatumIngest.Shell;
 /// </summary>
 internal static class TableFormatter
 {
-    /// <summary>Maximum display width for any single column.</summary>
-    private const int MaxColumnWidth = 40;
+    /// <summary>
+    /// Maximum display width for any single column. Tracks the terminal width
+    /// so a wide cell (e.g. an LLM response) gets the full screen rather than
+    /// being clipped at an arbitrary 40-character cap. Falls back to 200 when
+    /// no console is attached (redirected output, pipes, tests).
+    /// </summary>
+    private static int MaxColumnWidth
+    {
+        get
+        {
+            try
+            {
+                int width = Console.WindowWidth;
+                return width > 0 ? Math.Max(40, width - 4) : 200;
+            }
+            catch (IOException)
+            {
+                return 200;
+            }
+        }
+    }
 
     /// <summary>
     /// Renders one page of rows. <paramref name="cells"/> holds the already-

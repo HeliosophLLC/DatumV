@@ -142,6 +142,12 @@ public static class LiteralHoister
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type for hoisting: {lit.Value.GetType().Name}."),
         };
-        return new LiteralValueExpression(dv);
+
+        // Tag arena-backed hoisted values as living in the context store so
+        // downstream consumers can route reads through ExecutionContext.Store
+        // (where the hoist arena is plumbed) rather than guessing which arena
+        // the value came from. Inline / sidecar / null values pass through
+        // unchanged — they don't need the routing hint.
+        return new LiteralValueExpression(dv.WithContextStoreFlag());
     }
 }

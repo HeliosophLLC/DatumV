@@ -443,7 +443,8 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     {
         DatumIngest.Statistics.StatisticsCollector collector = new();
 
-        string[] names = ["id", "category", "score", "name"];
+        ColumnLookup columnLookup = new (["id", "category", "score", "name"]);
+
         for (int index = 0; index < 100; index++)
         {
             DataValue[] values =
@@ -453,7 +454,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
                 DataValue.FromFloat64(index * 1.5 + 0.1),
                 DataValue.FromString($"item_{index}", _arena)
             ];
-            collector.AddRow(new DatumIngest.Model.Row(names, values), _arena);
+            collector.AddRow(new DatumIngest.Model.Row(columnLookup, values), _arena);
         }
 
         IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();
@@ -483,11 +484,11 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     {
         DatumIngest.Statistics.StatisticsCollector collector = new();
 
-        string[] names = ["flag"];
+        ColumnLookup columnLookup = new (["flag"]);
         for (int index = 0; index < 100; index++)
         {
             DataValue[] values = [DataValue.FromBoolean(index % 3 != 0)];
-            collector.AddRow(new DatumIngest.Model.Row(names, values), _arena);
+            collector.AddRow(new Row(columnLookup, values), _arena);
         }
 
         IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();

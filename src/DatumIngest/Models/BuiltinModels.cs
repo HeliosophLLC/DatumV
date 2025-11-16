@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using DatumIngest.Model;
+using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
 
 namespace DatumIngest.Models;
@@ -69,6 +70,59 @@ public static class BuiltinModels
                     ? null
                     : TryLoadLabels(Path.Combine(ctx.ModelDirectory, labelsFilename));
                 return new MobileNetV2Model(modelName, modelPath, labels);
+            }));
+    }
+
+    /// <summary>
+    /// Default filename for the Llama 3.1 8B Instruct GGUF (Q4_K_M
+    /// imatrix-quantized variant from bartowski's HuggingFace repo).
+    /// </summary>
+    public const string Llama31_8BDefaultFilename = "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers Llama 3.1 8B Instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"llm"</c>). The GGUF file is
+    /// resolved as <c>{ModelDirectory}/{modelFilename}</c> and loaded via
+    /// LlamaSharp; all layers offload to GPU when a supported backend is
+    /// installed (CUDA 12 by default in this build).
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">
+    /// SQL-visible name (the <c>X</c> in <c>models.X(prompt)</c>). Defaults to
+    /// <c>"llm"</c>.
+    /// </param>
+    /// <param name="modelFilename">
+    /// GGUF filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
+    /// Defaults to <see cref="Llama31_8BDefaultFilename"/>.
+    /// </param>
+    /// <param name="contextSize">
+    /// Token context window the model is loaded with. Defaults to 4096.
+    /// </param>
+    /// <param name="maxTokens">
+    /// Maximum new tokens to generate per call. Defaults to 256.
+    /// </param>
+    /// <param name="temperature">
+    /// Sampling temperature. Defaults to 0.7.
+    /// </param>
+    public static void RegisterLlama31(
+        ModelCatalog catalog,
+        string modelName = "llm",
+        string modelFilename = Llama31_8BDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, contextSize, maxTokens, temperature);
             }));
     }
 

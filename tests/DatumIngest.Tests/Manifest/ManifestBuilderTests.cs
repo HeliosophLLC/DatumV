@@ -17,10 +17,11 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NumericColumn_ProducesNumericFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(2.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(3.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(3.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -45,10 +46,11 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_StringColumn_ProducesStringFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["name"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "name", DataValue.FromString("Alice", _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "name", DataValue.FromString("Bob", _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "name", DataValue.FromString("Charlotte", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("Alice", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("Bob", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("Charlotte", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["name"] = DataKind.String };
@@ -67,9 +69,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_VectorColumn_ProducesVectorFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "embedding", DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "embedding", DataValue.FromVector([4.0f, 5.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([4.0f, 5.0f], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
@@ -92,8 +95,9 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_MatrixColumn_ProducesTensorFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["weights"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "weights", DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["weights"] = DataKind.Matrix };
@@ -110,9 +114,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_BinaryColumn_ProducesBinaryFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["raw"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromByteArray([1, 2, 3, 4, 5], _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "raw", DataValue.FromByteArray([10, 20], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromByteArray([1, 2, 3, 4, 5], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromByteArray([10, 20], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["raw"] = DataKind.UInt8Array };
@@ -127,9 +132,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_DateColumn_ProducesTemporalFeatureManifest()
     {
+        ColumnLookup columnLookup = new (["created"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "created", DataValue.FromDate(new DateOnly(2024, 1, 15))), _arena);
-        collector.AddRow(MakeRow(_arena, "created", DataValue.FromDate(new DateOnly(2025, 6, 30))), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDate(new DateOnly(2024, 1, 15))), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDate(new DateOnly(2025, 6, 30))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["created"] = DataKind.Date };
@@ -144,11 +150,14 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_MultipleColumns_ProducesCorrectTypes()
     {
+        ColumnLookup columnLookup = new (["id", "name", "score"]);
         StatisticsCollector collector = new();
 
-        Row row = new(
-            ["id", "name", "score"],
-            [DataValue.FromFloat32(1.0f), DataValue.FromString("test", _arena), DataValue.FromUInt8(200)]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromFloat32(1.0f),
+            DataValue.FromString("test", _arena),
+            DataValue.FromUInt8(200));
 
         collector.AddRow(row, _arena);
 
@@ -171,9 +180,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NullValues_TrackedInNullCount()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -189,16 +199,17 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_TopKValues_Populated()
     {
+        ColumnLookup columnLookup = new (["category"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 10; i++)
         {
-            collector.AddRow(MakeRow(_arena, "category", DataValue.FromString("A", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("A", _arena)), _arena);
         }
 
         for (int i = 0; i < 5; i++)
         {
-            collector.AddRow(MakeRow(_arena, "category", DataValue.FromString("B", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("B", _arena)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -215,8 +226,9 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_GeneratedAtUtc_IsSet()
     {
+        ColumnLookup columnLookup = new (["x"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "x", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
@@ -230,11 +242,12 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NullRatio_ComputedCorrectly()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(3.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(3.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -248,6 +261,7 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NullRatio_ZeroRows_IsNull()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -255,7 +269,7 @@ public sealed class ManifestBuilderTests : ServiceTestBase
 
         // No columns in stats when no rows added — build with empty stats but rowCount 0
         // Add at least one row so the column exists, then build with rowCount = 0
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
         stats = collector.GetStatistics();
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
@@ -267,9 +281,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NullRatio_NoNulls_IsZero()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -283,16 +298,17 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_MissingRuns_TrackedCorrectly()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
         // Run 1: [null, null]
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
         // non-null
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
         // Run 2: [null]
-        collector.AddRow(MakeRow(_arena, "value", DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
         // non-null
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -306,9 +322,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_MissingRuns_NoNulls_IsZero()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -322,10 +339,11 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_ConstantColumn_IsConstantTrue()
     {
+        ColumnLookup columnLookup = new (["price"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(0.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(0.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(0.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(0.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(0.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(0.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
@@ -340,10 +358,11 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_VaryingColumn_IsConstantFalse()
     {
+        ColumnLookup columnLookup = new (["price"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(2.0f)), _arena);
-        collector.AddRow(MakeRow(_arena, "price", DataValue.FromFloat32(3.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(3.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
@@ -357,9 +376,10 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_AllNullColumn_IsConstantTrue()
     {
+        ColumnLookup columnLookup = new (["price"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "price", DataValue.Null(DataKind.Float32)), _arena);
-        collector.AddRow(MakeRow(_arena, "price", DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.Null(DataKind.Float32)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
@@ -374,14 +394,15 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_DominantValueRatio_NearConstant()
     {
+        ColumnLookup columnLookup = new (["status"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 99; i++)
         {
-            collector.AddRow(MakeRow(_arena, "status", DataValue.FromString("active", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("active", _arena)), _arena);
         }
 
-        collector.AddRow(MakeRow(_arena, "status", DataValue.FromString("inactive", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("inactive", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["status"] = DataKind.String };
@@ -396,15 +417,16 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_DominantValueRatio_UniformDistribution()
     {
+        ColumnLookup columnLookup = new (["cat"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 20; i++)
         {
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("A", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("B", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("C", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("D", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("E", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("A", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("B", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("C", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("D", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("E", _arena)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -420,8 +442,9 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_DominantValueRatio_ZeroRows_IsNull()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -435,14 +458,15 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_NearConstantColumn_IsNearConstantTrue()
     {
+        ColumnLookup columnLookup = new (["status"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 99; i++)
         {
-            collector.AddRow(MakeRow(_arena, "status", DataValue.FromString("active", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("active", _arena)), _arena);
         }
 
-        collector.AddRow(MakeRow(_arena, "status", DataValue.FromString("inactive", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("inactive", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["status"] = DataKind.String };
@@ -456,15 +480,16 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_UniformColumn_IsNearConstantFalse()
     {
+        ColumnLookup columnLookup = new (["cat"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 20; i++)
         {
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("A", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("B", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("C", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("D", _arena)), _arena);
-            collector.AddRow(MakeRow(_arena, "cat", DataValue.FromString("E", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("A", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("B", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("C", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("D", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("E", _arena)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -479,8 +504,9 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_ZeroRows_IsNearConstantFalse()
     {
+        ColumnLookup columnLookup = new (["value"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(_arena, "value", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -494,16 +520,17 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     [Fact]
     public void Build_BoundaryRatio_IsNearConstantFalse()
     {
+        ColumnLookup columnLookup = new (["flag"]);
         StatisticsCollector collector = new();
 
         // 98 of one value + 2 of another in 100 rows = exactly 0.98 ratio
         for (int i = 0; i < 98; i++)
         {
-            collector.AddRow(MakeRow(_arena, "flag", DataValue.FromString("yes", _arena)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromString("yes", _arena)), _arena);
         }
 
-        collector.AddRow(MakeRow(_arena, "flag", DataValue.FromString("no", _arena)), _arena);
-        collector.AddRow(MakeRow(_arena, "flag", DataValue.FromString("no", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("no", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("no", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.String };
@@ -512,11 +539,6 @@ public sealed class ManifestBuilderTests : ServiceTestBase
 
         StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
         Assert.False(feature.IsNearConstant);
-    }
-
-    private static Row MakeRow(Arena arena, string columnName, DataValue value)
-    {
-        return new Row([columnName], [value]);
     }
 
     private static byte[] MakeMinimalJpeg(int width, int height, int channels)

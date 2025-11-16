@@ -5,6 +5,7 @@ namespace DatumIngest.Tests.Functions.Math;
 
 public class ActivationFunctionTests : ServiceTestBase
 {
+    private readonly Arena _arena = new();
     [Fact]
     public void Sigmoid_Zero()
     {
@@ -46,7 +47,7 @@ public class ActivationFunctionTests : ServiceTestBase
     {
         ReluFunction function = new();
         DataValue result = function.Execute([DataValue.FromVector([-2f, 0f, 3f])]);
-        Assert.Equal([0f, 0f, 3f], result.AsVector());
+        Assert.Equal([0f, 0f, 3f], result.AsVector(_arena));
     }
 
     [Fact]

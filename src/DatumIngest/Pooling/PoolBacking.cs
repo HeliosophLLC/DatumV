@@ -150,6 +150,18 @@ public sealed class PoolBacking
     /// </summary>
     public DataValue[] RentDataValues(int length)
     {
+        // Length-zero arrays are global singletons in .NET (`new DataValue[0]`
+        // returns the same instance as `Array.Empty<DataValue>()`). Pooling
+        // a singleton across queries is meaningless — there's nothing to
+        // reuse — and breaks the POOL_DIAGNOSTICS tracker, which can't
+        // distinguish "this query rented the singleton" from "the previous
+        // query returned the singleton and we never reset it". Short-circuit
+        // here so empty arrays never enter the pool or the tracker.
+        if (length == 0)
+        {
+            return Array.Empty<DataValue>();
+        }
+
         Interlocked.Increment(ref _dataValueArrayRentCount);
 
         if (dataValuePools.TryGetValue(length, out CountedPool<DataValue[]>? pool)
@@ -347,6 +359,15 @@ public sealed class PoolBacking
     /// </summary>
     public void Return(DataValue[] buffer)
     {
+        // Empty-array singletons (see RentDataValues) bypass the pool entirely.
+        // Skipping here keeps the POOL_DIAGNOSTICS tracker from ever flagging
+        // the singleton as "returned" — a state it could never escape because
+        // RentDataValues short-circuits length==0 and never marks it rented.
+        if (buffer.Length == 0)
+        {
+            return;
+        }
+
 #if POOL_DIAGNOSTICS
         MarkReturnedWithDiagnostics(buffer);
 #endif

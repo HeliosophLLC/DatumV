@@ -27,9 +27,12 @@ public sealed class IndexHintTests : ServiceTestBase
     public void Build_BooleanColumn_GeneratesBitmapHint()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)), _arena);
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
+
+        ColumnLookup columnLookup = new (["flag"]);
+
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromBoolean(true)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromBoolean(false)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromBoolean(true)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
@@ -45,10 +48,11 @@ public sealed class IndexHintTests : ServiceTestBase
     [Fact]
     public void Build_LowCardinalityString_GeneratesBitmapHint()
     {
+        ColumnLookup columnLookup = new (["color"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("color", DataValue.FromString("red", _arena)), _arena);
-        collector.AddRow(MakeRow("color", DataValue.FromString("blue", _arena)), _arena);
-        collector.AddRow(MakeRow("color", DataValue.FromString("red", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("red", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("blue", _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromString("red", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["color"] = DataKind.String };
@@ -68,9 +72,10 @@ public sealed class IndexHintTests : ServiceTestBase
         StatisticsCollector collector = new();
         int distinctCount = IndexConstants.BitmapAutoThreshold + 100;
 
+        ColumnLookup columnLookup = new (["id"]);
         for (int i = 0; i < distinctCount; i++)
         {
-            collector.AddRow(MakeRow("id", DataValue.FromFloat32(i)), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(i)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
@@ -87,9 +92,10 @@ public sealed class IndexHintTests : ServiceTestBase
     [Fact]
     public void Build_VectorColumn_GeneratesNoHint()
     {
+        ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("embedding", DataValue.FromVector([1.0f, 2.0f], _arena)), _arena);
-        collector.AddRow(MakeRow("embedding", DataValue.FromVector([3.0f, 4.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([1.0f, 2.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([3.0f, 4.0f], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
@@ -102,15 +108,28 @@ public sealed class IndexHintTests : ServiceTestBase
     [Fact]
     public void Build_MixedColumns_GeneratesCorrectHintsPerColumn()
     {
+        ColumnLookup columnLookup = new (["status", "count"]);
         StatisticsCollector collector = new();
 
         // Low-cardinality string → Bitmap.
-        collector.AddRow(MakeRow("status", DataValue.FromString("active", _arena),
-                                 "count", DataValue.FromFloat32(1.0f)), _arena);
-        collector.AddRow(MakeRow("status", DataValue.FromString("inactive", _arena),
-                                 "count", DataValue.FromFloat32(2.0f)), _arena);
-        collector.AddRow(MakeRow("status", DataValue.FromString("active", _arena),
-                                 "count", DataValue.FromFloat32(3.0f)), _arena);
+        collector.AddRow(
+            MakeRow(
+                columnLookup,
+                DataValue.FromString("active", _arena),
+                DataValue.FromFloat32(1.0f)
+            ), _arena);
+        collector.AddRow(
+            MakeRow(
+                columnLookup,
+                DataValue.FromString("inactive", _arena),
+                DataValue.FromFloat32(2.0f)
+            ), _arena);
+        collector.AddRow(
+            MakeRow(
+                columnLookup,
+                DataValue.FromString("active", _arena),
+                DataValue.FromFloat32(3.0f)
+            ), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
@@ -134,9 +153,10 @@ public sealed class IndexHintTests : ServiceTestBase
     [Fact]
     public void Build_WithInsights_PreservesIndexHints()
     {
+        ColumnLookup columnLookup = new (["flag"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromBoolean(true)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromBoolean(false)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
@@ -166,17 +186,5 @@ public sealed class IndexHintTests : ServiceTestBase
         Assert.NotNull(accumulators);
         Assert.True(accumulators.ContainsKey("value"));
         Assert.False(accumulators.ContainsKey("embedding"));
-    }
-
-    // ───────────────── Helpers ─────────────────
-
-    private static Row MakeRow(string columnName, DataValue value)
-    {
-        return new Row([columnName], [value]);
-    }
-
-    private static Row MakeRow(string column1, DataValue value1, string column2, DataValue value2)
-    {
-        return new Row([column1, column2], [value1, value2]);
     }
 }
