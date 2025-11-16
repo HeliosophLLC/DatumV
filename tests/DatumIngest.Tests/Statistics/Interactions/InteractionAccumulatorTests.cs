@@ -633,6 +633,8 @@ public sealed class MissingnessCorrelationAccumulatorTests : ServiceTestBase
     [Fact]
     public void GetValue_MixedDataKinds_WorksCorrectly()
     {
+        using Arena arena = new();
+
         MissingnessCorrelationAccumulator accumulator = new();
 
         // Scalar × Image — previously ineligible pair, now participates via missingness
@@ -640,7 +642,7 @@ public sealed class MissingnessCorrelationAccumulatorTests : ServiceTestBase
         {
             if (i % 2 == 0)
             {
-                accumulator.Add(DataValue.FromFloat32(i), DataValue.FromImage(new byte[] { 0xFF }));
+                accumulator.Add(DataValue.FromFloat32(i), DataValue.FromImage([0xFF], arena));
             }
             else
             {

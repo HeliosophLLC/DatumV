@@ -8,12 +8,13 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_NumericPair_ProducesPearsonSpearmanMI()
     {
+        ColumnLookup columnLookup = new(["x", "y"]);
         ColumnInteractionCollector collector = new();
-        Row row = CreateRow(("x", DataValue.FromFloat32(1.0f)), ("y", DataValue.FromFloat32(2.0f)));
+        Row row = MakeRow(columnLookup, DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f));
 
         for (int i = 0; i < 100; i++)
         {
-            row = CreateRow(("x", DataValue.FromFloat32(i)), ("y", DataValue.FromFloat32(i * 2.0f)));
+            row = MakeRow(columnLookup, DataValue.FromFloat32(i), DataValue.FromFloat32(i * 2.0f));
             collector.AddRow(row);
         }
 
@@ -36,13 +37,16 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_CategoricalPair_ProducesCramerVAndMI()
     {
+        ColumnLookup columnLookup = new(["category", "color"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 100; i++)
         {
-            Row row = CreateRow(
-                ("category", DataValue.FromString((i % 3).ToString())),
-                ("color", DataValue.FromString((i % 4).ToString())));
+            Row row = MakeRow(
+                columnLookup,
+                DataValue.FromString((i % 3).ToString()),
+                DataValue.FromString((i % 4).ToString())
+            );
             collector.AddRow(row);
         }
 
@@ -62,13 +66,15 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_MixedPair_ProducesAnovaAndMI()
     {
+        ColumnLookup columnLookup = new(["group", "score"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 100; i++)
         {
-            Row row = CreateRow(
-                ("group", DataValue.FromString((i % 5).ToString())),
-                ("score", DataValue.FromFloat32(i * 1.5f)));
+            Row row = MakeRow(
+                columnLookup,
+                DataValue.FromString((i % 5).ToString()),
+                DataValue.FromFloat32(i * 1.5f));
             collector.AddRow(row);
         }
 
@@ -88,14 +94,16 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_ThreeColumns_ProducesThreePairs()
     {
+        ColumnLookup columnLookup = new(["a", "b", "c"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 50; i++)
         {
-            Row row = CreateRow(
-                ("a", DataValue.FromFloat32(i)),
-                ("b", DataValue.FromFloat32(i * 2.0f)),
-                ("c", DataValue.FromFloat32(i * 3.0f)));
+            Row row = MakeRow(
+                columnLookup,
+                DataValue.FromFloat32(i),
+                DataValue.FromFloat32(i * 2.0f),
+                DataValue.FromFloat32(i * 3.0f));
             collector.AddRow(row);
         }
 
@@ -110,12 +118,12 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_SingleColumnOnly_ReturnsEmpty()
     {
+        ColumnLookup columnLookup = new(["x"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 10; i++)
         {
-            Row row = CreateRow(
-                ("blob", DataValue.FromUInt8Array(new byte[] { 1, 2, 3 })));
+            Row row = MakeRow(columnLookup, DataValue.FromUInt16(10));
             collector.AddRow(row);
         }
 
@@ -127,11 +135,12 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_SingleColumn_ReturnsEmpty()
     {
+        ColumnLookup columnLookup = new(["x"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 10; i++)
         {
-            Row row = CreateRow(("x", DataValue.FromFloat32(i)));
+            Row row = MakeRow(columnLookup, DataValue.FromFloat32(i));
             collector.AddRow(row);
         }
 
@@ -143,21 +152,26 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_IneligiblePairOnly_ProducesMissingnessOnly()
     {
+        using Arena arena = new();
+
+        ColumnLookup columnLookup = new(["image", "vector"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 50; i++)
         {
             if (i % 4 == 0)
             {
-                collector.AddRow(CreateRow(
-                    ("image", DataValue.Null(DataKind.Image)),
-                    ("vector", DataValue.Null(DataKind.Vector))));
+                collector.AddRow(MakeRow(
+                    columnLookup,
+                    DataValue.Null(DataKind.Image),
+                    DataValue.Null(DataKind.Vector)));
             }
             else
             {
-                collector.AddRow(CreateRow(
-                    ("image", DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF })),
-                    ("vector", DataValue.FromVector(new float[] { 1.0f, 2.0f }))));
+                collector.AddRow(MakeRow(
+                    columnLookup,
+                    DataValue.FromImage([0xFF, 0xD8, 0xFF], arena),
+                    DataValue.FromVector([1.0f, 2.0f], arena)));
             }
         }
 
@@ -176,14 +190,18 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     [Fact]
     public void GetInteractions_MixedEligibility_ExpandedPairCount()
     {
+        using Arena arena = new();
+
+        ColumnLookup columnLookup = new(["score", "label", "image"]);
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 50; i++)
         {
-            Row row = CreateRow(
-                ("score", DataValue.FromFloat32(i)),
-                ("label", DataValue.FromString("cat")),
-                ("image", DataValue.FromImage(new byte[] { 0xFF })));
+            Row row = MakeRow(
+                columnLookup,
+                DataValue.FromFloat32(i),
+                DataValue.FromString("cat"),
+                DataValue.FromImage([0xFF], arena));
             collector.AddRow(row);
         }
 
@@ -193,10 +211,4 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
         Assert.Equal(3, results.Count);
     }
 
-    private static Row CreateRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
 }
