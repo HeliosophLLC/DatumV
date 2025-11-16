@@ -18,7 +18,7 @@ using DatumIngest.Pooling;
 /// </summary>
 public sealed class ModelInvocationTests : ServiceTestBase
 {
-    private static ModelCatalog BuildCatalogWithEcho()
+    private static ModelCatalog BuildCatalogWithEcho(IReadOnlyList<DataKind>? optionalArgKinds = null)
     {
         ModelCatalog catalog = new(modelDirectory: System.IO.Path.GetTempPath());
         catalog.Register(new ModelCatalogEntry(
@@ -28,7 +28,8 @@ public sealed class ModelInvocationTests : ServiceTestBase
             InputKinds: [DataKind.String],
             OutputKind: DataKind.String,
             IsDeterministic: true,
-            Loader: _ => EchoModel.Instance));
+            Loader: _ => EchoModel.Instance,
+            OptionalArgKinds: optionalArgKinds));
         return catalog;
     }
 
@@ -113,6 +114,53 @@ public sealed class ModelInvocationTests : ServiceTestBase
         Assert.Equal("alice", rows[0][0].AsString(scratch));
         Assert.Equal("bob", rows[1][0].AsString(scratch));
         Assert.Equal("carol", rows[2][0].AsString(scratch));
+    }
+
+    /// <summary>
+    /// Hoister accepts a trailing positional override when the catalog entry
+    /// declares an <c>OptionalArgKinds</c> slot for it. The first <em>required</em>
+    /// arg ends up in <see cref="ModelInvocationOperator.InputExpressions"/>;
+    /// trailing optional args land in
+    /// <see cref="ModelInvocationOperator.OptionalExpressions"/>.
+    /// </summary>
+    [Fact]
+    public void Planner_HoistsModelCallWithOptionalArg()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho(optionalArgKinds: [DataKind.Float64]);
+
+        QueryExpression query = SqlParser.Parse("SELECT models.echo(name, 0.5) FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
+        Assert.Single(invocation.InputExpressions);
+        Assert.Single(invocation.OptionalExpressions);
+    }
+
+    /// <summary>
+    /// Hoister rejects a call with more args than the entry's required + optional
+    /// declared count. Catches typos and stale signatures at plan time rather
+    /// than dispatching them silently.
+    /// </summary>
+    [Fact]
+    public void Planner_RejectsCallExceedingOptionalArity()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho(optionalArgKinds: [DataKind.Float64]);
+
+        QueryExpression query = SqlParser.Parse("SELECT models.echo(name, 0.5, 100) FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => planner.Plan(query));
+        Assert.Contains("at most", ex.Message);
     }
 
     /// <summary>

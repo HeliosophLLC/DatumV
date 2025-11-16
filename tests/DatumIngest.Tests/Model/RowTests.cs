@@ -7,9 +7,11 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowStoresNamedValues()
     {
-        Row row = new Row(
-            ["name", "age"],
-            [DataValue.FromString("Alice"), DataValue.FromFloat32(30.0f)]);
+        ColumnLookup columnLookup = new(["name", "age"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("Alice"),
+            DataValue.FromFloat32(30.0f));
 
         Assert.Equal(2, row.FieldCount);
         Assert.Equal("Alice", row["name"].AsString());
@@ -19,9 +21,11 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowAccessByOrdinal()
     {
-        Row row = new Row(
-            ["x", "y"],
-            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)]);
+        ColumnLookup columnLookup = new(["x", "y"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromFloat32(1.0f),
+            DataValue.FromFloat32(2.0f));
 
         Assert.Equal(1.0f, row[0].AsFloat32());
         Assert.Equal(2.0f, row[1].AsFloat32());
@@ -30,9 +34,10 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowThrowsOnInvalidColumnName()
     {
-        Row row = new Row(
-            ["name"],
-            [DataValue.FromString("test")]);
+        ColumnLookup columnLookup = new(["name"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("test"));
 
         Assert.Throws<KeyNotFoundException>(() => row["missing"]);
     }
@@ -40,9 +45,10 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowThrowsOnInvalidOrdinal()
     {
-        Row row = new Row(
-            ["name"],
-            [DataValue.FromString("test")]);
+        ColumnLookup columnLookup = new(["name"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("test"));
 
         Assert.Throws<ArgumentOutOfRangeException>(() => row[1]);
     }
@@ -50,9 +56,12 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowReturnsColumnNames()
     {
-        Row row = new Row(
-            ["alpha", "beta", "gamma"],
-            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), DataValue.FromFloat32(3.0f)]);
+        ColumnLookup columnLookup = new(["alpha", "beta", "gamma"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromFloat32(1.0f),
+            DataValue.FromFloat32(2.0f),
+            DataValue.FromFloat32(3.0f));
 
         Assert.Equal(["alpha", "beta", "gamma"], row.ColumnNames);
     }
@@ -60,6 +69,7 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowWithLazyValueDoesNotForceOnAccess()
     {
+        ColumnLookup columnLookup = new(["cheap", "expensive_col"]);
         int forceCount = 0;
         LazyDataValue lazy = new(() =>
         {
@@ -67,9 +77,10 @@ public class RowTests : ServiceTestBase
             return DataValue.FromString("expensive");
         }, DataKind.String);
 
-        Row row = new Row(
-            ["cheap", "expensive_col"],
-            [DataValue.FromFloat32(1.0f), lazy.Value]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromFloat32(1.0f),
+            lazy.Value);
 
         // Accessing the cheap column should not affect the lazy value
         DataValue cheap = row["cheap"];
@@ -79,28 +90,22 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void RowNamesAreCaseInsensitive()
     {
-        Row row = new Row(
-            ["Name"],
-            [DataValue.FromString("Alice")]);
+        ColumnLookup columnLookup = new(["Name"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("Alice"));
 
         Assert.Equal("Alice", row["name"].AsString());
         Assert.Equal("Alice", row["NAME"].AsString());
     }
 
     [Fact]
-    public void RowRejectsNameValueCountMismatch()
-    {
-        Assert.Throws<ArgumentException>(() => new Row(
-            ["a", "b"],
-            [DataValue.FromFloat32(1.0f)]));
-    }
-
-    [Fact]
     public void TryGetValueReturnsFalseForMissingColumn()
     {
-        Row row = new Row(
-            ["name"],
-            [DataValue.FromString("test")]);
+        ColumnLookup columnLookup = new(["name"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("test"));
 
         bool found = row.TryGetValue("missing", out DataValue result);
 
@@ -111,9 +116,10 @@ public class RowTests : ServiceTestBase
     [Fact]
     public void TryGetValueReturnsTrueForExistingColumn()
     {
-        Row row = new Row(
-            ["name"],
-            [DataValue.FromString("test")]);
+        ColumnLookup columnLookup = new(["name"]);
+        Row row = MakeRow(
+            columnLookup,
+            DataValue.FromString("test"));
 
         bool found = row.TryGetValue("name", out DataValue result);
 

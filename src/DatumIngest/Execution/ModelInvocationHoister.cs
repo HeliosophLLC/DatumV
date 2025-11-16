@@ -149,17 +149,40 @@ public static class ModelInvocationHoister
                     $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
             }
 
-            if (entry.InputKinds.Count != fn.Arguments.Count)
+            // Required-arg arity must match exactly. Trailing args beyond the
+            // required count are interpreted as positional optional overrides
+            // (declared by the entry's OptionalArgKinds). The total count is
+            // bounded by required + optional declared.
+            int requiredCount = entry.InputKinds.Count;
+            int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
+            int suppliedCount = fn.Arguments.Count;
+
+            if (suppliedCount < requiredCount)
             {
                 throw new InvalidOperationException(
-                    $"Model '{modelName}' expects {entry.InputKinds.Count} input(s) but the call site '{fn.FunctionName}' supplies {fn.Arguments.Count}.");
+                    $"Model '{modelName}' expects at least {requiredCount} required input(s) " +
+                    $"but the call site '{fn.FunctionName}' supplies only {suppliedCount}.");
             }
+            if (suppliedCount > requiredCount + maxOptional)
+            {
+                throw new InvalidOperationException(
+                    $"Model '{modelName}' accepts at most {requiredCount + maxOptional} arguments " +
+                    $"({requiredCount} required + {maxOptional} optional) but the call site " +
+                    $"'{fn.FunctionName}' supplies {suppliedCount}.");
+            }
+
+            Expression[] requiredArgs = new Expression[requiredCount];
+            for (int i = 0; i < requiredCount; i++) requiredArgs[i] = fn.Arguments[i];
+
+            Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
+            for (int i = 0; i < optionalArgs.Length; i++) optionalArgs[i] = fn.Arguments[requiredCount + i];
 
             string synthName = hoistedColumns[fn];
             augmented = new ModelInvocationOperator(
                 augmented,
                 modelName,
-                fn.Arguments.ToArray(),
+                requiredArgs,
+                optionalArgs,
                 synthName);
         }
 

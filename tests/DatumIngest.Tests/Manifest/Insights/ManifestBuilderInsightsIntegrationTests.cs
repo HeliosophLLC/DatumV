@@ -22,12 +22,13 @@ public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
     [Fact]
     public void Build_WithInsightThresholds_PopulatesInsights()
     {
+        ColumnLookup columnLookup = new(["constant"]);
         StatisticsCollector collector = new();
 
         // All-constant column → should trigger ConstantFeature insight.
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(new Row(["constant"], [DataValue.FromFloat32(42.0f)]), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(42.0f)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -44,13 +45,12 @@ public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
     [Fact]
     public void Build_WithInsightThresholds_GeneratesRecommendedQuery()
     {
+        ColumnLookup columnLookup = new(["constant", "normal"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(new Row(
-                ["constant", "normal"],
-                [DataValue.FromFloat32(42.0f), DataValue.FromFloat32(i * 1.0f)]), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(42.0f), DataValue.FromFloat32(i * 1.0f)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -71,11 +71,12 @@ public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
     [Fact]
     public void Build_WithoutInsightThresholds_NoInsights()
     {
+        ColumnLookup columnLookup = new(["value"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 10; i++)
         {
-            collector.AddRow(new Row(["value"], [DataValue.FromFloat32(42.0f)]), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(42.0f)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -92,11 +93,12 @@ public sealed class ManifestBuilderInsightsIntegrationTests : ServiceTestBase
     [Fact]
     public void Build_WithInsightThresholds_PopulatesQueryAnnotations()
     {
+        ColumnLookup columnLookup = new(["constant"]);
         StatisticsCollector collector = new();
 
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(new Row(["constant"], [DataValue.FromFloat32(42.0f)]), _arena);
+            collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat32(42.0f)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();

@@ -117,8 +117,14 @@ public abstract class OnnxModel : IModel, IDisposable
         IValueStore inputStore,
         SidecarRegistry? sidecarRegistry,
         IValueStore targetStore,
+        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
+        // The base ONNX session has no per-call hyperparameters in this design.
+        // Subclasses that want to expose them (e.g. a future quantised model
+        // with a "precision" knob) can override; for now ONNX entries that
+        // declare any optional kinds will see this argument ignored.
+        _ = overrides;
         cancellationToken.ThrowIfCancellationRequested();
 
         if (inputs.Count == 0)

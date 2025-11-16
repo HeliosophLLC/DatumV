@@ -54,6 +54,8 @@ public abstract class ServiceTestBase : IDisposable
     protected T GetService<T>() where T : notnull
         => Services.GetRequiredService<T>();
 
+
+    
     protected static Row MakeRow(ColumnLookup columnLookup, params DataValue[] values)
     {
         return new Row(columnLookup, values);

@@ -77,6 +77,16 @@ public interface IModel
     /// (strings, vectors, byte arrays). The pipeline runtime supplies the output
     /// batch's arena so results land where the caller expects to read them from.
     /// </param>
+    /// <param name="overrides">
+    /// Per-row hyperparameter overrides. Outer length matches
+    /// <paramref name="inputs"/>.Count (one entry per row). Each inner list is
+    /// in the order declared by the catalog entry's
+    /// <see cref="ModelCatalogEntry.OptionalArgKinds"/>; an inner length shorter
+    /// than the declared list means trailing parameters fall back to the model's
+    /// construction-time defaults for that row. An empty inner list (or empty
+    /// outer list) means "use defaults for everything." Implementations that
+    /// don't accept any optional args may ignore this parameter.
+    /// </param>
     /// <param name="cancellationToken">Honoured between sub-batches at minimum.</param>
     /// <returns>One <see cref="DataValue"/> per input row, in the same order.</returns>
     Task<IReadOnlyList<DataValue>> InferBatchAsync(
@@ -84,5 +94,6 @@ public interface IModel
         IValueStore inputStore,
         SidecarRegistry? sidecarRegistry,
         IValueStore targetStore,
+        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken);
 }

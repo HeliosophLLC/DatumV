@@ -31,7 +31,10 @@ namespace DatumIngest.Models;
 /// File path relative to the catalog's <c>ModelDirectory</c>. <see langword="null"/>
 /// for synthetic backends (<c>EchoModel</c>) that don't need a file.
 /// </param>
-/// <param name="InputKinds">Expected input column kinds; length = arity.</param>
+/// <param name="InputKinds">
+/// Required input column kinds; length = required arity. Every call site must
+/// supply at least this many positional arguments matching these kinds.
+/// </param>
 /// <param name="OutputKind">The kind this model produces per row.</param>
 /// <param name="IsDeterministic">
 /// <see langword="true"/> when the same input always yields the same output.
@@ -42,6 +45,15 @@ namespace DatumIngest.Models;
 /// (lazily, behind the catalog's residency manager). Resolved
 /// <see cref="IModel"/>s are cached for the catalog's lifetime.
 /// </param>
+/// <param name="OptionalArgKinds">
+/// Per-call hyperparameter kinds, in the order they appear after the required
+/// inputs (e.g. <c>[Float64, Int32]</c> for trailing
+/// <c>(prompt, temperature, max_tokens)</c>). Each is optional positionally:
+/// a call site may supply a prefix of this list, with later args defaulted by
+/// the model. The <see cref="IModel"/> implementation receives them as the
+/// <c>overrides</c> parameter to <see cref="IModel.InferBatchAsync"/>.
+/// Defaults to <see langword="null"/> (no per-call overrides).
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -49,7 +61,8 @@ public sealed record ModelCatalogEntry(
     IReadOnlyList<DataKind> InputKinds,
     DataKind OutputKind,
     bool IsDeterministic,
-    Func<ModelLoadContext, IModel> Loader);
+    Func<ModelLoadContext, IModel> Loader,
+    IReadOnlyList<DataKind>? OptionalArgKinds = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

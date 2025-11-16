@@ -37,6 +37,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     private readonly IQueryOperator _source;
     private readonly string _modelName;
     private readonly IReadOnlyList<Expression> _inputExpressions;
+    private readonly IReadOnlyList<Expression> _optionalExpressions;
     private readonly string _outputColumnName;
 
     /// <summary>
@@ -48,8 +49,15 @@ public sealed class ModelInvocationOperator : IQueryOperator
     /// resolved via <see cref="ExecutionContext.Models"/> at execute time.
     /// </param>
     /// <param name="inputExpressions">
-    /// One expression per input the model expects. Each is evaluated against the
-    /// source row before the batched dispatch.
+    /// One expression per required input the model expects. Each is evaluated against
+    /// the source row before the batched dispatch.
+    /// </param>
+    /// <param name="optionalExpressions">
+    /// Per-call hyperparameter expressions, in the order declared by the catalog
+    /// entry's <c>OptionalArgKinds</c> (e.g. <c>[temperature, max_tokens]</c>).
+    /// Length may be shorter than the declared list — trailing parameters fall
+    /// back to the model's defaults. Pass an empty list when the call site
+    /// supplies no overrides.
     /// </param>
     /// <param name="outputColumnName">
     /// Column name to attach the model's result under. The planner generates a
@@ -60,11 +68,13 @@ public sealed class ModelInvocationOperator : IQueryOperator
         IQueryOperator source,
         string modelName,
         IReadOnlyList<Expression> inputExpressions,
+        IReadOnlyList<Expression> optionalExpressions,
         string outputColumnName)
     {
         _source = source;
         _modelName = modelName;
         _inputExpressions = inputExpressions;
+        _optionalExpressions = optionalExpressions;
         _outputColumnName = outputColumnName;
     }
 
@@ -74,8 +84,11 @@ public sealed class ModelInvocationOperator : IQueryOperator
     /// <summary>The unqualified model name resolved against <see cref="ExecutionContext.Models"/>.</summary>
     public string ModelName => _modelName;
 
-    /// <summary>The expressions evaluated to produce per-row inputs for the model.</summary>
+    /// <summary>The expressions evaluated to produce per-row required inputs for the model.</summary>
     public IReadOnlyList<Expression> InputExpressions => _inputExpressions;
+
+    /// <summary>The expressions evaluated to produce per-call hyperparameter overrides.</summary>
+    public IReadOnlyList<Expression> OptionalExpressions => _optionalExpressions;
 
     /// <summary>The column name attached to model outputs.</summary>
     public string OutputColumnName => _outputColumnName;
@@ -83,16 +96,23 @@ public sealed class ModelInvocationOperator : IQueryOperator
     /// <inheritdoc/>
     public IQueryOperator RewriteExpressions(Func<Expression, Expression> rewriter)
     {
-        Expression[] rewritten = new Expression[_inputExpressions.Count];
+        Expression[] rewrittenInputs = new Expression[_inputExpressions.Count];
         for (int i = 0; i < _inputExpressions.Count; i++)
         {
-            rewritten[i] = rewriter(_inputExpressions[i]);
+            rewrittenInputs[i] = rewriter(_inputExpressions[i]);
+        }
+
+        Expression[] rewrittenOptionals = new Expression[_optionalExpressions.Count];
+        for (int i = 0; i < _optionalExpressions.Count; i++)
+        {
+            rewrittenOptionals[i] = rewriter(_optionalExpressions[i]);
         }
 
         return new ModelInvocationOperator(
             _source.RewriteExpressions(rewriter),
             _modelName,
-            rewritten,
+            rewrittenInputs,
+            rewrittenOptionals,
             _outputColumnName);
     }
 
@@ -105,6 +125,10 @@ public sealed class ModelInvocationOperator : IQueryOperator
             ["inputs"] = string.Join(", ", _inputExpressions.Select(QueryExplainer.FormatExpression)),
             ["output"] = _outputColumnName,
         };
+        if (_optionalExpressions.Count > 0)
+        {
+            properties["overrides"] = string.Join(", ", _optionalExpressions.Select(QueryExplainer.FormatExpression));
+        }
 
         return new OperatorPlanDescription("Model Invocation")
         {
@@ -186,7 +210,17 @@ public sealed class ModelInvocationOperator : IQueryOperator
             // StabilizeInput tries each candidate arena until it finds one whose
             // capacity covers the value's offsets, then copies the bytes into
             // outputBatch.Arena.
+            // Evaluate inputs and per-row hyperparameter overrides together so
+            // each row sees its own EvaluationFrame and overrides can vary by
+            // column reference (e.g. a `temp` column drives temperature). When
+            // there are no optional expressions, overrideValues stays a shared
+            // empty array — no per-row allocation cost in the common case.
             DataValue[][] inputs = new DataValue[sourceBatch.Count][];
+            DataValue[][] overrideValues = _optionalExpressions.Count == 0
+                ? new DataValue[sourceBatch.Count][]
+                : new DataValue[sourceBatch.Count][];
+            DataValue[] emptyOverrideRow = [];
+
             for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
             {
                 Row row = sourceBatch[rowIdx];
@@ -199,6 +233,21 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     rowInputs[argIdx] = StabilizeInput(raw, sourceBatch.Arena, context.Store, outputBatch.Arena);
                 }
                 inputs[rowIdx] = rowInputs;
+
+                if (_optionalExpressions.Count == 0)
+                {
+                    overrideValues[rowIdx] = emptyOverrideRow;
+                }
+                else
+                {
+                    DataValue[] rowOverrides = new DataValue[_optionalExpressions.Count];
+                    for (int i = 0; i < _optionalExpressions.Count; i++)
+                    {
+                        DataValue raw = evaluator.Evaluate(_optionalExpressions[i], frame);
+                        rowOverrides[i] = StabilizeInput(raw, sourceBatch.Arena, context.Store, outputBatch.Arena);
+                    }
+                    overrideValues[rowIdx] = rowOverrides;
+                }
             }
 
             // Step 3: dispatch the whole batch in one async call. All input
@@ -211,6 +260,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     outputBatch.Arena,
                     context.SidecarRegistry,
                     outputBatch.Arena,
+                    overrideValues,
                     cancellationToken)
                 .ConfigureAwait(false);
 

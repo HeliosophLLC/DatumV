@@ -43,6 +43,7 @@ public sealed class EchoModel : IModel
         IValueStore inputStore,
         SidecarRegistry? sidecarRegistry,
         IValueStore targetStore,
+        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

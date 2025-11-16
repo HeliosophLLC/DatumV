@@ -91,6 +91,7 @@ public sealed class LlamaModelTests : ServiceTestBase
                 inputStore: inputArena,
                 sidecarRegistry: null,
                 targetStore: targetArena,
+                overrides: [],
                 cancellationToken: CancellationToken.None);
 
             DataValue response = Assert.Single(outputs);
@@ -140,6 +141,7 @@ public sealed class LlamaModelTests : ServiceTestBase
                 inputStore: inputArena,
                 sidecarRegistry: null,
                 targetStore: targetArena,
+                overrides: [],
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);

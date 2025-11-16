@@ -94,6 +94,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 inputStore: inputArena,
                 sidecarRegistry: null,
                 targetStore: targetArena,
+                overrides: [],
                 cancellationToken: CancellationToken.None);
 
             Assert.Single(outputs);
@@ -145,6 +146,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 inputStore: inputArena,
                 sidecarRegistry: null,
                 targetStore: targetArena,
+                overrides: [],
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);
@@ -209,6 +211,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 inputStore: inputArena,
                 sidecarRegistry: null,
                 targetStore: targetArena,
+                overrides: [],
                 cancellationToken: CancellationToken.None);
 
             DataValue label = Assert.Single(outputs);

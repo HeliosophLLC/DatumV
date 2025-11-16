@@ -123,7 +123,14 @@ public static class BuiltinModels
             {
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, contextSize, maxTokens, temperature);
-            }));
+            },
+            // Trailing optional positional args:
+            //   [0] temperature (Float64)  — sampling temperature override
+            //   [1] max_tokens  (Int32)    — max new tokens to generate
+            // Order matters: callers supply a prefix. `models.llm(prompt, 0.9)`
+            // overrides temperature only; `models.llm(prompt, 0.9, 64)` overrides
+            // both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
     }
 
     /// <summary>

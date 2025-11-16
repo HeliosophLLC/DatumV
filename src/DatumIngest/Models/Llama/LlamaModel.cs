@@ -50,6 +50,7 @@ public sealed class LlamaModel : IModel, IDisposable
     private readonly LLamaWeights _weights;
     private readonly ModelParams _modelParams;
     private readonly StatelessExecutor _executor;
+    private readonly LlamaChatTemplate _template;
     private readonly int _maxTokens;
     private readonly float _temperature;
 
@@ -231,6 +232,7 @@ public sealed class LlamaModel : IModel, IDisposable
         IValueStore inputStore,
         SidecarRegistry? sidecarRegistry,
         IValueStore targetStore,
+        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -259,10 +261,26 @@ public sealed class LlamaModel : IModel, IDisposable
                     $"LlamaModel received a null prompt at row {row}; filter nulls upstream before invoking the model.");
             }
 
+            // Resolve per-row hyperparameters from this row's override slice.
+            // Order matches the catalog entry's OptionalArgKinds:
+            //   [0] = temperature (Float64)
+            //   [1] = max_tokens   (Int32)
+            // Missing or null entries fall back to construction-time defaults.
+            // Cheap when overrides is empty (common case for the scalar form).
+            IReadOnlyList<DataValue> rowOverrides = overrides.Count > row
+                ? overrides[row]
+                : [];
+            float temperature = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
+                ? rowOverrides[0].ToFloat()
+                : _temperature;
+            int maxTokens = rowOverrides.Count > 1 && !rowOverrides[1].IsNull
+                ? rowOverrides[1].ToInt32()
+                : _maxTokens;
+
             string promptText = prompt.AsString(inputStore);
             string templated = BuildLlama31ChatPrompt(promptText);
 
-            string response = await GenerateAsync(templated, cancellationToken).ConfigureAwait(false);
+            string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);
             outputs[row] = DataValue.FromString(response, targetStore);
         }
 
@@ -292,7 +310,11 @@ public sealed class LlamaModel : IModel, IDisposable
             "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
     }
 
-    private async Task<string> GenerateAsync(string templatedPrompt, CancellationToken cancellationToken)
+    private async Task<string> GenerateAsync(
+        string templatedPrompt,
+        float temperature,
+        int maxTokens,
+        CancellationToken cancellationToken)
     {
         // No manual KV-cache reset: StatelessExecutor.Context is only valid
         // *during* InferAsync — the executor builds a fresh context per call
@@ -305,11 +327,11 @@ public sealed class LlamaModel : IModel, IDisposable
         // share a sampling trajectory because the seed defaulted to 0.
         InferenceParams inferenceParams = new()
         {
-            MaxTokens = _maxTokens,
+            MaxTokens = maxTokens,
             AntiPrompts = ["<|eot_id|>"],
             SamplingPipeline = new DefaultSamplingPipeline
             {
-                Temperature = _temperature,
+                Temperature = temperature,
                 Seed = (uint)Random.Shared.Next(),
             },
         };
