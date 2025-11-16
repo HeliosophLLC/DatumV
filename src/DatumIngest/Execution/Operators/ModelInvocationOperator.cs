@@ -229,8 +229,10 @@ public sealed class ModelInvocationOperator : IQueryOperator
             }
 
             // Step 1: rent the output batch sized to rowsThisBatch (capped by
-            // RowLimit when set). Inputs and outputs share its arena.
-            RowBatch outputBatch = pool.RentRowBatch(outputLookup, rowsThisBatch);
+            // RowLimit when set). Bound to context.Store so it shares the
+            // single per-query arena — same arena as inputs and the rest of
+            // the operator chain. No cross-arena routing needed.
+            RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
 
             // Step 2: evaluate the input expressions against every source row, then
             // stabilise each non-inline value into outputBatch.Arena so the model
@@ -262,8 +264,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 DataValue[] rowInputs = new DataValue[_inputExpressions.Count];
                 for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                 {
-                    DataValue raw = evaluator.Evaluate(_inputExpressions[argIdx], frame);
-                    rowInputs[argIdx] = StabilizeInput(raw, sourceBatch.Arena, context.Store, outputBatch.Arena);
+                    rowInputs[argIdx] = evaluator.Evaluate(_inputExpressions[argIdx], frame);
                 }
                 inputs[rowIdx] = rowInputs;
 
@@ -276,8 +277,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     DataValue[] rowOverrides = new DataValue[_optionalExpressions.Count];
                     for (int i = 0; i < _optionalExpressions.Count; i++)
                     {
-                        DataValue raw = evaluator.Evaluate(_optionalExpressions[i], frame);
-                        rowOverrides[i] = StabilizeInput(raw, sourceBatch.Arena, context.Store, outputBatch.Arena);
+                        rowOverrides[i] = evaluator.Evaluate(_optionalExpressions[i], frame);
                     }
                     overrideValues[rowIdx] = rowOverrides;
                 }
@@ -334,48 +334,4 @@ public sealed class ModelInvocationOperator : IQueryOperator
         }
     }
 
-    /// <summary>
-    /// Stabilises an input <see cref="DataValue"/> into <paramref name="target"/>,
-    /// routing the source-store lookup by the value's flag bits. Three cases:
-    /// <list type="bullet">
-    /// <item><description>
-    /// <strong>Inline / sidecar / inline-array / null</strong> — self-contained,
-    /// no store dereference needed. Pass-through (<see cref="Arena"/> argument is
-    /// only used by <see cref="DataValueRetention.Stabilize"/> for sidecar
-    /// resolution if applicable).
-    /// </description></item>
-    /// <item><description>
-    /// <strong>In context store</strong> (<see cref="DataValue.IsInContextStore"/>) —
-    /// the dual-flag pattern set by <see cref="LiteralHoister"/>. Read via
-    /// <paramref name="contextStore"/>, the plan-scoped persistent hoist arena
-    /// plumbed as <c>ExecutionContext.Store</c>.
-    /// </description></item>
-    /// <item><description>
-    /// <strong>Arena-backed</strong> — read via <paramref name="primarySource"/>,
-    /// the source batch's arena (where column-reference values live).
-    /// </description></item>
-    /// </list>
-    /// </summary>
-    /// <remarks>
-    /// The flag-based dispatch replaces an earlier <see cref="Arena.BytesWritten"/>
-    /// heuristic that probed which arena had bytes. The heuristic was fragile
-    /// against pool-recycled arenas: a freshly rented arena's
-    /// <see cref="Arena.Capacity"/> persists from a prior use even when nothing
-    /// has been written this rental, so heuristics on capacity returned stale
-    /// bytes from the previous tenant.
-    /// </remarks>
-    private static DataValue StabilizeInput(
-        DataValue value,
-        Arena primarySource,
-        IValueStore contextStore,
-        IValueStore target)
-    {
-        if (value.IsNull || value.IsInline || value.IsInSidecar || value.IsInlineArray)
-        {
-            return DataValueRetention.Stabilize(value, primarySource, target);
-        }
-
-        IValueStore source = value.IsInContextStore ? contextStore : primarySource;
-        return DataValueRetention.Stabilize(value, source, target);
-    }
 }

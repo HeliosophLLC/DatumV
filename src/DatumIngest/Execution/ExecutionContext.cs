@@ -85,11 +85,48 @@ public sealed class ExecutionContext
     public TableCatalog Catalog { get; }
 
     /// <summary>
-    /// Value store for string, byte, float, and object payloads during query execution.
-    /// Operators use this store for all reference-type <see cref="DataValue"/> access
-    /// for all reference-type payloads.
+    /// The single per-query arena for all non-inline, non-sidecar
+    /// <see cref="DataValue"/> payloads. Strings, byte arrays, vectors, JSON values,
+    /// hoisted literals, model outputs, intermediate computed values — they all
+    /// resolve through this arena. Lives for the duration of the query.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>One arena per query.</strong> Earlier designs had per-batch arenas
+    /// (rented from a pool) plus a separate plan-scoped hoist store. That model
+    /// produced a "which arena does this DataValue reference?" ambiguity that
+    /// every consumer had to resolve correctly — and got wrong every few weeks
+    /// (Demo 1.5 hoist bug, BytesWritten heuristic, ConcatFunction recurrence).
+    /// Collapsing to one arena per query removes the ambiguity: <c>IsInArena</c>
+    /// unambiguously means "in this arena", consumers pass a single store, no
+    /// routing decisions.
+    /// </para>
+    /// <para>
+    /// <strong>Memory bounding.</strong> The arena grows for the query's life;
+    /// when the query ends the arena is disposed and bytes go away. For long
+    /// queries with large intermediate state, the arena is file-backed (mmap
+    /// to a spill file) so growth is bounded by disk, not RAM. A future cap
+    /// will reject inserts that would exceed a configurable budget.
+    /// </para>
+    /// <para>
+    /// <strong>Sidecar is separate.</strong> Sidecars (durable, content-addressable
+    /// via <see cref="SidecarRegistry"/>) remain their own tier. DataValues with
+    /// <c>IsInSidecar</c> resolve through the registry; everything else goes
+    /// through this arena.
+    /// </para>
+    /// </remarks>
     public Arena Store { get; }
+
+    /// <summary>
+    /// Rents a <see cref="RowBatch"/> bound to <see cref="Store"/> as its arena —
+    /// the canonical way for operators to allocate output batches in the
+    /// one-arena-per-query model. Equivalent to
+    /// <c>Pool.RentRowBatch(lookup, capacity, Store)</c> but spelled at the
+    /// context level so call sites read as "rent me a batch in this query's
+    /// arena" without restating the arena every time.
+    /// </summary>
+    public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity)
+        => Pool.RentRowBatch(columnLookup, capacity, Store);
 
     /// <summary>
     /// Optional meter for accumulating Query Unit costs during execution.

@@ -143,11 +143,10 @@ public static class LiteralHoister
                 $"Unsupported literal type for hoisting: {lit.Value.GetType().Name}."),
         };
 
-        // Tag arena-backed hoisted values as living in the context store so
-        // downstream consumers can route reads through ExecutionContext.Store
-        // (where the hoist arena is plumbed) rather than guessing which arena
-        // the value came from. Inline / sidecar / null values pass through
-        // unchanged — they don't need the routing hint.
-        return new LiteralValueExpression(dv.WithContextStoreFlag());
+        // No special tagging needed: the hoist store IS context.Store IS the
+        // single per-query arena that every operator's batch arena points to.
+        // A literal materialised here is in the one arena everyone reads from,
+        // so plain IsInArena (single flag) is sufficient.
+        return new LiteralValueExpression(dv);
     }
 }

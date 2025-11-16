@@ -164,7 +164,7 @@ public sealed class ProjectOperator : IQueryOperator
                         Row row = inputBatch[index];
 
                         schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                        outputBatch ??= pool.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
 
                         EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.OuterRow, context.SidecarRegistry);
 

@@ -20,7 +20,7 @@ internal sealed class SingleEmptyRowOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        RowBatch outputBatch = context.Pool.RentRowBatch(ColumnLookup.Empty, 1);
+        RowBatch outputBatch = context.RentRowBatch(ColumnLookup.Empty, 1);
 
         outputBatch.Add([]);
 

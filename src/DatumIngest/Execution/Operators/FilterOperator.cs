@@ -85,7 +85,7 @@ public sealed class FilterOperator : IQueryOperator
 
                         if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
 
-                        outputBatch ??= pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
                         pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
 

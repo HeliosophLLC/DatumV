@@ -127,7 +127,7 @@ public sealed class LimitOperator : IQueryOperator
                     int end = startIndex + take;
                     for (int index = startIndex; index < end; index++)
                     {
-                        outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
                         context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
 

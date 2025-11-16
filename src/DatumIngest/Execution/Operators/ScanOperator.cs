@@ -395,7 +395,7 @@ public sealed class ScanOperator : IQueryOperator
                         {
                             for (int i = 0; i < inputBatch.Count; i++)
                             {
-                                outputBatch ??= context.Pool.RentRowBatch(
+                                outputBatch ??= context.RentRowBatch(
                                     inputBatch.ColumnLookup,
                                     context.BatchSize);
 
@@ -427,12 +427,41 @@ public sealed class ScanOperator : IQueryOperator
             }
             else if (PrunedIndexChunks == 0 && !HasBitmapRowFilter)
             {
-                // No pruning and no bitmap row filtering — stream all rows straight from the
-                // provider without the per-chunk seek machinery. outputBatch stays null on
-                // this branch, so the outer finally is a no-op.
-                await foreach (RowBatch batch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+                // No pruning and no bitmap row filtering — stream all rows from the
+                // provider, materialising each into a context.Store-bound output
+                // batch. The copy looks wasteful but it's the price of the
+                // one-arena-per-query invariant: providers manage their own arenas
+                // (mmap, decode buffers); we re-bind into the query's single arena
+                // so downstream operators can read without "which arena?" routing.
+                // ScanOperator is the boundary where that re-binding happens.
+                await foreach (RowBatch inputBatch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
                 {
-                    yield return batch;
+                    try
+                    {
+                        for (int i = 0; i < inputBatch.Count; i++)
+                        {
+                            outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                            context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        context.Pool.ReturnRowBatch(inputBatch);
+                    }
+                }
+
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
                 }
 
                 yield break;
@@ -459,7 +488,7 @@ public sealed class ScanOperator : IQueryOperator
                                 {
                                     if (IsBitmapBitSet(bitmapMask, rowInChunk))
                                     {
-                                        outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
                                         context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
@@ -488,7 +517,7 @@ public sealed class ScanOperator : IQueryOperator
                             {
                                 for (int i = 0; i < inputBatch.Count; i++)
                                 {
-                                    outputBatch ??= context.Pool.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                    outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
 
                                     context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
