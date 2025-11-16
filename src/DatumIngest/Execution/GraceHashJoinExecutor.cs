@@ -3,6 +3,7 @@ using System.Diagnostics;
 using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using static DatumIngest.Execution.Operators.JoinOperator;
 
 namespace DatumIngest.Execution;
@@ -127,7 +128,7 @@ internal sealed class GraceHashJoinExecutor
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
-        SpillPartition[] partitions = CreatePartitions(partitionCount, context.LocalBufferPool);
+        SpillPartition[] partitions = CreatePartitions(partitionCount, context.Pool, context.LocalBufferPool);
 
         ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
@@ -184,7 +185,7 @@ internal sealed class GraceHashJoinExecutor
                     }
 
                     int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch);
-                    partitions[partitionIndex].AddBuildRow(buildRow);
+                    partitions[partitionIndex].AddBuildRow(buildRow, buildBatch.Arena);
 
                     // Only count rows that landed in memory (not appended to an already-spilled partition).
                     if (!partitions[partitionIndex].IsBuildSpilled)
@@ -212,7 +213,7 @@ internal sealed class GraceHashJoinExecutor
                         buildEstimator.EscalateToEveryRow();
                     }
                 }
-                context.LocalBufferPool.ReturnBatch(buildBatch);
+                context.Pool.ReturnRowBatch(buildBatch);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -306,7 +307,7 @@ internal sealed class GraceHashJoinExecutor
                             partition.SpillProbeToDisk();
                         }
 
-                        partition.AddProbeRow(probeRow);
+                        partition.AddProbeRow(probeRow, probeBatch.Arena);
 
                         // The row has been serialized to disk — return its DataValue[]
                         // to the pool so it can be reused immediately. Without this,
@@ -318,7 +319,7 @@ internal sealed class GraceHashJoinExecutor
                         }
                     }
                     }
-                    probeBatch.Return();
+                    context.Pool.ReturnRowBatch(probeBatch);
                 }
 
                 if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
@@ -345,14 +346,14 @@ internal sealed class GraceHashJoinExecutor
                                 partition.SpillProbeToDisk();
                             }
 
-                            partition.AddProbeRow(probeRow);
+                            partition.AddProbeRow(probeRow, probeBatch.Arena);
                         }
                         else
                         {
-                            partition.AddProbeRow(probeRow);
+                            partition.AddProbeRow(probeRow, probeBatch.Arena);
                         }
                     }
-                    probeBatch.Return();
+                    context.Pool.ReturnRowBatch(probeBatch);
                 }
             }
 
@@ -735,7 +736,7 @@ internal sealed class GraceHashJoinExecutor
                 if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
 
                 await foreach (RowBatch recursionBatch in RecursivelyRepartitionAsync(
-                    buildRowList, probeRows, useSingleKey, recursionDepth + 1,
+                    buildRowList, probeRows, partition.RetentionArena, useSingleKey, recursionDepth + 1,
                     nullLeftTemplate, nullRightTemplate, context).ConfigureAwait(false))
                 {
                     yield return recursionBatch;
@@ -922,6 +923,7 @@ internal sealed class GraceHashJoinExecutor
     private async IAsyncEnumerable<RowBatch> RecursivelyRepartitionAsync(
         List<Row> buildRows,
         IEnumerable<Row> probeRows,
+        Arena? sourceArena,
         bool useSingleKey,
         int recursionDepth,
         Row? nullLeftTemplate,
@@ -936,7 +938,7 @@ internal sealed class GraceHashJoinExecutor
 
         for (int index = 0; index < subPartitionCount; index++)
         {
-            subPartitions[index] = new SpillPartition(subSpillDir, index, pool: context.LocalBufferPool);
+            subPartitions[index] = new SpillPartition(subSpillDir, index, context.Pool, pool: context.LocalBufferPool);
         }
 
         DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
@@ -949,7 +951,7 @@ internal sealed class GraceHashJoinExecutor
             foreach (Row buildRow in buildRows)
             {
                 int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight, keyScratch);
-                subPartitions[partitionIndex].AddBuildRow(buildRow);
+                subPartitions[partitionIndex].AddBuildRow(buildRow, sourceArena);
 
                 if (estimator.ShouldSample())
                 {
@@ -975,7 +977,7 @@ internal sealed class GraceHashJoinExecutor
                     partition.SpillProbeToDisk();
                 }
 
-                partition.AddProbeRow(probeRow);
+                partition.AddProbeRow(probeRow, sourceArena);
             }
 
             await foreach (RowBatch joinBatch in JoinAllPartitionsAsync(
@@ -1083,7 +1085,7 @@ internal sealed class GraceHashJoinExecutor
         return 0;
     }
 
-    private SpillPartition[] CreatePartitions(int count, LocalBufferPool pool)
+    private SpillPartition[] CreatePartitions(int count, Pool arenaPool, LocalBufferPool pool)
     {
         int perPartitionEstimate = _estimatedBuildRows.HasValue
             ? (int)Math.Min(_estimatedBuildRows.Value / count, int.MaxValue)
@@ -1092,7 +1094,7 @@ internal sealed class GraceHashJoinExecutor
         SpillPartition[] partitions = new SpillPartition[count];
         for (int index = 0; index < count; index++)
         {
-            partitions[index] = new SpillPartition(_spillDirectory, index, perPartitionEstimate, pool);
+            partitions[index] = new SpillPartition(_spillDirectory, index, arenaPool, perPartitionEstimate, pool);
         }
 
         return partitions;

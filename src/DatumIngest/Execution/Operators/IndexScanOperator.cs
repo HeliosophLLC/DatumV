@@ -136,7 +136,7 @@ public sealed class IndexScanOperator : IQueryOperator
             {
                 // Chunk boundary or size cap: flush the accumulated entries.
                 await foreach (Row row in FlushIndexEntriesAsync(
-                    seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
+                    seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
                 {
                     if (ExecutionTracer.IsEnabled)
                     {
@@ -169,7 +169,7 @@ public sealed class IndexScanOperator : IQueryOperator
         // Flush any remaining entries.
         if (indexEntries.Count > 0)
         {
-            await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, cancellationToken).ConfigureAwait(false))
+            await foreach (Row row in FlushIndexEntriesAsync(seekSession, indexEntries, context, cancellationToken).ConfigureAwait(false))
             {
                 if (ExecutionTracer.IsEnabled)
                 {
@@ -213,6 +213,7 @@ public sealed class IndexScanOperator : IQueryOperator
     private async IAsyncEnumerable<Row> FlushIndexEntriesAsync(
         ISeekSession seekSession,
         List<ValueIndexEntry> indexEntries,
+        ExecutionContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (indexEntries.Count == 1)
@@ -228,7 +229,7 @@ public sealed class IndexScanOperator : IQueryOperator
                     yield return inputBatch[i];
                 }
 
-                inputBatch.Return();
+                context.Pool.ReturnRowBatch(inputBatch);
             }
 
             yield break;
@@ -259,7 +260,7 @@ public sealed class IndexScanOperator : IQueryOperator
                 totalFetched++;
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         // Yield rows in index order (the batch order from the traversal).

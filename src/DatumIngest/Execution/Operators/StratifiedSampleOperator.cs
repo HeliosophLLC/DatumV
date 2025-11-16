@@ -111,7 +111,7 @@ public sealed class StratifiedSampleOperator : IQueryOperator
                 }
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         if (outputBatch is not null)

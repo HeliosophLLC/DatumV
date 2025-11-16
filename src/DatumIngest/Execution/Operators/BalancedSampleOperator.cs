@@ -139,7 +139,7 @@ public sealed class BalancedSampleOperator : IQueryOperator
                 }
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         // --- Pass 2: Emit all reservoirs in class-first order ---

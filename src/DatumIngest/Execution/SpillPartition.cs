@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
@@ -40,12 +41,19 @@ internal sealed class SpillPartition : IDisposable
     private readonly string _spillDirectory;
     private readonly int _partitionIndex;
     private readonly LocalBufferPool? _pool;
+    private readonly Pool _arenaPool;
+    private Arena? _retentionArena;
 
     /// <summary>
     /// Creates a new partition.
     /// </summary>
     /// <param name="spillDirectory">The temporary directory for spill files.</param>
     /// <param name="partitionIndex">The zero-based index of this partition (used in file names).</param>
+    /// <param name="arenaPool">
+    /// The arena-aware pool. Used to lazy-rent a per-partition retention arena that holds
+    /// stabilized payload bytes for arena-backed values, so input batches can be safely
+    /// returned without invalidating the rows we keep.
+    /// </param>
     /// <param name="estimatedBuildRows">
     /// Estimated number of build-side rows for this partition. Used to pre-size the
     /// internal list and avoid repeated LOH-crossing doublings that drive Gen2 GC pressure.
@@ -56,16 +64,25 @@ internal sealed class SpillPartition : IDisposable
     /// When provided, <see cref="AddBuildRow"/> copies the row's values into a
     /// pool-rented array so the input batch can be returned immediately.
     /// </param>
-    internal SpillPartition(string spillDirectory, int partitionIndex, int estimatedBuildRows = 0, LocalBufferPool? pool = null)
+    internal SpillPartition(string spillDirectory, int partitionIndex, Pool arenaPool, int estimatedBuildRows = 0, LocalBufferPool? pool = null)
     {
         _spillDirectory = spillDirectory;
         _partitionIndex = partitionIndex;
+        _arenaPool = arenaPool;
         _pool = pool;
         if (estimatedBuildRows > 0)
         {
             _buildRows = new List<Row>(estimatedBuildRows);
         }
     }
+
+    /// <summary>
+    /// The retention arena for this partition. Holds stabilized payload bytes for any
+    /// arena-backed values added via <see cref="AddBuildRow"/> / <see cref="AddProbeRow"/>.
+    /// Lazily allocated on first stabilization. Exposed so callers handing rows from one
+    /// partition to another (e.g. recursive repartitioning) can pass it as the source arena.
+    /// </summary>
+    internal Arena? RetentionArena => _retentionArena;
 
     /// <summary>The number of build-side rows currently held in memory.</summary>
     internal int InMemoryBuildRowCount => _buildRows?.Count ?? 0;
@@ -86,11 +103,20 @@ internal sealed class SpillPartition : IDisposable
     internal bool IsProbeSpilled => _probeSpillPath is not null;
 
     /// <summary>
-    /// Adds a build-side row. When a pool is available, the row's <see cref="DataValue"/>
-    /// values are copied into a pool-rented array so the original batch can be returned.
-    /// If the partition has been spilled, the row is written directly to the spill file.
+    /// Adds a build-side row. The row's values are stabilized into the partition's
+    /// retention arena so the source batch can be returned without invalidating the
+    /// arena offsets in arena-backed payloads. If the partition has already been
+    /// spilled, the row is written directly to the spill file.
     /// </summary>
-    internal void AddBuildRow(Row row)
+    /// <param name="row">The row to add.</param>
+    /// <param name="sourceArena">
+    /// The arena holding the row's payload bytes (typically the source batch's arena,
+    /// or the prior partition's <see cref="RetentionArena"/> when re-partitioning).
+    /// May be null when the caller cannot supply one (e.g. rows read back from a spill
+    /// file via the legacy codec, where only inline values are reliably round-tripped);
+    /// in that case the row is stored without arena stabilization.
+    /// </param>
+    internal void AddBuildRow(Row row, Arena? sourceArena)
     {
         if (_buildSpillWriter is not null)
         {
@@ -99,23 +125,25 @@ internal sealed class SpillPartition : IDisposable
         }
         else
         {
-            if (_pool is not null)
-            {
-                // Copy values into a pool-rented array so the input batch
-                // can be ReturnBatch'd without corrupting this partition's data.
-                DataValue[] copy = _pool.RentCopy(row.RawValues);
-                row = new Row(row.RawNames, copy, row.RawNameIndex);
-            }
-
-            _buildRows!.Add(row);
+            _buildRows!.Add(StabilizeRow(row, sourceArena));
         }
     }
 
     /// <summary>
-    /// Adds a probe-side row. If the partition has been spilled, the row is written
-    /// directly to the spill file.
+    /// Adds a probe-side row. The row's values are stabilized into the partition's
+    /// retention arena so the source batch can be returned without invalidating the
+    /// arena offsets in arena-backed payloads. If the partition has already been
+    /// spilled, the row is written directly to the spill file.
     /// </summary>
-    internal void AddProbeRow(Row row)
+    /// <param name="row">The row to add.</param>
+    /// <param name="sourceArena">
+    /// The arena holding the row's payload bytes (typically the source batch's arena,
+    /// or the prior partition's <see cref="RetentionArena"/> when re-partitioning).
+    /// May be null when the caller cannot supply one (e.g. rows read back from a spill
+    /// file via the legacy codec, where only inline values are reliably round-tripped);
+    /// in that case the row is stored without arena stabilization.
+    /// </param>
+    internal void AddProbeRow(Row row, Arena? sourceArena)
     {
         if (_probeSpillWriter is not null)
         {
@@ -124,8 +152,37 @@ internal sealed class SpillPartition : IDisposable
         }
         else
         {
-            _probeRows!.Add(row);
+            _probeRows!.Add(StabilizeRow(row, sourceArena));
         }
+    }
+
+    private Row StabilizeRow(Row row, Arena? sourceArena)
+    {
+        ReadOnlySpan<DataValue> source = row.RawValues;
+        DataValue[] copy = _pool is not null
+            ? _pool.Rent(source.Length)
+            : new DataValue[source.Length];
+
+        if (sourceArena is null)
+        {
+            // Legacy path — caller didn't supply an arena. Fall back to a shallow array
+            // copy. Safe for inline values; arena-backed values will become stale once
+            // the source arena is recycled. Step C will tighten this.
+            for (int i = 0; i < source.Length; i++)
+            {
+                copy[i] = source[i];
+            }
+        }
+        else
+        {
+            _retentionArena ??= _arenaPool.Backing.RentArena();
+            for (int i = 0; i < source.Length; i++)
+            {
+                copy[i] = DataValueRetention.Stabilize(source[i], sourceArena, _retentionArena);
+            }
+        }
+
+        return new Row(row.RawNames, copy, row.RawNameIndex);
     }
 
     /// <summary>
@@ -249,8 +306,23 @@ internal sealed class SpillPartition : IDisposable
             }
         }
 
+        // Probe rows also use pool-rented arrays since stabilization rents from the same pool.
+        if (_probeRows is not null && _pool is not null)
+        {
+            foreach (Row row in _probeRows)
+            {
+                _pool.ReturnValues(row);
+            }
+        }
+
         _buildRows = null;
         _probeRows = null;
+
+        if (_retentionArena is not null)
+        {
+            _arenaPool.Backing.TryReturn(_retentionArena);
+            _retentionArena = null;
+        }
 
         if (_buildSpillPath is not null && File.Exists(_buildSpillPath))
         {

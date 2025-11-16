@@ -190,7 +190,7 @@ public sealed class UnpivotOperator : IQueryOperator
             }
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         if (outputBatch is not null)

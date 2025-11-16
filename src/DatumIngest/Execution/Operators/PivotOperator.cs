@@ -201,7 +201,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                 }
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
             }
 
             // Close the spill writer before reading.

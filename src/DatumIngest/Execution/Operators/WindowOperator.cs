@@ -85,7 +85,7 @@ public sealed class WindowOperator : IQueryOperator
                 allRows.Add(row);
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         if (allRows.Count == 0)

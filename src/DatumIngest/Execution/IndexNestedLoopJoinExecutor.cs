@@ -154,9 +154,9 @@ internal sealed class IndexNestedLoopJoinExecutor
                     // LIMIT short-circuit. Discard buffered output and signal
                     // the caller to fall back to hash join.
                     ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
-                    probeBatch.Return();
-                    outputBatch?.Return();
-                    foreach (RowBatch buffered in trialBuffer) { buffered.Return(); }
+                    context.Pool.ReturnRowBatch(probeBatch);
+                    if (outputBatch is not null) context.Pool.ReturnRowBatch(outputBatch);
+                    foreach (RowBatch buffered in trialBuffer) { context.Pool.ReturnRowBatch(buffered); }
                     _circuitBreakerTripped = true;
                     yield break;
                 }
@@ -197,7 +197,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     foreach (ValueIndexEntry entry in matches)
                     {
-                        Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, cancellationToken)
+                        Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, context, cancellationToken)
                             .ConfigureAwait(false);
 
                         if (rawBuildRow is null)
@@ -237,7 +237,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, context, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (rawBuildRow is null)
@@ -275,7 +275,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }
             }
-            probeBatch.Return();
+            context.Pool.ReturnRowBatch(probeBatch);
         }
 
         ExecutionTracer.Write($"INLJ trial complete  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
@@ -301,6 +301,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         ISeekSession seekSession,
         ValueIndexEntry entry,
         LocalBufferPool bufferPool,
+        ExecutionContext context,
         CancellationToken cancellationToken)
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
@@ -315,7 +316,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 DataValue[] owned = bufferPool.Rent(src.FieldCount);
                 Array.Copy(src.RawValues, owned, src.FieldCount);
                 Row row = new(src.RawNames, owned, src.RawNameIndex);
-                batch.Return();
+                context.Pool.ReturnRowBatch(batch);
                 return row;
             }
         }

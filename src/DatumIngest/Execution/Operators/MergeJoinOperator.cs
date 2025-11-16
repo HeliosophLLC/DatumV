@@ -142,7 +142,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 return true;
             }
 
-            currentLeftBatch?.Return();
+            if (currentLeftBatch is not null) context.Pool.ReturnRowBatch(currentLeftBatch);
             currentLeftBatch = null;
 
             if (await leftBatchEnumerator.MoveNextAsync().ConfigureAwait(false))
@@ -165,7 +165,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 return true;
             }
 
-            currentRightBatch?.Return();
+            if (currentRightBatch is not null) context.Pool.ReturnRowBatch(currentRightBatch);
             currentRightBatch = null;
 
             if (await rightBatchEnumerator.MoveNextAsync().ConfigureAwait(false))

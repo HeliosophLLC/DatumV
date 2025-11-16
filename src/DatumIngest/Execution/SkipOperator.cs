@@ -69,7 +69,7 @@ public sealed class SkipOperator : IQueryOperator
                 }
             }
 
-            inputBatch.Return();
+            context.Pool.ReturnRowBatch(inputBatch);
         }
 
         if (outputBatch is not null)

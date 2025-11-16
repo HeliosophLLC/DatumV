@@ -430,7 +430,7 @@ public sealed class JoinOperator : IQueryOperator
                 bucket.Add((buildIndex, buildRow));
             }
             }
-            buildBatch.Return();
+            context.Pool.ReturnRowBatch(buildBatch);
         }
 
         ExecutionTracer.Write($"HASH BUILD done  rows={buildRows.Count}  keys={singleKeyTable?.Count ?? compositeKeyTable?.Count ?? 0}  elapsed={Stopwatch.GetElapsedTime(buildStartTicks).TotalMilliseconds:F0}ms");
@@ -637,7 +637,7 @@ public sealed class JoinOperator : IQueryOperator
                 }
             }
         }
-        probeBatch.Return();
+        context.Pool.ReturnRowBatch(probeBatch);
         }
         }
         finally
@@ -753,7 +753,7 @@ public sealed class JoinOperator : IQueryOperator
                         {
                             await probeInput.Writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
                         }
-                        batch.Return();
+                        context.Pool.ReturnRowBatch(batch);
                     }
                 }
                 finally
@@ -1002,7 +1002,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 buildRows.Add(buildBatch[batchIndex]);
             }
-            buildBatch.Return();
+            context.Pool.ReturnRowBatch(buildBatch);
         }
 
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
@@ -1102,7 +1102,7 @@ public sealed class JoinOperator : IQueryOperator
                 }
             }
         }
-        probeBatch.Return();
+        context.Pool.ReturnRowBatch(probeBatch);
         }
 
         // Emit unmatched build rows.
@@ -1153,7 +1153,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 rightRows.Add(rightBatch[batchIndex]);
             }
-            rightBatch.Return();
+            context.Pool.ReturnRowBatch(rightBatch);
         }
 
         CombinedRowSchema? schema = null;
@@ -1173,7 +1173,7 @@ public sealed class JoinOperator : IQueryOperator
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
-            leftBatch.Return();
+            context.Pool.ReturnRowBatch(leftBatch);
         }
 
         if (outputBatch is not null)
