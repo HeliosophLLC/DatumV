@@ -19,6 +19,11 @@ internal static class ImageCostHelper
     /// </summary>
     /// <param name="arguments">The evaluated function arguments.</param>
     /// <returns>Supplemental QU to add on top of the function's base cost.</returns>
+    /// <remarks>
+    /// Inline-values only: throws if any image argument is arena- or sidecar-backed.
+    /// Use <see cref="ComputeSupplementalCost(ReadOnlySpan{DataValue}, in InvocationFrame)"/>
+    /// for the production path that reads from a live store / sidecar registry.
+    /// </remarks>
     internal static long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments)
     {
         for (int i = 0; i < arguments.Length; i++)
@@ -46,6 +51,44 @@ internal static class ImageCostHelper
                 : arguments[i].AsUInt8Array();
 
             using MemoryStream stream = new(imageBytes, writable: false);
+            using SKCodec? codec = SKCodec.Create(stream);
+
+            if (codec is not null)
+            {
+                long pixelCount = (long)codec.Info.Width * codec.Info.Height;
+                return pixelCount / ICostAwareFunction.PixelsPerQueryUnit;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Frame-aware cost calculation. Reads byte payloads via
+    /// <paramref name="frame"/>'s source store and sidecar registry so arena-backed and
+    /// sidecar-backed images resolve correctly.
+    /// </summary>
+    internal static long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].Kind is not (DataKind.Image or DataKind.UInt8Array) || arguments[i].IsNull)
+            {
+                continue;
+            }
+
+            ImageHandle? handle = arguments[i].TryGetOwnedImageHandle();
+
+            if (handle is not null && handle.HasBitmap)
+            {
+                SKBitmap bitmap = handle.GetBitmap("cost");
+                long pixelCount = (long)bitmap.Width * bitmap.Height;
+                return pixelCount / ICostAwareFunction.PixelsPerQueryUnit;
+            }
+
+            ReadOnlySpan<byte> imageBytes = arguments[i].AsByteSpan(frame.Source, frame.SidecarRegistry);
+
+            using MemoryStream stream = new(imageBytes.ToArray(), writable: false);
             using SKCodec? codec = SKCodec.Create(stream);
 
             if (codec is not null)

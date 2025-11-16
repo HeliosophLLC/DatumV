@@ -157,7 +157,7 @@ public sealed class TablesampleParsingTests : ServiceTestBase
         Assert.NotNull(tableReference.Tablesample);
 
         LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample!.Percentage);
-        Assert.Equal(0.5d, percentage.Value);
+        Assert.Equal(0.5f, percentage.Value);
     }
 
     // ───────────────────── TABLESAMPLE in JOIN ─────────────────────

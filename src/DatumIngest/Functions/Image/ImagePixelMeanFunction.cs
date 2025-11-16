@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -94,6 +95,12 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
 
     private static DataValue ComputePerChannelMean(nint pixelPointer, int totalPixels, float[] channelIndices)
     {
+        float[] means = ComputePerChannelMeanArray(pixelPointer, totalPixels, channelIndices);
+        return DataValue.FromVector(means);
+    }
+
+    private static float[] ComputePerChannelMeanArray(nint pixelPointer, int totalPixels, float[] channelIndices)
+    {
         double[] sums = new double[channelIndices.Length];
 
         unsafe
@@ -126,7 +133,7 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
             means[c] = (float)(sums[c] / totalPixels);
         }
 
-        return DataValue.FromVector(means);
+        return means;
     }
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
@@ -138,6 +145,43 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            DataKind resultKind = arguments.Length == 1 ? DataKind.Float32 : DataKind.Vector;
+            return DataValue.Null(resultKind);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
+        SKBitmap bitmap = inputHandle.GetBitmap("image_pixel_mean");
+
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
+
+        int totalPixels = rgba.Width * rgba.Height;
+        nint pixelPointer = rgba.GetPixels();
+
+        if (arguments.Length == 1)
+        {
+            // No channels specified — mean across all RGBA channels
+            return ComputeOverallMean(pixelPointer, totalPixels);
+        }
+
+        float[] channelIndices = arguments[1].AsVector(frame.Source);
+        float[] means = ComputePerChannelMeanArray(pixelPointer, totalPixels, channelIndices);
+        return DataValue.FromVector(means, frame.Target);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

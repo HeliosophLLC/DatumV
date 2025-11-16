@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -104,6 +105,13 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
     private static DataValue ComputePerChannelStandardDeviation(
         nint pixelPointer, int totalPixels, float[] channelIndices)
     {
+        float[] standardDeviations = ComputePerChannelStandardDeviationArray(pixelPointer, totalPixels, channelIndices);
+        return DataValue.FromVector(standardDeviations);
+    }
+
+    private static float[] ComputePerChannelStandardDeviationArray(
+        nint pixelPointer, int totalPixels, float[] channelIndices)
+    {
         double[] sums = new double[channelIndices.Length];
 
         unsafe
@@ -157,7 +165,7 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
                 standardDeviations[c] = (float)System.Math.Sqrt(variance);
             }
 
-            return DataValue.FromVector(standardDeviations);
+            return standardDeviations;
         }
     }
 
@@ -170,6 +178,42 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            DataKind resultKind = arguments.Length == 1 ? DataKind.Float32 : DataKind.Vector;
+            return DataValue.Null(resultKind);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
+        SKBitmap bitmap = inputHandle.GetBitmap("image_pixel_std");
+
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
+
+        int totalPixels = rgba.Width * rgba.Height;
+        nint pixelPointer = rgba.GetPixels();
+
+        if (arguments.Length == 1)
+        {
+            return ComputeOverallStandardDeviation(pixelPointer, totalPixels);
+        }
+
+        float[] channelIndices = arguments[1].AsVector(frame.Source);
+        float[] standardDeviations = ComputePerChannelStandardDeviationArray(pixelPointer, totalPixels, channelIndices);
+        return DataValue.FromVector(standardDeviations, frame.Target);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

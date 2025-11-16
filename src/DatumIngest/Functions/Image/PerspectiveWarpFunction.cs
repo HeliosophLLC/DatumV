@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -262,7 +263,7 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -271,7 +272,7 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
             return DataValue.Null(DataKind.Image);
         }
 
-        ImageHandle inputHandle = input.GetImageHandle(store);
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
         SKBitmap original = inputHandle.GetBitmap("perspective_warp");
 
         float width = original.Width;
@@ -292,7 +293,7 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         {
             // Random perspective warp with intensity
             float intensity = arguments[1].AsFloat32();
-            formatOverride = arguments.Length == 3 ? arguments[2].AsString(store) : null;
+            formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
 
             Random random = new();
             destinationCorners =
@@ -318,7 +319,7 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
             float bottomLeftY = arguments[6].AsFloat32() * height;
             float bottomRightX = arguments[7].AsFloat32() * width;
             float bottomRightY = arguments[8].AsFloat32() * height;
-            formatOverride = arguments.Length == 10 ? arguments[9].AsString(store) : null;
+            formatOverride = arguments.Length == 10 ? arguments[9].AsString(frame.Source) : null;
 
             destinationCorners =
             [
@@ -339,10 +340,14 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         canvas.SetMatrix(perspectiveMatrix);
         canvas.DrawBitmap(original, 0, 0);
 
-        return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat), store);
+        return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

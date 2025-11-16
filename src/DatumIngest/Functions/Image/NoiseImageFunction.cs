@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -186,7 +187,7 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -195,7 +196,7 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        ImageHandle inputHandle = input.GetImageHandle(store);
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
 
         // Two-argument form: noise(image, value) — defaults to gaussian.
         string noiseType;
@@ -210,9 +211,9 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         }
         else
         {
-            noiseType = arguments[1].AsString(store).ToUpperInvariant();
+            noiseType = arguments[1].AsString(frame.Source).ToUpperInvariant();
             value = arguments[2].AsFloat32();
-            formatOverride = arguments.Length == 4 ? arguments[3].AsString(store) : null;
+            formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
         }
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
@@ -243,10 +244,14 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
                     $"noise() unknown noise type '{noiseType}'. Supported: gaussian, salt_pepper.");
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat), store);
+        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

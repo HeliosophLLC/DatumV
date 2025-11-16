@@ -163,7 +163,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private async IAsyncEnumerable<RowBatch> ExecuteStreamingAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
 
         bool useSingleKey = _groupByExpressions.Count == 1;
 
@@ -482,8 +482,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     int wi = workerIndex;
                     globalWorkers[wi] = Task.Run(async () =>
                     {
-                        ExpressionEvaluator workerEvaluator = new(
-                            context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+                        ExpressionEvaluator workerEvaluator = new(context);
 
                         (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
                             CreateAggregateArgumentScratch();
@@ -567,8 +566,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     {
         Arena? operatorArena = null;
         Arena? bufferArena = null;
-        ExpressionEvaluator evaluator = new(
-            context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
 
         Dictionary<DataValue, GroupState>? singleKeyTable = useSingleKey && !isGlobalAggregation
             ? new Dictionary<DataValue, GroupState>() : null;

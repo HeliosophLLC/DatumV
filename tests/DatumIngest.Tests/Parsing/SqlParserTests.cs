@@ -305,11 +305,11 @@ public class SqlParserTests : ServiceTestBase
     [Fact]
     public void NumericLiteral_HalfValue_NarrowsToFloat()
     {
-        // 0.5 is exactly representable as float: (double)(float)0.5 == 0.5
+        // 0.5 is exactly representable as float: (double)(float)0.5 == 0.5.
         LiteralExpression literal = Assert.IsType<LiteralExpression>(
             Parse("SELECT 0.5 FROM t").Columns[0].Expression);
-        // 0.5 can be exact in float, but let's just verify it's not integer
-        Assert.True(literal.Value is float or double);
+        Assert.IsType<float>(literal.Value);
+        Assert.Equal(0.5f, literal.Value);
     }
 
     [Fact]
@@ -2022,7 +2022,8 @@ public class SqlParserTests : ServiceTestBase
         ColumnReference expr = Assert.IsType<ColumnReference>(func.Arguments[0]);
         Assert.Equal("salary", expr.ColumnName);
         LiteralExpression fraction = Assert.IsType<LiteralExpression>(func.Arguments[1]);
-        Assert.Equal(0.5, (double)fraction.Value!);
+        // 0.5 is exactly representable as float, so the parser narrows it.
+        Assert.Equal(0.5f, fraction.Value);
     }
 
     // ───────────────────── Struct literal ─────────────────────

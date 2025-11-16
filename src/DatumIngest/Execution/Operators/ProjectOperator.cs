@@ -130,12 +130,7 @@ public sealed class ProjectOperator : IQueryOperator
             letBindingExpressions = map;
         }
 
-        ExpressionEvaluator evaluator = new(
-            context.FunctionRegistry,
-            context.QueryMeter,
-            context.OuterRow,
-            letBindingExpressions: letBindingExpressions,
-            store: context.Store);
+        ExpressionEvaluator evaluator = new(context, letBindingExpressions: letBindingExpressions);
         ProjectionSchema? schema = null;
         Pool pool = context.Pool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;

@@ -151,8 +151,14 @@ public static class SqlParser
         if (d != System.Math.Truncate(d))
         {
             float f = (float)d;
+            // Without the explicit (object) cast on the float branch, the C# ternary
+            // unifies the operand types to the common arithmetic type (double) and
+            // implicitly widens the float back, so the narrowing was getting silently
+            // discarded — every decimal literal landed as a double regardless of
+            // representability. Boxing the float-branch result preserves the runtime
+            // type as System.Single.
             // ReSharper disable once CompareOfFloatsByEqualityOperator
-            return (double)f == d ? f : d;
+            return (double)f == d ? (object)f : d;
         }
 
         if (d >= sbyte.MinValue && d <= sbyte.MaxValue) return (sbyte)d;

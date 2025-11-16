@@ -209,7 +209,7 @@ public sealed class JoinOperator : IQueryOperator
 
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
-                ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+                ExpressionEvaluator evaluator = new(context);
                 IQueryOperator buildSide = _flipped ? _left : _right;
                 long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
                 ExecutionTracer.Write($"JOIN GraceHash starting  build={GetOperatorLabel(buildSide)}  estimatedBuild={estimatedBuildRows}");
@@ -344,7 +344,7 @@ public sealed class JoinOperator : IQueryOperator
         // fetched directly from the seekable provider (which bypasses AliasOperator).
         string? buildAlias = FindBuildAlias(_right);
 
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
 
         return new IndexNestedLoopJoinExecutor(
             buildScan.TableProvider,
@@ -359,7 +359,7 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteHashJoinAsync(
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
@@ -783,8 +783,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 workers[workerIndex] = Task.Run(async () =>
                 {
-                    ExpressionEvaluator workerEvaluator = new(
-                        context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+                    ExpressionEvaluator workerEvaluator = new(context);
                     CombinedRowSchema? workerSchema = null;
                     Row? workerResidualRow = null;
                     DataValue[]? workerResidualBuffer = null;
@@ -987,7 +986,7 @@ public sealed class JoinOperator : IQueryOperator
 
     private async IAsyncEnumerable<RowBatch> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
         // Physical side assignment mirrors the hash join path.

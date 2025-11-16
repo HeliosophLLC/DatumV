@@ -36,6 +36,18 @@ public interface IScalarFunction
     DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 
     /// <summary>
+    /// Executes the function with the given arguments and a full <see cref="InvocationFrame"/>.
+    /// Use this overload when the function needs more than the target store — specifically the
+    /// <see cref="InvocationFrame.SidecarRegistry"/> for resolving sidecar-backed payloads
+    /// (Image, UInt8Array, etc.) or distinct <see cref="InvocationFrame.Source"/> /
+    /// <see cref="InvocationFrame.Target"/> stores.
+    /// </summary>
+    /// <param name="arguments">The argument values.</param>
+    /// <param name="frame">The invocation frame supplying source/target stores and the optional sidecar registry.</param>
+    /// <returns>The computed result.</returns>
+    DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame) => Execute(arguments, frame.Target);
+
+    /// <summary>
     /// The cost weight of a single invocation of this function, measured in Query Units (QU).
     /// Used for billing, governance budgets, and pre-execution cost estimation.
     /// Higher values indicate more expensive operations (e.g. image transforms vs scalar math).

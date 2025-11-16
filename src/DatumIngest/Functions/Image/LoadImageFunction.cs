@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 /// <summary>
@@ -43,5 +44,19 @@ public sealed class LoadImageFunction : IScalarFunction
 
         byte[] bytes = input.AsUInt8Array();
         return DataValue.FromImage(bytes);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        byte[] bytes = input.AsUInt8Array(frame.Source, frame.SidecarRegistry);
+        return DataValue.FromImage(bytes, frame.Target);
     }
 }

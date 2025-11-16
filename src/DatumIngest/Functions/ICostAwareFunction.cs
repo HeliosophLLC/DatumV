@@ -5,8 +5,8 @@ namespace DatumIngest.Functions;
 /// <summary>
 /// Optional interface for scalar functions that incur resolution-dependent costs
 /// beyond their fixed <see cref="IScalarFunction.QueryUnitCost"/>. The evaluator
-/// calls <see cref="ComputeSupplementalCost"/> after execution and adds the result
-/// to the <see cref="DatumIngest.Execution.QueryMeter"/>.
+/// calls <see cref="ComputeSupplementalCost(ReadOnlySpan{DataValue}, DataValue, in InvocationFrame)"/>
+/// after execution and adds the result to the <see cref="DatumIngest.Execution.QueryMeter"/>.
 /// </summary>
 /// <remarks>
 /// Only functions whose real cost varies with input size need to implement this.
@@ -33,4 +33,14 @@ public interface ICostAwareFunction
     /// Returns zero when the input is too small to warrant additional charge.
     /// </returns>
     long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result);
+
+    /// <summary>
+    /// Frame-aware cost computation. Use this overload when arguments may be sidecar-
+    /// backed or arena-backed — the frame supplies the source store and sidecar registry
+    /// needed to read payload bytes for the cost calculation. The default implementation
+    /// falls back to the legacy <see cref="ComputeSupplementalCost(ReadOnlySpan{DataValue}, DataValue)"/>
+    /// which only handles inline values.
+    /// </summary>
+    long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame)
+        => ComputeSupplementalCost(arguments, result);
 }

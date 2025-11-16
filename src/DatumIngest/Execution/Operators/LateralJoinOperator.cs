@@ -83,7 +83,7 @@ public sealed class LateralJoinOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
         JoinOperator.CombinedRowSchema? schema = null;
         Row? cachedNullRight = null;
         RowBatch? outputBatch = null;

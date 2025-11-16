@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -83,7 +84,7 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -92,16 +93,14 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        ImageHandle inputHandle = input.GetImageHandle(store);
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
         float intensity = arguments[1].AsFloat32();
 
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(store) : null;
+        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
         SKBitmap original = inputHandle.GetBitmap("brighten");
 
-        // Use color matrix to add intensity to RGB channels
-        // Matrix layout: [R, G, B, A, translate] × 4 rows
         SKBitmap brightened = new(original.Width, original.Height);
         using SKCanvas canvas = new(brightened);
 
@@ -120,10 +119,14 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
 
         canvas.DrawBitmap(original, 0, 0, paint);
 
-        return DataValue.FromImageHandle(new ImageHandle(brightened, outputFormat), store);
+        return DataValue.FromImageHandle(new ImageHandle(brightened, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

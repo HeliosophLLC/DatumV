@@ -416,25 +416,13 @@ public static class ExpressionTypeResolver
                 }
             }
 
-            try
-            {
-                return elementKindAware.ValidateArgumentsWithElementKinds(argumentKinds, arrayElementKinds);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            return elementKindAware.ValidateArgumentsWithElementKinds(argumentKinds, arrayElementKinds);
         }
 
-        try
-        {
-            return scalarFunction.ValidateArguments(argumentKinds);
-        }
-        catch (ArgumentException)
-        {
-            // If validation fails, the type cannot be determined.
-            return null;
-        }
+        // Surface ValidateArguments errors directly. A swallowed ArgumentException here
+        // turns "blur() requires 2 or 3 arguments" into a runtime IndexOutOfRangeException
+        // because the function is dispatched anyway with whatever args were supplied.
+        return scalarFunction.ValidateArguments(argumentKinds);
     }
 
     /// <summary>
@@ -462,14 +450,7 @@ public static class ExpressionTypeResolver
             argumentKinds[index] = kind.Value;
         }
 
-        try
-        {
-            return aggregateFunction.ValidateArguments(argumentKinds);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
+        return aggregateFunction.ValidateArguments(argumentKinds);
     }
 
     private static DataKind? ResolveCast(CastExpression cast)
@@ -617,13 +598,6 @@ public static class ExpressionTypeResolver
             argumentKinds[index] = kind.Value;
         }
 
-        try
-        {
-            return windowFunction.ValidateArguments(argumentKinds);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
+        return windowFunction.ValidateArguments(argumentKinds);
     }
 }

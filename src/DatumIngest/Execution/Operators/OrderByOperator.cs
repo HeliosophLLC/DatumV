@@ -106,8 +106,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        ExpressionEvaluator evaluator = new(
-            context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
 
         SpillingTriggered = false;
         SortedRunCount = 0;

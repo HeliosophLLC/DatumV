@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 /// <summary>
@@ -39,6 +40,27 @@ public sealed class ImageChannelsFunction : IScalarFunction
         }
 
         byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
+
+        if (dimensions is null)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        return DataValue.FromFloat32(dimensions.Channels);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        ReadOnlySpan<byte> imageBytes = input.AsByteSpan(frame.Source, frame.SidecarRegistry);
         ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
 
         if (dimensions is null)

@@ -70,7 +70,7 @@ public sealed class WindowOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
 
         // Step 1: Materialize all source rows and track their original order.
         List<Row> allRows = new();

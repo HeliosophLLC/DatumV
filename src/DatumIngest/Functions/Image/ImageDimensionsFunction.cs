@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 /// <summary>
@@ -71,7 +72,7 @@ public sealed class ImageDimensionsFunction : IScalarFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -80,7 +81,7 @@ public sealed class ImageDimensionsFunction : IScalarFunction
             return DataValue.Null(DataKind.Vector);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ReadOnlySpan<byte> imageBytes = input.AsByteSpan(frame.Source, frame.SidecarRegistry);
         ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
 
         if (dimensions is null)
@@ -88,7 +89,7 @@ public sealed class ImageDimensionsFunction : IScalarFunction
             return DataValue.Null(DataKind.Vector);
         }
 
-        string format = arguments[1].AsString(store).ToUpperInvariant();
+        string format = arguments[1].AsString(frame.Source).ToUpperInvariant();
 
         float[] result = format switch
         {

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Image;
 using DatumIngest.Model;
@@ -36,6 +37,14 @@ public sealed class ExpressionEvaluator
     /// keyed off the same store.
     /// </summary>
     public IValueStore? Store => _store;
+
+    /// <summary>
+    /// Optional sidecar registry for resolving <c>FlagInSidecar</c> DataValues. Threaded into
+    /// <see cref="EvaluationFrame.SidecarRegistry"/> by the simple <see cref="Evaluate(Expression, Row)"/>
+    /// overload and into the <see cref="InvocationFrame"/> built for scalar-function dispatch,
+    /// so image / byte-array functions can resolve sidecar-backed payloads.
+    /// </summary>
+    private readonly SidecarRegistry? _sidecarRegistry;
 
     private readonly Row? _outerRow;
     private readonly Schema? _sourceSchema;
@@ -81,6 +90,17 @@ public sealed class ExpressionEvaluator
     private readonly Dictionary<InExpression, (HashSet<DataValue> NonNullValues, bool HasNull)> _inValueSetCache = new();
 
     /// <summary>
+    /// Per-call-site cache of which <see cref="FunctionCallExpression"/> nodes have already
+    /// passed <see cref="IScalarFunction.ValidateArguments"/>. The validation depends only on
+    /// the static argument kinds (which are stable for the duration of a query), so it's safe
+    /// to run exactly once per call site on first invocation. This catches errors like
+    /// <c>blur(file)</c> (arity) and <c>blur(file, 'x')</c> (type) at the first row instead of
+    /// letting the function body crash with an opaque <c>IndexOutOfRangeException</c> /
+    /// <c>InvalidOperationException</c>.
+    /// </summary>
+    private readonly HashSet<FunctionCallExpression> _validatedScalarCalls = new();
+
+    /// <summary>
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
@@ -109,7 +129,13 @@ public sealed class ExpressionEvaluator
     /// <see cref="Evaluate(Expression, Row)"/> overload. For true two-arena evaluation use the
     /// <see cref="EvaluationFrame"/>-based overloads.
     /// </param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null, IValueStore? store = null)
+    /// <param name="sidecarRegistry">
+    /// Optional registry for resolving <c>FlagInSidecar</c> DataValues (LBO payloads stored in
+    /// <c>.datum-blob</c> sidecars). Threaded into both the simple <see cref="Evaluate(Expression, Row)"/>
+    /// frame and the per-call <see cref="InvocationFrame"/> built for scalar dispatch so image /
+    /// byte-array functions can resolve sidecar-backed values.
+    /// </param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null, IValueStore? store = null, SidecarRegistry? sidecarRegistry = null)
     {
         _functions = functions;
         _meter = meter;
@@ -117,6 +143,31 @@ public sealed class ExpressionEvaluator
         _outerRow = outerRow;
         _sourceSchema = sourceSchema;
         _letBindingExpressions = letBindingExpressions;
+        _sidecarRegistry = sidecarRegistry;
+    }
+
+    /// <summary>
+    /// Convenience constructor that pulls every shared dependency from <paramref name="context"/> —
+    /// the function registry, query meter, default value store, outer row, and sidecar registry.
+    /// Operator-specific extras (<paramref name="sourceSchema"/>, <paramref name="letBindingExpressions"/>)
+    /// stay explicit since they're not on the context.
+    /// </summary>
+    /// <param name="context">Execution context the evaluator runs under.</param>
+    /// <param name="sourceSchema">See the field-based constructor.</param>
+    /// <param name="letBindingExpressions">See the field-based constructor.</param>
+    public ExpressionEvaluator(
+        ExecutionContext context,
+        Schema? sourceSchema = null,
+        IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
+        : this(
+            context.FunctionRegistry,
+            context.QueryMeter,
+            context.OuterRow,
+            sourceSchema,
+            letBindingExpressions,
+            context.Store,
+            context.SidecarRegistry)
+    {
     }
 
     /// <summary>Resolves a string DataValue against the frame's source arena.</summary>
@@ -132,7 +183,7 @@ public sealed class ExpressionEvaluator
     public DataValue Evaluate(Expression expression, Row row)
     {
         IValueStore store = _store ?? ThrowStoreRequired();
-        return Evaluate(expression, new EvaluationFrame(row, store, store, _outerRow));
+        return Evaluate(expression, new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry));
     }
 
     /// <summary>
@@ -142,7 +193,7 @@ public sealed class ExpressionEvaluator
     public bool EvaluateAsBoolean(Expression expression, Row row)
     {
         IValueStore store = _store ?? ThrowStoreRequired();
-        return EvaluateAsBoolean(expression, new EvaluationFrame(row, store, store, _outerRow));
+        return EvaluateAsBoolean(expression, new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry));
     }
 
     private static IValueStore ThrowStoreRequired() =>
@@ -278,6 +329,45 @@ public sealed class ExpressionEvaluator
         }
 
         return DataValue.FromType(kind);
+    }
+
+    /// <summary>
+    /// Validates a scalar function call's argument kinds via
+    /// <see cref="IScalarFunction.ValidateArguments"/>. On failure, wraps the function's
+    /// <see cref="ArgumentException"/> message with the call site's source span and
+    /// rethrows as an <see cref="ExpressionEvaluationException"/> so the user sees a
+    /// clean <c>[Line N, Col C] foo() requires X arguments</c> error.
+    /// </summary>
+    private static void ValidateScalarCallSiteOrThrow(
+        IScalarFunction scalarFunction,
+        FunctionCallExpression function,
+        ReadOnlySpan<DataValue> arguments)
+    {
+        DataKind[] argumentKinds = ArrayPool<DataKind>.Shared.Rent(arguments.Length);
+        try
+        {
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                argumentKinds[i] = arguments[i].Kind;
+            }
+
+            try
+            {
+                scalarFunction.ValidateArguments(argumentKinds.AsSpan(0, arguments.Length));
+            }
+            catch (ArgumentException ex)
+            {
+                SourceSpan? span = function.Span;
+                string prefix = span is not null
+                    ? $"[Line {span.Line}, Col {span.Column}] "
+                    : string.Empty;
+                throw new ExpressionEvaluationException($"{prefix}{ex.Message}", span, ex);
+            }
+        }
+        finally
+        {
+            ArrayPool<DataKind>.Shared.Return(argumentKinds);
+        }
     }
 
     /// <summary>
@@ -460,12 +550,25 @@ public sealed class ExpressionEvaluator
                 arguments[index] = Evaluate(function.Arguments[index], frame);
             }
 
-            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), frame.Target);
+            // Run ValidateArguments once per call site. Argument kinds are static for the
+            // duration of a query, so caching by FunctionCallExpression identity is safe and
+            // keeps the per-row hot path free of validation work after the first invocation.
+            // This is what catches "blur() requires 2 or 3 arguments" before the function
+            // body crashes with IndexOutOfRangeException; the planner doesn't currently
+            // run a type-resolution pass over top-level SELECT expressions, so the evaluator
+            // is the first place where we know enough to validate.
+            if (_validatedScalarCalls.Add(function))
+            {
+                ValidateScalarCallSiteOrThrow(scalarFunction, function, arguments.AsSpan(0, argumentCount));
+            }
+
+            InvocationFrame invocationFrame = new(frame.Source, frame.Target, frame.SidecarRegistry);
+            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in invocationFrame);
 
             _meter?.Add(scalarFunction.QueryUnitCost);
             if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
             {
-                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
+                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in invocationFrame));
             }
             // Dispose intermediate ImageHandle arguments whose bitmaps are no longer needed.
             // Handles still referenced by the source row are kept alive — they may appear
@@ -534,7 +637,8 @@ public sealed class ExpressionEvaluator
             _meter?.Add(higherOrder.QueryUnitCost);
             if (_meter is not null && higherOrder is ICostAwareFunction costAware)
             {
-                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
+                InvocationFrame higherOrderInvocation = new(frame.Source, frame.Target, frame.SidecarRegistry);
+                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in higherOrderInvocation));
             }
 
             DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, frame.Row);

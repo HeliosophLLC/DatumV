@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -111,7 +112,7 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -120,12 +121,12 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
             return DataValue.Null(DataKind.Image);
         }
 
-        ImageHandle inputHandle = input.GetImageHandle(store);
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
         int targetWidth = (int)arguments[1].AsFloat32();
         int targetHeight = (int)arguments[2].AsFloat32();
-        string gravity = arguments[3].AsString(store).ToUpperInvariant();
+        string gravity = arguments[3].AsString(frame.Source).ToUpperInvariant();
 
-        string? formatOverride = arguments.Length == 5 ? arguments[4].AsString(store) : null;
+        string? formatOverride = arguments.Length == 5 ? arguments[4].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
         SKBitmap original = inputHandle.GetBitmap("resize_and_crop");
@@ -151,10 +152,14 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
         canvas.DrawBitmap(resized, new SKRect(cropX, cropY, cropX + targetWidth, cropY + targetHeight),
             new SKRect(0, 0, targetWidth, targetHeight));
 
-        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat), store);
+        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

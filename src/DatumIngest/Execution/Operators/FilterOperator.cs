@@ -56,7 +56,7 @@ public sealed class FilterOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
+        ExpressionEvaluator evaluator = new(context);
         Pool pool = context.Pool;
         // Invariant: outputBatch != null ⟺ producer still owns it. Yielding transfers
         // ownership, so we null the local *before* yield. The outer finally cleans up

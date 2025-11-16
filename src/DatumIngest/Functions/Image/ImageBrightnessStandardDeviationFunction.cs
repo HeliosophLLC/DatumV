@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -103,6 +104,66 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
+        SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_std");
+
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
+
+        int totalPixels = rgba.Width * rgba.Height;
+        nint pixelPointer = rgba.GetPixels();
+
+        // Two-pass: compute mean, then variance
+        double sum = 0.0;
+
+        unsafe
+        {
+            byte* pixels = (byte*)pixelPointer;
+
+            for (int i = 0; i < totalPixels; i++)
+            {
+                int offset = i * 4;
+                float luminance = pixels[offset] * RedWeight
+                                + pixels[offset + 1] * GreenWeight
+                                + pixels[offset + 2] * BlueWeight;
+                sum += luminance;
+            }
+
+            double mean = sum / totalPixels;
+            double sumSquaredDifferences = 0.0;
+
+            for (int i = 0; i < totalPixels; i++)
+            {
+                int offset = i * 4;
+                float luminance = pixels[offset] * RedWeight
+                                + pixels[offset + 1] * GreenWeight
+                                + pixels[offset + 2] * BlueWeight;
+                double difference = luminance - mean;
+                sumSquaredDifferences += difference * difference;
+            }
+
+            double variance = sumSquaredDifferences / totalPixels;
+            float standardDeviation = (float)System.Math.Sqrt(variance);
+            return DataValue.FromFloat32(standardDeviation);
+        }
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }

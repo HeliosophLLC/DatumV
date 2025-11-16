@@ -1,5 +1,6 @@
 namespace DatumIngest.Functions.Image;
 
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -70,7 +71,7 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
     {
         DataValue input = arguments[0];
 
@@ -79,11 +80,11 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        ImageHandle inputHandle = input.GetImageHandle(store);
+        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
         int targetWidth = (int)arguments[1].AsFloat32();
         int targetHeight = (int)arguments[2].AsFloat32();
 
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(store) : null;
+        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
         SKBitmap original = inputHandle.GetBitmap("resize");
@@ -93,10 +94,14 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
             ?? throw new InvalidOperationException(
                 $"resize() failed to resize the image to {targetWidth}×{targetHeight}.");
 
-        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat), store);
+        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result, in InvocationFrame frame) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 }
