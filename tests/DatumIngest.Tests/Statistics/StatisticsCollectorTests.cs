@@ -19,9 +19,11 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))), _arena);
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))), _arena);
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))), _arena);
+        ColumnLookup columnLookup = new (["value"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromFloat32(3.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -40,8 +42,10 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Bob", _arena))), _arena);
+        ColumnLookup columnLookup = new (["name"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromString("Alice", _arena)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromString("Bob", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -59,7 +63,9 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))), _arena);
+        ColumnLookup columnLookup = new (["value"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         ColumnStatistics columnStats = stats["value"];
@@ -72,7 +78,9 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
+        ColumnLookup columnLookup = new (["name"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromString("Alice", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         ColumnStatistics columnStats = stats["name"];
@@ -85,12 +93,20 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(
-            ("name", DataValue.FromString("Alice", _arena)),
-            ("age", DataValue.FromFloat32(30.0f))), _arena);
-        collector.AddRow(CreateRow(
-            ("name", DataValue.FromString("Bob", _arena)),
-            ("age", DataValue.FromFloat32(25.0f))), _arena);
+        ColumnLookup columnLookup = new (["name", "age"]);
+
+        collector.AddRow(
+            CreateRow(
+                columnLookup,
+                DataValue.FromString("Alice", _arena),
+                DataValue.FromFloat32(30.0f)
+            ), _arena);
+        collector.AddRow(
+            CreateRow(
+                columnLookup,
+                DataValue.FromString("Bob", _arena),
+                DataValue.FromFloat32(25.0f)
+            ), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -111,9 +127,11 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
-        collector.AddRow(CreateRow(("name", DataValue.Null(DataKind.String))), _arena);
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Charlie", _arena))), _arena);
+        ColumnLookup columnLookup = new (["name"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromString("Alice", _arena)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.Null(DataKind.String)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromString("Charlie", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         CountResult count = (CountResult)stats["name"].Results["count"].Value!;
@@ -137,10 +155,13 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new(topK: 3);
 
+        ColumnLookup columnLookup = new (["category"]);
+
         // Add many distinct values
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(CreateRow(("category", DataValue.FromString($"cat_{i % 5}", _arena))), _arena);
+            DataValue val = DataValue.FromString($"cat_{i % 5}", _arena);
+            collector.AddRow(CreateRow(columnLookup, val), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -154,8 +175,10 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(10))), _arena);
-        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(200))), _arena);
+        ColumnLookup columnLookup = new (["byte_val"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromUInt8(10)), _arena);
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromUInt8(200)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -170,7 +193,9 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("my_column", DataValue.FromFloat32(1.0f))), _arena);
+        ColumnLookup columnLookup = new (["my_column"]);
+
+        collector.AddRow(CreateRow(columnLookup, DataValue.FromFloat32(1.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.Equal("my_column", stats["my_column"].ColumnName);
@@ -196,10 +221,17 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
 
-        collector.AddRow(CreateRow(("data", value)), _arena);
+        ColumnLookup columnLookup = new (["data"]);
+
+        collector.AddRow(CreateRow(columnLookup, value), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.DoesNotContain("top_k", stats["data"].Results.Keys);
+    }
+
+    private static Row CreateRow(ColumnLookup columnLookup, params DataValue[] values)
+    {
+        return new Row(columnLookup, values);
     }
 
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)
