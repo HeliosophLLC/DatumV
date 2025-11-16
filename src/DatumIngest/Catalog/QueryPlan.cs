@@ -29,7 +29,14 @@ internal sealed class QueryPlan : IQueryPlan
         // payloads outlive any individual ExecuteAsync / AnalyzeAsync call. Otherwise
         // the second run would dereference a recycled arena.
         _hoistStore = new Arena();
-        _operator = op.RewriteExpressions(expr => LiteralHoister.Hoist(expr, _hoistStore));
+        _operator = op
+            .RewriteExpressions(expr => LiteralHoister.Hoist(expr, _hoistStore))
+            // Lower image(source, lambda) calls into FusedImagePipelineExpression nodes
+            // after literal hoisting so the pipeline's auxiliary args have already been
+            // hoisted by the time the lowerer captures them. Any image() call left over
+            // after this pass would throw at runtime — the pass is responsible for
+            // reaching every reachable site.
+            .RewriteExpressions(expr => ImagePipelineLowerer.Lower(expr, functions));
     }
 
     public ExplainPlanNode ExplainTree => QueryExplainer.Explain(_operator);

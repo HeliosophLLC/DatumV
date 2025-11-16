@@ -480,6 +480,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.LabelEncodeUnknownFunction());
         registry.RegisterScalar(new Scalar.HashEncodeFunction());
 
+        // Image — Pipeline entry point. The planner lowers image(source, lambda) calls
+        // into FusedImagePipelineExpression nodes; this registration exists so the parser,
+        // type resolver, and language-server completion all see the function.
+        registry.RegisterScalar(new Image.ImagePipelineFunction());
+
         // Image — Metadata
         registry.RegisterScalar(new Image.ImageWidthFunction());
         registry.RegisterScalar(new Image.ImageHeightFunction());

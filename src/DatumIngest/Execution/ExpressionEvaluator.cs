@@ -249,6 +249,7 @@ public sealed class ExpressionEvaluator
                 StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, frame),
                 IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, frame),
                 TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
+                FusedImagePipelineExpression pipeline => EvaluateImagePipeline(pipeline, frame),
                 _ => throw new InvalidOperationException(
                     $"Unsupported expression type: {expression.GetType().Name}.")
             };
@@ -1458,6 +1459,108 @@ public sealed class ExpressionEvaluator
         }
 
         return DataValue.NullStruct(fieldCount);
+    }
+
+    /// <summary>
+    /// Runs a fused image pipeline: decodes the source bytes once, threads the live
+    /// <see cref="SkiaSharp.SKBitmap"/> through every transform, and either encodes the
+    /// final bitmap (no sink) or hands it to the terminal sink. Cross-stage bitmap
+    /// lifetime is bounded by this method — every bitmap allocated inside is disposed
+    /// before return, so the only state that escapes is either encoded bytes (in
+    /// <c>frame.Target</c>) or the sink's <see cref="DataValue"/>.
+    /// </summary>
+    private DataValue EvaluateImagePipeline(FusedImagePipelineExpression pipeline, in EvaluationFrame frame)
+    {
+        // Source produces encoded bytes. Either Image (sidecar/arena) or UInt8Array
+        // (raw bytes from a load_image kind-cast or column).
+        DataValue sourceBytes = Evaluate(pipeline.Source, frame);
+
+        if (sourceBytes.IsNull)
+        {
+            // Null propagation. Type matches what the pipeline would have produced.
+            return DataValue.Null(pipeline.ResultKind);
+        }
+
+        ReadOnlySpan<byte> encoded = sourceBytes.AsByteSpan(frame.Source, frame.SidecarRegistry);
+        SkiaSharp.SKBitmap initial = SkiaSharp.SKBitmap.Decode(encoded.ToArray())
+            ?? throw new InvalidOperationException(
+                "image() pipeline failed to decode the source bytes — the input is not a recognised image format.");
+
+        // Thread the bitmap through transforms. Each Apply may return the same instance
+        // (no-op for the args) or a new one; we own the previous instance and must
+        // dispose it when a transform replaces it.
+        SkiaSharp.SKBitmap current = initial;
+        SkiaSharp.SKBitmap? owned = initial;
+        SkiaSharp.SKEncodedImageFormat? formatOverride = pipeline.OutputFormatOverride;
+
+        try
+        {
+            foreach (PipelineStage stage in pipeline.Transforms)
+            {
+                DataValue[] auxValues = EvaluatePipelineAuxiliary(stage.AuxiliaryArgs, frame);
+                try
+                {
+                    SkiaSharp.SKBitmap next = stage.Function.Apply(current, auxValues);
+                    if (!ReferenceEquals(next, current))
+                    {
+                        owned?.Dispose();
+                        owned = next;
+                        current = next;
+                    }
+
+                    formatOverride ??= stage.Function.FormatOverride;
+                }
+                finally
+                {
+                    ArrayPool<DataValue>.Shared.Return(auxValues);
+                }
+            }
+
+            if (pipeline.TerminalSink is { } terminalSink)
+            {
+                DataValue[] sinkAux = EvaluatePipelineAuxiliary(terminalSink.AuxiliaryArgs, frame);
+                try
+                {
+                    return terminalSink.Function.Reduce(current, sinkAux, frame.Target);
+                }
+                finally
+                {
+                    ArrayPool<DataValue>.Shared.Return(sinkAux);
+                }
+            }
+
+            // No sink: encode the final bitmap to bytes. Preserve the source format unless
+            // a transform's FormatOverride or an explicit OutputFormatOverride changed it.
+            SkiaSharp.SKEncodedImageFormat encodeFormat = formatOverride
+                ?? Functions.Image.ImageEncoder.ResolveFormat(encoded.ToArray(), formatOverride: null);
+            byte[] outputBytes = Functions.Image.ImageEncoder.Encode(current, encodeFormat);
+            return DataValue.FromImage(outputBytes, frame.Target);
+        }
+        finally
+        {
+            owned?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Pre-evaluates the auxiliary expressions for one pipeline stage. Returns a rented
+    /// <see cref="DataValue"/> array that the caller must return to <see cref="ArrayPool{T}"/>
+    /// after the stage completes. Returning an empty array (length 0) is a borrow-free
+    /// special case to avoid pool churn for the common no-aux-args transform.
+    /// </summary>
+    private DataValue[] EvaluatePipelineAuxiliary(IReadOnlyList<Expression> auxiliary, in EvaluationFrame frame)
+    {
+        if (auxiliary.Count == 0)
+        {
+            return Array.Empty<DataValue>();
+        }
+
+        DataValue[] values = ArrayPool<DataValue>.Shared.Rent(auxiliary.Count);
+        for (int i = 0; i < auxiliary.Count; i++)
+        {
+            values[i] = Evaluate(auxiliary[i], frame);
+        }
+        return values;
     }
 
     /// <summary>
