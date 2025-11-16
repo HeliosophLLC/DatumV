@@ -122,7 +122,7 @@ public static class BuiltinModels
             Loader: ctx =>
             {
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new LlamaModel(modelName, modelPath, contextSize, maxTokens, temperature);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Llama31, contextSize, maxTokens, temperature);
             },
             // Trailing optional positional args:
             //   [0] temperature (Float64)  — sampling temperature override
@@ -130,6 +130,55 @@ public static class BuiltinModels
             // Order matters: callers supply a prefix. `models.llm(prompt, 0.9)`
             // overrides temperature only; `models.llm(prompt, 0.9, 64)` overrides
             // both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
+    }
+
+    /// <summary>
+    /// Default filename for the Phi-3-mini-4k Instruct GGUF (Q4_K_M
+    /// imatrix-quantized variant from bartowski's HuggingFace repo).
+    /// </summary>
+    public const string Phi3MiniDefaultFilename = "Phi-3-mini-4k-instruct-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers Microsoft Phi-3-mini-4k-instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"phi3"</c>). Same backend
+    /// (LlamaSharp) as Llama 3.1, just with the Phi-3 chat template — making
+    /// it a much smaller (~2.4 GB on disk, ~3 GB cold VRAM) drop-in for
+    /// budget-tight setups or for verifying the engine handles multiple
+    /// concurrent LLMs.
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">
+    /// SQL-visible name (the <c>X</c> in <c>models.X(prompt)</c>). Defaults to
+    /// <c>"phi3"</c>.
+    /// </param>
+    /// <param name="modelFilename">
+    /// GGUF filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
+    /// Defaults to <see cref="Phi3MiniDefaultFilename"/>.
+    /// </param>
+    /// <param name="contextSize">Token context window. Defaults to 4096 (matches the model's training context).</param>
+    /// <param name="maxTokens">Maximum new tokens per call. Defaults to 256.</param>
+    /// <param name="temperature">Sampling temperature. Defaults to 0.7.</param>
+    public static void RegisterPhi3(
+        ModelCatalog catalog,
+        string modelName = "phi3",
+        string modelFilename = Phi3MiniDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
+            },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
     }
 

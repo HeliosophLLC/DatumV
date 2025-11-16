@@ -183,17 +183,11 @@ public sealed class LlamaModelTests : ServiceTestBase
         Assert.Equal(BuiltinModels.Llama31_8BDefaultFilename, entry.RelativePath);
         Assert.False(entry.IsDeterministic);
 
-        IModel model = catalog.GetModel("llm");
-        try
-        {
-            Assert.IsType<LlamaModel>(model);
-            Assert.Equal(DataKind.String, model.OutputKind);
-            Assert.Single(model.InputKinds);
-            Assert.Equal(DataKind.String, model.InputKinds[0]);
-        }
-        finally
-        {
-            (model as IDisposable)?.Dispose();
-        }
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("llm");
+        IModel model = lease.Model;
+        Assert.IsType<LlamaModel>(model);
+        Assert.Equal(DataKind.String, model.OutputKind);
+        Assert.Single(model.InputKinds);
+        Assert.Equal(DataKind.String, model.InputKinds[0]);
     }
 }

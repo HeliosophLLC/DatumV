@@ -193,7 +193,8 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterMobileNetV2(catalog);
-        IModel model = catalog.GetModel("classify");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("classify");
+        IModel model = lease.Model;
 
         Pool pool = GetService<Pool>();
         Arena inputArena = pool.Backing.RentArena();
@@ -248,7 +249,8 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
         Assert.Equal("onnx", entry!.Backend);
         Assert.Equal(BuiltinModels.MobileNetV2DefaultFilename, entry.RelativePath);
 
-        IModel model = catalog.GetModel("classify");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("classify");
+        IModel model = lease.Model;
         Assert.IsType<MobileNetV2Model>(model);
         Assert.Equal(DataKind.String, model.OutputKind);
         Assert.Single(model.InputKinds);

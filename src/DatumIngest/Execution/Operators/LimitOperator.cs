@@ -62,13 +62,17 @@ public sealed class LimitOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        // Propagate the row limit hint so downstream operators (e.g. join) can
-        // choose cheaper strategies when only a small result set is needed.
+        // Propagate the row limit hint so downstream operators (e.g. join,
+        // model invocation) can choose cheaper strategies when only a small
+        // result set is needed. Build the limited context FIRST, then alias
+        // to it for the source dispatch — the previous shape captured the
+        // alias from the unmodified context, so the new RowLimit never
+        // reached upstream operators.
         ExecutionContext limitedContext = context;
-        
+
         if (context.RowLimit is null || Limit + Offset < context.RowLimit)
         {
-            context = new ExecutionContext(context)
+            limitedContext = new ExecutionContext(context)
             {
                 OuterRow = context.OuterRow,
                 MaxRecursionDepth = context.MaxRecursionDepth,

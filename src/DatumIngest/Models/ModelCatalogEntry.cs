@@ -54,6 +54,15 @@ namespace DatumIngest.Models;
 /// <c>overrides</c> parameter to <see cref="IModel.InferBatchAsync"/>.
 /// Defaults to <see langword="null"/> (no per-call overrides).
 /// </param>
+/// <param name="EstimatedVramBytes">
+/// Hint to the residency manager for VRAM accounting, in bytes. When the
+/// hint is <see langword="null"/>, the manager defaults to
+/// <c>file_size × 1.2</c> for entries with a <see cref="RelativePath"/>;
+/// the multiplier covers activations / KV cache / scratch buffers beyond
+/// the on-disk weights. Provide an explicit value when you've measured the
+/// real residency for a model and the file-size heuristic is materially off
+/// (e.g. ONNX models where activations dominate).
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -62,7 +71,8 @@ public sealed record ModelCatalogEntry(
     DataKind OutputKind,
     bool IsDeterministic,
     Func<ModelLoadContext, IModel> Loader,
-    IReadOnlyList<DataKind>? OptionalArgKinds = null);
+    IReadOnlyList<DataKind>? OptionalArgKinds = null,
+    long? EstimatedVramBytes = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

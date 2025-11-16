@@ -86,12 +86,20 @@ public sealed class LlamaModel : IModel, IDisposable
     /// </summary>
     /// <param name="name">Catalog-visible name (the <c>"llm"</c> in <c>models.llm</c>).</param>
     /// <param name="modelFilePath">Absolute path to the <c>.gguf</c> file.</param>
+    /// <param name="template">
+    /// Chat template to wrap user messages with, plus the stop-sequence
+    /// vocabulary that ends generation. Defaults to
+    /// <see cref="LlamaChatTemplate.Llama31"/>; use
+    /// <see cref="LlamaChatTemplate.Phi3"/> for Phi-3-family GGUFs and
+    /// construct a custom <see cref="LlamaChatTemplate"/> for any other family.
+    /// </param>
     /// <param name="contextSize">Token context window. Defaults to 4096 — fits typical demo prompts plus generation.</param>
     /// <param name="maxTokens">Max new tokens to generate per call. Defaults to 256.</param>
     /// <param name="temperature">Sampling temperature. Defaults to 0.7.</param>
     public LlamaModel(
         string name,
         string modelFilePath,
+        LlamaChatTemplate? template = null,
         uint contextSize = 4096,
         int maxTokens = 256,
         float temperature = 0.7f)
@@ -104,6 +112,7 @@ public sealed class LlamaModel : IModel, IDisposable
         }
 
         Name = name;
+        _template = template ?? LlamaChatTemplate.Llama31;
         _maxTokens = maxTokens;
         _temperature = temperature;
 
@@ -183,9 +192,15 @@ public sealed class LlamaModel : IModel, IDisposable
             // levels are extremely chatty (per-tensor / per-token traces during
             // load and inference) and drown out actual problems. Bump to a
             // lower threshold here when debugging native-load issues.
+            //
+            // Continue is a special llama.cpp marker meaning "no newline
+            // before me; this is a continuation of the previous log line"
+            // (used to print the tensor-loading "..........." dots one at a
+            // time). It slips through the >= Warning filter because its
+            // numeric value happens to be high; exclude it explicitly.
             NativeLogConfig.LLamaLogCallback logCallback = (level, message) =>
             {
-                if (level >= LLamaLogLevel.Warning)
+                if (level >= LLamaLogLevel.Warning && level != LLamaLogLevel.Continue)
                 {
                     Console.Error.Write($"[llama:{level}] {message}");
                 }
@@ -278,36 +293,13 @@ public sealed class LlamaModel : IModel, IDisposable
                 : _maxTokens;
 
             string promptText = prompt.AsString(inputStore);
-            string templated = BuildLlama31ChatPrompt(promptText);
+            string templated = _template.Format(promptText);
 
             string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);
             outputs[row] = DataValue.FromString(response, targetStore);
         }
 
         return outputs;
-    }
-
-    /// <summary>
-    /// Wraps <paramref name="userMessage"/> in the Llama 3.1 Instruct chat
-    /// template. No system prompt by default — the model behaves as a
-    /// generic instruction-tuned assistant. Users wanting a system prompt
-    /// today can prepend it to their input; a future signature with a
-    /// dedicated system column is feasible if demand surfaces.
-    /// </summary>
-    /// <remarks>
-    /// We deliberately do <strong>not</strong> include the leading
-    /// <c>&lt;|begin_of_text|&gt;</c> token — llama.cpp's tokenizer
-    /// auto-adds the BOS token because the model's metadata sets
-    /// <c>add_bos_token = true</c>. Including it here would produce a
-    /// double-BOS prompt (which llama.cpp warns about and which can
-    /// degrade output quality).
-    /// </remarks>\
-    private static string BuildLlama31ChatPrompt(string userMessage)
-    {
-        return
-            "<|start_header_id|>user<|end_header_id|>\n\n" +
-            userMessage +
-            "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
     }
 
     private async Task<string> GenerateAsync(
@@ -328,7 +320,7 @@ public sealed class LlamaModel : IModel, IDisposable
         InferenceParams inferenceParams = new()
         {
             MaxTokens = maxTokens,
-            AntiPrompts = ["<|eot_id|>"],
+            AntiPrompts = [.. _template.StopSequences],
             SamplingPipeline = new DefaultSamplingPipeline
             {
                 Temperature = temperature,
@@ -342,16 +334,10 @@ public sealed class LlamaModel : IModel, IDisposable
             sb.Append(token);
         }
 
-        // Strip the trailing stop token if it leaked through, then trim. The
-        // anti-prompt list is supposed to consume it, but llama.cpp's emit
-        // boundary occasionally yields the literal text alongside the stop.
-        string raw = sb.ToString();
-        int stopIdx = raw.IndexOf("<|eot_id|>", StringComparison.Ordinal);
-        if (stopIdx >= 0)
-        {
-            raw = raw[..stopIdx];
-        }
-        return raw.Trim();
+        // Strip any trailing stop sequence the anti-prompt list missed, then
+        // trim. The template's StripTrailingStop knows which markers to scrub
+        // (Llama 3.1 uses <|eot_id|>, Phi-3 uses <|end|>, etc.).
+        return _template.StripTrailingStop(sb.ToString());
     }
 
     /// <inheritdoc />

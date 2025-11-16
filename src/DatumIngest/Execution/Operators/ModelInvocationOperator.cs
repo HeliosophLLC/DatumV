@@ -149,7 +149,17 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 "Set ExecutionContext.Models when building the context, or remove the models.* call.");
         }
 
-        IModel model = context.Models.GetModel(_modelName);
+        // Acquire a residency lease for the duration of this operator's
+        // execution. The lease holds an active ref on the model so it can't
+        // be evicted while we're using it; disposed when the iterator
+        // finalises (consumer completes or breaks). Operator-scoped pinning
+        // (β semantics from the residency design) — short enough that other
+        // queries can ping-pong a different model in/out, long enough that
+        // we don't pay a reload mid-batch.
+        using ModelLease lease = await context.Models
+            .AcquireAsync(_modelName, cancellationToken)
+            .ConfigureAwait(false);
+        IModel model = lease.Model;
         if (model.InputKinds.Count != _inputExpressions.Count)
         {
             throw new InvalidOperationException(
@@ -161,6 +171,15 @@ public sealed class ModelInvocationOperator : IQueryOperator
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
 
+        // RowLimit is set by a downstream LimitOperator (LIMIT + OFFSET) to
+        // signal "I'll only consume this many rows total." For an expensive
+        // operator like model invocation, this is the difference between
+        // running the LLM once per source row (default batch can be 1024+)
+        // vs. once per actually-needed row. Track yielded rows and stop
+        // pulling/processing once we hit the cap.
+        int yieldedRows = 0;
+        int? rowLimit = context.RowLimit;
+
         await foreach (RowBatch sourceBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -169,6 +188,23 @@ public sealed class ModelInvocationOperator : IQueryOperator
             {
                 pool.ReturnRowBatch(sourceBatch);
                 continue;
+            }
+
+            if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
+            {
+                pool.ReturnRowBatch(sourceBatch);
+                yield break;
+            }
+
+            // Trim work to the rows we still need. If LIMIT 5 and the source
+            // hands us a 64-row batch when we already produced 3, we only
+            // process the next 2 rows — the rest of the source batch is
+            // dropped. Saves N expensive model dispatches per LIMIT.
+            int rowsThisBatch = sourceBatch.Count;
+            if (rowLimit.HasValue)
+            {
+                int remaining = rowLimit.Value - yieldedRows;
+                if (remaining < rowsThisBatch) rowsThisBatch = remaining;
             }
 
             // First batch: build the augmented column lookup once. The output column is
@@ -192,10 +228,9 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
             }
 
-            // Step 1: rent the output batch up-front so we can stabilise inputs and
-            // outputs into a single arena. The output arena becomes the unified
-            // store for all DataValues the model sees.
-            RowBatch outputBatch = pool.RentRowBatch(outputLookup, sourceBatch.Count);
+            // Step 1: rent the output batch sized to rowsThisBatch (capped by
+            // RowLimit when set). Inputs and outputs share its arena.
+            RowBatch outputBatch = pool.RentRowBatch(outputLookup, rowsThisBatch);
 
             // Step 2: evaluate the input expressions against every source row, then
             // stabilise each non-inline value into outputBatch.Arena so the model
@@ -215,13 +250,11 @@ public sealed class ModelInvocationOperator : IQueryOperator
             // column reference (e.g. a `temp` column drives temperature). When
             // there are no optional expressions, overrideValues stays a shared
             // empty array — no per-row allocation cost in the common case.
-            DataValue[][] inputs = new DataValue[sourceBatch.Count][];
-            DataValue[][] overrideValues = _optionalExpressions.Count == 0
-                ? new DataValue[sourceBatch.Count][]
-                : new DataValue[sourceBatch.Count][];
+            DataValue[][] inputs = new DataValue[rowsThisBatch][];
+            DataValue[][] overrideValues = new DataValue[rowsThisBatch][];
             DataValue[] emptyOverrideRow = [];
 
-            for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
+            for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
             {
                 Row row = sourceBatch[rowIdx];
                 EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry);
@@ -264,19 +297,19 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            if (modelOutputs.Count != sourceBatch.Count)
+            if (modelOutputs.Count != rowsThisBatch)
             {
                 pool.ReturnRowBatch(outputBatch);
                 pool.ReturnRowBatch(sourceBatch);
                 throw new InvalidOperationException(
-                    $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {sourceBatch.Count}-row input batch.");
+                    $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {rowsThisBatch}-row input batch.");
             }
 
             // Step 4: scatter — for each source row, copy source columns and append the
             // model output. Source values stabilise from the source batch's arena into
             // the output batch's arena so they survive the source batch returning to the
             // pool below.
-            for (int rowIdx = 0; rowIdx < sourceBatch.Count; rowIdx++)
+            for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
             {
                 Row sourceRow = sourceBatch[rowIdx];
                 DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
@@ -291,7 +324,13 @@ public sealed class ModelInvocationOperator : IQueryOperator
             }
 
             pool.ReturnRowBatch(sourceBatch);
+            yieldedRows += rowsThisBatch;
             yield return outputBatch;
+
+            if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
+            {
+                yield break;
+            }
         }
     }
 

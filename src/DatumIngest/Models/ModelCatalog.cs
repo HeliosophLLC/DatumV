@@ -5,24 +5,27 @@ namespace DatumIngest.Models;
 /// <summary>
 /// Process-scoped registry of <see cref="ModelCatalogEntry"/> records and the
 /// <see cref="IModel"/> instances they produce. Lives outside <c>ExecutionContext</c>
-/// because models are server-wide resources: a loaded ONNX model is amortised
-/// across queries, sessions, and tenants. Per-query state (memory budget, query
-/// meter, spill arenas) belongs to the context; model residency does not.
+/// because models are server-wide resources: a loaded model is amortised across
+/// queries, sessions, and tenants. Per-query state (memory budget, query meter,
+/// spill arenas) belongs to the context; model residency does not.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Demo 0.5 uses a "load on first use, hold forever" policy: <see cref="GetModel"/>
-/// memoises the result of the entry's loader. Real eviction (LRU, VRAM-bounded
-/// admission control) lives in a future <c>ModelResidencyManager</c> behind the
-/// same interface — callers don't change.
-/// </para>
 /// <para>
 /// Lookup is namespaced by the SQL surface: <c>models.classify</c> resolves to
 /// the entry whose <see cref="ModelCatalogEntry.Name"/> equals <c>"classify"</c>.
 /// The leading <c>"models."</c> qualifier is stripped by the planner before lookup.
 /// </para>
+/// <para>
+/// The actual load / cache / evict lifecycle lives in
+/// <see cref="ModelResidencyManager"/>. The catalog hands out
+/// <see cref="ModelLease"/>s via <see cref="AcquireAsync"/>; callers
+/// (<c>ModelInvocationOperator</c>) hold the lease for the duration of their
+/// model use and dispose it when done. Tests that just want to verify "is the
+/// catalog wired correctly?" can use the synchronous
+/// <see cref="ResolveLeaseSynchronously"/> helper.
+/// </para>
 /// </remarks>
-public sealed class ModelCatalog
+public sealed class ModelCatalog : IDisposable
 {
     /// <summary>Default model directory when none is configured.</summary>
     /// <remarks>
@@ -35,9 +38,6 @@ public sealed class ModelCatalog
     private readonly ConcurrentDictionary<string, ModelCatalogEntry> _entries =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly ConcurrentDictionary<string, IModel> _loaded =
-        new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>
     /// Absolute path to the directory holding model files. Resolved at construction;
     /// each entry's <see cref="ModelCatalogEntry.RelativePath"/> is combined with this
@@ -45,14 +45,42 @@ public sealed class ModelCatalog
     /// </summary>
     public string ModelDirectory { get; }
 
+    /// <summary>
+    /// The residency manager that owns the loaded <see cref="IModel"/>
+    /// instances and enforces the VRAM budget. Created with the catalog;
+    /// budget defaults to <see cref="ModelResidencyManager.UnlimitedBudget"/>
+    /// — set <see cref="VramBudgetBytes"/> to bound it.
+    /// </summary>
+    public ModelResidencyManager ResidencyManager { get; }
+
+    /// <summary>
+    /// Convenience accessor for the residency manager's VRAM budget. Setting
+    /// after construction is not supported in this build — initialise via the
+    /// <see cref="ModelCatalog(string?, long, TimeSpan?)"/> ctor when you need
+    /// a non-default budget.
+    /// </summary>
+    public long VramBudgetBytes => ResidencyManager.VramBudgetBytes;
+
     /// <summary>Creates a catalog rooted at <paramref name="modelDirectory"/>.</summary>
     /// <param name="modelDirectory">
     /// Absolute path to the models directory. <see langword="null"/> uses
     /// <see cref="DefaultModelDirectory"/>.
     /// </param>
     public ModelCatalog(string? modelDirectory = null)
+        : this(modelDirectory, ModelResidencyManager.UnlimitedBudget, admissionTimeout: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a catalog with a specific VRAM budget and optional admission
+    /// timeout. Use this overload when you want eviction to actually fire —
+    /// the parameterless form leaves the budget unlimited (load-and-hold-
+    /// forever, the same shape as before residency was introduced).
+    /// </summary>
+    public ModelCatalog(string? modelDirectory, long vramBudgetBytes, TimeSpan? admissionTimeout)
     {
         ModelDirectory = modelDirectory ?? DefaultModelDirectory;
+        ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout);
     }
 
     /// <summary>
@@ -70,15 +98,13 @@ public sealed class ModelCatalog
     }
 
     /// <summary>
-    /// Removes the entry. Any already-loaded <see cref="IModel"/> instance is
-    /// dropped from the cache too — subsequent <see cref="GetModel"/> calls would
-    /// re-load. Implementations of <see cref="IModel"/> that hold native
-    /// resources should implement <see cref="IDisposable"/>; this method does not
-    /// dispose them (the caller may still hold a reference).
+    /// Removes the entry. Any already-loaded <see cref="IModel"/> instance
+    /// stays in the residency manager until it's evicted naturally — this
+    /// just removes the registration so future acquires for the same name
+    /// fail to resolve.
     /// </summary>
     public bool Unregister(string name)
     {
-        _loaded.TryRemove(name, out _);
         return _entries.TryRemove(name, out _);
     }
 
@@ -96,21 +122,36 @@ public sealed class ModelCatalog
     public IReadOnlyDictionary<string, ModelCatalogEntry> Entries => _entries;
 
     /// <summary>
-    /// Resolves the loaded <see cref="IModel"/> for <paramref name="name"/>,
-    /// loading it on first use. Subsequent calls return the same instance —
-    /// "load once, hold forever" for Demo 0.5. Real residency control comes
-    /// from a future <c>ModelResidencyManager</c> behind the same call.
+    /// Acquires a <see cref="ModelLease"/> for the given model name, loading
+    /// the model into VRAM if not already resident. The lease holds an
+    /// active ref until disposed; callers must use <c>using</c> (or
+    /// equivalent) at the call site so the manager can evict the model
+    /// after the work completes.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No entry registered for <paramref name="name"/>.</exception>
-    public IModel GetModel(string name)
+    /// <param name="name">Catalog name (the unqualified model identifier — no <c>models.</c> prefix).</param>
+    /// <param name="cancellationToken">Honoured during admission-timeout polling.</param>
+    /// <returns>A lease wrapping the loaded model.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// No entry registered for <paramref name="name"/>, or admission timed out.
+    /// </exception>
+    public Task<ModelLease> AcquireAsync(string name, CancellationToken cancellationToken)
     {
-        return _loaded.GetOrAdd(name, key =>
-        {
-            ModelCatalogEntry entry = TryGetEntry(key)
-                ?? throw new InvalidOperationException(
-                    $"No model registered as '{key}'. Register it via ModelCatalog.Register before referencing it from SQL.");
+        ModelCatalogEntry entry = TryGetEntry(name)
+            ?? throw new InvalidOperationException(
+                $"No model registered as '{name}'. Register it via ModelCatalog.Register before referencing it from SQL.");
 
-            return entry.Loader(new ModelLoadContext(entry, ModelDirectory));
-        });
+        return ResidencyManager.AcquireAsync(entry, ModelDirectory, cancellationToken);
     }
+
+    /// <summary>
+    /// Synchronous resolve for tests / setup paths that just need the model
+    /// instance and don't care about the residency lifecycle. The returned
+    /// lease MUST still be disposed; this is just sugar over
+    /// <see cref="AcquireAsync"/>.<see cref="Task{T}.GetAwaiter"/>.<see cref="System.Runtime.CompilerServices.TaskAwaiter{T}.GetResult"/>.
+    /// </summary>
+    public ModelLease ResolveLeaseSynchronously(string name)
+        => AcquireAsync(name, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public void Dispose() => ResidencyManager.Dispose();
 }

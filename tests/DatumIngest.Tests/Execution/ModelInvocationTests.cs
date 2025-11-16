@@ -143,6 +143,38 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Nested model calls hoist in post-order: the inner call's MIO must end
+    /// up closer to the scan than the outer's so the outer can reference the
+    /// inner's synthesised output column. Plus the outer call's input
+    /// expressions must have nested model-call references rewritten to
+    /// <see cref="ColumnReference"/>s — otherwise MIO's runtime evaluator
+    /// throws "Unknown function: 'models.X'" because models.* isn't in the
+    /// scalar function registry.
+    /// </summary>
+    [Fact]
+    public async Task Planner_NestedModelCalls_HoistInCorrectOrder()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        // Outer echo wraps the inner echo's output. With the bug, the outer's
+        // MIO would receive `'X: ' || models.echo(name)` — a raw model call
+        // node — and fail at runtime. Post-order hoist + arg rewrite makes
+        // the outer's MIO see `'X: ' || <ColRef to inner's output>` instead.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT models.echo(concat('X: ', models.echo(name))) FROM t", catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal("X: alice", rows[0][0].AsString(scratch));
+        Assert.Equal("X: bob", rows[1][0].AsString(scratch));
+    }
+
+    /// <summary>
     /// Hoister rejects a call with more args than the entry's required + optional
     /// declared count. Catches typos and stale signatures at plan time rather
     /// than dispatching them silently.
@@ -161,6 +193,77 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => planner.Plan(query));
         Assert.Contains("at most", ex.Message);
+    }
+
+    /// <summary>
+    /// Counting model that records every input it sees, so a test can assert
+    /// the model was invoked exactly N times — not just that N rows came back.
+    /// Without this distinction the original LIMIT test passed even when
+    /// MIO ran the model on every source row and let LIMIT discard the rest.
+    /// </summary>
+    private sealed class CountingEchoModel : DatumIngest.Models.IModel
+    {
+        public List<string> SeenInputs { get; } = new();
+        public string Name => "counting_echo";
+        public bool IsDeterministic => true;
+        public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
+        public DataKind OutputKind => DataKind.String;
+
+        public Task<IReadOnlyList<DataValue>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<DataValue>> inputs,
+            DatumIngest.Model.IValueStore inputStore,
+            DatumIngest.DatumFile.Sidecar.SidecarRegistry? sidecarRegistry,
+            DatumIngest.Model.IValueStore targetStore,
+            IReadOnlyList<IReadOnlyList<DataValue>> overrides,
+            CancellationToken cancellationToken)
+        {
+            DataValue[] outputs = new DataValue[inputs.Count];
+            for (int row = 0; row < inputs.Count; row++)
+            {
+                string text = inputs[row][0].AsString(inputStore);
+                SeenInputs.Add(text);
+                outputs[row] = inputs[row][0];
+            }
+            return Task.FromResult<IReadOnlyList<DataValue>>(outputs);
+        }
+    }
+
+    /// <summary>
+    /// LIMIT N above a model invocation must invoke the model EXACTLY N times,
+    /// not "process the whole upstream batch and let LIMIT discard the rest."
+    /// For expensive operators (LLMs) the latter is a real cost regression.
+    /// We verify by registering a counting model and asserting the recorded
+    /// invocation count matches the LIMIT.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_LimitAboveModel_InvokesModelExactlyLimitTimes()
+    {
+        CountingEchoModel counter = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "counting_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => counter));
+
+        // 50 source rows to exceed any reasonable batch size and force the
+        // LIMIT cap to actually clamp work mid-batch.
+        object?[][] rows = new object?[50][];
+        for (int i = 0; i < rows.Length; i++) rows[i] = new object?[] { $"row_{i}" };
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            rows);
+        catalog.Models = modelCatalog;
+
+        List<Row> result = await ExecuteQueryAsync(
+            "SELECT models.counting_echo(name) FROM t LIMIT 7", catalog);
+
+        Assert.Equal(7, result.Count);
+        Assert.Equal(7, counter.SeenInputs.Count);
     }
 
     /// <summary>

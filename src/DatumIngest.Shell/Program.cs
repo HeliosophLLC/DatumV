@@ -21,9 +21,14 @@ TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.
 // Register the built-in model catalog so `models.*` calls resolve. Each
 // model loads lazily on first use, so missing files don't block startup —
 // `models.foo(...)` calls fail at the moment they're actually evaluated.
+// The residency manager runs with an unlimited budget by default; switch
+// to the (modelDirectory, vramBudgetBytes, admissionTimeout) ctor when you
+// want eviction to kick in (e.g. on a 12 GB card hosting a captioner +
+// LLM + diffusion model concurrently).
 ModelCatalog modelCatalog = new();
 BuiltinModels.RegisterMobileNetV2(modelCatalog);
 BuiltinModels.RegisterLlama31(modelCatalog);
+BuiltinModels.RegisterPhi3(modelCatalog);
 catalog.Models = modelCatalog;
 try
 {

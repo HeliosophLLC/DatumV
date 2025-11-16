@@ -86,13 +86,20 @@ public static class ModelInvocationHoister
             switch (expr)
             {
                 case FunctionCallExpression fn when IsModelCall(fn):
+                    // Post-order: visit children FIRST so any nested model calls
+                    // get appended to hoistedOrder before this one. The order in
+                    // hoistedOrder dictates operator stacking — the first entry
+                    // becomes the innermost MIO (closest to the scan), so nested
+                    // models.classify(file) inside models.llm(...) ends up below
+                    // models.llm in the plan and its output column is available
+                    // by the time llm runs.
+                    foreach (Expression arg in fn.Arguments) Visit(arg);
                     if (!hoistedColumns.ContainsKey(fn))
                     {
                         string synthName = $"__model_{StripNamespace(fn.FunctionName)}_{hoistedOrder.Count}";
                         hoistedColumns[fn] = synthName;
                         hoistedOrder.Add(fn);
                     }
-                    foreach (Expression arg in fn.Arguments) Visit(arg);
                     break;
 
                 case FunctionCallExpression fn:
@@ -171,11 +178,26 @@ public static class ModelInvocationHoister
                     $"'{fn.FunctionName}' supplies {suppliedCount}.");
             }
 
+            // Rewrite this call's argument expressions before stitching them
+            // into the new MIO. Any nested models.* call sites in the args have
+            // already been hoisted (post-order visit ensured they're earlier
+            // in hoistedOrder); RewriteExpression replaces those nested
+            // FunctionCallExpression nodes with ColumnReferences to their
+            // hoisted output columns. Without this rewrite the MIO's
+            // ExpressionEvaluator would see the inner models.classify(...)
+            // node and fail with "Unknown function" because models.* isn't in
+            // the scalar function registry.
             Expression[] requiredArgs = new Expression[requiredCount];
-            for (int i = 0; i < requiredCount; i++) requiredArgs[i] = fn.Arguments[i];
+            for (int i = 0; i < requiredCount; i++)
+            {
+                requiredArgs[i] = RewriteExpression(fn.Arguments[i], hoistedColumns);
+            }
 
             Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
-            for (int i = 0; i < optionalArgs.Length; i++) optionalArgs[i] = fn.Arguments[requiredCount + i];
+            for (int i = 0; i < optionalArgs.Length; i++)
+            {
+                optionalArgs[i] = RewriteExpression(fn.Arguments[requiredCount + i], hoistedColumns);
+            }
 
             string synthName = hoistedColumns[fn];
             augmented = new ModelInvocationOperator(
