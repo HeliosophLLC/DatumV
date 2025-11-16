@@ -112,7 +112,7 @@ public abstract class OnnxModel : IModel, IDisposable
         IValueStore targetStore);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    public virtual Task<IReadOnlyList<DataValue>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<DataValue>> inputs,
         IValueStore inputStore,
         SidecarRegistry? sidecarRegistry,

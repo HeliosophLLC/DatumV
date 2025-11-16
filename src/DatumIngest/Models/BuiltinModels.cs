@@ -183,6 +183,50 @@ public static class BuiltinModels
     }
 
     /// <summary>
+    /// Default filename for the YOLOv8-nano ONNX file (the smallest variant
+    /// from Ultralytics, ~12 MB). Larger variants — yolov8s.onnx, yolov8m.onnx —
+    /// drop in by passing a different <c>modelFilename</c>.
+    /// </summary>
+    public const string YoloDefaultFilename = "yolov8n.onnx";
+
+    /// <summary>
+    /// Registers YOLOv8 object detection under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"detect"</c>). Returns one
+    /// detection-array per image.
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to <c>"detect"</c>.</param>
+    /// <param name="modelFilename">ONNX filename relative to <see cref="ModelCatalog.ModelDirectory"/>. Defaults to <see cref="YoloDefaultFilename"/>.</param>
+    /// <param name="confidenceThreshold">Score threshold below which a prediction is dropped pre-NMS. Defaults to 0.25.</param>
+    /// <param name="iouThreshold">IoU threshold for NMS. Defaults to 0.45.</param>
+    public static void RegisterYolo(
+        ModelCatalog catalog,
+        string modelName = "detect",
+        string modelFilename = YoloDefaultFilename,
+        float confidenceThreshold = 0.25f,
+        float iouThreshold = 0.45f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Array,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new YoloModel(modelName, modelPath, labels: null, confidenceThreshold, iouThreshold);
+            },
+            // Optional positional overrides for per-call thresholding:
+            //   [0] confidenceThreshold (Float64) — drop predictions below this score
+            //   [1] iouThreshold        (Float64) — NMS overlap threshold
+            // Not yet wired into YoloModel (it uses its construction-time thresholds);
+            // parser will accept them for forward-compat. TODO: thread overrides through.
+            OptionalArgKinds: [DataKind.Float64, DataKind.Float64]));
+    }
+
+    /// <summary>
     /// Loads a JSON-array label file. Returns <see langword="null"/> when the
     /// file is missing — letting the model fall back to <c>class_&lt;index&gt;</c>
     /// instead of failing the load. Throws when the file exists but is malformed:

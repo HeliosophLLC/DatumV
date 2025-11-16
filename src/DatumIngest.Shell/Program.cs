@@ -27,6 +27,7 @@ TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.
 // LLM + diffusion model concurrently).
 ModelCatalog modelCatalog = new();
 BuiltinModels.RegisterMobileNetV2(modelCatalog);
+BuiltinModels.RegisterYolo(modelCatalog);
 BuiltinModels.RegisterLlama31(modelCatalog);
 BuiltinModels.RegisterPhi3(modelCatalog);
 catalog.Models = modelCatalog;

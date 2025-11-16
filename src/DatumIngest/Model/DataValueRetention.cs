@@ -52,6 +52,15 @@ public static class DataValueRetention
         // so stabilisation across arena boundaries is a pass-through.
         if (value.IsInlineArray) return value;
 
+        // Same-store fast path. With the one-arena-per-query model
+        // (`project_one_arena_per_query.md`) most Stabilize calls have
+        // source == target — the bytes are already in the right place,
+        // so the per-kind copy switch below would just allocate a duplicate
+        // copy of the same payload. Short-circuit. This is also what makes
+        // Array<Struct> outputs from YOLO work without needing an explicit
+        // Struct retention path: nobody actually copies them across stores.
+        if (ReferenceEquals(sourceStore, retentionStore)) return value;
+
         return value.Kind switch
         {
             // Byte array via the new IsArray flag — copy bytes into retention store.

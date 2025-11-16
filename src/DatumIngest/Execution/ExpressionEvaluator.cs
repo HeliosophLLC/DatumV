@@ -1210,7 +1210,7 @@ public sealed class ExpressionEvaluator
             fields[index] = Evaluate(literal.Fields[index].Value, frame);
         }
 
-        return DataValue.FromStruct((short)literal.Fields.Count, fields);
+        return DataValue.FromStruct((short)literal.Fields.Count, fields, frame.Target);
     }
 
     private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, in EvaluationFrame frame)
