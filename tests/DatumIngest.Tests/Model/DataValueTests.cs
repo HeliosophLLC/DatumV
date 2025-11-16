@@ -194,16 +194,6 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void ImageValueStoresBytes()
-    {
-        byte[] imageData = [0xFF, 0xD8, 0xFF, 0xE0];
-        DataValue value = DataValue.FromImage(imageData);
-
-        Assert.Equal(DataKind.Image, value.Kind);
-        Assert.Equal(imageData, value.AsImage());
-    }
-
-    [Fact]
     public void DateValueStoresDateOnly()
     {
         DateOnly date = new(2026, 3, 15);

@@ -11,7 +11,7 @@ using SkiaSharp;
 /// Converts to grayscale, applies 3×3 Sobel kernels for horizontal and vertical
 /// gradients, and outputs the edge magnitude image (grayscale).
 /// </summary>
-public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -48,26 +48,29 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (0 or 1))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException("sobel() requires 0 or 1 auxiliary arguments: [format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
+        if (auxiliaryKinds.Length == 1
+            && auxiliaryKinds[0] != DataKind.Unknown
+            && auxiliaryKinds[0] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"sobel() format must be String, got {auxiliaryKinds[0]}.");
+        }
+    }
 
-        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("sobel");
-
-        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(original)
+    /// <inheritdoc />
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? original;
+        SKBitmap rgba = converted ?? input;
 
         int width = rgba.Width;
         int height = rgba.Height;
@@ -89,9 +92,6 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
             }
         }
 
-        // Apply Sobel kernels and produce output bitmap
-        // Gx = [-1, 0, 1; -2, 0, 2; -1, 0, 1]
-        // Gy = [-1, -2, -1; 0, 0, 0; 1, 2, 1]
         SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
         nint resultPointer = result.GetPixels();
 
@@ -107,7 +107,6 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
 
                     if (y == 0 || y == height - 1 || x == 0 || x == width - 1)
                     {
-                        // Border pixels: set to black
                         output[index] = 0;
                         output[index + 1] = 0;
                         output[index + 2] = 0;
@@ -115,7 +114,6 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
                         continue;
                     }
 
-                    // Sobel horizontal gradient
                     float gradientX = -grayscale[(y - 1) * width + (x - 1)]
                                     + grayscale[(y - 1) * width + (x + 1)]
                                     - 2f * grayscale[y * width + (x - 1)]
@@ -123,7 +121,6 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
                                     - grayscale[(y + 1) * width + (x - 1)]
                                     + grayscale[(y + 1) * width + (x + 1)];
 
-                    // Sobel vertical gradient
                     float gradientY = -grayscale[(y - 1) * width + (x - 1)]
                                     - 2f * grayscale[(y - 1) * width + x]
                                     - grayscale[(y - 1) * width + (x + 1)]
@@ -142,8 +139,25 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
             }
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat));
+        return result;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 1 || auxiliaryArgs[0].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[0].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "sobel() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -151,104 +165,6 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-
-        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("sobel");
-
-        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(original)
-            : null;
-        SKBitmap rgba = converted ?? original;
-
-        int width = rgba.Width;
-        int height = rgba.Height;
-        nint pixelPointer = rgba.GetPixels();
-
-        // Convert to grayscale luminance buffer
-        float[] grayscale = new float[width * height];
-
-        unsafe
-        {
-            byte* pixels = (byte*)pixelPointer;
-
-            for (int i = 0; i < width * height; i++)
-            {
-                int offset = i * 4;
-                grayscale[i] = pixels[offset] * RedWeight
-                             + pixels[offset + 1] * GreenWeight
-                             + pixels[offset + 2] * BlueWeight;
-            }
-        }
-
-        // Apply Sobel kernels and produce output bitmap
-        // Gx = [-1, 0, 1; -2, 0, 2; -1, 0, 1]
-        // Gy = [-1, -2, -1; 0, 0, 0; 1, 2, 1]
-        SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        nint resultPointer = result.GetPixels();
-
-        unsafe
-        {
-            byte* output = (byte*)resultPointer;
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    int index = (y * width + x) * 4;
-
-                    if (y == 0 || y == height - 1 || x == 0 || x == width - 1)
-                    {
-                        // Border pixels: set to black
-                        output[index] = 0;
-                        output[index + 1] = 0;
-                        output[index + 2] = 0;
-                        output[index + 3] = 255;
-                        continue;
-                    }
-
-                    // Sobel horizontal gradient
-                    float gradientX = -grayscale[(y - 1) * width + (x - 1)]
-                                    + grayscale[(y - 1) * width + (x + 1)]
-                                    - 2f * grayscale[y * width + (x - 1)]
-                                    + 2f * grayscale[y * width + (x + 1)]
-                                    - grayscale[(y + 1) * width + (x - 1)]
-                                    + grayscale[(y + 1) * width + (x + 1)];
-
-                    // Sobel vertical gradient
-                    float gradientY = -grayscale[(y - 1) * width + (x - 1)]
-                                    - 2f * grayscale[(y - 1) * width + x]
-                                    - grayscale[(y - 1) * width + (x + 1)]
-                                    + grayscale[(y + 1) * width + (x - 1)]
-                                    + 2f * grayscale[(y + 1) * width + x]
-                                    + grayscale[(y + 1) * width + (x + 1)];
-
-                    float magnitude = (float)System.Math.Sqrt(gradientX * gradientX + gradientY * gradientY);
-                    byte clamped = magnitude >= 255f ? (byte)255 : (byte)magnitude;
-
-                    output[index] = clamped;
-                    output[index + 1] = clamped;
-                    output[index + 2] = clamped;
-                    output[index + 3] = 255;
-                }
-            }
-        }
-
-        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />

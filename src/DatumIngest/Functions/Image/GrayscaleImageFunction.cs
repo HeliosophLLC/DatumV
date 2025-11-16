@@ -10,7 +10,7 @@ using SkiaSharp;
 /// <c>grayscale(img)</c> or <c>grayscale(img, format)</c>.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     // ITU-R BT.601 luminance weights
     private const float RedWeight = 0.2126f;
@@ -47,59 +47,26 @@ public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (0 or 1))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException("grayscale() requires 0 or 1 auxiliary arguments: [format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-
-        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("grayscale");
-
-        SKBitmap grayscaled = new(original.Width, original.Height);
-        using SKCanvas canvas = new(grayscaled);
-
-        float[] matrix =
-        [
-            RedWeight, GreenWeight, BlueWeight, 0, 0,
-            RedWeight, GreenWeight, BlueWeight, 0, 0,
-            RedWeight, GreenWeight, BlueWeight, 0, 0,
-            0, 0, 0, 1, 0
-        ];
-
-        using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
-        using SKPaint paint = new() { ColorFilter = filter };
-
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(grayscaled, outputFormat));
+        if (auxiliaryKinds.Length == 1
+            && auxiliaryKinds[0] != DataKind.Unknown
+            && auxiliaryKinds[0] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"grayscale() format must be String, got {auxiliaryKinds[0]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-
-        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("grayscale");
-
-        SKBitmap grayscaled = new(original.Width, original.Height);
+        SKBitmap grayscaled = new(input.Width, input.Height);
         using SKCanvas canvas = new(grayscaled);
 
         float[] matrix =
@@ -113,10 +80,26 @@ public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction
         using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
         using SKPaint paint = new() { ColorFilter = filter };
 
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(grayscaled, outputFormat), frame.Target);
+        canvas.DrawBitmap(input, 0, 0, paint);
+        return grayscaled;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 1 || auxiliaryArgs[0].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[0].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "grayscale() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

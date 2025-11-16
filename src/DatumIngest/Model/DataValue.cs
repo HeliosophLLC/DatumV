@@ -2,7 +2,6 @@ using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Functions.Image;
 
 namespace DatumIngest.Model;
 
@@ -847,18 +846,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt8Array,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
             p0: offset, p1: length);
-
-    /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
-    internal static DataValue FromImageHandle(ImageHandle handle) =>
-        throw new InvalidOperationException("Use FromImageHandle(handle, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates a value from an <see cref="ImageHandle"/> using an explicit store.</summary>
-    internal static DataValue FromImageHandle(ImageHandle handle, IValueStore store)
-    {
-        var (p0, p1) = store.StoreObject(handle);
-        return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
-    }
 
     /// <summary>Creates a value from a calendar date.</summary>
     public static DataValue FromDate(DateOnly value) =>
@@ -1993,61 +1980,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
         return store.RetrieveBytes(_p0, _p1);
     }
-
-    /// <summary>
-    /// Returns the <see cref="ImageHandle"/> for this image value.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, SidecarRegistry?)"/> instead.</remarks>
-    internal ImageHandle GetImageHandle()
-    {
-        ThrowIfNullOrWrongKind(DataKind.Image);
-        throw new InvalidOperationException("Use GetImageHandle(store). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>
-    /// Returns an <see cref="ImageHandle"/> for this image value, reconstructing from
-    /// encoded bytes stored in the given <see cref="IValueStore"/> (arena-backed) or
-    /// resolved through <paramref name="registry"/> (sidecar-backed), or — when the
-    /// value was produced by an image transform function — unwrapping the
-    /// <see cref="ImageHandle"/> object from the arena's object side-list. The bitmap
-    /// is not decoded until explicitly requested via <see cref="ImageHandle.GetBitmap"/>;
-    /// encoded bytes are produced lazily via <see cref="ImageHandle.GetEncodedBytes"/>.
-    /// </summary>
-    public ImageHandle GetImageHandle(IValueStore store, SidecarRegistry? registry = null)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Image);
-
-        if (IsInSidecar)
-        {
-            // Sidecar payloads are always raw encoded bytes (JPEG/PNG/etc.) — no
-            // object side-list, no precomputed ImageHandle. Decode directly from the
-            // mmap-backed span.
-            ReadOnlySpan<byte> bytes = ReadSidecarBytes(registry);
-            byte[] copy = bytes.ToArray();
-            return new ImageHandle(copy, ImageEncoder.ResolveFormat(copy, formatOverride: null));
-        }
-
-        // Try the object side-list first (ImageHandle from a previous function in the chain).
-        try
-        {
-            object obj = store.RetrieveObject(_p0, _p1);
-            if (obj is ImageHandle handle) return handle;
-        }
-        catch (InvalidOperationException) { /* not in object list — fall through to bytes */ }
-        catch (NotSupportedException) { /* store doesn't support objects — fall through */ }
-
-        // Fall back to byte[] storage (from deserialization or FromImage).
-        byte[] bytes2 = store.RetrieveBytes(_p0, _p1);
-        return new ImageHandle(bytes2, ImageEncoder.ResolveFormat(bytes2, formatOverride: null));
-    }
-
-    /// <summary>
-    /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
-    /// or <c>null</c> if the payload is raw bytes or no store is available.
-    /// </summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore, SidecarRegistry?)"/> and check the store instead.</remarks>
-    internal ImageHandle? TryGetOwnedImageHandle() => null;
 
     /// <summary>Returns the calendar date payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>

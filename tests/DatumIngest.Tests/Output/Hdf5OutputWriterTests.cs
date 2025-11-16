@@ -233,28 +233,6 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task FinalizeAsync_ImageColumn_WritesBinaryDataset()
-    {
-        string path = Path.Combine(_tempDir, "images.h5");
-        Schema schema = new([new ColumnInfo("img", DataKind.Image, false)]);
-        byte[] fakeImage1 = [0xFF, 0xD8, 0xFF, 0xE0, 0x10, 0x20];
-        byte[] fakeImage2 = [0x89, 0x50, 0x4E, 0x47, 0x30, 0x40];
-
-        await using Hdf5OutputWriter writer = new(path);
-        await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("img", DataValue.FromImage(fakeImage1))));
-        await writer.WriteRowAsync(CreateRow(("img", DataValue.FromImage(fakeImage2))));
-        OutputSummary summary = await writer.FinalizeAsync();
-
-        Assert.Equal(2, summary.RowsWritten);
-
-        using NativeFile file = H5File.OpenRead(path);
-        byte[][] data = file.Dataset("img").Read<byte[][]>();
-        Assert.Equal(fakeImage1, data[0]);
-        Assert.Equal(fakeImage2, data[1]);
-    }
-
-    [Fact]
     public async Task FinalizeAsync_TensorColumn_WritesNDimensionalDataset()
     {
         string path = Path.Combine(_tempDir, "tensors.h5");

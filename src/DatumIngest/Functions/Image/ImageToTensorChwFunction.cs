@@ -11,13 +11,16 @@ using SkiaSharp;
 /// Tensor with shape <c>[3, height, width]</c>. Pixel values are floats in
 /// the 0–255 range. The alpha channel is discarded.
 /// </summary>
-public sealed class ImageToTensorChwFunction : IScalarFunction, ICostAwareFunction
+public sealed class ImageToTensorChwFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     /// <inheritdoc />
     public string Name => "image_to_tensor_chw";
 
     /// <inheritdoc />
     public int QueryUnitCost => 50;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Tensor;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -37,22 +40,22 @@ public sealed class ImageToTensorChwFunction : IScalarFunction, ICostAwareFuncti
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Tensor);
+            throw new ArgumentException(
+                $"image_to_tensor_chw() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("image_to_tensor_chw");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int width = rgba.Width;
         int height = rgba.Height;
@@ -70,18 +73,25 @@ public sealed class ImageToTensorChwFunction : IScalarFunction, ICostAwareFuncti
             {
                 for (int col = 0; col < width; col++)
                 {
-                    int sourceOffset = (row * width + col) * 4; // RGBA stride
+                    int sourceOffset = (row * width + col) * 4;
                     int pixelIndex = row * width + col;
 
-                    pixels[pixelIndex] = source[sourceOffset];                     // R plane
-                    pixels[planeSize + pixelIndex] = source[sourceOffset + 1];     // G plane
-                    pixels[2 * planeSize + pixelIndex] = source[sourceOffset + 2]; // B plane
+                    pixels[pixelIndex] = source[sourceOffset];
+                    pixels[planeSize + pixelIndex] = source[sourceOffset + 1];
+                    pixels[2 * planeSize + pixelIndex] = source[sourceOffset + 2];
                 }
             }
         }
 
-        return DataValue.FromTensor(pixels, [channelCount, height, width]);
+        return DataValue.FromTensor(pixels, [channelCount, height, width], targetStore);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "image_to_tensor_chw() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -91,53 +101,6 @@ public sealed class ImageToTensorChwFunction : IScalarFunction, ICostAwareFuncti
         canvas.DrawBitmap(source, 0, 0);
 
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Tensor);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("image_to_tensor_chw");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int width = rgba.Width;
-        int height = rgba.Height;
-        int planeSize = height * width;
-        const int channelCount = 3;
-
-        float[] pixels = new float[channelCount * planeSize];
-        nint pixelPtr = rgba.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-
-            for (int row = 0; row < height; row++)
-            {
-                for (int col = 0; col < width; col++)
-                {
-                    int sourceOffset = (row * width + col) * 4; // RGBA stride
-                    int pixelIndex = row * width + col;
-
-                    pixels[pixelIndex] = source[sourceOffset];                     // R plane
-                    pixels[planeSize + pixelIndex] = source[sourceOffset + 1];     // G plane
-                    pixels[2 * planeSize + pixelIndex] = source[sourceOffset + 2]; // B plane
-                }
-            }
-        }
-
-        return DataValue.FromTensor(pixels, [channelCount, height, width], frame.Target);
     }
 
     /// <inheritdoc />

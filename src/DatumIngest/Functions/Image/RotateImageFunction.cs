@@ -11,7 +11,7 @@ using SkiaSharp;
 /// For non-90°-multiple rotations the canvas expands to avoid clipping.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "rotate";
@@ -49,68 +49,39 @@ public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (1 or 2))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException("rotate() requires 1 or 2 auxiliary arguments: degrees[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        float degrees = arguments[1].ToFloat();
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"rotate() degrees must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("rotate");
-
-        // Compute expanded canvas size to avoid clipping
-        double radians = degrees * System.Math.PI / 180.0;
-        double sinAngle = System.Math.Abs(System.Math.Sin(radians));
-        double cosAngle = System.Math.Abs(System.Math.Cos(radians));
-
-        int newWidth = (int)System.Math.Round(original.Width * cosAngle + original.Height * sinAngle);
-        int newHeight = (int)System.Math.Round(original.Width * sinAngle + original.Height * cosAngle);
-
-        SKBitmap rotated = new(newWidth, newHeight);
-        using SKCanvas canvas = new(rotated);
-
-        canvas.Clear(SKColors.Transparent);
-        canvas.Translate(newWidth / 2f, newHeight / 2f);
-        canvas.RotateDegrees(degrees);
-        canvas.Translate(-original.Width / 2f, -original.Height / 2f);
-        canvas.DrawBitmap(original, 0, 0);
-
-        return DataValue.FromImageHandle(new ImageHandle(rotated, outputFormat));
+        if (auxiliaryKinds.Length == 2
+            && auxiliaryKinds[1] != DataKind.Unknown
+            && auxiliaryKinds[1] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"rotate() format must be String, got {auxiliaryKinds[1]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
+        float degrees = auxiliaryArgs[0].ToFloat();
 
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float degrees = arguments[1].ToFloat();
-
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("rotate");
-
-        // Compute expanded canvas size to avoid clipping
         double radians = degrees * System.Math.PI / 180.0;
         double sinAngle = System.Math.Abs(System.Math.Sin(radians));
         double cosAngle = System.Math.Abs(System.Math.Cos(radians));
 
-        int newWidth = (int)System.Math.Round(original.Width * cosAngle + original.Height * sinAngle);
-        int newHeight = (int)System.Math.Round(original.Width * sinAngle + original.Height * cosAngle);
+        int newWidth = (int)System.Math.Round(input.Width * cosAngle + input.Height * sinAngle);
+        int newHeight = (int)System.Math.Round(input.Width * sinAngle + input.Height * cosAngle);
 
         SKBitmap rotated = new(newWidth, newHeight);
         using SKCanvas canvas = new(rotated);
@@ -118,11 +89,28 @@ public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
         canvas.Clear(SKColors.Transparent);
         canvas.Translate(newWidth / 2f, newHeight / 2f);
         canvas.RotateDegrees(degrees);
-        canvas.Translate(-original.Width / 2f, -original.Height / 2f);
-        canvas.DrawBitmap(original, 0, 0);
+        canvas.Translate(-input.Width / 2f, -input.Height / 2f);
+        canvas.DrawBitmap(input, 0, 0);
 
-        return DataValue.FromImageHandle(new ImageHandle(rotated, outputFormat), frame.Target);
+        return rotated;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 2 || auxiliaryArgs[1].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[1].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "rotate() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

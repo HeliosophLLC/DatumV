@@ -6,7 +6,7 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Execution;
 
 /// <summary>
-/// Plan-time pass that recognises calls to the <c>image(source, lambda)</c> function
+/// Plan-time pass that recognises calls to the <c>img(source, lambda)</c> function
 /// and rewrites them into <see cref="FusedImagePipelineExpression"/> nodes that the
 /// runtime evaluator decodes/encodes exactly once.
 /// </summary>
@@ -37,11 +37,11 @@ namespace DatumIngest.Execution;
 public static class ImagePipelineLowerer
 {
     /// <summary>The SQL function name this pass triggers on.</summary>
-    private const string ImageFunctionName = "image";
+    private const string ImageFunctionName = "img";
 
     /// <summary>
     /// Recursively rewrites <paramref name="expression"/>, lowering every
-    /// <c>image(source, lambda)</c> call inside it.
+    /// <c>img(source, lambda)</c> call inside it.
     /// </summary>
     /// <param name="expression">The expression to rewrite.</param>
     /// <param name="functions">Function registry — used to resolve names in the lambda body.</param>
@@ -54,10 +54,7 @@ public static class ImagePipelineLowerer
             FunctionCallExpression fn when string.Equals(fn.FunctionName, ImageFunctionName, StringComparison.OrdinalIgnoreCase)
                 => LowerImageCall(fn, functions),
 
-            FunctionCallExpression fn => fn with
-            {
-                Arguments = LowerList(fn.Arguments, functions),
-            },
+            FunctionCallExpression fn => LowerOrAutoFuseFunctionCall(fn, functions),
 
             BinaryExpression b => b with
             {
@@ -120,8 +117,8 @@ public static class ImagePipelineLowerer
             },
 
             // Lambda bodies inside non-image higher-order functions (array_map etc.) may
-            // also contain image() calls — recurse so a chain like
-            //   array_map(images, img => image(img, f => f.blur(3)))
+            // also contain img() calls — recurse so a chain like
+            //   array_map(images, img => img(img, f => f.blur(3)))
             // gets fully lowered.
             LambdaExpression lam => lam with { Body = Lower(lam.Body, functions) },
 
@@ -146,7 +143,119 @@ public static class ImagePipelineLowerer
     }
 
     /// <summary>
-    /// Lowers an <c>image(source, lambda)</c> call. Validates the call shape, walks the
+    /// Handles a non-<c>img()</c> function call. After recursively lowering arguments, if
+    /// the function is itself a pipeline-eligible image function we synthesise (or extend)
+    /// a <see cref="FusedImagePipelineExpression"/>. This is the auto-fusion path: bare
+    /// calls like <c>blur(file, 5)</c> become single-stage pipelines, and chained calls
+    /// like <c>brightness_mean(blur(file, 5))</c> fuse into <c>source + [blur] + sink</c>
+    /// with a single decode/encode at the boundaries.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Auto-fusion eliminates the need for the standalone (non-pipeline) execution path on
+    /// image functions. Once every reachable call site is lowered, image functions never
+    /// dispatch through <see cref="IScalarFunction.Execute(ReadOnlySpan{DataValue})"/>
+    /// at runtime — the pipeline evaluator handles them all uniformly.
+    /// </para>
+    /// </remarks>
+    private static Expression LowerOrAutoFuseFunctionCall(
+        FunctionCallExpression call, FunctionRegistry functions)
+    {
+        IReadOnlyList<Expression> loweredArgs = LowerList(call.Arguments, functions);
+
+        IScalarFunction? func = functions.TryGetScalar(call.FunctionName);
+
+        if (func is IImagePipelineSink sink && loweredArgs.Count >= 1)
+        {
+            return AutoFuseSink(sink, loweredArgs);
+        }
+
+        if (func is IImagePipelineFunction transform && loweredArgs.Count >= 1)
+        {
+            return AutoFuseTransform(transform, loweredArgs);
+        }
+
+        // Not a pipeline function — keep the regular call shape with lowered children.
+        return ReferenceEquals(loweredArgs, call.Arguments)
+            ? call
+            : call with { Arguments = loweredArgs };
+    }
+
+    /// <summary>
+    /// Builds (or extends) a <see cref="FusedImagePipelineExpression"/> for a transform
+    /// whose first argument is the image input. If that argument is already a fused
+    /// pipeline, append this transform to its <see cref="FusedImagePipelineExpression.Transforms"/>;
+    /// otherwise start a fresh pipeline rooted at the argument.
+    /// </summary>
+    private static Expression AutoFuseTransform(
+        IImagePipelineFunction transform, IReadOnlyList<Expression> loweredArgs)
+    {
+        Expression imageArg = loweredArgs[0];
+        IReadOnlyList<Expression> auxArgs = SkipFirst(loweredArgs);
+        ValidateTransformAuxiliary(transform, auxArgs);
+
+        PipelineStage newStage = new(transform, auxArgs);
+
+        if (imageArg is FusedImagePipelineExpression existing)
+        {
+            if (existing.TerminalSink is not null)
+            {
+                throw new ArgumentException(
+                    $"Image pipeline transform '{transform.Name}' cannot be applied to the " +
+                    $"result of a sink ('{existing.TerminalSink.Function.Name}'). Sinks must " +
+                    $"be terminal in a pipeline chain.");
+            }
+
+            List<PipelineStage> stages = new(existing.Transforms.Count + 1);
+            stages.AddRange(existing.Transforms);
+            stages.Add(newStage);
+            return existing with { Transforms = stages };
+        }
+
+        return new FusedImagePipelineExpression(
+            Source: imageArg,
+            Transforms: [newStage],
+            TerminalSink: null,
+            OutputFormatOverride: null,
+            ResultKind: DataKind.Image);
+    }
+
+    /// <summary>
+    /// Builds (or extends) a <see cref="FusedImagePipelineExpression"/> terminating in
+    /// the supplied sink. If the image argument is already a fused pipeline, attach this
+    /// sink as its terminal. Sinks may not be applied on top of other sinks.
+    /// </summary>
+    private static Expression AutoFuseSink(
+        IImagePipelineSink sink, IReadOnlyList<Expression> loweredArgs)
+    {
+        Expression imageArg = loweredArgs[0];
+        IReadOnlyList<Expression> auxArgs = SkipFirst(loweredArgs);
+        ValidateSinkAuxiliary(sink, auxArgs);
+
+        PipelineSink newSink = new(sink, auxArgs);
+
+        if (imageArg is FusedImagePipelineExpression existing)
+        {
+            if (existing.TerminalSink is not null)
+            {
+                throw new ArgumentException(
+                    $"Image pipeline sink '{sink.Name}' cannot be applied to the result of " +
+                    $"another sink ('{existing.TerminalSink.Function.Name}').");
+            }
+
+            return existing with { TerminalSink = newSink, ResultKind = sink.ResultKind };
+        }
+
+        return new FusedImagePipelineExpression(
+            Source: imageArg,
+            Transforms: [],
+            TerminalSink: newSink,
+            OutputFormatOverride: null,
+            ResultKind: sink.ResultKind);
+    }
+
+    /// <summary>
+    /// Lowers an <c>img(source, lambda)</c> call. Validates the call shape, walks the
     /// lambda body to collect transforms and an optional terminal sink, and emits a
     /// <see cref="FusedImagePipelineExpression"/> — except for the identity case
     /// <c>f =&gt; f</c>, which short-circuits to the source.
@@ -156,24 +265,24 @@ public static class ImagePipelineLowerer
         if (call.Arguments.Count != 2)
         {
             throw new ArgumentException(
-                $"image() expects exactly 2 arguments (source, lambda); got {call.Arguments.Count}.");
+                $"img() expects exactly 2 arguments (source, lambda); got {call.Arguments.Count}.");
         }
 
-        // The lambda may itself contain nested image() calls; lower the source first too
-        // so any inner image() pipelines are already FusedImagePipelineExpressions when
+        // The lambda may itself contain nested img() calls; lower the source first too
+        // so any inner img() pipelines are already FusedImagePipelineExpressions when
         // we walk the body.
         Expression source = Lower(call.Arguments[0], functions);
 
         if (call.Arguments[1] is not LambdaExpression lambda)
         {
             throw new ArgumentException(
-                "image() second argument must be a lambda (e.g. f => f.blur(5)).");
+                "img() second argument must be a lambda (e.g. f => f.blur(5)).");
         }
 
         if (lambda.Parameters.Count != 1)
         {
             throw new ArgumentException(
-                $"image() lambda must take exactly one parameter; got {lambda.Parameters.Count}.");
+                $"img() lambda must take exactly one parameter; got {lambda.Parameters.Count}.");
         }
 
         string parameterName = lambda.Parameters[0];
@@ -194,7 +303,7 @@ public static class ImagePipelineLowerer
                 if (outer.Arguments.Count == 0)
                 {
                     throw new ArgumentException(
-                        $"image() pipeline sink '{outer.FunctionName}' must take the image as its first argument.");
+                        $"img() pipeline sink '{outer.FunctionName}' must take the image as its first argument.");
                 }
 
                 IReadOnlyList<Expression> auxiliary = LowerList(SkipFirst(outer.Arguments), functions);
@@ -211,7 +320,7 @@ public static class ImagePipelineLowerer
             if (func is not IImagePipelineFunction transform)
             {
                 throw new ArgumentException(
-                    $"image() pipeline body may only contain pipeline-compatible image " +
+                    $"img() pipeline body may only contain pipeline-compatible image " +
                     $"functions; '{stageCall.FunctionName}' is not registered as an " +
                     $"IImagePipelineFunction.");
             }
@@ -219,7 +328,7 @@ public static class ImagePipelineLowerer
             if (stageCall.Arguments.Count == 0)
             {
                 throw new ArgumentException(
-                    $"image() pipeline transform '{stageCall.FunctionName}' must take the image as its first argument.");
+                    $"img() pipeline transform '{stageCall.FunctionName}' must take the image as its first argument.");
             }
 
             IReadOnlyList<Expression> auxiliary = LowerList(SkipFirst(stageCall.Arguments), functions);
@@ -237,7 +346,7 @@ public static class ImagePipelineLowerer
             || !string.Equals(paramRef.ColumnName, parameterName, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                $"image() pipeline body must terminate at the lambda parameter '{parameterName}'; " +
+                $"img() pipeline body must terminate at the lambda parameter '{parameterName}'; " +
                 $"got an expression of kind {cursor.GetType().Name}. Pipeline transforms must " +
                 $"thread '{parameterName}' through their first argument.");
         }
@@ -286,7 +395,7 @@ public static class ImagePipelineLowerer
         }
         catch (ArgumentException ex)
         {
-            throw new ArgumentException($"image() transform '{transform.Name}' rejected its arguments: {ex.Message}", ex);
+            throw new ArgumentException($"img() transform '{transform.Name}' rejected its arguments: {ex.Message}", ex);
         }
     }
 
@@ -301,7 +410,7 @@ public static class ImagePipelineLowerer
         }
         catch (ArgumentException ex)
         {
-            throw new ArgumentException($"image() sink '{sink.Name}' rejected its arguments: {ex.Message}", ex);
+            throw new ArgumentException($"img() sink '{sink.Name}' rejected its arguments: {ex.Message}", ex);
         }
     }
 

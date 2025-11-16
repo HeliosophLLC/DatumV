@@ -15,7 +15,7 @@ using SkiaSharp;
 ///     — explicit corner offsets (normalized 0–1 coordinates for each destination corner).</item>
 /// </list>
 /// </summary>
-public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunction
+public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "perspective_warp";
@@ -86,37 +86,81 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        // Pipeline form drops the implicit image arg. Auxiliary shapes:
+        //   [intensity]                                                    -> random warp
+        //   [intensity, format]                                            -> random warp with format
+        //   [tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y]               -> explicit corners
+        //   [tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y, format]       -> explicit corners with format
+        if (auxiliaryKinds.Length is not (1 or 2 or 8 or 9))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "perspective_warp() requires 1-2 auxiliary arguments (intensity[, format]) " +
+                "or 8-9 auxiliary arguments (tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y[, format]).");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap original = inputHandle.GetBitmap("perspective_warp");
+        if (auxiliaryKinds.Length is 1 or 2)
+        {
+            if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+            {
+                throw new ArgumentException(
+                    $"perspective_warp() intensity must be numeric, got {auxiliaryKinds[0]}.");
+            }
 
-        float width = original.Width;
-        float height = original.Height;
+            if (auxiliaryKinds.Length == 2
+                && auxiliaryKinds[1] != DataKind.Unknown
+                && auxiliaryKinds[1] != DataKind.String)
+            {
+                throw new ArgumentException(
+                    $"perspective_warp() format must be String, got {auxiliaryKinds[1]}.");
+            }
+            return;
+        }
+
+        // 8 or 9 args: corner coordinates at positions 0..7
+        string[] cornerNames =
+        [
+            "tl_x", "tl_y", "tr_x", "tr_y", "bl_x", "bl_y", "br_x", "br_y"
+        ];
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (auxiliaryKinds[i] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[i]))
+            {
+                throw new ArgumentException(
+                    $"perspective_warp() {cornerNames[i]} must be numeric, got {auxiliaryKinds[i]}.");
+            }
+        }
+
+        if (auxiliaryKinds.Length == 9
+            && auxiliaryKinds[8] != DataKind.Unknown
+            && auxiliaryKinds[8] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"perspective_warp() format must be String, got {auxiliaryKinds[8]}.");
+        }
+    }
+
+    /// <inheritdoc />
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        float width = input.Width;
+        float height = input.Height;
 
         SKPoint[] sourceCorners =
         [
-            new(0, 0),             // top-left
-            new(width, 0),         // top-right
-            new(0, height),        // bottom-left
-            new(width, height)     // bottom-right
+            new(0, 0),
+            new(width, 0),
+            new(0, height),
+            new(width, height)
         ];
 
         SKPoint[] destinationCorners;
-        string? formatOverride;
 
-        if (arguments.Length is 2 or 3)
+        if (auxiliaryArgs.Length is 1 or 2)
         {
-            // Random perspective warp with intensity
-            float intensity = arguments[1].ToFloat();
-            formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
+            float intensity = auxiliaryArgs[0].ToFloat();
 
             Random random = new();
             destinationCorners =
@@ -133,16 +177,14 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         }
         else
         {
-            // Explicit corner coordinates (normalized 0–1)
-            float topLeftX = arguments[1].ToFloat() * width;
-            float topLeftY = arguments[2].ToFloat() * height;
-            float topRightX = arguments[3].ToFloat() * width;
-            float topRightY = arguments[4].ToFloat() * height;
-            float bottomLeftX = arguments[5].ToFloat() * width;
-            float bottomLeftY = arguments[6].ToFloat() * height;
-            float bottomRightX = arguments[7].ToFloat() * width;
-            float bottomRightY = arguments[8].ToFloat() * height;
-            formatOverride = arguments.Length == 10 ? arguments[9].AsString() : null;
+            float topLeftX = auxiliaryArgs[0].ToFloat() * width;
+            float topLeftY = auxiliaryArgs[1].ToFloat() * height;
+            float topRightX = auxiliaryArgs[2].ToFloat() * width;
+            float topRightY = auxiliaryArgs[3].ToFloat() * height;
+            float bottomLeftX = auxiliaryArgs[4].ToFloat() * width;
+            float bottomLeftY = auxiliaryArgs[5].ToFloat() * height;
+            float bottomRightX = auxiliaryArgs[6].ToFloat() * width;
+            float bottomRightY = auxiliaryArgs[7].ToFloat() * height;
 
             destinationCorners =
             [
@@ -153,18 +195,40 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
             ];
         }
 
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        // Compute perspective matrix from source → destination corner mapping
         SKMatrix perspectiveMatrix = ComputePerspectiveMatrix(sourceCorners, destinationCorners);
 
-        SKBitmap transformed = new(original.Width, original.Height);
+        SKBitmap transformed = new(input.Width, input.Height);
         using SKCanvas canvas = new(transformed);
         canvas.SetMatrix(perspectiveMatrix);
-        canvas.DrawBitmap(original, 0, 0);
+        canvas.DrawBitmap(input, 0, 0);
 
-        return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat));
+        return transformed;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        // Format is the trailing String arg at position 1 (intensity form) or 8 (explicit form).
+        int formatIndex = auxiliaryArgs.Length switch
+        {
+            2 => 1,
+            9 => 8,
+            _ => -1,
+        };
+
+        if (formatIndex < 0 || auxiliaryArgs[formatIndex].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[formatIndex].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "perspective_warp() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <summary>
     /// Computes a perspective transformation matrix that maps the four source corners
@@ -286,87 +350,6 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         }
 
         return result;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap original = inputHandle.GetBitmap("perspective_warp");
-
-        float width = original.Width;
-        float height = original.Height;
-
-        SKPoint[] sourceCorners =
-        [
-            new(0, 0),             // top-left
-            new(width, 0),         // top-right
-            new(0, height),        // bottom-left
-            new(width, height)     // bottom-right
-        ];
-
-        SKPoint[] destinationCorners;
-        string? formatOverride;
-
-        if (arguments.Length is 2 or 3)
-        {
-            // Random perspective warp with intensity
-            float intensity = arguments[1].ToFloat();
-            formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
-
-            Random random = new();
-            destinationCorners =
-            [
-                new((float)(random.NextDouble() * intensity * width),
-                    (float)(random.NextDouble() * intensity * height)),
-                new(width - (float)(random.NextDouble() * intensity * width),
-                    (float)(random.NextDouble() * intensity * height)),
-                new((float)(random.NextDouble() * intensity * width),
-                    height - (float)(random.NextDouble() * intensity * height)),
-                new(width - (float)(random.NextDouble() * intensity * width),
-                    height - (float)(random.NextDouble() * intensity * height))
-            ];
-        }
-        else
-        {
-            // Explicit corner coordinates (normalized 0–1)
-            float topLeftX = arguments[1].ToFloat() * width;
-            float topLeftY = arguments[2].ToFloat() * height;
-            float topRightX = arguments[3].ToFloat() * width;
-            float topRightY = arguments[4].ToFloat() * height;
-            float bottomLeftX = arguments[5].ToFloat() * width;
-            float bottomLeftY = arguments[6].ToFloat() * height;
-            float bottomRightX = arguments[7].ToFloat() * width;
-            float bottomRightY = arguments[8].ToFloat() * height;
-            formatOverride = arguments.Length == 10 ? arguments[9].AsString(frame.Source) : null;
-
-            destinationCorners =
-            [
-                new(topLeftX, topLeftY),
-                new(topRightX, topRightY),
-                new(bottomLeftX, bottomLeftY),
-                new(bottomRightX, bottomRightY)
-            ];
-        }
-
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        // Compute perspective matrix from source → destination corner mapping
-        SKMatrix perspectiveMatrix = ComputePerspectiveMatrix(sourceCorners, destinationCorners);
-
-        SKBitmap transformed = new(original.Width, original.Height);
-        using SKCanvas canvas = new(transformed);
-        canvas.SetMatrix(perspectiveMatrix);
-        canvas.DrawBitmap(original, 0, 0);
-
-        return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />

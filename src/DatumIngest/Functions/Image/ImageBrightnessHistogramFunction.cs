@@ -10,7 +10,7 @@ using SkiaSharp;
 /// <c>image_brightness_histogram(img)</c> returns a 256-element vector where each element
 /// is the count of pixels whose luminance falls into that bin (0–255).
 /// </summary>
-public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwareFunction
+public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     // ITU-R BT.601 luminance weights (same as GrayscaleImageFunction)
     private const float RedWeight = 0.2126f;
@@ -24,6 +24,9 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
 
     /// <inheritdoc />
     public int QueryUnitCost => 10;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Vector;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -43,22 +46,22 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Vector);
+            throw new ArgumentException(
+                $"image_brightness_histogram() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_histogram");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int totalPixels = rgba.Width * rgba.Height;
         nint pixelPointer = rgba.GetPixels();
@@ -76,7 +79,6 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
                                 + pixels[offset + 1] * GreenWeight
                                 + pixels[offset + 2] * BlueWeight;
 
-                // Clamp to [0, 255] and quantize to bin index
                 int bin = (int)luminance;
                 if (bin < 0) bin = 0;
                 else if (bin >= BinCount) bin = BinCount - 1;
@@ -85,8 +87,15 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
             }
         }
 
-        return DataValue.FromVector(histogram);
+        return DataValue.FromVector(histogram, targetStore);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "image_brightness_histogram() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -94,52 +103,6 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Vector);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_histogram");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int totalPixels = rgba.Width * rgba.Height;
-        nint pixelPointer = rgba.GetPixels();
-
-        float[] histogram = new float[BinCount];
-
-        unsafe
-        {
-            byte* pixels = (byte*)pixelPointer;
-
-            for (int i = 0; i < totalPixels; i++)
-            {
-                int offset = i * 4;
-                float luminance = pixels[offset] * RedWeight
-                                + pixels[offset + 1] * GreenWeight
-                                + pixels[offset + 2] * BlueWeight;
-
-                // Clamp to [0, 255] and quantize to bin index
-                int bin = (int)luminance;
-                if (bin < 0) bin = 0;
-                else if (bin >= BinCount) bin = BinCount - 1;
-
-                histogram[bin]++;
-            }
-        }
-
-        return DataValue.FromVector(histogram, frame.Target);
     }
 
     /// <inheritdoc />

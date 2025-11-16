@@ -7,7 +7,7 @@ using DatumIngest.Model;
 /// Loads encoded image bytes (UInt8Array) as an Image value for use with image transform
 /// and analysis functions. This is the entry point for the fused image pipeline: the raw
 /// bytes are wrapped as <see cref="DataKind.Image"/> without decoding, so downstream
-/// transforms benefit from lazy decode via <see cref="ImageHandle"/>.
+/// transforms see them as encoded image bytes.
 /// <c>load_image(bytes)</c> accepts UInt8Array (e.g. <c>file_bytes</c> from a ZIP source).
 /// </summary>
 public sealed class LoadImageFunction : IScalarFunction

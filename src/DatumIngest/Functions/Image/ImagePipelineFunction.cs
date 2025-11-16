@@ -5,13 +5,21 @@ namespace DatumIngest.Functions.Image;
 
 /// <summary>
 /// SQL entry point for fused image pipelines:
-/// <c>image(source, f =&gt; f.transform_a().transform_b().reduce())</c>.
+/// <c>img(source, f =&gt; f.transform_a().transform_b().reduce())</c>.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The function is named <c>img</c> rather than <c>image</c> because <c>IMAGE</c> is
+/// already a reserved type keyword (for <c>CAST(x AS IMAGE)</c>). Renaming the type
+/// keyword or teaching the tokenizer to disambiguate by lookahead is feasible but
+/// out of scope here.
+/// </para>
+/// </remarks>
 /// <remarks>
 /// <para>
 /// This function exists in the registry so the parser, type resolver, and language-server
 /// completion all see it as a real function — but it has no runtime body. The planner
-/// recognises calls to <c>image()</c> and rewrites them into
+/// recognises calls to <c>img()</c> and rewrites them into
 /// <c>FusedImagePipelineExpression</c> nodes, walking the
 /// lambda body to collect transforms and an optional terminal sink. Each function inside
 /// the lambda must resolve to an <see cref="IImagePipelineFunction"/> (transform) or
@@ -30,7 +38,7 @@ public sealed class ImagePipelineFunction : IHigherOrderFunction
     private static readonly HashSet<int> LambdaIndices = [1];
 
     /// <inheritdoc />
-    public string Name => "image";
+    public string Name => "img";
 
     /// <inheritdoc />
     public IReadOnlySet<int> GetLambdaParameterIndices(int argumentCount) => LambdaIndices;
@@ -41,7 +49,7 @@ public sealed class ImagePipelineFunction : IHigherOrderFunction
         if (argumentKinds.Length != 2)
         {
             throw new ArgumentException(
-                "image() requires exactly 2 arguments: a byte source (Image or UInt8Array) " +
+                "img() requires exactly 2 arguments: a byte source (Image or UInt8Array) " +
                 "and a lambda body (e.g. image(file, f => f.blur(5))).");
         }
 
@@ -50,7 +58,7 @@ public sealed class ImagePipelineFunction : IHigherOrderFunction
         if (argumentKinds[0] is not (DataKind.Image or DataKind.UInt8Array))
         {
             throw new ArgumentException(
-                $"image() first argument must be Image or UInt8Array (the byte source), got {argumentKinds[0]}.");
+                $"img() first argument must be Image or UInt8Array (the byte source), got {argumentKinds[0]}.");
         }
 
         // Return type is determined by the lambda body during planner lowering — could be
@@ -63,7 +71,7 @@ public sealed class ImagePipelineFunction : IHigherOrderFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
         throw new InvalidOperationException(
-            "image() must be lowered to a FusedImagePipelineExpression at plan time and " +
+            "img() must be lowered to a FusedImagePipelineExpression at plan time and " +
             "should never reach the runtime evaluator. This indicates the planner pass did " +
             "not run, or ran but failed to recognise the call.");
 
@@ -73,7 +81,7 @@ public sealed class ImagePipelineFunction : IHigherOrderFunction
         IReadOnlyDictionary<int, LambdaExpression> lambdaArguments,
         LambdaEvaluator lambdaEvaluator) =>
         throw new InvalidOperationException(
-            "image() must be lowered to a FusedImagePipelineExpression at plan time and " +
+            "img() must be lowered to a FusedImagePipelineExpression at plan time and " +
             "should never reach the runtime evaluator. This indicates the planner pass did " +
             "not run, or ran but failed to recognise the call.");
 }

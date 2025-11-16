@@ -13,7 +13,7 @@ using SkiaSharp;
 /// Type <c>'salt_pepper'</c>: randomly sets <c>val</c> ratio of pixels to black or white.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "noise";
@@ -70,43 +70,70 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        // Pipeline form drops the implicit image arg. Auxiliary shapes:
+        //   [value]                          -> defaults to gaussian
+        //   [type, value]                    -> explicit type
+        //   [type, value, format]            -> explicit type with format
+        if (auxiliaryKinds.Length is not (1 or 2 or 3))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "noise() requires 1-3 auxiliary arguments: value or type, value[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
+        if (auxiliaryKinds.Length == 1)
+        {
+            if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+            {
+                throw new ArgumentException(
+                    $"noise() value must be numeric, got {auxiliaryKinds[0]}.");
+            }
+            return;
+        }
 
-        // Two-argument form: noise(image, value) — defaults to gaussian.
+        if (auxiliaryKinds[0] != DataKind.Unknown && auxiliaryKinds[0] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"noise() type must be String, got {auxiliaryKinds[0]}.");
+        }
+
+        if (auxiliaryKinds[1] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[1]))
+        {
+            throw new ArgumentException(
+                $"noise() value must be numeric, got {auxiliaryKinds[1]}.");
+        }
+
+        if (auxiliaryKinds.Length == 3
+            && auxiliaryKinds[2] != DataKind.Unknown
+            && auxiliaryKinds[2] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"noise() format must be String, got {auxiliaryKinds[2]}.");
+        }
+    }
+
+    /// <inheritdoc />
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
         string noiseType;
         float value;
-        string? formatOverride;
 
-        if (arguments.Length == 2)
+        if (auxiliaryArgs.Length == 1)
         {
             noiseType = "GAUSSIAN";
-            value = arguments[1].ToFloat();
-            formatOverride = null;
+            value = auxiliaryArgs[0].ToFloat();
         }
         else
         {
-            noiseType = arguments[1].AsString().ToUpperInvariant();
-            value = arguments[2].ToFloat();
-            formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
+            noiseType = auxiliaryArgs[0].AsString().ToUpperInvariant();
+            value = auxiliaryArgs[1].ToFloat();
         }
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        SKBitmap original = inputHandle.GetBitmap("noise");
-
-        // Work in RGBA8888 for consistent pixel access — always copy
-        // because noise modifies pixels in place and we must not mutate the input handle's bitmap.
-        SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
-            ? original.Copy()
-            : original.Copy(SKColorType.Rgba8888);
+        // Always copy because noise modifies pixels in place; we must not mutate the caller's bitmap.
+        SKBitmap rgba = input.ColorType == SKColorType.Rgba8888
+            ? input.Copy()
+            : input.Copy(SKColorType.Rgba8888);
 
         nint pixelPtr = rgba.GetPixels();
         int totalPixels = rgba.Width * rgba.Height;
@@ -127,8 +154,26 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
                     $"noise() unknown noise type '{noiseType}'. Supported: gaussian, salt_pepper.");
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat));
+        return rgba;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        // Only the 3-aux form (type, value, format) carries a format string.
+        if (auxiliaryArgs.Length < 3 || auxiliaryArgs[2].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[2].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "noise() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static void ApplyGaussianNoise(nint pixelPtr, int totalPixels, float standardDeviation)
     {
@@ -196,67 +241,6 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         return (byte)value;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-
-        // Two-argument form: noise(image, value) — defaults to gaussian.
-        string noiseType;
-        float value;
-        string? formatOverride;
-
-        if (arguments.Length == 2)
-        {
-            noiseType = "GAUSSIAN";
-            value = arguments[1].ToFloat();
-            formatOverride = null;
-        }
-        else
-        {
-            noiseType = arguments[1].AsString(frame.Source).ToUpperInvariant();
-            value = arguments[2].ToFloat();
-            formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
-        }
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("noise");
-
-        // Work in RGBA8888 for consistent pixel access — always copy
-        // because noise modifies pixels in place and we must not mutate the input handle's bitmap.
-        SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
-            ? original.Copy()
-            : original.Copy(SKColorType.Rgba8888);
-
-        nint pixelPtr = rgba.GetPixels();
-        int totalPixels = rgba.Width * rgba.Height;
-
-        switch (noiseType)
-        {
-            case "GAUSSIAN":
-                ApplyGaussianNoise(pixelPtr, totalPixels, value);
-                break;
-
-            case "SALT_PEPPER":
-                ApplySaltAndPepperNoise(pixelPtr, totalPixels, value);
-                break;
-
-            default:
-                rgba.Dispose();
-                throw new ArgumentException(
-                    $"noise() unknown noise type '{noiseType}'. Supported: gaussian, salt_pepper.");
-        }
-
-        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />

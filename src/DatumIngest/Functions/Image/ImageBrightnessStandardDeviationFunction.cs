@@ -9,7 +9,7 @@ using SkiaSharp;
 /// Computes the standard deviation of brightness (luminance) across all pixels
 /// using BT.601 weights. <c>image_brightness_std(img)</c> returns a scalar.
 /// </summary>
-public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, ICostAwareFunction
+public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     // ITU-R BT.601 luminance weights (same as GrayscaleImageFunction)
     private const float RedWeight = 0.2126f;
@@ -21,6 +21,9 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
 
     /// <inheritdoc />
     public int QueryUnitCost => 10;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Float32;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -40,27 +43,26 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Float32);
+            throw new ArgumentException(
+                $"image_brightness_std() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_std");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int totalPixels = rgba.Width * rgba.Height;
         nint pixelPointer = rgba.GetPixels();
 
-        // Two-pass: compute mean, then variance
         double sum = 0.0;
 
         unsafe
@@ -94,6 +96,13 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
             return DataValue.FromFloat32(standardDeviation);
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "image_brightness_std() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -101,62 +110,6 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_std");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int totalPixels = rgba.Width * rgba.Height;
-        nint pixelPointer = rgba.GetPixels();
-
-        // Two-pass: compute mean, then variance
-        double sum = 0.0;
-
-        unsafe
-        {
-            byte* pixels = (byte*)pixelPointer;
-
-            for (int i = 0; i < totalPixels; i++)
-            {
-                int offset = i * 4;
-                float luminance = pixels[offset] * RedWeight
-                                + pixels[offset + 1] * GreenWeight
-                                + pixels[offset + 2] * BlueWeight;
-                sum += luminance;
-            }
-
-            double mean = sum / totalPixels;
-            double sumSquaredDifferences = 0.0;
-
-            for (int i = 0; i < totalPixels; i++)
-            {
-                int offset = i * 4;
-                float luminance = pixels[offset] * RedWeight
-                                + pixels[offset + 1] * GreenWeight
-                                + pixels[offset + 2] * BlueWeight;
-                double difference = luminance - mean;
-                sumSquaredDifferences += difference * difference;
-            }
-
-            double variance = sumSquaredDifferences / totalPixels;
-            float standardDeviation = (float)System.Math.Sqrt(variance);
-            return DataValue.FromFloat32(standardDeviation);
-        }
     }
 
     /// <inheritdoc />

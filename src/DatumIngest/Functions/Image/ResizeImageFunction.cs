@@ -11,7 +11,7 @@ using SkiaSharp;
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// When omitted, the original format is preserved.
 /// </summary>
-public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "resize";
@@ -56,58 +56,65 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (2 or 3))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "resize() requires 2 or 3 auxiliary arguments: width, height[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        int targetWidth = arguments[1].ToInt32();
-        int targetHeight = arguments[2].ToInt32();
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"resize() width must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+        if (auxiliaryKinds[1] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[1]))
+        {
+            throw new ArgumentException(
+                $"resize() height must be numeric, got {auxiliaryKinds[1]}.");
+        }
 
-        SKBitmap original = inputHandle.GetBitmap("resize");
-
-        SKBitmap resized = original.Resize(
-            new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"resize() failed to resize the image to {targetWidth}×{targetHeight}.");
-
-        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat));
+        if (auxiliaryKinds.Length == 3
+            && auxiliaryKinds[2] != DataKind.Unknown
+            && auxiliaryKinds[2] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"resize() format must be String, got {auxiliaryKinds[2]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
+        int targetWidth = auxiliaryArgs[0].ToInt32();
+        int targetHeight = auxiliaryArgs[1].ToInt32();
 
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        int targetWidth = arguments[1].ToInt32();
-        int targetHeight = arguments[2].ToInt32();
-
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("resize");
-
-        SKBitmap resized = original.Resize(
+        SKBitmap resized = input.Resize(
             new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
             ?? throw new InvalidOperationException(
                 $"resize() failed to resize the image to {targetWidth}×{targetHeight}.");
 
-        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat), frame.Target);
+        return resized;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 3 || auxiliaryArgs[2].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[2].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "resize() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

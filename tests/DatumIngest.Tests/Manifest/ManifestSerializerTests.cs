@@ -41,21 +41,6 @@ public sealed class ManifestSerializerTests : ServiceTestBase
     }
 
     [Fact]
-    public void Serialize_ImageManifest_ContainsDimensionFields()
-    {
-        QueryResultsManifest manifest = BuildImageManifest();
-        string json = ManifestSerializer.Serialize("test", manifest);
-
-        Assert.Contains("\"type\": \"image\"", json);
-        Assert.Contains("\"minWidth\":", json);
-        Assert.Contains("\"maxWidth\":", json);
-        Assert.Contains("\"channelCounts\":", json);
-        Assert.Contains("\"fileSizeStats\":", json);
-        Assert.Contains("\"megapixelStats\":", json);
-        Assert.Contains("\"aspectRatioStats\":", json);
-    }
-
-    [Fact]
     public void Serialize_VectorManifest_ContainsElementStats()
     {
         QueryResultsManifest manifest = BuildVectorManifest();

@@ -10,13 +10,16 @@ using SkiaSharp;
 /// <c>image_to_bytes(img)</c> accepts Image or UInt8Array and returns a flat
 /// UInt8Array of length <c>height × width × 4</c> in RGBA byte order.
 /// </summary>
-public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction
+public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     /// <inheritdoc />
     public string Name => "image_to_bytes";
 
     /// <inheritdoc />
     public int QueryUnitCost => 50;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.UInt8Array;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -36,22 +39,22 @@ public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.UInt8Array);
+            throw new ArgumentException(
+                $"image_to_bytes() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("image_to_bytes");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int byteCount = rgba.Height * rgba.Width * 4;
         byte[] pixels = new byte[byteCount];
@@ -67,43 +70,15 @@ public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction
             }
         }
 
-        return DataValue.FromUInt8Array(pixels);
+        return DataValue.FromUInt8Array(pixels, targetStore);
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.UInt8Array);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("image_to_bytes");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int byteCount = rgba.Height * rgba.Width * 4;
-        byte[] pixels = new byte[byteCount];
-        nint pixelPtr = rgba.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-
-            for (int i = 0; i < byteCount; i++)
-            {
-                pixels[i] = source[i];
-            }
-        }
-
-        return DataValue.FromUInt8Array(pixels, frame.Target);
-    }
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "image_to_bytes() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {

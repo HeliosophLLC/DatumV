@@ -448,27 +448,13 @@ internal sealed class InteractiveShell
     }
 
     /// <summary>
-    /// Returns encoded image bytes regardless of how the value was stored — sidecar-
-    /// backed, raw bytes in the arena, or an <see cref="DatumIngest.Functions.Image.ImageHandle"/>
-    /// object placed in the arena's object side-list by an image transform function.
-    /// <see cref="DataValue.AsByteSpan"/> only covers the first two; an image produced
-    /// by <c>blur(...)</c>, <c>resize(...)</c>, etc. lives as an ImageHandle and has to be
-    /// asked to encode itself.
+    /// Returns encoded image bytes for an Image or UInt8Array value resolved through
+    /// arena/sidecar storage. Image payloads are always encoded bytes now (the legacy
+    /// ImageHandle-in-object-slot path was removed when image functions moved to fused
+    /// pipelines), so a single byte-span fetch covers every case.
     /// </summary>
     private static byte[] ResolveImageBytes(DataValue value, Arena arena, SidecarRegistry registry)
     {
-        if (value.Kind == DataKind.Image)
-        {
-            // Don't dispose the handle: when the value was produced by an image transform
-            // function the handle lives in the arena's object side-list and is owned by
-            // the row, not by us. Disposing would trash the SKBitmap the arena still
-            // references. The bytes-from-arena/sidecar path creates a transient handle
-            // wrapping pre-encoded bytes; GetEncodedBytes returns them without decoding,
-            // so there's no SKBitmap to leak even when we don't dispose.
-            DatumIngest.Functions.Image.ImageHandle handle = value.GetImageHandle(arena, registry);
-            return handle.GetEncodedBytes();
-        }
-
         return value.AsByteSpan(arena, registry).ToArray();
     }
 

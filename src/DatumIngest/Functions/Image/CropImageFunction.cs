@@ -11,7 +11,7 @@ using SkiaSharp;
 /// Coordinates are in pixels with the origin at the top-left corner.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "crop";
@@ -68,72 +68,70 @@ public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (4 or 5))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "crop() requires 4 or 5 auxiliary arguments: x, y, width, height[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        int x = arguments[1].ToInt32();
-        int y = arguments[2].ToInt32();
-        int cropWidth = arguments[3].ToInt32();
-        int cropHeight = arguments[4].ToInt32();
-
-        string? formatOverride = arguments.Length == 6 ? arguments[5].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("crop");
-        SKRectI cropRect = new(x, y, x + cropWidth, y + cropHeight);
-
-        SKBitmap cropped = new();
-
-        if (!original.ExtractSubset(cropped, cropRect))
+        string[] names = ["x", "y", "width", "height"];
+        for (int i = 0; i < 4; i++)
         {
-            cropped.Dispose();
-            throw new InvalidOperationException(
-                $"crop() failed to extract region ({x}, {y}, {cropWidth}×{cropHeight}).");
+            if (auxiliaryKinds[i] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[i]))
+            {
+                throw new ArgumentException(
+                    $"crop() {names[i]} must be numeric, got {auxiliaryKinds[i]}.");
+            }
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat));
+        if (auxiliaryKinds.Length == 5
+            && auxiliaryKinds[4] != DataKind.Unknown
+            && auxiliaryKinds[4] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"crop() format must be String, got {auxiliaryKinds[4]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
+        int x = auxiliaryArgs[0].ToInt32();
+        int y = auxiliaryArgs[1].ToInt32();
+        int cropWidth = auxiliaryArgs[2].ToInt32();
+        int cropHeight = auxiliaryArgs[3].ToInt32();
 
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        int x = arguments[1].ToInt32();
-        int y = arguments[2].ToInt32();
-        int cropWidth = arguments[3].ToInt32();
-        int cropHeight = arguments[4].ToInt32();
-
-        string? formatOverride = arguments.Length == 6 ? arguments[5].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("crop");
         SKRectI cropRect = new(x, y, x + cropWidth, y + cropHeight);
-
         SKBitmap cropped = new();
 
-        if (!original.ExtractSubset(cropped, cropRect))
+        if (!input.ExtractSubset(cropped, cropRect))
         {
             cropped.Dispose();
             throw new InvalidOperationException(
                 $"crop() failed to extract region ({x}, {y}, {cropWidth}×{cropHeight}).");
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat), frame.Target);
+        return cropped;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 5 || auxiliaryArgs[4].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[4].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "crop() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

@@ -17,15 +17,6 @@ public sealed class ImageCostAwareTests : ServiceTestBase
 {
     // ───────────────── Helpers ─────────────────
 
-    /// <summary>Creates an <see cref="ImageHandle"/>-backed <see cref="DataValue"/> with a decoded bitmap.</summary>
-    private static DataValue MakeImageValue(int width, int height)
-    {
-        SKBitmap bitmap = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        bitmap.Erase(SKColors.Red);
-        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
-        return DataValue.FromImageHandle(handle);
-    }
-
     /// <summary>Creates a PNG-encoded byte array for a solid red image.</summary>
     private static byte[] MakeTestPng(int width, int height)
     {
@@ -103,6 +94,13 @@ public sealed class ImageCostAwareTests : ServiceTestBase
 
     // ───────────────── ImageCostHelper formula ─────────────────
 
+    private static (DataValue value, Arena arena) MakeArenaImage(int width, int height)
+    {
+        Arena arena = new();
+        DataValue value = DataValue.FromImage(MakeTestPng(width, height), arena);
+        return (value, arena);
+    }
+
     /// <summary>
     /// A small image (below 100,000 pixels) incurs zero supplemental cost.
     /// </summary>
@@ -110,10 +108,11 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     public void ComputeSupplementalCost_SmallImage_ReturnsZero()
     {
         // 224 × 224 = 50,176 pixels < 100,000 → supplemental = 0
-        DataValue image = MakeImageValue(224, 224);
+        (DataValue image, Arena arena) = MakeArenaImage(224, 224);
+        InvocationFrame frame = InvocationFrame.Symmetric(arena);
         ReadOnlySpan<DataValue> arguments = [image];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(0, cost);
     }
@@ -125,10 +124,11 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     public void ComputeSupplementalCost_FullHdImage_ReturnsExpectedCost()
     {
         // 1920 × 1080 = 2,073,600 / 100,000 = 20 (integer division)
-        DataValue image = MakeImageValue(1920, 1080);
+        (DataValue image, Arena arena) = MakeArenaImage(1920, 1080);
+        InvocationFrame frame = InvocationFrame.Symmetric(arena);
         ReadOnlySpan<DataValue> arguments = [image];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(20, cost);
     }
@@ -140,10 +140,11 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     public void ComputeSupplementalCost_4KImage_ReturnsExpectedCost()
     {
         // 3840 × 2160 = 8,294,400 / 100,000 = 82
-        DataValue image = MakeImageValue(3840, 2160);
+        (DataValue image, Arena arena) = MakeArenaImage(3840, 2160);
+        InvocationFrame frame = InvocationFrame.Symmetric(arena);
         ReadOnlySpan<DataValue> arguments = [image];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(82, cost);
     }
@@ -154,9 +155,10 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     [Fact]
     public void ComputeSupplementalCost_NoImageArgument_ReturnsZero()
     {
+        InvocationFrame frame = InvocationFrame.Symmetric(new Arena());
         ReadOnlySpan<DataValue> arguments = [DataValue.FromFloat32(42f)];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(0, cost);
     }
@@ -167,9 +169,10 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     [Fact]
     public void ComputeSupplementalCost_NullImage_ReturnsZero()
     {
+        InvocationFrame frame = InvocationFrame.Symmetric(new Arena());
         ReadOnlySpan<DataValue> arguments = [DataValue.Null(DataKind.Image)];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(0, cost);
     }
@@ -181,57 +184,22 @@ public sealed class ImageCostAwareTests : ServiceTestBase
     public void ComputeSupplementalCost_MultipleArguments_UsesFirstImage()
     {
         DataValue scalar = DataValue.FromFloat32(0.5f);
-        DataValue image = MakeImageValue(1000, 200);
+        (DataValue image, Arena arena) = MakeArenaImage(1000, 200);
+        InvocationFrame frame = InvocationFrame.Symmetric(arena);
         // 1000 × 200 = 200,000 / 100,000 = 2
         ReadOnlySpan<DataValue> arguments = [scalar, image];
 
-        long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
+        long cost = ImageCostHelper.ComputeSupplementalCost(arguments, in frame);
 
         Assert.Equal(2, cost);
     }
 
     // ───────────────── End-to-end metering ─────────────────
 
-    /// <summary>
-    /// When an image function with <see cref="ICostAwareFunction"/> executes through
-    /// <see cref="ExpressionEvaluator"/>, the meter accumulates both the base cost
-    /// and the supplemental cost.
-    /// </summary>
-    [Fact]
-    public void Evaluator_ImageFunction_AccumulatesBasePlusSupplementalCost()
-    {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-
-        // Create a 1920×1080 PNG. image_brightness_mean has base cost 10.
-        // Supplemental: 2,073,600 / 100,000 = 20. Total expected: 30.
-        byte[] png = MakeTestPng(1920, 1080);
-        Row row = new(["img"], [DataValue.FromImage(png)]);
-
-        evaluator.Evaluate(
-            new FunctionCallExpression("image_brightness_mean", [new ColumnReference("img")]),
-            row);
-
-        Assert.Equal(30, meter.QueryUnits);
-    }
-
-    /// <summary>
-    /// A small image that yields zero supplemental cost still accumulates the base cost.
-    /// </summary>
-    [Fact]
-    public void Evaluator_SmallImage_OnlyBaseCost()
-    {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-
-        // 32×32 image: 1,024 pixels → supplemental 0. Base cost = 10.
-        byte[] png = MakeTestPng(32, 32);
-        Row row = new(["img"], [DataValue.FromImage(png)]);
-
-        evaluator.Evaluate(
-            new FunctionCallExpression("image_brightness_mean", [new ColumnReference("img")]),
-            row);
-
-        Assert.Equal(10, meter.QueryUnits);
-    }
+    // Evaluator_ImageFunction_AccumulatesBasePlusSupplementalCost and
+    // Evaluator_SmallImage_OnlyBaseCost removed: they evaluated a bare
+    // image_brightness_mean(...) call through ExpressionEvaluator without going
+    // through the planner's ImagePipelineLowerer. With the legacy Execute path
+    // gone, image function calls must be fused at plan time before execution;
+    // the e2e cost-metering coverage now lives alongside the lowerer tests.
 }

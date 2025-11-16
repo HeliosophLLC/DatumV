@@ -10,7 +10,7 @@ using SkiaSharp;
 /// boundaries. <c>compression_artifact_score(img)</c> returns a scalar where higher
 /// values indicate more severe compression artifacts (blockiness).
 /// </summary>
-public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwareFunction
+public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -24,6 +24,9 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
     /// <inheritdoc />
     public int QueryUnitCost => 10;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Float32;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -43,22 +46,22 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Float32);
+            throw new ArgumentException(
+                $"compression_artifact_score() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("compression_artifact_score");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int width = rgba.Width;
         int height = rgba.Height;
@@ -70,7 +73,6 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         nint pixelPointer = rgba.GetPixels();
 
-        // Convert to grayscale luminance buffer
         float[] grayscale = new float[width * height];
 
         unsafe
@@ -86,13 +88,11 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
             }
         }
 
-        // Measure average absolute gradient difference at block boundaries vs. interior
         double boundaryGradientSum = 0.0;
         int boundaryCount = 0;
         double interiorGradientSum = 0.0;
         int interiorCount = 0;
 
-        // Horizontal block boundaries (vertical lines at x = 8, 16, 24, ...)
         for (int x = BlockSize; x < width - 1; x += BlockSize)
         {
             for (int y = 0; y < height; y++)
@@ -104,7 +104,6 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
             }
         }
 
-        // Vertical block boundaries (horizontal lines at y = 8, 16, 24, ...)
         for (int y = BlockSize; y < height - 1; y += BlockSize)
         {
             for (int x = 0; x < width; x++)
@@ -116,10 +115,9 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
             }
         }
 
-        // Interior gradients: sample non-boundary positions
         for (int x = 1; x < width; x++)
         {
-            if (x % BlockSize == 0) continue; // skip block boundaries
+            if (x % BlockSize == 0) continue;
 
             for (int y = 0; y < height; y++)
             {
@@ -132,7 +130,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         for (int y = 1; y < height; y++)
         {
-            if (y % BlockSize == 0) continue; // skip block boundaries
+            if (y % BlockSize == 0) continue;
 
             for (int x = 0; x < width; x++)
             {
@@ -151,8 +149,6 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
         double averageBoundaryGradient = boundaryGradientSum / boundaryCount;
         double averageInteriorGradient = interiorGradientSum / interiorCount;
 
-        // Score: ratio of boundary excess over interior, clamped to [0, 1]
-        // When boundary gradients are higher than interior, blockiness is present
         float score = averageInteriorGradient > 0.001
             ? (float)System.Math.Clamp(
                 (averageBoundaryGradient - averageInteriorGradient) / averageInteriorGradient,
@@ -161,6 +157,13 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         return DataValue.FromFloat32(score);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "compression_artifact_score() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -168,126 +171,6 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("compression_artifact_score");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int width = rgba.Width;
-        int height = rgba.Height;
-
-        if (width < BlockSize * 2 || height < BlockSize * 2)
-        {
-            return DataValue.FromFloat32(0f);
-        }
-
-        nint pixelPointer = rgba.GetPixels();
-
-        // Convert to grayscale luminance buffer
-        float[] grayscale = new float[width * height];
-
-        unsafe
-        {
-            byte* pixels = (byte*)pixelPointer;
-
-            for (int i = 0; i < width * height; i++)
-            {
-                int offset = i * 4;
-                grayscale[i] = pixels[offset] * RedWeight
-                             + pixels[offset + 1] * GreenWeight
-                             + pixels[offset + 2] * BlueWeight;
-            }
-        }
-
-        // Measure average absolute gradient difference at block boundaries vs. interior
-        double boundaryGradientSum = 0.0;
-        int boundaryCount = 0;
-        double interiorGradientSum = 0.0;
-        int interiorCount = 0;
-
-        // Horizontal block boundaries (vertical lines at x = 8, 16, 24, ...)
-        for (int x = BlockSize; x < width - 1; x += BlockSize)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                float gradient = System.Math.Abs(
-                    grayscale[y * width + x] - grayscale[y * width + (x - 1)]);
-                boundaryGradientSum += gradient;
-                boundaryCount++;
-            }
-        }
-
-        // Vertical block boundaries (horizontal lines at y = 8, 16, 24, ...)
-        for (int y = BlockSize; y < height - 1; y += BlockSize)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                float gradient = System.Math.Abs(
-                    grayscale[y * width + x] - grayscale[(y - 1) * width + x]);
-                boundaryGradientSum += gradient;
-                boundaryCount++;
-            }
-        }
-
-        // Interior gradients: sample non-boundary positions
-        for (int x = 1; x < width; x++)
-        {
-            if (x % BlockSize == 0) continue; // skip block boundaries
-
-            for (int y = 0; y < height; y++)
-            {
-                float gradient = System.Math.Abs(
-                    grayscale[y * width + x] - grayscale[y * width + (x - 1)]);
-                interiorGradientSum += gradient;
-                interiorCount++;
-            }
-        }
-
-        for (int y = 1; y < height; y++)
-        {
-            if (y % BlockSize == 0) continue; // skip block boundaries
-
-            for (int x = 0; x < width; x++)
-            {
-                float gradient = System.Math.Abs(
-                    grayscale[y * width + x] - grayscale[(y - 1) * width + x]);
-                interiorGradientSum += gradient;
-                interiorCount++;
-            }
-        }
-
-        if (boundaryCount == 0 || interiorCount == 0)
-        {
-            return DataValue.FromFloat32(0f);
-        }
-
-        double averageBoundaryGradient = boundaryGradientSum / boundaryCount;
-        double averageInteriorGradient = interiorGradientSum / interiorCount;
-
-        // Score: ratio of boundary excess over interior, clamped to [0, 1]
-        // When boundary gradients are higher than interior, blockiness is present
-        float score = averageInteriorGradient > 0.001
-            ? (float)System.Math.Clamp(
-                (averageBoundaryGradient - averageInteriorGradient) / averageInteriorGradient,
-                0.0, 1.0)
-            : 0f;
-
-        return DataValue.FromFloat32(score);
     }
 
     /// <inheritdoc />

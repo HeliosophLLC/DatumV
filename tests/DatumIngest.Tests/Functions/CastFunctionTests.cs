@@ -116,18 +116,6 @@ public class CastFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Cast_UInt8ArrayToImage()
-    {
-        byte[] bytes = [1, 2, 3];
-        DataValue result = _function.Execute([
-            DataValue.FromUInt8Array(bytes),
-            DataValue.FromString("Image")
-        ]);
-        Assert.Equal(DataKind.Image, result.Kind);
-        Assert.Equal(bytes, result.AsImage());
-    }
-
-    [Fact]
     public void Cast_SameKind_ReturnsSameValue()
     {
         DataValue original = DataValue.FromFloat32(42);

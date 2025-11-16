@@ -84,7 +84,7 @@ internal static class IdxValueReader
     /// image flows through the same byte-span accessor path as ZIP/CSV image columns.
     /// IDX pixels are never the target storage format on disk — the datum writer needs
     /// encoded bytes regardless, so we pay the encode cost once here rather than
-    /// holding an <see cref="ImageHandle"/> and re-encoding at flush time.
+    /// re-encoding at flush time.
     /// </summary>
     private static DataValue CreateImageFromUInt8(IdxHeader header, byte[] pixelData, IValueStore store)
     {

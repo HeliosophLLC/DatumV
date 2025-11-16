@@ -11,7 +11,7 @@ using SkiaSharp;
 /// Generates a random displacement field, smooths it with a Gaussian kernel of radius
 /// <c>sigma</c>, and scales by <c>alpha</c>. Uses bilinear interpolation for sub-pixel sampling.
 /// </summary>
-public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
+public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "elastic_deform";
@@ -56,33 +56,49 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (2 or 3))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "elastic_deform() requires 2 or 3 auxiliary arguments: alpha, sigma[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        float alpha = arguments[1].ToFloat();
-        float sigma = arguments[2].ToFloat();
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"elastic_deform() alpha must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+        if (auxiliaryKinds[1] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[1]))
+        {
+            throw new ArgumentException(
+                $"elastic_deform() sigma must be numeric, got {auxiliaryKinds[1]}.");
+        }
 
-        SKBitmap original = inputHandle.GetBitmap("elastic_deform");
+        if (auxiliaryKinds.Length == 3
+            && auxiliaryKinds[2] != DataKind.Unknown
+            && auxiliaryKinds[2] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"elastic_deform() format must be String, got {auxiliaryKinds[2]}.");
+        }
+    }
 
-        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(original)
+    /// <inheritdoc />
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        float alpha = auxiliaryArgs[0].ToFloat();
+        float sigma = auxiliaryArgs[1].ToFloat();
+
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? original;
+        SKBitmap rgba = converted ?? input;
 
         int width = rgba.Width;
         int height = rgba.Height;
 
-        // Generate random displacement fields
         Random random = new();
         float[] displacementX = new float[width * height];
         float[] displacementY = new float[width * height];
@@ -93,21 +109,18 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
             displacementY[i] = (float)(random.NextDouble() * 2.0 - 1.0);
         }
 
-        // Smooth displacement fields with Gaussian kernel
         int kernelRadius = System.Math.Max(1, (int)System.Math.Ceiling(sigma * 3));
         float[] kernel = BuildGaussianKernel(kernelRadius, sigma);
 
         float[] smoothedX = ApplyGaussianSmoothing(displacementX, width, height, kernel, kernelRadius);
         float[] smoothedY = ApplyGaussianSmoothing(displacementY, width, height, kernel, kernelRadius);
 
-        // Scale by alpha
         for (int i = 0; i < width * height; i++)
         {
             smoothedX[i] *= alpha;
             smoothedY[i] *= alpha;
         }
 
-        // Apply displacement with bilinear interpolation
         SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         nint sourcePointer = rgba.GetPixels();
         nint resultPointer = result.GetPixels();
@@ -131,8 +144,25 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
             }
         }
 
-        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat));
+        return result;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 3 || auxiliaryArgs[2].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[2].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "elastic_deform() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static float[] BuildGaussianKernel(int radius, float sigma)
     {
@@ -240,85 +270,6 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float alpha = arguments[1].ToFloat();
-        float sigma = arguments[2].ToFloat();
-
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("elastic_deform");
-
-        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(original)
-            : null;
-        SKBitmap rgba = converted ?? original;
-
-        int width = rgba.Width;
-        int height = rgba.Height;
-
-        // Generate random displacement fields
-        Random random = new();
-        float[] displacementX = new float[width * height];
-        float[] displacementY = new float[width * height];
-
-        for (int i = 0; i < width * height; i++)
-        {
-            displacementX[i] = (float)(random.NextDouble() * 2.0 - 1.0);
-            displacementY[i] = (float)(random.NextDouble() * 2.0 - 1.0);
-        }
-
-        // Smooth displacement fields with Gaussian kernel
-        int kernelRadius = System.Math.Max(1, (int)System.Math.Ceiling(sigma * 3));
-        float[] kernel = BuildGaussianKernel(kernelRadius, sigma);
-
-        float[] smoothedX = ApplyGaussianSmoothing(displacementX, width, height, kernel, kernelRadius);
-        float[] smoothedY = ApplyGaussianSmoothing(displacementY, width, height, kernel, kernelRadius);
-
-        // Scale by alpha
-        for (int i = 0; i < width * height; i++)
-        {
-            smoothedX[i] *= alpha;
-            smoothedY[i] *= alpha;
-        }
-
-        // Apply displacement with bilinear interpolation
-        SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        nint sourcePointer = rgba.GetPixels();
-        nint resultPointer = result.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)sourcePointer;
-            byte* destination = (byte*)resultPointer;
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    int index = y * width + x;
-                    float sourceX = x + smoothedX[index];
-                    float sourceY = y + smoothedY[index];
-
-                    BilinearSample(source, width, height, sourceX, sourceY,
-                        destination, (y * width + x) * 4);
-                }
-            }
-        }
-
-        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />

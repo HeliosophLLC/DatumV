@@ -7,11 +7,22 @@ using SkiaSharp;
 
 /// <summary>
 /// Applies a Gaussian blur to an image.
-/// <c>blur(img, radius)</c> or <c>blur(img, radius, format)</c>.
-/// The <c>radius</c> controls blur strength (sigma in both X and Y directions).
-/// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class BlurImageFunction : IScalarFunction, ICostAwareFunction
+/// <remarks>
+/// <para>
+/// <strong>Standalone form</strong> — <c>blur(img, radius)</c> or <c>blur(img, radius, format)</c>.
+/// Decodes the source bytes, blurs, re-encodes. <c>radius</c> is the Gaussian sigma in
+/// both X and Y. The optional <c>format</c> arg overrides the output encoding
+/// (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>); when omitted the source format is preserved.
+/// </para>
+/// <para>
+/// <strong>Pipeline form</strong> — inside an <c>image(source, lambda)</c> body
+/// (<c>image(file, f =&gt; blur(f, 5))</c>), <see cref="Apply"/> threads the live
+/// <see cref="SKBitmap"/> through. Decode and encode happen exactly once at the
+/// pipeline boundaries regardless of how many transforms are chained.
+/// </para>
+/// </remarks>
+public sealed class BlurImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "blur";
@@ -49,60 +60,62 @@ public sealed class BlurImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        // Pipeline form drops the implicit image arg; auxiliaries are [radius] or
+        // [radius, format].
+        if (auxiliaryKinds.Length is not (1 or 2))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException("blur() requires 1 or 2 auxiliary arguments: radius[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        float radius = arguments[1].ToFloat();
+        // Plan-time best-effort: a column-ref or other unresolved expression resolves to
+        // Unknown — accept it and let runtime widening (ToFloat) catch real type errors.
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"blur() radius must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("blur");
-
-        SKBitmap blurred = new(original.Width, original.Height);
-        using SKCanvas canvas = new(blurred);
-        using SKImageFilter blurFilter = SKImageFilter.CreateBlur(radius, radius);
-        using SKPaint paint = new() { ImageFilter = blurFilter };
-
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(blurred, outputFormat));
+        if (auxiliaryKinds.Length == 2
+            && auxiliaryKinds[1] != DataKind.Unknown
+            && auxiliaryKinds[1] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"blur() format must be String, got {auxiliaryKinds[1]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
+        float radius = auxiliaryArgs[0].ToFloat();
 
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float radius = arguments[1].ToFloat();
-
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("blur");
-
-        SKBitmap blurred = new(original.Width, original.Height);
+        SKBitmap blurred = new(input.Width, input.Height);
         using SKCanvas canvas = new(blurred);
         using SKImageFilter blurFilter = SKImageFilter.CreateBlur(radius, radius);
         using SKPaint paint = new() { ImageFilter = blurFilter };
 
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(blurred, outputFormat), frame.Target);
+        canvas.DrawBitmap(input, 0, 0, paint);
+        return blurred;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 2 || auxiliaryArgs[1].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[1].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "blur() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

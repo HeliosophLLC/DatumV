@@ -11,7 +11,7 @@ using SkiaSharp;
 /// The <c>intensity</c> value is added to every pixel's R, G, and B channels (clamped 0–255).
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "brighten";
@@ -49,65 +49,34 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (1 or 2))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException("brighten() requires 1 or 2 auxiliary arguments: intensity[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        float intensity = arguments[1].ToFloat();
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"brighten() intensity must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("brighten");
-
-        // Use color matrix to add intensity to RGB channels
-        // Matrix layout: [R, G, B, A, translate] × 4 rows
-        SKBitmap brightened = new(original.Width, original.Height);
-        using SKCanvas canvas = new(brightened);
-
-        float normalizedIntensity = intensity / 255f;
-
-        float[] matrix =
-        [
-            1, 0, 0, 0, normalizedIntensity,
-            0, 1, 0, 0, normalizedIntensity,
-            0, 0, 1, 0, normalizedIntensity,
-            0, 0, 0, 1, 0
-        ];
-
-        using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
-        using SKPaint paint = new() { ColorFilter = filter };
-
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(brightened, outputFormat));
+        if (auxiliaryKinds.Length == 2
+            && auxiliaryKinds[1] != DataKind.Unknown
+            && auxiliaryKinds[1] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"brighten() format must be String, got {auxiliaryKinds[1]}.");
+        }
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
     {
-        DataValue input = arguments[0];
+        float intensity = auxiliaryArgs[0].ToFloat();
 
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        float intensity = arguments[1].ToFloat();
-
-        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("brighten");
-
-        SKBitmap brightened = new(original.Width, original.Height);
+        SKBitmap brightened = new(input.Width, input.Height);
         using SKCanvas canvas = new(brightened);
 
         float normalizedIntensity = intensity / 255f;
@@ -123,10 +92,26 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
         using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
         using SKPaint paint = new() { ColorFilter = filter };
 
-        canvas.DrawBitmap(original, 0, 0, paint);
-
-        return DataValue.FromImageHandle(new ImageHandle(brightened, outputFormat), frame.Target);
+        canvas.DrawBitmap(input, 0, 0, paint);
+        return brightened;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 2 || auxiliaryArgs[1].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[1].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "brighten() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>

@@ -86,40 +86,6 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
     }
 
     [Fact]
-    public void GetInteractions_ImageColumnIncludedForMissingness()
-    {
-        ColumnInteractionCollector collector = new();
-
-        for (int i = 0; i < 50; i++)
-        {
-            if (i % 3 == 0)
-            {
-                // Both null at same time → correlated missingness
-                collector.AddRow(CreateRow(
-                    ("label", DataValue.Null(DataKind.String)),
-                    ("image", DataValue.Null(DataKind.Image))));
-            }
-            else
-            {
-                collector.AddRow(CreateRow(
-                    ("label", DataValue.FromString("cat")),
-                    ("image", DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF }))));
-            }
-        }
-
-        IReadOnlyList<ColumnInteractionResult> results = collector.GetInteractions();
-
-        Assert.Single(results);
-        ColumnInteractionResult result = results[0];
-        Assert.NotNull(result.MissingnessCorrelation);
-        Assert.Null(result.Pearson);
-        Assert.Null(result.Spearman);
-        Assert.Null(result.CramerV);
-        Assert.Null(result.AnovaFStatistic);
-        Assert.Null(result.MutualInformation);
-    }
-
-    [Fact]
     public void GetInteractions_ThreeColumns_ProducesThreePairs()
     {
         ColumnInteractionCollector collector = new();

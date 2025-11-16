@@ -11,7 +11,7 @@ using SkiaSharp;
 /// the Laplacian-filtered image. Higher values indicate sharper images;
 /// lower values indicate blurrier images.
 /// </summary>
-public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
+public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction, IImagePipelineSink
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -23,6 +23,9 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
 
     /// <inheritdoc />
     public int QueryUnitCost => 10;
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Float32;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -42,28 +45,27 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Float32);
+            throw new ArgumentException(
+                $"detect_blur() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("detect_blur");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        using SKBitmap? converted = input.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(input)
             : null;
-        SKBitmap rgba = converted ?? bitmap;
+        SKBitmap rgba = converted ?? input;
 
         int width = rgba.Width;
         int height = rgba.Height;
         nint pixelPointer = rgba.GetPixels();
 
-        // Convert to grayscale luminance buffer
         float[] grayscale = new float[width * height];
 
         unsafe
@@ -79,8 +81,6 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
             }
         }
 
-        // Apply 3×3 Laplacian kernel: [0, 1, 0; 1, -4, 1; 0, 1, 0]
-        // Only process interior pixels (skip 1-pixel border)
         int interiorCount = (width - 2) * (height - 2);
 
         if (interiorCount <= 0)
@@ -95,11 +95,11 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
         {
             for (int x = 1; x < width - 1; x++)
             {
-                float laplacian = grayscale[(y - 1) * width + x]       // top
-                                + grayscale[(y + 1) * width + x]       // bottom
-                                + grayscale[y * width + (x - 1)]       // left
-                                + grayscale[y * width + (x + 1)]       // right
-                                - 4f * grayscale[y * width + x];       // center
+                float laplacian = grayscale[(y - 1) * width + x]
+                                + grayscale[(y + 1) * width + x]
+                                + grayscale[y * width + (x - 1)]
+                                + grayscale[y * width + (x + 1)]
+                                - 4f * grayscale[y * width + x];
 
                 laplacianSum += laplacian;
                 laplacianSumSquared += laplacian * (double)laplacian;
@@ -111,6 +111,13 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
 
         return DataValue.FromFloat32((float)variance);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "detect_blur() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)
     {
@@ -118,77 +125,6 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
         using SKCanvas canvas = new(converted);
         canvas.DrawBitmap(source, 0, 0);
         return converted;
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        SKBitmap bitmap = inputHandle.GetBitmap("detect_blur");
-
-        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
-            ? ConvertToRgba8888(bitmap)
-            : null;
-        SKBitmap rgba = converted ?? bitmap;
-
-        int width = rgba.Width;
-        int height = rgba.Height;
-        nint pixelPointer = rgba.GetPixels();
-
-        // Convert to grayscale luminance buffer
-        float[] grayscale = new float[width * height];
-
-        unsafe
-        {
-            byte* pixels = (byte*)pixelPointer;
-
-            for (int i = 0; i < width * height; i++)
-            {
-                int offset = i * 4;
-                grayscale[i] = pixels[offset] * RedWeight
-                             + pixels[offset + 1] * GreenWeight
-                             + pixels[offset + 2] * BlueWeight;
-            }
-        }
-
-        // Apply 3×3 Laplacian kernel: [0, 1, 0; 1, -4, 1; 0, 1, 0]
-        // Only process interior pixels (skip 1-pixel border)
-        int interiorCount = (width - 2) * (height - 2);
-
-        if (interiorCount <= 0)
-        {
-            return DataValue.FromFloat32(0f);
-        }
-
-        double laplacianSum = 0.0;
-        double laplacianSumSquared = 0.0;
-
-        for (int y = 1; y < height - 1; y++)
-        {
-            for (int x = 1; x < width - 1; x++)
-            {
-                float laplacian = grayscale[(y - 1) * width + x]       // top
-                                + grayscale[(y + 1) * width + x]       // bottom
-                                + grayscale[y * width + (x - 1)]       // left
-                                + grayscale[y * width + (x + 1)]       // right
-                                - 4f * grayscale[y * width + x];       // center
-
-                laplacianSum += laplacian;
-                laplacianSumSquared += laplacian * (double)laplacian;
-            }
-        }
-
-        double mean = laplacianSum / interiorCount;
-        double variance = (laplacianSumSquared / interiorCount) - (mean * mean);
-
-        return DataValue.FromFloat32((float)variance);
     }
 
     /// <inheritdoc />

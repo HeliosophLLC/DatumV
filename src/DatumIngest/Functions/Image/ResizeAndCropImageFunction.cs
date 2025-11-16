@@ -11,7 +11,7 @@ using SkiaSharp;
 /// <c>resize_and_crop(img, w, h, gravity)</c> or <c>resize_and_crop(img, w, h, gravity, format)</c>.
 /// Supported gravity values: <c>'center'</c>, <c>'top'</c>, <c>'bottom'</c>, <c>'left'</c>, <c>'right'</c>.
 /// </summary>
-public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunction, IImagePipelineFunction
 {
     /// <inheritdoc />
     public string Name => "resize_and_crop";
@@ -62,39 +62,60 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        if (auxiliaryKinds.Length is not (3 or 4))
         {
-            return DataValue.Null(DataKind.Image);
+            throw new ArgumentException(
+                "resize_and_crop() requires 3 or 4 auxiliary arguments: width, height, gravity[, format].");
         }
 
-        ImageHandle inputHandle = input.GetImageHandle();
-        int targetWidth = arguments[1].ToInt32();
-        int targetHeight = arguments[2].ToInt32();
-        string gravity = arguments[3].AsString().ToUpperInvariant();
+        if (auxiliaryKinds[0] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[0]))
+        {
+            throw new ArgumentException(
+                $"resize_and_crop() width must be numeric, got {auxiliaryKinds[0]}.");
+        }
 
-        string? formatOverride = arguments.Length == 5 ? arguments[4].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+        if (auxiliaryKinds[1] != DataKind.Unknown && !DataValue.IsNumericScalarKind(auxiliaryKinds[1]))
+        {
+            throw new ArgumentException(
+                $"resize_and_crop() height must be numeric, got {auxiliaryKinds[1]}.");
+        }
 
-        SKBitmap original = inputHandle.GetBitmap("resize_and_crop");
+        if (auxiliaryKinds[2] != DataKind.Unknown && auxiliaryKinds[2] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"resize_and_crop() gravity must be String, got {auxiliaryKinds[2]}.");
+        }
 
-        // Step 1: Resize to fill — scale so both dimensions meet or exceed target
-        float scaleX = (float)targetWidth / original.Width;
-        float scaleY = (float)targetHeight / original.Height;
+        if (auxiliaryKinds.Length == 4
+            && auxiliaryKinds[3] != DataKind.Unknown
+            && auxiliaryKinds[3] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"resize_and_crop() format must be String, got {auxiliaryKinds[3]}.");
+        }
+    }
+
+    /// <inheritdoc />
+    public SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        int targetWidth = auxiliaryArgs[0].ToInt32();
+        int targetHeight = auxiliaryArgs[1].ToInt32();
+        string gravity = auxiliaryArgs[2].AsString().ToUpperInvariant();
+
+        float scaleX = (float)targetWidth / input.Width;
+        float scaleY = (float)targetHeight / input.Height;
         float scale = System.Math.Max(scaleX, scaleY);
 
-        int resizedWidth = (int)System.Math.Ceiling(original.Width * scale);
-        int resizedHeight = (int)System.Math.Ceiling(original.Height * scale);
+        int resizedWidth = (int)System.Math.Ceiling(input.Width * scale);
+        int resizedHeight = (int)System.Math.Ceiling(input.Height * scale);
 
-        using SKBitmap resized = original.Resize(
+        using SKBitmap resized = input.Resize(
             new SKImageInfo(resizedWidth, resizedHeight), SKSamplingOptions.Default)
             ?? throw new InvalidOperationException(
                 $"resize_and_crop() failed to resize to {resizedWidth}×{resizedHeight}.");
 
-        // Step 2: Crop to exact target dimensions using gravity
         (int cropX, int cropY) = ComputeCropOffset(resizedWidth, resizedHeight, targetWidth, targetHeight, gravity);
 
         SKBitmap cropped = new(targetWidth, targetHeight);
@@ -102,8 +123,25 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
         canvas.DrawBitmap(resized, new SKRect(cropX, cropY, cropX + targetWidth, cropY + targetHeight),
             new SKRect(0, 0, targetWidth, targetHeight));
 
-        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat));
+        return cropped;
     }
+
+    /// <inheritdoc />
+    public SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs)
+    {
+        if (auxiliaryArgs.Length < 4 || auxiliaryArgs[3].IsNull)
+        {
+            return null;
+        }
+        return ImageEncoder.ParseFormatString(auxiliaryArgs[3].AsString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "resize_and_crop() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 
     private static (int X, int Y) ComputeCropOffset(
         int sourceWidth, int sourceHeight, int targetWidth, int targetHeight, string gravity)
@@ -121,50 +159,6 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
             _ => throw new ArgumentException(
                 $"resize_and_crop() unknown gravity '{gravity}'. Supported: center, top, bottom, left, right.")
         };
-    }
-
-    /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Image);
-        }
-
-        ImageHandle inputHandle = input.GetImageHandle(frame.Source, frame.SidecarRegistry);
-        int targetWidth = arguments[1].ToInt32();
-        int targetHeight = arguments[2].ToInt32();
-        string gravity = arguments[3].AsString(frame.Source).ToUpperInvariant();
-
-        string? formatOverride = arguments.Length == 5 ? arguments[4].AsString(frame.Source) : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
-
-        SKBitmap original = inputHandle.GetBitmap("resize_and_crop");
-
-        // Step 1: Resize to fill — scale so both dimensions meet or exceed target
-        float scaleX = (float)targetWidth / original.Width;
-        float scaleY = (float)targetHeight / original.Height;
-        float scale = System.Math.Max(scaleX, scaleY);
-
-        int resizedWidth = (int)System.Math.Ceiling(original.Width * scale);
-        int resizedHeight = (int)System.Math.Ceiling(original.Height * scale);
-
-        using SKBitmap resized = original.Resize(
-            new SKImageInfo(resizedWidth, resizedHeight), SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"resize_and_crop() failed to resize to {resizedWidth}×{resizedHeight}.");
-
-        // Step 2: Crop to exact target dimensions using gravity
-        (int cropX, int cropY) = ComputeCropOffset(resizedWidth, resizedHeight, targetWidth, targetHeight, gravity);
-
-        SKBitmap cropped = new(targetWidth, targetHeight);
-        using SKCanvas canvas = new(cropped);
-        canvas.DrawBitmap(resized, new SKRect(cropX, cropY, cropX + targetWidth, cropY + targetHeight),
-            new SKRect(0, 0, targetWidth, targetHeight));
-
-        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat), frame.Target);
     }
 
     /// <inheritdoc />

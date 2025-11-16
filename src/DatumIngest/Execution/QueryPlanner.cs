@@ -42,12 +42,13 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(QueryExpression query)
     {
-        return query switch
+        IQueryOperator op = query switch
         {
             SelectQueryExpression select => Plan(select.Statement),
             CompoundQueryExpression compound => PlanCompound(compound),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
+        return Finalize(op);
     }
 
     /// <summary>
@@ -57,7 +58,7 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(SelectStatement statement)
     {
-        return PlanCore(statement);
+        return Finalize(PlanCore(statement));
     }
 
     /// <summary>
@@ -72,12 +73,13 @@ public sealed class QueryPlanner
         QueryExpression query,
         CancellationToken cancellationToken)
     {
-        return query switch
+        IQueryOperator op = query switch
         {
             SelectQueryExpression select => PlanCore(select.Statement),
             CompoundQueryExpression compound => await PlanCompoundAsync(compound, cancellationToken).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
+        return Finalize(op);
     }
 
     /// <summary>
@@ -94,15 +96,27 @@ public sealed class QueryPlanner
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        return query switch
+        IQueryOperator op = query switch
         {
-            SelectQueryExpression select => 
+            SelectQueryExpression select =>
                 await PlanCoreWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
             CompoundQueryExpression compound =>
                 await PlanCompoundWithSubqueriesAsync(compound, context, cancellationToken).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
+        return Finalize(op);
     }
+
+    /// <summary>
+    /// Required-for-correctness rewrites applied to every plan, regardless of entry point.
+    /// Currently lowers <c>image(source, lambda)</c> calls into
+    /// <see cref="FusedImagePipelineExpression"/> nodes. <see cref="LiteralHoister"/> is
+    /// intentionally <em>not</em> here — it's a per-plan-instance optimisation that lives
+    /// in <see cref="DatumIngest.Catalog.QueryPlan"/> because the hoist arena's lifetime
+    /// is tied to that instance, not to the planner.
+    /// </summary>
+    private IQueryOperator Finalize(IQueryOperator op) =>
+        op.RewriteExpressions(expr => ImagePipelineLowerer.Lower(expr, _functionRegistry));
 
     /// <summary>
     /// Plans a compound set operation (UNION, INTERSECT, EXCEPT) by recursively

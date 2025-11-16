@@ -146,12 +146,6 @@ public class RowSerializerTests : ServiceTestBase
     }
 
     [Fact]
-    public void RoundTrip_Image()
-    {
-        AssertSingleValueRoundTrip(DataValue.FromImage([0x89, 0x50, 0x4E, 0x47]));
-    }
-
-    [Fact]
     public void RoundTrip_Date()
     {
         AssertSingleValueRoundTrip(DataValue.FromDate(new DateOnly(2026, 3, 25)));

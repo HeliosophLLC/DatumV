@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -590,11 +589,6 @@ public sealed class ExpressionEvaluator
             {
                 _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in invocationFrame));
             }
-            // Dispose intermediate ImageHandle arguments whose bitmaps are no longer needed.
-            // Handles still referenced by the source row are kept alive — they may appear
-            // as ordinal copies in the projected row (e.g. SELECT *, func(image)).
-            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, frame.Row);
-
             return result;
         }
         finally
@@ -661,8 +655,6 @@ public sealed class ExpressionEvaluator
                 _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in higherOrderInvocation));
             }
 
-            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, frame.Row);
-
             return result;
         }
         finally
@@ -716,69 +708,6 @@ public sealed class ExpressionEvaluator
         Row augmentedRow = new(augmentedNames, augmentedValues);
 
         return Evaluate(lambda.Body, enclosingFrame.WithRow(augmentedRow));
-    }
-
-    /// <summary>
-    /// Disposes <see cref="ImageHandle"/> payloads in evaluated arguments that are
-    /// no longer referenced by the result or the source row. This releases native
-    /// <see cref="SkiaSharp.SKBitmap"/> memory from intermediate pipeline stages
-    /// (e.g. nested <c>image_to_tensor_chw(resize(image, 64, 64))</c>) while keeping
-    /// handles that the source row still owns alive for ordinal copies.
-    /// </summary>
-    private static void DisposeConsumedImageHandles(
-        ReadOnlySpan<DataValue> arguments, DataValue result, Row sourceRow)
-    {
-        for (int index = 0; index < arguments.Length; index++)
-        {
-            DataValue argument = arguments[index];
-
-            if (argument.Kind != DataKind.Image || argument.IsNull)
-            {
-                continue;
-            }
-
-            if (argument.TryGetOwnedImageHandle() is not ImageHandle argumentHandle)
-            {
-                continue;
-            }
-
-            // If the result reuses the same handle, don't dispose — it's still alive.
-            if (result.Kind == DataKind.Image
-                && !result.IsNull
-                && ReferenceEquals(argumentHandle, result.TryGetOwnedImageHandle()))
-            {
-                continue;
-            }
-
-            // If the source row still references this handle, don't dispose — it may
-            // be needed by ordinal copies in the projected row (SELECT *, func(image)).
-            if (IsHandleReferencedByRow(argumentHandle, sourceRow))
-            {
-                continue;
-            }
-
-            argumentHandle.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Checks whether any column in the row holds the given <see cref="ImageHandle"/>.
-    /// </summary>
-    private static bool IsHandleReferencedByRow(ImageHandle handle, Row row)
-    {
-        for (int index = 0; index < row.FieldCount; index++)
-        {
-            DataValue value = row[index];
-
-            if (value.Kind == DataKind.Image
-                && !value.IsNull
-                && ReferenceEquals(handle, value.TryGetOwnedImageHandle()))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private DataValue EvaluateIn(InExpression inExpr, in EvaluationFrame frame)
@@ -1500,7 +1429,8 @@ public sealed class ExpressionEvaluator
                 DataValue[] auxValues = EvaluatePipelineAuxiliary(stage.AuxiliaryArgs, frame);
                 try
                 {
-                    SkiaSharp.SKBitmap next = stage.Function.Apply(current, auxValues);
+                    ReadOnlySpan<DataValue> auxSpan = auxValues.AsSpan(0, stage.AuxiliaryArgs.Count);
+                    SkiaSharp.SKBitmap next = stage.Function.Apply(current, auxSpan);
                     if (!ReferenceEquals(next, current))
                     {
                         owned?.Dispose();
@@ -1508,7 +1438,13 @@ public sealed class ExpressionEvaluator
                         current = next;
                     }
 
-                    formatOverride ??= stage.Function.FormatOverride;
+                    // Rightmost non-null override wins — a later stage's explicit format
+                    // choice (e.g. blur(..., 'png') after a plain resize()) takes priority
+                    // over earlier stages' implicit choices.
+                    if (stage.Function.FormatOverride(auxSpan) is { } stageFormat)
+                    {
+                        formatOverride = stageFormat;
+                    }
                 }
                 finally
                 {
@@ -1521,7 +1457,8 @@ public sealed class ExpressionEvaluator
                 DataValue[] sinkAux = EvaluatePipelineAuxiliary(terminalSink.AuxiliaryArgs, frame);
                 try
                 {
-                    return terminalSink.Function.Reduce(current, sinkAux, frame.Target);
+                    ReadOnlySpan<DataValue> sinkAuxSpan = sinkAux.AsSpan(0, terminalSink.AuxiliaryArgs.Count);
+                    return terminalSink.Function.Reduce(current, sinkAuxSpan, frame.Target);
                 }
                 finally
                 {

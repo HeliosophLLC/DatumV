@@ -3,14 +3,31 @@ namespace DatumIngest.Functions.Image;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
+using SkiaSharp;
+
 /// <summary>
-/// Returns the width of an image in pixels by parsing the image header.
-/// <c>width(img)</c> accepts Image or UInt8Array.
+/// Returns the width of an image in pixels.
 /// </summary>
-public sealed class ImageWidthFunction : IScalarFunction
+/// <remarks>
+/// <para>
+/// <strong>Standalone form</strong> — <c>width(img)</c> parses the image header bytes
+/// without a full decode, so it's cheap even on multi-megabyte images.
+/// </para>
+/// <para>
+/// <strong>Pipeline form</strong> — when used as a terminal sink inside
+/// <c>img(source, f -&gt; ... .width())</c>, reads <see cref="SKBitmap.Width"/> from the
+/// already-decoded bitmap that the pipeline threaded through. Faster for chained
+/// pipelines (no header re-parse) and works after transforms that change the size
+/// (e.g. <c>img(file, f -&gt; resize(f, 64, 64).width())</c> returns 64).
+/// </para>
+/// </remarks>
+public sealed class ImageWidthFunction : IScalarFunction, IImagePipelineSink
 {
     /// <inheritdoc />
     public string Name => "width";
+
+    /// <inheritdoc cref="IImagePipelineSink.ResultKind" />
+    public DataKind ResultKind => DataKind.Float32;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -29,44 +46,26 @@ public sealed class ImageWidthFunction : IScalarFunction
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    public void ValidateAuxiliaryArguments(ReadOnlySpan<DataKind> auxiliaryKinds)
     {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
+        // Pipeline form: image is the implicit arg, no auxiliaries expected.
+        if (auxiliaryKinds.Length != 0)
         {
-            return DataValue.Null(DataKind.Float32);
+            throw new ArgumentException(
+                $"width() takes no auxiliary arguments in pipeline form; got {auxiliaryKinds.Length}.");
         }
+    }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
-        ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
-
-        if (dimensions is null)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        return DataValue.FromFloat32(dimensions.Width);
+    /// <inheritdoc cref="IImagePipelineSink.Reduce" />
+    public DataValue Reduce(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs, IValueStore targetStore)
+    {
+        return DataValue.FromFloat32(input.Width);
     }
 
     /// <inheritdoc />
-    public DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
-    {
-        DataValue input = arguments[0];
-
-        if (input.IsNull)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        ReadOnlySpan<byte> imageBytes = input.AsByteSpan(frame.Source, frame.SidecarRegistry);
-        ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
-
-        if (dimensions is null)
-        {
-            return DataValue.Null(DataKind.Float32);
-        }
-
-        return DataValue.FromFloat32(dimensions.Width);
-    }
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments) =>
+        throw new InvalidOperationException(
+            "width() must be lowered to a FusedImagePipelineExpression at plan time " +
+            "and should never reach the runtime evaluator. This indicates the " +
+            "ImagePipelineLowerer pass did not run, or ran but failed to lower this call.");
 }

@@ -108,37 +108,6 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
-    public void Build_ImageColumn_ProducesImageFeatureManifest()
-    {
-        StatisticsCollector collector = new();
-        byte[] jpeg = MakeMinimalJpeg(640, 480, 3);
-        collector.AddRow(MakeRow(_arena, "photo", DataValue.FromImage(jpeg, _arena)), _arena);
-
-        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["photo"] = DataKind.Image };
-
-        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 1);
-
-        ImageFeatureManifest feature = Assert.IsType<ImageFeatureManifest>(manifest.Features[0]);
-        Assert.Equal(640, feature.MinWidth);
-        Assert.Equal(640, feature.MaxWidth);
-        Assert.Equal(480, feature.MinHeight);
-        Assert.Equal(480, feature.MaxHeight);
-        Assert.Equal(1, feature.ChannelCounts[3]);
-        Assert.Equal(1, feature.OrientationCounts["landscape"]);
-        Assert.True(feature.FileSizeStats.Count > 0);
-        Assert.NotNull(feature.AspectRatioStats);
-        Assert.Equal(1, feature.AspectRatioStats.Count);
-        Assert.Equal(640.0 / 480.0, feature.AspectRatioStats.Mean, 3);
-        Assert.NotNull(feature.MegapixelStats);
-        Assert.Equal(1, feature.MegapixelStats.Count);
-        Assert.Equal(640.0 * 480 / 1_000_000.0, feature.MegapixelStats.Mean, 4);
-        Assert.NotNull(feature.PixelCountStats);
-        Assert.Equal(1, feature.PixelCountStats.Count);
-        Assert.Equal(640.0 * 480, feature.PixelCountStats.Mean, 0);
-    }
-
-    [Fact]
     public void Build_BinaryColumn_ProducesBinaryFeatureManifest()
     {
         StatisticsCollector collector = new();

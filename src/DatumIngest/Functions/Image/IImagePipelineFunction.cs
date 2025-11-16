@@ -62,11 +62,18 @@ public interface IImagePipelineFunction
     SKBitmap Apply(SKBitmap input, ReadOnlySpan<DataValue> auxiliaryArgs);
 
     /// <summary>
-    /// Optional override for the output encoding format. Most transforms preserve
-    /// the source format and return <see langword="null"/>; transforms that always
-    /// emit a specific format (e.g. a future <c>encode_jpeg</c>) override this.
+    /// Optional override for the output encoding format. Returns <see langword="null"/>
+    /// when this transform doesn't dictate the format (most transforms — they preserve
+    /// whatever the source had). Returns a specific format when the user passed one as
+    /// an auxiliary arg (e.g. <c>blur(f, 5, 'png')</c>) or when the transform always
+    /// emits a specific kind. The pipeline runtime applies the rightmost non-null
+    /// override across all stages — so a later transform's choice wins.
     /// </summary>
-    SKEncodedImageFormat? FormatOverride => null;
+    /// <param name="auxiliaryArgs">
+    /// Same span passed to <see cref="Apply"/>. Lets transforms inspect their own args
+    /// (a per-call format string) without storing per-instance state.
+    /// </param>
+    SKEncodedImageFormat? FormatOverride(ReadOnlySpan<DataValue> auxiliaryArgs) => null;
 }
 
 /// <summary>
