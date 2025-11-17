@@ -155,8 +155,8 @@ internal static class TableFormatter
             DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
             DataKind.Duration => value.AsDuration().ToString(),
             DataKind.Uuid => value.AsUuid().ToString(),
-            DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena),
-            DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena),
+            DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
+            DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena, registry),
             DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, registry),
             _ => value.ToDisplayString(),
         };

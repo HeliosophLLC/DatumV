@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.DatumFile.V2;
 using DatumIngest.Ingestion.Sampling;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -219,5 +220,247 @@ public class Ingester(
     private static string SidecarPathFor(string datumPath)
     {
         return Path.ChangeExtension(datumPath, SidecarConstants.FileExtension);
+    }
+
+    // ──────────────────── V2 format ingest path ────────────────────
+
+    /// <summary>
+    /// V2 format counterpart to <see cref="IngestAsync(FileFormatDescriptor, OutputDescriptor, IngestionOptions, CancellationToken)"/>.
+    /// Uses <see cref="DatumFileWriterV2"/> to produce an uncompressed
+    /// columnar-with-sidecar file per <c>project_datum_format_v2.md</c>. While
+    /// v1 still ships, this path is the debug entry-point for verifying
+    /// end-to-end v2 file creation against real source files (CSV / JSON /
+    /// Parquet / HDF5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Differences from the v1 path: no row-group concept (pages auto-flush
+    /// at 1024 rows), no <see cref="WriteHandle"/> (the writer streams
+    /// directly to disk), and stats / sample collection resolves through
+    /// each batch's arena (not a consolidated writer arena). Stats
+    /// accumulators that retain DataValues across batches will see them go
+    /// stale once the source batch is returned to the pool — a known gap
+    /// for stats-correctness in this path that will be addressed when v1
+    /// is dropped (Phase 5).
+    /// </para>
+    /// </remarks>
+    public Task<IngestionResult> IngestV2Async(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        CancellationToken cancellationToken = default)
+        => IngestV2Async(source, destination, IngestionOptions.Default, cancellationToken);
+
+    /// <summary>V2 ingest with explicit options.</summary>
+    public Task<IngestionResult> IngestV2Async(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        IngestionOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        IFormatDeserializer deserializer = formatRegistry.CreateDeserializer(source);
+        return IngestV2Async(source, destination, deserializer, options, cancellationToken);
+    }
+
+    /// <summary>V2 ingest with caller-provided deserializer.</summary>
+    public Task<IngestionResult> IngestV2Async(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        IFormatDeserializer deserializer,
+        CancellationToken cancellationToken = default)
+        => IngestV2Async(source, destination, deserializer, IngestionOptions.Default, cancellationToken);
+
+    /// <summary>V2 ingest with caller-provided deserializer and options.</summary>
+    public async Task<IngestionResult> IngestV2Async(
+        FileFormatDescriptor source,
+        OutputDescriptor destination,
+        IFormatDeserializer deserializer,
+        IngestionOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        Stopwatch sw = Stopwatch.StartNew();
+
+        SchemaDetector schemaDetector = new();
+        StatisticsCollector statisticsCollector = new();
+        SamplePreviewCollector sampleCollector = new();
+
+        await using Stream outputStream = await destination.OpenAsync(cancellationToken);
+
+        // Sidecar created lazily per the v1 pattern. We construct it
+        // up-front so its Fingerprint can be captured (needed for the
+        // sample-preview read pass) and so the deserializer can target it
+        // as the IBlobSink for image-bearing rows.
+        string sidecarPath = SidecarPathFor(destination.FilePath);
+        SidecarWriteStore sidecar = new(sidecarPath);
+        ulong sidecarFingerprint = sidecar.Fingerprint;
+        bool sidecarMaterialized;
+
+        DatumFileWriterV2 writer = new(outputStream, sidecar);
+
+        SerializationContext sourceContext = new(pool, options.BatchByteTarget, lboStore: sidecar);
+
+        // Long-lived stats arena — accumulators that retain DataValues
+        // (e.g. SpaceSavingSketch's top-K samples) need their offsets to
+        // stay resolvable past the source batch's pool.ReturnRowBatch.
+        // We stabilize each value into this arena before handing it to
+        // the collector; the arena lives until after GetStatistics().
+        Arena statsArena = new();
+        DataValue[]? stableScratch = null;
+
+        long rowCount = 0;
+        long batchCount = 0;
+        long totalArenaBytes = 0;
+        bool initialized = false;
+
+        try
+        {
+            await foreach (RowBatch batch in deserializer.DeserializeAsync(sourceContext, cancellationToken))
+            {
+                if (!schemaDetector.IsDetected)
+                {
+                    schemaDetector.Detect(batch);
+
+                    if (schemaDetector.IsDetected)
+                    {
+                        ColumnDescriptorV2[] descriptors = ToV2Descriptors(schemaDetector.Schema);
+                        writer.Initialize(descriptors);
+                        initialized = true;
+                    }
+                }
+
+                // Stats: stabilize per-row into statsArena, then accumulate
+                // against statsArena. Accumulators that retain values get
+                // arena-bound offsets that resolve for the rest of the run.
+                int colCount = batch.ColumnLookup.Count;
+                if (colCount > 0)
+                {
+                    if (stableScratch is null || stableScratch.Length < colCount)
+                    {
+                        stableScratch = new DataValue[colCount];
+                    }
+                    for (int rowI = 0; rowI < batch.Count; rowI++)
+                    {
+                        Row row = batch[rowI];
+                        for (int colI = 0; colI < colCount; colI++)
+                        {
+                            stableScratch[colI] = DataValueRetention.Stabilize(
+                                row[colI], batch.Arena, statsArena);
+                        }
+                        statisticsCollector.AddRow(new Row(batch.ColumnLookup, stableScratch), statsArena);
+                    }
+                }
+
+                // SamplePreviewCollector eagerly materializes to managed
+                // object?[] inside Consider — no arena retention required.
+                sampleCollector.Consider(batch, batch.Arena);
+
+                writer.WriteRowBatch(batch);
+
+                rowCount += batch.Count;
+                batchCount++;
+                totalArenaBytes += batch.Arena.BytesWritten;
+                pool.ReturnRowBatch(batch);
+            }
+
+            if (!initialized)
+            {
+                writer.Initialize(ToV2Descriptors(new Schema([])));
+            }
+
+            writer.FinalizeWriter();
+        }
+        finally
+        {
+            writer.Dispose();
+            sidecarMaterialized = sidecar.WasMaterialized;
+            sidecar.Dispose();
+        }
+
+        // outputStream is disposed by the await using; the file is now
+        // closed and we can stat it for the byte count.
+        long bytesWritten;
+        try
+        {
+            bytesWritten = new FileInfo(destination.FilePath).Length;
+        }
+        catch (FileNotFoundException)
+        {
+            // OutputDescriptor may not be a regular file path (e.g. memory
+            // stream destination); fall back to zero.
+            bytesWritten = 0;
+        }
+
+        sw.Stop();
+
+        PassMetrics ingestMetrics = new(
+            RowCount: rowCount,
+            BatchCount: batchCount,
+            BytesRead: 0,
+            ArenaBytesWritten: totalArenaBytes,
+            Elapsed: sw.Elapsed);
+
+        Schema finalSchema = schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]);
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+
+        Dictionary<string, DataKind> columnKinds = new(finalSchema.Columns.Count);
+        foreach (ColumnInfo column in finalSchema.Columns)
+        {
+            columnKinds[column.Name] = column.Kind;
+        }
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+
+        SidecarRegistry? sampleRegistry = null;
+        SidecarReadStore? sidecarReader = null;
+        try
+        {
+            if (sidecarMaterialized)
+            {
+                sidecarReader = new SidecarReadStore(sidecarPath, sidecarFingerprint);
+                sampleRegistry = new SidecarRegistry();
+                sampleRegistry.Register(sidecarReader);
+            }
+            SamplePreview sample = sampleCollector.Build(finalSchema, sampleRegistry);
+
+            return new IngestionResult(
+                OutputPath: destination.FilePath,
+                RowCount: rowCount,
+                BytesWritten: bytesWritten,
+                Schema: finalSchema,
+                Manifest: manifest,
+                Sample: sample,
+                ScanPass: deserializer.ScanMetrics,
+                IngestPass: ingestMetrics);
+        }
+        finally
+        {
+            sidecarReader?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Converts a <see cref="Schema"/> to the v2 column-descriptor list.
+    /// Encoder kind is picked by <see cref="ColumnDescriptorV2.EncoderFor"/>;
+    /// nullability comes from <see cref="ColumnInfo.Nullable"/>; array kind
+    /// is inferred from <see cref="ColumnInfo.ArrayElementKind"/>. Fixed
+    /// shape isn't carried on <see cref="ColumnInfo"/> today, so it is
+    /// always <see langword="null"/> here — Vector / Matrix / Tensor
+    /// columns will get their shape populated by a later schema-enrichment
+    /// pass when one lands.
+    /// </summary>
+    private static ColumnDescriptorV2[] ToV2Descriptors(Schema schema)
+    {
+        ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            ColumnInfo col = schema.Columns[i];
+            bool isArray = col.Kind == DataKind.Array || col.ArrayElementKind is not null;
+            descriptors[i] = new ColumnDescriptorV2(
+                Name: col.Name,
+                Kind: col.Kind,
+                Encoder: ColumnDescriptorV2.EncoderFor(col.Kind, isArray),
+                IsNullable: col.Nullable,
+                IsArray: isArray);
+        }
+        return descriptors;
     }
 }

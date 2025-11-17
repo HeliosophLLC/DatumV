@@ -17,7 +17,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IDisposable
+public sealed class DatumFileTableProvider : ITableProvider, IDatumFileTableProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
@@ -71,7 +71,52 @@ public sealed class DatumFileTableProvider : ITableProvider, IDisposable
     /// providers without a sidecar (the slot is unused since no sidecar-flagged
     /// values are produced).
     /// </summary>
-    public byte SidecarStoreId { get; internal set; }
+    public byte SidecarStoreId { get; set; }
+
+    /// <summary>
+    /// Opens the right table provider for the given <c>.datum</c> file —
+    /// peeks the format-version byte at offset 4-5 of the file header and
+    /// dispatches to either the v1 reader (this class) or the v2 reader
+    /// (<see cref="DatumFileTableProviderV2"/>). Same magic ("DTMF") for
+    /// both; only the version differs (v1=2, v2=3). Use this entry point
+    /// from <see cref="TableCatalog"/> rather than calling the v1
+    /// constructor directly so a registered v2 file just works.
+    /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// File magic doesn't match or version is unrecognized.
+    /// </exception>
+    public static ITableProvider Open(TableDescriptor descriptor, Pool pool)
+    {
+        ushort version = PeekFormatVersion(descriptor.FilePath);
+        return version switch
+        {
+            DatumFileConstants.FormatVersion => new DatumFileTableProvider(descriptor, pool),
+            DatumIngest.DatumFile.V2.DatumFormatV2.FormatVersion => new DatumFileTableProviderV2(descriptor, pool),
+            _ => throw new InvalidDataException(
+                $"Unsupported .datum format version {version} in '{descriptor.FilePath}'. " +
+                $"Reader supports v{DatumFileConstants.FormatVersion} and v{DatumIngest.DatumFile.V2.DatumFormatV2.FormatVersion}."),
+        };
+    }
+
+    /// <summary>
+    /// Reads the first 6 bytes of a <c>.datum</c> file: 4-byte ASCII
+    /// "DTMF" magic followed by the uint16 format version (little-endian).
+    /// Validates the magic and returns the version. Cheap one-shot — used
+    /// by the version-dispatching factory.
+    /// </summary>
+    private static ushort PeekFormatVersion(string filePath)
+    {
+        using FileStream fs = File.OpenRead(filePath);
+        Span<byte> probe = stackalloc byte[6];
+        fs.ReadExactly(probe);
+
+        if (!probe[..4].SequenceEqual("DTMF"u8))
+        {
+            throw new InvalidDataException(
+                $"File '{filePath}' does not have the .datum magic bytes (expected ASCII 'DTMF').");
+        }
+        return System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(probe.Slice(4, 2));
+    }
 
     private DatumFileReader Reader { get; }
 

@@ -376,6 +376,23 @@ public readonly struct DataValue : IEquatable<DataValue>
         BuildSidecar(DataKind.UInt8Array, offset, length, storeId, isArray: true);
 
     /// <summary>
+    /// Creates a <see cref="DataKind.String"/> value whose UTF-8 bytes live in a
+    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
+    /// 40-bit length; resolution requires an <see cref="IBlobSource"/>. Used by the
+    /// v2 reader when decoding a sidecar-pointer slot in a String column.
+    /// </summary>
+    public static DataValue FromStringInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.String, offset, length, storeId);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.JsonValue"/> value whose raw JSON UTF-8 bytes
+    /// live in a <c>.datum-blob</c> sidecar. Mirror of
+    /// <see cref="FromStringInSidecar"/> for the JsonValue kind.
+    /// </summary>
+    public static DataValue FromJsonValueInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.JsonValue, offset, length, storeId);
+
+    /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
     /// UTF-8 form fits in 16 bytes (inline path); longer strings require a store —
     /// see <see cref="FromString(string, IValueStore)"/>.
@@ -570,7 +587,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// kinds like <see cref="DataKind.Image"/> and <see cref="DataKind.UInt8Array"/>
     /// leave it <c>false</c>.
     /// </summary>
-    private static DataValue BuildSidecar(
+    internal static DataValue BuildSidecar(
         DataKind kind, long offset, long length, byte storeId, bool isArray = false)
     {
         if (offset < 0)
@@ -1683,10 +1700,40 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Returns the text string payload from an explicit <see cref="IValueStore"/>.</summary>
+    /// <remarks>
+    /// Does not handle sidecar-backed values — for those use the
+    /// <see cref="AsString(IValueStore, SidecarRegistry)"/> overload that
+    /// accepts a registry. This method throws with a helpful pointer when
+    /// it encounters one.
+    /// </remarks>
     public string AsString(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
+        if (IsInSidecar)
+        {
+            throw new InvalidOperationException(
+                "AsString(store) cannot resolve a sidecar-backed String. Use the " +
+                "AsString(store, registry) overload — it routes sidecar values through " +
+                "the SidecarRegistry and inline / arena values through the store.");
+        }
+        return store.RetrieveString(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Returns the text string payload, resolving inline / arena / sidecar
+    /// storage tiers uniformly. Inline values come from the struct itself,
+    /// arena-backed values come from <paramref name="store"/>, and
+    /// sidecar-backed values come from <paramref name="registry"/> via the
+    /// value's recorded <c>storeId</c>.
+    /// </summary>
+    /// <param name="store">Used for arena-backed values; ignored for inline / sidecar.</param>
+    /// <param name="registry">Required for sidecar-backed values; ignored for inline / arena.</param>
+    public string AsString(IValueStore store, SidecarRegistry? registry)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
+        if (IsInSidecar) return System.Text.Encoding.UTF8.GetString(ReadSidecarBytes(registry));
         return store.RetrieveString(_p0, _p1);
     }
 
@@ -1847,6 +1894,27 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
             ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return InlineUtf8Span;
+        if (IsInSidecar)
+        {
+            throw new InvalidOperationException(
+                "AsUtf8Span(store) cannot resolve a sidecar-backed String / JsonValue. Use the " +
+                "AsUtf8Span(store, registry) overload that routes through the SidecarRegistry.");
+        }
+        return store.RetrieveUtf8Span(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Returns the UTF-8 byte span, resolving inline / arena / sidecar
+    /// storage tiers uniformly. Inline values come from the struct,
+    /// arena-backed values come from <paramref name="store"/>, and
+    /// sidecar-backed values come from <paramref name="registry"/>.
+    /// </summary>
+    public ReadOnlySpan<byte> AsUtf8Span(IValueStore store, SidecarRegistry? registry)
+    {
+        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
+            ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsInline) return InlineUtf8Span;
+        if (IsInSidecar) return ReadSidecarBytes(registry);
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
@@ -2007,10 +2075,33 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Returns the raw JSON string payload from an explicit <see cref="IValueStore"/>.</summary>
+    /// <remarks>
+    /// Does not handle sidecar-backed values — for those use the
+    /// <see cref="AsJsonValue(IValueStore, SidecarRegistry)"/> overload.
+    /// </remarks>
     public string AsJsonValue(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
         if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
+        if (IsInSidecar)
+        {
+            throw new InvalidOperationException(
+                "AsJsonValue(store) cannot resolve a sidecar-backed JsonValue. Use the " +
+                "AsJsonValue(store, registry) overload that routes through the SidecarRegistry.");
+        }
+        return store.RetrieveString(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Returns the raw JSON string payload, resolving inline / arena /
+    /// sidecar storage tiers uniformly via <paramref name="store"/> and
+    /// <paramref name="registry"/>.
+    /// </summary>
+    public string AsJsonValue(IValueStore store, SidecarRegistry? registry)
+    {
+        ThrowIfNullOrWrongKind(DataKind.JsonValue);
+        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
+        if (IsInSidecar) return System.Text.Encoding.UTF8.GetString(ReadSidecarBytes(registry));
         return store.RetrieveString(_p0, _p1);
     }
 

@@ -248,7 +248,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
         }
-        DatumFileTableProvider provider = new(tableDescriptor, Pool);
+        // Version-aware open: peeks the format byte and returns either the
+        // v1 or v2 provider. Both expose the same ITableProvider surface and
+        // the small IDatumFileTableProvider extension for sidecar plumbing.
+        ITableProvider provider = DatumFileTableProvider.Open(tableDescriptor, Pool);
         if (Tables.TryAdd(tableDescriptor.Name, provider))
         {
             RegisterProviderSidecar(provider);
@@ -256,7 +259,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
         else
         {
-            provider.Dispose();
+            (provider as IDisposable)?.Dispose();
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered.");
         }
     }
@@ -286,15 +289,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// If <paramref name="provider"/> is a <see cref="DatumFileTableProvider"/> with a
-    /// <c>.datum-blob</c> companion sidecar, registers the sidecar with this catalog's
-    /// <see cref="SidecarRegistry"/> and stamps the assigned <c>storeId</c> onto the
-    /// provider so its decoder can label sidecar-flagged DataValues at decode time.
+    /// If <paramref name="provider"/> is a v1 / v2 <c>.datum</c> file
+    /// provider with a <c>.datum-blob</c> companion sidecar, registers
+    /// the sidecar with this catalog's <see cref="SidecarRegistry"/> and
+    /// stamps the assigned <c>storeId</c> onto the provider so its
+    /// decoder can label sidecar-flagged DataValues at decode time.
     /// No-op for tabular-only providers and for non-datum providers.
     /// </summary>
     private void RegisterProviderSidecar(ITableProvider provider)
     {
-        if (provider is not DatumFileTableProvider datumProvider) return;
+        if (provider is not IDatumFileTableProvider datumProvider) return;
         if (datumProvider.Sidecar is not { } source) return;
 
         datumProvider.SidecarStoreId = SidecarRegistry.Register(source);
