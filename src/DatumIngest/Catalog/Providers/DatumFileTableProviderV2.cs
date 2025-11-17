@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.DatumFile.V2;
 using DatumIngest.DatumFile.V2.Decoding;
+using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -20,12 +22,19 @@ namespace DatumIngest.Catalog.Providers;
 /// <see cref="SidecarStoreId"/>.
 /// </summary>
 /// <remarks>
-/// First-cut implementation: no zone-map pruning, no seek session,
-/// no <c>.datum-manifest</c> / <c>.datum-index</c> sidecar discovery
-/// (those are v1 sidecars; v2-equivalents are Phase 5+ work). The
-/// scan walks pages in order, opens fresh decoders per page, and yields
-/// page-sized batches whose arena absorbs eagerly-materialized children
-/// (Struct field arrays).
+/// <para>
+/// Three-tier zone-map pruning (volume → chapter → page) runs when the
+/// query engine supplies a <c>filterHint</c>: volumes that conclusively
+/// can't match are skipped wholesale, then chapters within surviving
+/// volumes, then pages within surviving chapters. Pages that survive all
+/// three tiers are read and emitted. With no filter hint the scan walks
+/// every page in order.
+/// </para>
+/// <para>
+/// First-cut limitations: no seek session, no <c>.datum-manifest</c> /
+/// <c>.datum-index</c> sidecar discovery (those are v1 sidecars;
+/// v2-equivalents are Phase 5+ work).
+/// </para>
 /// </remarks>
 public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTableProvider, IDisposable
 {
@@ -83,8 +92,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         Expression? filterHint,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        _ = filterHint; // Zone-map pruning deferred — see class remarks.
-
         if (_reader.Footer.Columns.Count == 0)
         {
             yield break;
@@ -101,9 +108,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
         // All columns share the same page count and per-page row count
         // because the writer flushes every encoder at the same row cadence.
-        // We probe column 0 and trust the rest match. (If a future writer
-        // ever desyncs, this assumption needs to be lifted — but the
-        // current spec has all encoders flushing on the same row.)
         int pageCount = _reader.Footer.Columns[0].Pages.Count;
         int[] schemaIndices = new int[projectedCount];
         for (int i = 0; i < projectedCount; i++)
@@ -111,28 +115,36 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             schemaIndices[i] = columnLookup.GetSchemaColumnIndex(i);
         }
 
+        // Build a filter-column → schema-index lookup once. Skip the
+        // pruning path entirely when the filter references no columns we
+        // have stats for.
+        Dictionary<string, int>? filterSchemaIndex = filterHint is null
+            ? null
+            : BuildFilterColumnIndex(filterHint);
+
+        // Stats arena for boxed min/max values during partition checks.
+        // Reused across all skip evaluations; values are tiny (numerics,
+        // short strings) so growth is bounded.
+        Arena statsArena = new();
+
         IPageDecoderV2[] decoders = new IPageDecoderV2[projectedCount];
 
-        for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+        foreach (int pageIndex in EnumerateScanablePages(pageCount, filterHint, filterSchemaIndex, statsArena))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Page row count is the same across all columns (writer
-            // invariant) — read it from the first projected column's page
-            // descriptor.
             int rowCount = _reader.Footer.Columns[schemaIndices[0]].Pages[pageIndex].RowCount;
             if (rowCount == 0)
             {
                 continue;
             }
 
-            // One batch per page. Batch.Arena is the eager store the
+            // One batch per page. batch.Arena is the eager store the
             // decoders use to materialize Struct field arrays — values
             // stored against the batch's own arena resolve cleanly through
             // standard accessors downstream.
             RowBatch batch = _pool.RentRowBatch(columnLookup, rowCount);
 
-            // Open page decoders bound to the batch's arena.
             for (int i = 0; i < projectedCount; i++)
             {
                 decoders[i] = _reader.OpenPageDecoder(
@@ -157,6 +169,176 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             yield return batch;
         }
+    }
+
+    /// <summary>
+    /// Yields the page indices that survive zone-map pruning, in scan
+    /// order. With no filter hint, this is just <c>0..pageCount-1</c>.
+    /// With a filter, the three-tier hierarchy (volume → chapter → page)
+    /// is walked top-down: a volume that the predicate provably can't
+    /// match short-circuits all its chapters; same for chapters and
+    /// their pages.
+    /// </summary>
+    private IEnumerable<int> EnumerateScanablePages(
+        int pageCount,
+        Expression? filterHint,
+        Dictionary<string, int>? filterSchemaIndex,
+        Arena statsArena)
+    {
+        if (filterHint is null || filterSchemaIndex is null || filterSchemaIndex.Count == 0)
+        {
+            for (int p = 0; p < pageCount; p++) yield return p;
+            yield break;
+        }
+
+        int pagesPerChapter = DatumFormatV2.PagesPerChapter;
+        int chaptersPerVolume = DatumFormatV2.ChaptersPerVolume;
+        int chapterCount = _reader.Footer.Columns[0].ChapterZoneMaps.Count;
+
+        bool hasVolumes = (_reader.Header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0
+            && _reader.Footer.Columns[0].VolumeZoneMaps is { Count: > 0 };
+
+        // When the file emits volume zone maps walk volumes; otherwise
+        // the volume tier is collapsed and we walk chapters directly.
+        int volumeIterCount = hasVolumes ? _reader.Footer.Columns[0].VolumeZoneMaps!.Count : 1;
+
+        for (int v = 0; v < volumeIterCount; v++)
+        {
+            if (hasVolumes && CanSkipVolume(v, filterHint, filterSchemaIndex, statsArena))
+            {
+                continue;
+            }
+
+            int chapterStart = hasVolumes ? v * chaptersPerVolume : 0;
+            int chapterEnd = hasVolumes
+                ? Math.Min(chapterStart + chaptersPerVolume, chapterCount)
+                : chapterCount;
+
+            for (int c = chapterStart; c < chapterEnd; c++)
+            {
+                if (CanSkipChapter(c, filterHint, filterSchemaIndex, statsArena))
+                {
+                    continue;
+                }
+
+                int pageStart = c * pagesPerChapter;
+                int pageEnd = Math.Min(pageStart + pagesPerChapter, pageCount);
+
+                for (int p = pageStart; p < pageEnd; p++)
+                {
+                    if (CanSkipPage(p, filterHint, filterSchemaIndex, statsArena))
+                    {
+                        continue;
+                    }
+                    yield return p;
+                }
+            }
+        }
+    }
+
+    private bool CanSkipVolume(int volumeIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    {
+        // Volume row count = sum of chapter row counts in this volume.
+        // Chapter row count = sum of page row counts in that chapter.
+        // We only need a bound; passing pageCount * pageSize is fine as a
+        // ceiling for the predicate evaluator's null-vs-row arithmetic.
+        long rowCount = ComputeVolumeRowCount(volumeIndex);
+        Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string name, int schemaIdx) in filterSchemaIndex)
+        {
+            DatumZoneMap zoneMap = _reader.Footer.Columns[schemaIdx].VolumeZoneMaps![volumeIndex];
+            stats[name] = MakeRange(zoneMap, rowCount, arena);
+        }
+        using ColumnStatisticsRangeLookup lookup = new(stats);
+        return StatisticsPredicateEvaluator.CanSkipPartition(filter, lookup, arena);
+    }
+
+    private bool CanSkipChapter(int chapterIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    {
+        long rowCount = ComputeChapterRowCount(chapterIndex);
+        Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string name, int schemaIdx) in filterSchemaIndex)
+        {
+            DatumZoneMap zoneMap = _reader.Footer.Columns[schemaIdx].ChapterZoneMaps[chapterIndex];
+            stats[name] = MakeRange(zoneMap, rowCount, arena);
+        }
+        using ColumnStatisticsRangeLookup lookup = new(stats);
+        return StatisticsPredicateEvaluator.CanSkipPartition(filter, lookup, arena);
+    }
+
+    private bool CanSkipPage(int pageIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    {
+        int rowCount = _reader.Footer.Columns[0].Pages[pageIndex].RowCount;
+        Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
+        foreach ((string name, int schemaIdx) in filterSchemaIndex)
+        {
+            DatumZoneMap? zoneMap = _reader.Footer.Columns[schemaIdx].Pages[pageIndex].ZoneMap;
+            // Page-level zone maps are null for non-comparable kinds —
+            // skip those columns rather than synthesizing fake stats.
+            if (zoneMap is null) continue;
+            stats[name] = MakeRange(zoneMap, rowCount, arena);
+        }
+        if (stats.Count == 0) return false;
+        using ColumnStatisticsRangeLookup lookup = new(stats);
+        return StatisticsPredicateEvaluator.CanSkipPartition(filter, lookup, arena);
+    }
+
+    /// <summary>
+    /// Materializes a <see cref="DatumZoneMap"/> as a
+    /// <see cref="ColumnStatisticsRange"/>, lifting the boxed min/max
+    /// into <see cref="DataValue"/>s landed in <paramref name="arena"/>.
+    /// </summary>
+    private static ColumnStatisticsRange MakeRange(DatumZoneMap zoneMap, long rowCount, Arena arena) =>
+        new(
+            DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Minimum, arena),
+            DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Maximum, arena),
+            zoneMap.NullCount,
+            rowCount);
+
+    private long ComputeChapterRowCount(int chapterIndex)
+    {
+        int pagesPerChapter = DatumFormatV2.PagesPerChapter;
+        int pageStart = chapterIndex * pagesPerChapter;
+        var pages = _reader.Footer.Columns[0].Pages;
+        int pageEnd = Math.Min(pageStart + pagesPerChapter, pages.Count);
+        long total = 0;
+        for (int p = pageStart; p < pageEnd; p++) total += pages[p].RowCount;
+        return total;
+    }
+
+    private long ComputeVolumeRowCount(int volumeIndex)
+    {
+        int chaptersPerVolume = DatumFormatV2.ChaptersPerVolume;
+        int chapterStart = volumeIndex * chaptersPerVolume;
+        int chapterCount = _reader.Footer.Columns[0].ChapterZoneMaps.Count;
+        int chapterEnd = Math.Min(chapterStart + chaptersPerVolume, chapterCount);
+        long total = 0;
+        for (int c = chapterStart; c < chapterEnd; c++) total += ComputeChapterRowCount(c);
+        return total;
+    }
+
+    /// <summary>
+    /// Builds a case-insensitive dictionary mapping every column name
+    /// referenced in <paramref name="filter"/> to its schema column
+    /// index. Columns not present in the schema are silently dropped
+    /// (the predicate evaluator falls back to "do not skip" for those).
+    /// </summary>
+    private Dictionary<string, int>? BuildFilterColumnIndex(Expression filter)
+    {
+        Dictionary<string, int> result = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string? _, string columnName) in ColumnReferenceCollector.Collect(filter))
+        {
+            if (result.ContainsKey(columnName)) continue;
+            for (int i = 0; i < _schema.Columns.Count; i++)
+            {
+                if (string.Equals(_schema.Columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    result[columnName] = i;
+                    break;
+                }
+            }
+        }
+        return result.Count > 0 ? result : null;
     }
 
     /// <inheritdoc/>
