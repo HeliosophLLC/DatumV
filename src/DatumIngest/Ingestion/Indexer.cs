@@ -72,7 +72,12 @@ public sealed class Indexer(Pool pool)
         long bytesWritten;
         long rowCount = 0;
 
-        using DatumFileTableProvider provider = new(descriptor, pool);
+        // Version-aware open: dispatches to v1 or v2 reader based on the
+        // file's format-version byte. v2 files emit sidecar-bound DataValues
+        // for long strings / byte arrays / images; the index builder skips
+        // those at the bloom layer (see IncrementalIndexBuilder.AddRow).
+        using ITableProvider provider = DatumFileTableProvider.Open(descriptor, pool);
+
         try
         {
             await foreach (RowBatch batch in provider

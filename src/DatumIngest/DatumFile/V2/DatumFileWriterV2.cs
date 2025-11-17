@@ -35,6 +35,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     private readonly Stream _stream;
     private readonly bool _ownsStream;
     private readonly IBlobSink? _sidecar;
+    private readonly CountingBlobSink? _countingSidecar;
     private readonly bool _ownsSidecar;
 
     private ColumnDescriptorV2[]? _columns;
@@ -74,7 +75,9 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         if (sidecarPath is not null)
         {
-            _sidecar = new SidecarWriteStore(sidecarPath);
+            SidecarWriteStore underlying = new(sidecarPath);
+            _countingSidecar = new CountingBlobSink(underlying);
+            _sidecar = _countingSidecar;
             _ownsSidecar = true;
         }
     }
@@ -95,7 +98,11 @@ public sealed class DatumFileWriterV2 : IDisposable
         }
         _stream = datumStream;
         _ownsStream = false;
-        _sidecar = sidecar;
+        if (sidecar is not null)
+        {
+            _countingSidecar = new CountingBlobSink(sidecar);
+            _sidecar = _countingSidecar;
+        }
         _ownsSidecar = false;
     }
 
@@ -292,7 +299,7 @@ public sealed class DatumFileWriterV2 : IDisposable
             _stream.Dispose();
         }
 
-        if (_ownsSidecar && _sidecar is IDisposable disposableSidecar)
+        if (_ownsSidecar && _countingSidecar?.Inner is IDisposable disposableSidecar)
         {
             disposableSidecar.Dispose();
         }
@@ -317,28 +324,38 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
-    /// Scans the page descriptors for any column whose pages flagged at
-    /// least one row as a sidecar pointer (inline-bit clear). Drives the
-    /// <see cref="DatumFileFlagsV2.HasSidecarReferences"/> flag. The
-    /// cheap-but-coarse signal: any VariableSlot column whose pages
-    /// contain at least one non-inline row.
+    /// True when at least one row was emitted as a sidecar pointer (i.e.
+    /// the variable-slot encoder couldn't keep it inline). Drives the
+    /// <see cref="DatumFileFlagsV2.HasSidecarReferences"/> file flag,
+    /// which the reader uses to know whether the companion
+    /// <c>.datum-blob</c> is required for opens.
     /// </summary>
     private bool HasAnySidecarReferences()
     {
-        // The current encoder API doesn't surface "did this page emit a
-        // sidecar pointer?". As a coarse signal we look at whether any
-        // VariableSlot column has any pages whose non-null rows aren't all
-        // inline — but that requires the inline bitmap, which we've
-        // discarded by now. For v1, key off "is there a VariableSlot
-        // column AND a sidecar attached AND a non-zero row count".
-        if (_sidecar is null) return false;
-        for (int colIndex = 0; colIndex < _columns!.Length; colIndex++)
+        // Authoritative: the counting wrapper around the IBlobSink tracks
+        // every Append call from inside the encoders. Zero appends means
+        // every variable-slot row went inline, no sidecar bytes were
+        // written, and the sidecar file may not even exist on disk.
+        if (_countingSidecar is null) return false;
+        return _countingSidecar.AppendCount > 0;
+    }
+
+    /// <summary>
+    /// Pass-through <see cref="IBlobSink"/> wrapper that counts how many
+    /// times <see cref="Append"/> was called. Used by the writer to detect
+    /// whether any variable-slot row actually spilled to the sidecar so
+    /// the <see cref="DatumFileFlagsV2.HasSidecarReferences"/> flag is
+    /// only set when the sidecar contains real bytes.
+    /// </summary>
+    private sealed class CountingBlobSink : IBlobSink
+    {
+        public CountingBlobSink(IBlobSink inner) { Inner = inner; }
+        public IBlobSink Inner { get; }
+        public int AppendCount { get; private set; }
+        public (long Offset, long Length) Append(ReadOnlySpan<byte> bytes)
         {
-            if (_columns[colIndex].Encoder == EncoderKind.VariableSlot && _pageDirectory![colIndex].Count > 0)
-            {
-                return true;
-            }
+            AppendCount++;
+            return Inner.Append(bytes);
         }
-        return false;
     }
 }

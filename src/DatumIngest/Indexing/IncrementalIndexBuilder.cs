@@ -155,8 +155,18 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
             if (bloomFilters is not null)
             {
-                BloomFilter? bloom = bloomFilters[ordinal];
-                bloom?.Add(value, arena);
+                // Skip sidecar-bound values: the bloom-hash path resolves
+                // bytes through arena offsets, which sidecar coordinates
+                // are not. Sidecar payloads tend to be high-cardinality
+                // identifiers (filenames, long descriptions, image bytes)
+                // where bloom selectivity is low anyway — the trade is
+                // accepting reduced recall on those columns rather than
+                // plumbing a SidecarRegistry through every accumulator.
+                if (!value.IsInSidecar)
+                {
+                    BloomFilter? bloom = bloomFilters[ordinal];
+                    bloom?.Add(value, arena);
+                }
             }
 
             if (spillEntries is not null && !value.IsNull)
