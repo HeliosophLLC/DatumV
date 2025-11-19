@@ -91,6 +91,39 @@ public sealed class IndexerV2Tests : IAsyncLifetime
         Assert.Contains("description", result.BloomColumns, StringComparer.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task IndexedV2File_OpenedViaCatalog_ExposesSourceIndex()
+    {
+        // After indexing, the catalog should pick up the .datum-index
+        // sidecar when the v2 provider opens the file. This is what
+        // makes ScanOperator.HasIndexPruning true and lets equality
+        // queries promote to seek-mode.
+        const string csv =
+            "id,name\n" +
+            "1,alice\n" +
+            "2,bob\n" +
+            "3,carol\n" +
+            "4,dave\n";
+
+        string datumPath = await IngestCsvAsync(csv, "indexed.datum");
+        OutputDescriptor indexDest = new(Path.ChangeExtension(datumPath, ".datum-index"));
+        DatumIngest.Serialization.DatumFileDescriptor source = new(datumPath);
+        Indexer indexer = new(new Pool(new PoolBacking()));
+        await indexer.IndexAsync(source, indexDest);
+
+        // Open via catalog → v2 provider should auto-discover the
+        // .datum-index alongside.
+        using DatumIngest.Catalog.TableCatalog catalog = new(new Pool(new PoolBacking()));
+        DatumIngest.Catalog.ITableProvider provider = catalog.Add(
+            new DatumIngest.Catalog.TableDescriptor("indexed", datumPath));
+        Assert.NotNull(provider.GetSourceIndex());
+        DatumIngest.Indexing.SourceIndex sourceIndex = provider.GetSourceIndex()!;
+        Assert.True(sourceIndex.Chunks.Count > 0);
+        // Every column should appear in bloom (auto-bloom default).
+        Assert.NotNull(sourceIndex.BloomFilters);
+        Assert.Contains("id", sourceIndex.BloomFilters!.ColumnNames, StringComparer.OrdinalIgnoreCase);
+    }
+
     private async Task<string> IngestCsvAsync(string csv, string fileName)
     {
         string datumPath = Path.Combine(_tempDir, fileName);

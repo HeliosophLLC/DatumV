@@ -10,6 +10,7 @@ using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
+using DatumIngest.Serialization;
 
 namespace DatumIngest.Catalog.Providers;
 
@@ -43,13 +44,19 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private readonly Pool _pool;
     private readonly SidecarReadStore? _sidecar;
     private readonly Schema _schema;
+    private readonly QueryResultsManifest? _manifest;
+    private readonly MappedSourceIndexSet? _mappedIndexSet;
+    private readonly SourceIndex? _sourceIndex;
 
     /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
     /// the v2 <c>.datum</c> file, parses its footer, and (when the file
     /// declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>)
     /// memory-maps the companion <c>.datum-blob</c> for sidecar reads.
-    /// Use <see cref="DatumFileTableProvider.Open"/> from
+    /// Auto-discovers <c>.datum-manifest</c> and <c>.datum-index</c>
+    /// sidecars alongside the source so <see cref="GetManifest"/> /
+    /// <see cref="GetSourceIndex"/> return live data. Use
+    /// <see cref="DatumFileTableProvider.Open"/> from
     /// <see cref="TableCatalog"/> rather than this constructor directly so
     /// v1 / v2 dispatch is centralized.
     /// </summary>
@@ -60,6 +67,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _reader = DatumFileReaderV2.Open(descriptor.FilePath);
         _sidecar = TryOpenSidecar(descriptor.FilePath, _reader);
         _schema = BuildSchema(_reader.Footer);
+        _manifest = TryLoadManifest(descriptor);
+        (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
     }
 
     /// <inheritdoc/>
@@ -72,7 +81,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public string Name => _descriptor.Name;
 
     /// <inheritdoc/>
-    public bool Seekable => false;
+    public bool Seekable => true;
 
     /// <inheritdoc/>
     public long GetRowCount() => _reader.TotalRowCount;
@@ -81,10 +90,10 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public Schema GetSchema() => _schema;
 
     /// <inheritdoc/>
-    public QueryResultsManifest? GetManifest() => null;
+    public QueryResultsManifest? GetManifest() => _manifest;
 
     /// <inheritdoc/>
-    public SourceIndex? GetSourceIndex() => null;
+    public SourceIndex? GetSourceIndex() => _sourceIndex;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
@@ -342,16 +351,45 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Each session opens a fresh <see cref="DatumFileReaderV2"/> against
+    /// the same path so multiple concurrent sessions don't contend for
+    /// <see cref="FileStream.Position"/> on a shared reader. The sidecar
+    /// is similarly re-opened per session — mmap views are read-only and
+    /// shareable across processes, so two views of the same file don't
+    /// cost much. Resolved projection metadata is captured once and kept
+    /// for the session's lifetime.
+    /// </remarks>
     public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
     {
-        throw new NotSupportedException(
-            "v2 .datum reader does not yet support seek sessions. " +
-            "Index-based seeks will land alongside the Phase 5 chapter-grained index work.");
+        ColumnLookup columnLookup = ResolveProjection(_schema, requiredColumns);
+        int projectedCount = columnLookup.Count;
+        int[] schemaIndices = new int[projectedCount];
+        for (int i = 0; i < projectedCount; i++)
+        {
+            schemaIndices[i] = columnLookup.GetSchemaColumnIndex(i);
+        }
+
+        DatumFileReaderV2 sessionReader = DatumFileReaderV2.Open(_descriptor.FilePath);
+        SidecarReadStore? sessionSidecar = null;
+        try
+        {
+            sessionSidecar = TryOpenSidecar(_descriptor.FilePath, sessionReader);
+            return new DatumFileSeekSessionV2(
+                _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId);
+        }
+        catch
+        {
+            sessionSidecar?.Dispose();
+            sessionReader.Dispose();
+            throw;
+        }
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
+        _mappedIndexSet?.Dispose();
         _sidecar?.Dispose();
         _reader.Dispose();
     }
@@ -435,5 +473,88 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         Span<byte> hdr = stackalloc byte[SidecarConstants.HeaderSize];
         fs.ReadExactly(hdr);
         return BinaryPrimitives.ReadUInt64LittleEndian(hdr.Slice(16, 8));
+    }
+
+    /// <summary>
+    /// Loads a <c>.datum-manifest</c> sidecar alongside the source file.
+    /// Returns the per-table <see cref="QueryResultsManifest"/> matching
+    /// this provider's table name, or <see langword="null"/> when the
+    /// sidecar is absent or has no entry for this table. Mirrors the v1
+    /// loader; the manifest format is shared between v1 and v2.
+    /// </summary>
+    private static QueryResultsManifest? TryLoadManifest(TableDescriptor descriptor)
+    {
+        string path = PathDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-manifest";
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        string json = File.ReadAllText(path);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        if (sourceManifest is null)
+        {
+            return null;
+        }
+
+        return ResolveSidecarEntry(sourceManifest.Tables, descriptor.Name, descriptor.FilePath);
+    }
+
+    /// <summary>
+    /// Memory-maps a <c>.datum-index</c> sidecar alongside the source
+    /// file. Returns the owning <see cref="MappedSourceIndexSet"/> and
+    /// the resolved <see cref="SourceIndex"/> for this table, or
+    /// <c>(null, null)</c> when absent. Multiple scan operators share the
+    /// single mapped view via the kept <see cref="MappedSourceIndexSet"/>.
+    /// </summary>
+    private static (MappedSourceIndexSet? Mapped, SourceIndex? Index) TryLoadSourceIndex(TableDescriptor descriptor)
+    {
+        string path = PathDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-index";
+        if (!File.Exists(path))
+        {
+            return (null, null);
+        }
+
+        MappedSourceIndexSet mapped = UnifiedIndexReader.Open(path);
+        try
+        {
+            SourceIndex? index = ResolveSidecarEntry(mapped.IndexSet.Tables, descriptor.Name, descriptor.FilePath);
+            if (index is null)
+            {
+                mapped.Dispose();
+                return (null, null);
+            }
+            return (mapped, index);
+        }
+        catch
+        {
+            mapped.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a sidecar entry by the catalog's registered table name,
+    /// falling back to the file-convention-derived name. Mirrors the v1
+    /// loader to handle name-mismatch scenarios consistently between
+    /// formats.
+    /// </summary>
+    private static T? ResolveSidecarEntry<T>(
+        IReadOnlyDictionary<string, T> entries, string tableName, string sourceFilePath)
+        where T : class
+    {
+        if (entries.TryGetValue(tableName, out T? value))
+        {
+            return value;
+        }
+
+        string derivedName = PathDetector.DeriveTableName(sourceFilePath);
+        if (!string.Equals(derivedName, tableName, StringComparison.Ordinal)
+            && entries.TryGetValue(derivedName, out value))
+        {
+            return value;
+        }
+
+        return null;
     }
 }
