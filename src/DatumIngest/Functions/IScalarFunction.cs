@@ -1,56 +1,51 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions;
 
 /// <summary>
-/// Interface for scalar SQL functions that take one or more <see cref="DataValue"/>
-/// arguments and produce a single <see cref="DataValue"/> result.
+/// Scalar SQL function operating on <see cref="ValueRef"/>: takes one or
+/// more arguments and produces a single value. Functions never touch
+/// arenas, never thread an <c>IValueStore</c>, never call <c>Stabilize</c>;
+/// the evaluator handles store-routing at the call boundary.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Implementing types pair this instance interface with <see cref="IFunction"/>
+/// for static-abstract metadata. Both interfaces are required for
+/// <see cref="FunctionRegistry.RegisterScalar{T}"/>.
+/// </para>
+/// </remarks>
 public interface IScalarFunction
 {
-    /// <summary>The SQL function name (case-insensitive matching).</summary>
-    string Name { get; }
-
     /// <summary>
-    /// Validates the argument types and returns the result <see cref="DataKind"/>.
+    /// Validates argument kinds and returns the result kind. Most
+    /// implementations forward to <see cref="FunctionMetadata.Validate{T}"/>;
+    /// runtime-typed return shapes (<c>cast</c>, <c>try_cast</c>) override
+    /// the default rule with a custom resolver.
     /// </summary>
-    /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
-    /// <returns>The kind of the result value.</returns>
-    /// <exception cref="ArgumentException">The argument types are not valid for this function.</exception>
+    /// <exception cref="FunctionArgumentException">
+    /// The argument kinds do not match any signature variant.
+    /// </exception>
     DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds);
 
     /// <summary>
-    /// Executes the function with the given arguments.
+    /// Executes the function on already-materialized arguments. The
+    /// evaluator converts arena/sidecar-backed payloads to managed
+    /// objects before calling, and converts the returned
+    /// <see cref="ValueRef"/> back to a <see cref="DataValue"/> after.
     /// </summary>
-    /// <param name="arguments">The argument values.</param>
-    /// <returns>The computed result.</returns>
-    DataValue Execute(ReadOnlySpan<DataValue> arguments);
+    /// <param name="arguments">Argument values.</param>
+    /// <param name="frame">
+    /// Per-row evaluation frame, available for functions that need
+    /// row context (correlated columns, sidecar-bound source tables).
+    /// Most scalar functions can ignore it.
+    /// </param>
+    ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame);
 
     /// <summary>
-    /// Executes the function with the given arguments and an explicit value store
-    /// for resolving reference-type payloads (strings, arrays, etc.).
-    /// </summary>
-    /// <param name="arguments">The argument values.</param>
-    /// <param name="store">The value store for reading/writing reference-type payloads.</param>
-    /// <returns>The computed result.</returns>
-    DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
-
-    /// <summary>
-    /// Executes the function with the given arguments and a full <see cref="InvocationFrame"/>.
-    /// Use this overload when the function needs more than the target store — specifically the
-    /// <see cref="InvocationFrame.SidecarRegistry"/> for resolving sidecar-backed payloads
-    /// (Image, UInt8Array, etc.) or distinct <see cref="InvocationFrame.Source"/> /
-    /// <see cref="InvocationFrame.Target"/> stores.
-    /// </summary>
-    /// <param name="arguments">The argument values.</param>
-    /// <param name="frame">The invocation frame supplying source/target stores and the optional sidecar registry.</param>
-    /// <returns>The computed result.</returns>
-    DataValue Execute(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame) => Execute(arguments, frame.Target);
-
-    /// <summary>
-    /// The cost weight of a single invocation of this function, measured in Query Units (QU).
-    /// Used for billing, governance budgets, and pre-execution cost estimation.
-    /// Higher values indicate more expensive operations (e.g. image transforms vs scalar math).
+    /// Cost weight of a single invocation in Query Units (QU). Used for
+    /// billing, governance budgets, and pre-execution cost estimation.
     /// </summary>
     int QueryUnitCost => 1;
 }

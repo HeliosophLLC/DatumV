@@ -20,9 +20,9 @@ public sealed class ExpressionEvaluator
     private readonly QueryMeter? _meter;
 
     /// <summary>
-    /// Persistent store used for (1) per-evaluator caches (<see cref="_castTargetCache"/>,
-    /// <see cref="_inValueSetCache"/>) whose <see cref="DataValue"/> entries must outlive
-    /// any single batch, and (2) the <see cref="Row"/>-only overload of
+    /// Persistent store used for (1) per-evaluator caches (<see cref="_inValueSetCache"/>)
+    /// whose <see cref="DataValue"/> entries must outlive any single batch, and
+    /// (2) the <see cref="Row"/>-only overload of
     /// <see cref="Evaluate(Expression, Row)"/> which constructs a default frame using this
     /// store for both the source and target arenas. Callers that want true two-arena
     /// behaviour should invoke the <see cref="EvaluationFrame"/>-based overloads instead.
@@ -248,7 +248,6 @@ public sealed class ExpressionEvaluator
                 StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, frame),
                 IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, frame),
                 TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
-                FusedImagePipelineExpression pipeline => EvaluateImagePipeline(pipeline, frame),
                 _ => throw new InvalidOperationException(
                     $"Unsupported expression type: {expression.GetType().Name}.")
             };
@@ -334,14 +333,14 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Validates a scalar function call's argument kinds via
     /// <see cref="IScalarFunction.ValidateArguments"/>. On failure, wraps the function's
-    /// <see cref="ArgumentException"/> message with the call site's source span and
-    /// rethrows as an <see cref="ExpressionEvaluationException"/> so the user sees a
-    /// clean <c>[Line N, Col C] foo() requires X arguments</c> error.
+    /// argument exception with the call site's source span and rethrows as an
+    /// <see cref="ExpressionEvaluationException"/> so the user sees a clean
+    /// <c>[Line N, Col C] foo(): expects ...</c> error.
     /// </summary>
     private static void ValidateScalarCallSiteOrThrow(
         IScalarFunction scalarFunction,
         FunctionCallExpression function,
-        ReadOnlySpan<DataValue> arguments)
+        ReadOnlySpan<ValueRef> arguments)
     {
         DataKind[] argumentKinds = ArrayPool<DataKind>.Shared.Rent(arguments.Length);
         try
@@ -355,7 +354,7 @@ public sealed class ExpressionEvaluator
             {
                 scalarFunction.ValidateArguments(argumentKinds.AsSpan(0, arguments.Length));
             }
-            catch (ArgumentException ex)
+            catch (Exception ex) when (ex is ArgumentException || ex is FunctionArgumentException)
             {
                 SourceSpan? span = function.Span;
                 string prefix = span is not null
@@ -535,179 +534,103 @@ public sealed class ExpressionEvaluator
                 $"Unknown function: '{function.FunctionName}'.");
         }
 
-        // Higher-order function path: detect lambda arguments and route accordingly.
-        if (scalarFunction is IHigherOrderFunction higherOrder)
-        {
-            return EvaluateHigherOrderFunction(higherOrder, function, frame);
-        }
-
         int argumentCount = function.Arguments.Count;
-        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
+        ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(argumentCount);
         try
         {
-            // Args land in two different arenas depending on what the AST node is:
-            //   - ColumnReference: payloads in frame.Source (the input batch's arena).
-            //   - Inner FunctionCallExpression / literal-with-string / etc.: payloads
-            //     in frame.Target (where the inner Execute / FromX wrote them).
-            //
-            // The function's IScalarFunction.Execute(args, in frame) overload reads with
-            // a single store. To keep that contract, we unify all args into frame.Target
-            // before the call and pass an InvocationFrame whose Source = Target. Inline
-            // and sidecar-backed values pass through Stabilize unchanged; arena-backed
-            // column values get copied from frame.Source to frame.Target.
-            //
-            // Without this, a nested call like blur(sobel(file), 10) breaks: sobel's
-            // ImageHandle lands in frame.Target's object slot, but blur's GetImageHandle
-            // is handed frame.Source — looks for the slot in the wrong arena, falls
-            // through to RetrieveBytes(0,0), and trips the Capacity=0 read.
+            // Per-row boundary conversion: evaluate each argument as a DataValue
+            // against the current frame, then materialise into a ValueRef so the
+            // function body operates on managed memory only. Arena/sidecar-backed
+            // payloads are resolved here; inline values pass through cheaply.
             for (int index = 0; index < argumentCount; index++)
             {
-                Expression argExpr = function.Arguments[index];
-                DataValue raw = Evaluate(argExpr, frame);
-                arguments[index] = argExpr is ColumnReference
-                    ? DataValueRetention.Stabilize(raw, frame.Source, frame.Target)
-                    : raw;
+                DataValue raw = Evaluate(function.Arguments[index], frame);
+                arguments[index] = ToValueRef(raw, frame);
             }
 
-            // Run ValidateArguments once per call site. Argument kinds are static for the
-            // duration of a query, so caching by FunctionCallExpression identity is safe and
-            // keeps the per-row hot path free of validation work after the first invocation.
-            // This is what catches "blur() requires 2 or 3 arguments" before the function
-            // body crashes with IndexOutOfRangeException; the planner doesn't currently
-            // run a type-resolution pass over top-level SELECT expressions, so the evaluator
-            // is the first place where we know enough to validate.
             if (_validatedScalarCalls.Add(function))
             {
                 ValidateScalarCallSiteOrThrow(scalarFunction, function, arguments.AsSpan(0, argumentCount));
             }
 
-            InvocationFrame invocationFrame = new(frame.Target, frame.Target, frame.SidecarRegistry);
-            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in invocationFrame);
-
+            ValueRef result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in frame);
             _meter?.Add(scalarFunction.QueryUnitCost);
-            if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
-            {
-                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in invocationFrame));
-            }
-            return result;
+            return ToDataValue(result, frame);
         }
         finally
         {
-            // Clear references so the pool doesn't root DataValue objects.
+            // Clear references so the pool doesn't root managed payloads.
             arguments.AsSpan(0, argumentCount).Clear();
-            ArrayPool<DataValue>.Shared.Return(arguments);
+            ArrayPool<ValueRef>.Shared.Return(arguments);
         }
     }
 
     /// <summary>
-    /// Evaluates a higher-order function call by separating lambda arguments from
-    /// eagerly-evaluated arguments. Lambda arguments are passed as AST nodes; the
-    /// function receives a <see cref="LambdaEvaluator"/> callback to invoke them.
+    /// Materialises a <see cref="DataValue"/> argument into a
+    /// <see cref="ValueRef"/>: arena-backed strings/arrays are read into managed
+    /// payloads, sidecar-backed values are loaded via the registry, and inline
+    /// values pass through unchanged.
     /// </summary>
-    private DataValue EvaluateHigherOrderFunction(
-        IHigherOrderFunction higherOrder,
-        FunctionCallExpression function,
-        in EvaluationFrame frame)
+    private static ValueRef ToValueRef(DataValue value, in EvaluationFrame frame)
     {
-        int argumentCount = function.Arguments.Count;
-        IReadOnlySet<int> lambdaIndices = higherOrder.GetLambdaParameterIndices(argumentCount);
-
-        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
-        Dictionary<int, LambdaExpression> lambdaArguments = new(lambdaIndices.Count);
-        try
+        if (value.IsNull)
         {
-            for (int index = 0; index < argumentCount; index++)
-            {
-                if (lambdaIndices.Contains(index))
-                {
-                    if (function.Arguments[index] is not LambdaExpression lambda)
-                    {
-                        throw new InvalidOperationException(
-                            $"Argument {index + 1} of '{function.FunctionName}' must be a lambda expression (x -> expr).");
-                    }
-
-                    lambdaArguments[index] = lambda;
-                    arguments[index] = DataValue.UnknownNull();
-                }
-                else
-                {
-                    arguments[index] = Evaluate(function.Arguments[index], frame);
-                }
-            }
-
-            // Capture the current frame for closure semantics — lambda body references
-            // to columns resolve against this row after lambda parameter bindings.
-            EvaluationFrame capturedFrame = frame;
-            LambdaEvaluator evaluator = (LambdaExpression lambda, ReadOnlySpan<DataValue> parameterValues) =>
-            {
-                return EvaluateLambdaBody(lambda, parameterValues, capturedFrame);
-            };
-
-            DataValue result = higherOrder.ExecuteHigherOrder(
-                arguments.AsSpan(0, argumentCount),
-                lambdaArguments,
-                evaluator);
-
-            _meter?.Add(higherOrder.QueryUnitCost);
-            if (_meter is not null && higherOrder is ICostAwareFunction costAware)
-            {
-                InvocationFrame higherOrderInvocation = new(frame.Source, frame.Target, frame.SidecarRegistry);
-                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result, in higherOrderInvocation));
-            }
-
-            return result;
+            return ValueRef.Null(value.Kind);
         }
-        finally
+
+        if (value.IsInline)
         {
-            arguments.AsSpan(0, argumentCount).Clear();
-            ArrayPool<DataValue>.Shared.Return(arguments);
+            return ValueRef.FromInline(value);
+        }
+
+        // Non-inline: resolve managed payload from source store / sidecar.
+        switch (value.Kind)
+        {
+            case DataKind.String:
+                return ValueRef.FromString(value.AsString(frame.Source, frame.SidecarRegistry));
+            case DataKind.JsonValue:
+                return ValueRef.FromJsonValue(value.AsString(frame.Source, frame.SidecarRegistry));
+            case DataKind.UInt8Array:
+            case DataKind.Image:
+            {
+                ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
+                return ValueRef.FromBytes(value.Kind, bytes.ToArray());
+            }
+            default:
+                throw new InvalidOperationException(
+                    $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
+                    + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary.");
         }
     }
 
     /// <summary>
-    /// Evaluates a lambda body by creating an augmented row where lambda parameter
-    /// names shadow any existing column names. Unmatched column references in the
-    /// lambda body fall through to the enclosing row (closure semantics).
+    /// Lowers a function-result <see cref="ValueRef"/> back into a
+    /// <see cref="DataValue"/>: short strings inline, longer strings write to
+    /// the target arena, byte payloads land in the target arena.
     /// </summary>
-    private DataValue EvaluateLambdaBody(
-        LambdaExpression lambda,
-        ReadOnlySpan<DataValue> parameterValues,
-        in EvaluationFrame enclosingFrame)
+    private static DataValue ToDataValue(ValueRef value, in EvaluationFrame frame)
     {
-        int parameterCount = lambda.Parameters.Count;
-        if (parameterValues.Length != parameterCount)
+        if (value.IsNull)
         {
-            throw new InvalidOperationException(
-                $"Lambda expects {parameterCount} parameter(s) but received {parameterValues.Length}.");
+            return DataValue.Null(value.Kind);
         }
 
-        Row enclosingRow = enclosingFrame.Row;
-
-        // Build an augmented row: original columns + lambda parameter bindings.
-        // Lambda parameters shadow columns with the same name.
-        int originalFieldCount = enclosingRow.FieldCount;
-        int augmentedFieldCount = originalFieldCount + parameterCount;
-        string[] augmentedNames = new string[augmentedFieldCount];
-        DataValue[] augmentedValues = new DataValue[augmentedFieldCount];
-
-        for (int index = 0; index < originalFieldCount; index++)
+        // Inline-or-precomputed: ValueRef carries a self-sufficient DataValue.
+        if (value.Materialized is null)
         {
-            augmentedNames[index] = enclosingRow.ColumnNames[index];
-            augmentedValues[index] = enclosingRow[index];
+            return value.InlineDataValue;
         }
 
-        for (int index = 0; index < parameterCount; index++)
+        return value.Materialized switch
         {
-            augmentedNames[originalFieldCount + index] = lambda.Parameters[index];
-            augmentedValues[originalFieldCount + index] = parameterValues[index];
-        }
-
-        // The Row constructor builds a name-index dictionary where later entries
-        // overwrite earlier ones for the same key (case-insensitive), giving lambda
-        // parameters priority over enclosing columns — correct closure semantics.
-        Row augmentedRow = new(augmentedNames, augmentedValues);
-
-        return Evaluate(lambda.Body, enclosingFrame.WithRow(augmentedRow));
+            string s when value.Kind == DataKind.String => DataValue.FromString(s, frame.Target),
+            string s when value.Kind == DataKind.JsonValue => DataValue.FromJsonValue(s, frame.Target),
+            byte[] bytes when value.Kind == DataKind.UInt8Array => DataValue.FromUInt8Array(bytes, frame.Target),
+            byte[] bytes when value.Kind == DataKind.Image => DataValue.FromImage(bytes, frame.Target),
+            _ => throw new InvalidOperationException(
+                $"Cannot lower ValueRef with managed payload of type {value.Materialized.GetType().Name} "
+                + $"and kind {value.Kind} into a DataValue. Add support to ExpressionEvaluator.ToDataValue."),
+        };
     }
 
     private DataValue EvaluateIn(InExpression inExpr, in EvaluationFrame frame)
@@ -887,12 +810,6 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(result);
     }
 
-    /// <summary>
-    /// Cached <see cref="DataValue"/> wrappers for CAST target type strings, keyed by
-    /// the type name (e.g. "Float32", "UInt8"). Avoids allocating a new DataValue per row.
-    /// Entries are written to the persistent <c>_store</c> so they outlive any batch.
-    /// </summary>
-    private readonly Dictionary<string, DataValue> _castTargetCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
 
     private DataValue EvaluateCast(CastExpression cast, in EvaluationFrame frame)
@@ -905,27 +822,19 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("Cast function not registered.");
         }
 
-        if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue targetTypeValue))
-        {
-            // Cache entries must outlive any single batch — use the persistent store.
-            IValueStore cacheStore = _store ?? frame.Target;
-            targetTypeValue = DataValue.FromString(cast.TargetType, cacheStore);
-            _castTargetCache[cast.TargetType] = targetTypeValue;
-        }
-
-        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(2);
+        ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(2);
         try
         {
-            arguments[0] = value;
-            arguments[1] = targetTypeValue;
-            DataValue result = castFunction.Execute(arguments.AsSpan(0, 2), frame.Target);
+            arguments[0] = ToValueRef(value, frame);
+            arguments[1] = ValueRef.FromString(cast.TargetType);
+            ValueRef result = castFunction.Execute(arguments.AsSpan(0, 2), in frame);
             _meter?.Add(castFunction.QueryUnitCost);
-            return result;
+            return ToDataValue(result, frame);
         }
         finally
         {
             arguments.AsSpan(0, 2).Clear();
-            ArrayPool<DataValue>.Shared.Return(arguments);
+            ArrayPool<ValueRef>.Shared.Return(arguments);
         }
     }
 
@@ -1388,116 +1297,6 @@ public sealed class ExpressionEvaluator
         }
 
         return DataValue.NullStruct(fieldCount);
-    }
-
-    /// <summary>
-    /// Runs a fused image pipeline: decodes the source bytes once, threads the live
-    /// <see cref="SkiaSharp.SKBitmap"/> through every transform, and either encodes the
-    /// final bitmap (no sink) or hands it to the terminal sink. Cross-stage bitmap
-    /// lifetime is bounded by this method — every bitmap allocated inside is disposed
-    /// before return, so the only state that escapes is either encoded bytes (in
-    /// <c>frame.Target</c>) or the sink's <see cref="DataValue"/>.
-    /// </summary>
-    private DataValue EvaluateImagePipeline(FusedImagePipelineExpression pipeline, in EvaluationFrame frame)
-    {
-        // Source produces encoded bytes. Either Image (sidecar/arena) or UInt8Array
-        // (raw bytes from a load_image kind-cast or column).
-        DataValue sourceBytes = Evaluate(pipeline.Source, frame);
-
-        if (sourceBytes.IsNull)
-        {
-            // Null propagation. Type matches what the pipeline would have produced.
-            return DataValue.Null(pipeline.ResultKind);
-        }
-
-        ReadOnlySpan<byte> encoded = sourceBytes.AsByteSpan(frame.Source, frame.SidecarRegistry);
-        SkiaSharp.SKBitmap initial = SkiaSharp.SKBitmap.Decode(encoded.ToArray())
-            ?? throw new InvalidOperationException(
-                "image() pipeline failed to decode the source bytes — the input is not a recognised image format.");
-
-        // Thread the bitmap through transforms. Each Apply may return the same instance
-        // (no-op for the args) or a new one; we own the previous instance and must
-        // dispose it when a transform replaces it.
-        SkiaSharp.SKBitmap current = initial;
-        SkiaSharp.SKBitmap? owned = initial;
-        SkiaSharp.SKEncodedImageFormat? formatOverride = pipeline.OutputFormatOverride;
-
-        try
-        {
-            foreach (PipelineStage stage in pipeline.Transforms)
-            {
-                DataValue[] auxValues = EvaluatePipelineAuxiliary(stage.AuxiliaryArgs, frame);
-                try
-                {
-                    ReadOnlySpan<DataValue> auxSpan = auxValues.AsSpan(0, stage.AuxiliaryArgs.Count);
-                    SkiaSharp.SKBitmap next = stage.Function.Apply(current, auxSpan);
-                    if (!ReferenceEquals(next, current))
-                    {
-                        owned?.Dispose();
-                        owned = next;
-                        current = next;
-                    }
-
-                    // Rightmost non-null override wins — a later stage's explicit format
-                    // choice (e.g. blur(..., 'png') after a plain resize()) takes priority
-                    // over earlier stages' implicit choices.
-                    if (stage.Function.FormatOverride(auxSpan) is { } stageFormat)
-                    {
-                        formatOverride = stageFormat;
-                    }
-                }
-                finally
-                {
-                    ArrayPool<DataValue>.Shared.Return(auxValues);
-                }
-            }
-
-            if (pipeline.TerminalSink is { } terminalSink)
-            {
-                DataValue[] sinkAux = EvaluatePipelineAuxiliary(terminalSink.AuxiliaryArgs, frame);
-                try
-                {
-                    ReadOnlySpan<DataValue> sinkAuxSpan = sinkAux.AsSpan(0, terminalSink.AuxiliaryArgs.Count);
-                    return terminalSink.Function.Reduce(current, sinkAuxSpan, frame.Target);
-                }
-                finally
-                {
-                    ArrayPool<DataValue>.Shared.Return(sinkAux);
-                }
-            }
-
-            // No sink: encode the final bitmap to bytes. Preserve the source format unless
-            // a transform's FormatOverride or an explicit OutputFormatOverride changed it.
-            SkiaSharp.SKEncodedImageFormat encodeFormat = formatOverride
-                ?? Functions.Image.ImageEncoder.ResolveFormat(encoded.ToArray(), formatOverride: null);
-            byte[] outputBytes = Functions.Image.ImageEncoder.Encode(current, encodeFormat);
-            return DataValue.FromImage(outputBytes, frame.Target);
-        }
-        finally
-        {
-            owned?.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Pre-evaluates the auxiliary expressions for one pipeline stage. Returns a rented
-    /// <see cref="DataValue"/> array that the caller must return to <see cref="ArrayPool{T}"/>
-    /// after the stage completes. Returning an empty array (length 0) is a borrow-free
-    /// special case to avoid pool churn for the common no-aux-args transform.
-    /// </summary>
-    private DataValue[] EvaluatePipelineAuxiliary(IReadOnlyList<Expression> auxiliary, in EvaluationFrame frame)
-    {
-        if (auxiliary.Count == 0)
-        {
-            return Array.Empty<DataValue>();
-        }
-
-        DataValue[] values = ArrayPool<DataValue>.Shared.Rent(auxiliary.Count);
-        for (int i = 0; i < auxiliary.Count; i++)
-        {
-            values[i] = Evaluate(auxiliary[i], frame);
-        }
-        return values;
     }
 
     /// <summary>

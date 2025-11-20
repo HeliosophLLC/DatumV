@@ -28,12 +28,6 @@ internal sealed class QueryPlan : IQueryPlan
         // Hoist once into a plan-scoped store so the resulting LiteralValueExpression
         // payloads outlive any individual ExecuteAsync / AnalyzeAsync call. Otherwise
         // the second run would dereference a recycled arena.
-        //
-        // image() lowering already ran inside QueryPlanner.Finalize; we don't repeat it
-        // here. Hoisting after lowering is fine — LiteralHoister recognises every node
-        // type that can hold child expressions, including FunctionCallExpression args
-        // and (transitively) the auxiliary-arg expressions referenced from
-        // FusedImagePipelineExpression's child nodes.
         _hoistStore = new Arena();
         _operator = op.RewriteExpressions(expr => LiteralHoister.Hoist(expr, _hoistStore));
     }

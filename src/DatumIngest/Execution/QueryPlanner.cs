@@ -109,13 +109,8 @@ public sealed class QueryPlanner
 
     /// <summary>
     /// Required-for-correctness rewrites applied to every plan, regardless of entry point.
-    /// Two passes:
     /// </summary>
     /// <list type="number">
-    ///   <item><description>
-    ///     <see cref="ImagePipelineLowerer"/> — lowers <c>image(source, lambda)</c> and
-    ///     bare image function calls into <see cref="FusedImagePipelineExpression"/> nodes.
-    ///   </description></item>
     ///   <item><description>
     ///     <see cref="ModelInvocationHoister"/> — hoists <c>models.*</c> calls out of
     ///     expressions into <see cref="Operators.ModelInvocationOperator"/> nodes so
@@ -129,9 +124,7 @@ public sealed class QueryPlanner
     /// </remarks>
     private IQueryOperator Finalize(IQueryOperator op)
     {
-        IQueryOperator imageLowered = op.RewriteExpressions(
-            expr => ImagePipelineLowerer.Lower(expr, _functionRegistry));
-        return ModelInvocationHoister.Hoist(imageLowered, _catalog.Models);
+        return ModelInvocationHoister.Hoist(op, _catalog.Models);
     }
 
     /// <summary>

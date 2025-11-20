@@ -45,7 +45,7 @@ public static class ExpressionTypeResolver
             },
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
-            LambdaExpression => null, // Not a value — only valid as an argument to IHigherOrderFunction.
+            LambdaExpression => null, // Not a value — lambdas have no kind on their own.
             ParameterExpression => null,
             StructLiteralExpression structLiteral => ResolveStructLiteral(structLiteral, sourceSchema, functions),
             IndexAccessExpression indexAccess => ResolveIndexAccess(indexAccess, sourceSchema, functions),
@@ -366,27 +366,12 @@ public static class ExpressionTypeResolver
             return ResolveAggregate(function, sourceSchema, functions);
         }
 
-        // Higher-order functions accept lambda arguments that have no DataKind.
-        // Determine which argument positions expect lambdas so we can skip them
-        // during argument kind resolution and still type-check the non-lambda args.
-        IReadOnlySet<int>? lambdaIndices = scalarFunction is IHigherOrderFunction higherOrder
-            ? higherOrder.GetLambdaParameterIndices(function.Arguments.Count)
-            : null;
-
         // Resolve argument kinds so we can call ValidateArguments.
         DataKind[] argumentKinds = new DataKind[function.Arguments.Count];
         bool allResolved = true;
 
         for (int index = 0; index < function.Arguments.Count; index++)
         {
-            // Lambda arguments are AST-only — they don't resolve to a DataKind.
-            // The placeholder value is never inspected; ValidateArguments implementations
-            // for higher-order functions already know which positions are lambdas.
-            if (lambdaIndices is not null && lambdaIndices.Contains(index))
-            {
-                continue;
-            }
-
             DataKind? kind = ResolveType(function.Arguments[index], sourceSchema, functions);
             if (kind is null)
             {
@@ -402,26 +387,10 @@ public static class ExpressionTypeResolver
             return null;
         }
 
-        // If the function is element-kind-aware, also resolve the array element
-        // kinds and call the richer overload so it can produce a precise return type.
-        if (scalarFunction is IElementKindAwareFunction elementKindAware)
-        {
-            DataKind?[] arrayElementKinds = new DataKind?[function.Arguments.Count];
-            for (int index = 0; index < function.Arguments.Count; index++)
-            {
-                if (argumentKinds[index] == DataKind.Array)
-                {
-                    arrayElementKinds[index] = ResolveArrayElementKindFromExpression(
-                        function.Arguments[index], sourceSchema, functions);
-                }
-            }
-
-            return elementKindAware.ValidateArgumentsWithElementKinds(argumentKinds, arrayElementKinds);
-        }
-
-        // Surface ValidateArguments errors directly. A swallowed ArgumentException here
-        // turns "blur() requires 2 or 3 arguments" into a runtime IndexOutOfRangeException
-        // because the function is dispatched anyway with whatever args were supplied.
+        // Surface ValidateArguments errors directly. A swallowed exception here
+        // turns "concat() requires at least 2 arguments" into a runtime
+        // IndexOutOfRangeException because the function is dispatched anyway
+        // with whatever args were supplied.
         return scalarFunction.ValidateArguments(argumentKinds);
     }
 

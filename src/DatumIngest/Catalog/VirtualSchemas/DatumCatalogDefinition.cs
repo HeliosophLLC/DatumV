@@ -119,31 +119,38 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
         {
             RowBatch batch = RowBatch.Rent(64);
 
-            foreach (string name in context.FunctionRegistry.ScalarFunctionNames)
+            foreach (FunctionDescriptor descriptor in context.FunctionRegistry.ScalarDescriptors)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                AddRow(batch, name, "SCALAR");
+                AddScalarRow(batch, descriptor);
                 if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
+
+                foreach (string alias in descriptor.Aliases)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AddScalarRow(batch, descriptor with { PrimaryName = alias });
+                    if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
+                }
             }
 
             foreach (string name in context.FunctionRegistry.AggregateFunctionNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                AddRow(batch, name, "AGGREGATE");
+                AddRowMinimal(batch, name, "AGGREGATE");
                 if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
             }
 
             foreach (string name in context.FunctionRegistry.TableValuedFunctionNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                AddRow(batch, name, "TABLE_VALUED");
+                AddRowMinimal(batch, name, "TABLE_VALUED");
                 if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
             }
 
             foreach (string name in context.FunctionRegistry.WindowFunctionNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                AddRow(batch, name, "WINDOW");
+                AddRowMinimal(batch, name, "WINDOW");
                 if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
             }
 
@@ -159,19 +166,39 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
             await Task.CompletedTask.ConfigureAwait(false);
         }
 
-        private static void AddRow(RowBatch batch, string functionName, string functionType)
+        private static void AddScalarRow(RowBatch batch, FunctionDescriptor descriptor)
         {
-            FunctionSignature? signature = FunctionDocumentation.TryGet(functionName);
+            FunctionSignatureVariant? firstVariant = descriptor.Signatures.Count > 0 ? descriptor.Signatures[0] : null;
+            string? returnType = firstVariant?.ReturnType.Describe();
+            int? parameterCount = firstVariant is null
+                ? null
+                : firstVariant.Parameters.Count + (firstVariant.VariadicTrailing is null ? 0 : 1);
 
+            DataValue[] values =
+            [
+                DataValue.FromString(descriptor.PrimaryName),
+                DataValue.FromString("SCALAR"),
+                DataValue.FromString(descriptor.Category.ToString()),
+                returnType is not null ? DataValue.FromString(returnType) : DataValue.Null(DataKind.String),
+                DataValue.FromString(descriptor.Description),
+                parameterCount is not null ? DataValue.FromInt32(parameterCount.Value) : DataValue.Null(DataKind.Int32),
+                DataValue.Null(DataKind.Int32),
+            ];
+
+            batch.Add(new Row(ColumnNames, values));
+        }
+
+        private static void AddRowMinimal(RowBatch batch, string functionName, string functionType)
+        {
             DataValue[] values =
             [
                 DataValue.FromString(functionName),
                 DataValue.FromString(functionType),
-                signature is not null ? DataValue.FromString(signature.Category.ToString()) : DataValue.Null(DataKind.String),
-                signature?.ReturnType is not null ? DataValue.FromString(signature.ReturnType) : DataValue.Null(DataKind.String),
-                signature?.Description is not null ? DataValue.FromString(signature.Description) : DataValue.Null(DataKind.String),
-                signature is not null ? DataValue.FromInt32(signature.Parameters.Count) : DataValue.Null(DataKind.Int32),
-                signature is not null ? DataValue.FromInt32(signature.QueryUnitCost) : DataValue.Null(DataKind.Int32),
+                DataValue.Null(DataKind.String),
+                DataValue.Null(DataKind.String),
+                DataValue.Null(DataKind.String),
+                DataValue.Null(DataKind.Int32),
+                DataValue.Null(DataKind.Int32),
             ];
 
             batch.Add(new Row(ColumnNames, values));
@@ -206,21 +233,48 @@ internal sealed class DatumCatalogDefinition : IVirtualSchema
         {
             RowBatch batch = RowBatch.Rent(64);
 
-            foreach (FunctionSignature signature in FunctionDocumentation.All)
+            foreach (FunctionDescriptor descriptor in context.FunctionRegistry.ScalarDescriptors)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                for (int ordinal = 0; ordinal < signature.Parameters.Count; ordinal++)
+                if (descriptor.Signatures.Count == 0)
                 {
-                    ParameterSignature parameter = signature.Parameters[ordinal];
+                    continue;
+                }
+
+                FunctionSignatureVariant variant = descriptor.Signatures[0];
+
+                for (int ordinal = 0; ordinal < variant.Parameters.Count; ordinal++)
+                {
+                    ParameterSpec parameter = variant.Parameters[ordinal];
 
                     DataValue[] values =
                     [
-                        DataValue.FromString(signature.Name),
+                        DataValue.FromString(descriptor.PrimaryName),
                         DataValue.FromInt32(ordinal + 1),
                         DataValue.FromString(parameter.Name),
-                        DataValue.FromString(parameter.Kind),
+                        DataValue.FromString(parameter.Kind.Describe()),
                         DataValue.FromString(parameter.IsOptional ? "YES" : "NO"),
+                    ];
+
+                    batch.Add(new Row(ColumnNames, values));
+
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = RowBatch.Rent(64);
+                    }
+                }
+
+                if (variant.VariadicTrailing is not null)
+                {
+                    DataValue[] values =
+                    [
+                        DataValue.FromString(descriptor.PrimaryName),
+                        DataValue.FromInt32(variant.Parameters.Count + 1),
+                        DataValue.FromString(variant.VariadicTrailing.Name),
+                        DataValue.FromString(variant.VariadicTrailing.Kind.Describe() + "..."),
+                        DataValue.FromString("VARIADIC"),
                     ];
 
                     batch.Add(new Row(ColumnNames, values));
