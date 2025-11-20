@@ -101,11 +101,24 @@ public static class SqlKeywordRegistry
     ];
 
     /// <summary>
-    /// Built-in function names. Names that overlap with SQL keywords (e.g.
-    /// <c>LEFT</c>, <c>RIGHT</c>, <c>CAST</c>, <c>RANGE</c>) are intentionally
-    /// excluded — Monarch's <c>@keywords</c> case takes precedence so they
-    /// will be colored as keywords regardless.
+    /// Built-in function names for syntax highlighting. Names that overlap with
+    /// SQL keywords (e.g. <c>LEFT</c>, <c>RIGHT</c>, <c>CAST</c>, <c>RANGE</c>)
+    /// are intentionally excluded — Monarch's <c>@keywords</c> case takes
+    /// precedence so they will be colored as keywords regardless.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This list mirrors the registered functions in the runtime
+    /// <c>FunctionRegistry</c>. After the function library rebuild
+    /// (<c>project_function_rebuild.md</c>) it is intentionally narrow:
+    /// the six rebuilt scalar functions (<c>concat</c>, <c>upper</c>,
+    /// <c>lower</c>, <c>try_cast</c>, <c>typeof</c>; <c>cast</c> excluded as
+    /// a keyword overlap), all aggregate functions, all window functions, and
+    /// <c>UNNEST</c> (the only TVF that's not a keyword overlap with
+    /// <c>RANGE</c>). Update this list in lockstep when registering new
+    /// functions; a lint test asserts the registered set agrees.
+    /// </para>
+    /// </remarks>
     public static IReadOnlyList<string> BuiltinFunctions { get; } =
     [
         // Aggregate functions
@@ -124,146 +137,7 @@ public static class SqlKeywordRegistry
         // Table-valued functions
         "UNNEST",
 
-        // String functions
-        "len", "length", "char_length", "character_length",
-        "mid", "substring", "substr", "overlay", "upper", "lower",
-        "trim", "ltrim", "rtrim", "btrim",
-        "contains", "starts_with", "ends_with", "position", "strpos", "replace",
-        "concat", "concat_ws", "repeat", "reverse",
-        "lpad", "rpad", "regexp_extract", "regexp_replace",
-        "regexp_count", "regexp_like", "regexp_match",
-        "regexp_substr", "regexp_instr",
-        "word_count", "split_part", "initcap", "translate",
-        "ascii", "chr", "octet_length", "bit_length",
-        "format", "string_to_array", "regexp_split_to_array",
-        "to_hex", "to_bin", "to_oct", "to_ascii", "unistr", "casefold", "normalize",
-        "quote_ident", "quote_literal", "quote_nullable", "parse_ident",
-        "get_filename", "get_file_extension", "get_path",
-
-        // Date/Time functions
-        "now", "year", "month", "day", "hour", "minute", "second",
-        "quarter", "dayofweek", "dayofyear",
-        "make_date", "make_timestamp", "make_time", "current_time",
-        "transaction_timestamp", "statement_timestamp", "clock_timestamp", "timeofday",
-        "date_diff", "date_add", "date_trunc", "date_bucket", "date_bin",
-        "date_span", "date_offset", "time_diff",
-        "strftime", "is_date",
-
-        // Duration functions
-        "make_duration", "duration_seconds", "duration_minutes",
-        "duration_hours", "duration_days",
-
-        // Type conversion / introspection functions
-        "to_epoch", "date_part", "cyclical_encode", "typeof", "can_cast", "try_cast",
-
-        // JSON functions
-        "json_value", "json_query", "json_exists", "json_array_length",
-
-        // Math — Arithmetic & Basics
-        "abs", "sign", "negate", "mod",
-        "add", "subtract", "multiply", "divide",
-
-        // Math — Powers/Roots/Logs
-        "sqrt", "cbrt", "square", "exp", "exp2",
-        "ln", "log2", "log10", "pow", "log",
-
-        // Math — Trigonometric & Hyperbolic
-        "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
-        "sinh", "cosh", "tanh", "degrees", "radians",
-        "pi", "euler",
-
-        // Math — Rounding & Quantization
-        "ceil", "floor", "truncate", "round",
-        "quantize", "bucketize", "clip",
-
-        // Math — ML Activations
-        "sigmoid", "relu", "selu", "gelu", "swish",
-        "softplus", "softsign", "mish",
-        "hard_sigmoid", "hard_swish", "leaky_relu", "elu",
-        "softmax", "log_softmax", "l2_normalize",
-
-        // Math — Vector Reductions
-        "vec_sum", "vec_mean", "vec_min", "vec_max",
-        "vec_std", "vec_var", "vec_median",
-        "vec_argmin", "vec_argmax", "vec_norm",
-        "vec_count_nonzero", "vec_any", "vec_all", "vec_product",
-
-        // Tensor introspection
-        "rdim", "shape",
-
-        // Vector/Tensor manipulation
-        "vec", "tensor", "vec_slice", "vec_concat",
-        "vec_reverse", "vec_sort", "vec_unique",
-        "vec_flatten", "vec_pad", "vec_repeat",
-        "linspace", "arange",
-
-        // Distance/Similarity
-        "cosine_similarity", "euclidean_distance",
-        "manhattan_distance", "dot", "hamming_distance",
-
-        // Utility & Conditional
-        "nullif", "coalesce", "greatest", "least",
-        "is_nan", "is_finite", "is_even", "is_odd",
-        "if_null", "iif", "choose",
-
-        // Random & Sampling
-        "random", "hash_split", "random_int", "random_range",
-        "random_normal", "random_boolean",
-        "random_truncated_normal", "random_log_normal",
-        "random_exponential", "random_beta",
-        "random_poisson", "random_categorical",
-        "random_vector", "random_normal_vector",
-        "random_permutation", "random_choice",
-
-        // Numeric/Array
-        "min_max_normalize", "clamp", "denormalize", "reshape",
-
-        // Array functions
-        "array", "array_length", "array_get",
-        "array_contains", "array_position", "array_join",
-        "array_concat", "array_slice", "array_sort",
-        "array_reverse", "array_distinct",
-        "array_min", "array_max", "array_sum", "array_avg",
-        "array_transform", "array_filter",
-
-        // Byte functions
-        "bytes", "bytes_concat", "bytes_slice",
-
-        // Categorical/Encoding
-        "one_hot", "one_hot_unk",
-        "label_encode", "label_encode_unk", "hash_encode",
-
-        // Hash functions
-        "md5", "md5_bytes", "sha256", "sha512", "crc32",
-
-        // Encoding functions
-        "base64_encode", "base64_decode",
-        "hex_encode", "hex_decode",
-
-        // UUID functions
-        "uuidv4", "gen_random_uuid", "uuidv7", "is_uuid",
-        "uuid_str", "uuid_bytes", "uuid_extract_version", "uuid_extract_timestamp",
-
-        // Image — Metadata
-        "width", "height", "channels", "pixel_count", "dimensions",
-
-        // Image — Loading & Decode
-        "load_image", "image_to_bytes",
-        "image_to_tensor_hwc", "image_to_tensor_chw",
-
-        // Image — Analysis
-        "image_brightness_mean", "image_brightness_std",
-        "image_brightness_histogram",
-        "detect_blur", "compression_artifact_score",
-        "image_pixel_mean", "image_pixel_std",
-
-        // Image — Transforms
-        "resize", "crop", "grayscale", "rotate",
-        "noise", "blur", "brighten", "darken", "sobel",
-        "resize_and_crop", "affine_transform",
-        "elastic_deform", "perspective_warp",
-
-        // Image — Hashing
-        "perceptual_hash",
+        // Scalar functions (rebuilt set; cast excluded as keyword overlap)
+        "concat", "upper", "lower", "try_cast", "typeof",
     ];
 }

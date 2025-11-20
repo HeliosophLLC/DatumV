@@ -213,9 +213,15 @@ public sealed class FunctionRegistry
         FunctionRegistry registry = new();
 
         // ── Scalar ────────────────────────────────────────────────────────
-        // Empty during the rebuild. Functions are added back as their stages
-        // land: concat (stage 4), upper/lower (stage 5),
-        // cast / try_cast / typeof (stage 6).
+        // Demand-pulled rebuild: each function lands when a stage delivers it.
+        // Stage 4: concat. Stage 5: upper / lower. Stage 6: cast / try_cast /
+        // typeof. Anything beyond is added back when a demo demands it.
+        registry.RegisterScalar<Scalar.ConcatFunction>();
+        registry.RegisterScalar<Scalar.UpperFunction>();
+        registry.RegisterScalar<Scalar.LowerFunction>();
+        registry.RegisterScalar<Scalar.CastFunction>();
+        registry.RegisterScalar<Scalar.TryCastFunction>();
+        registry.RegisterScalar<Scalar.TypeofFunction>();
 
         // Image — pipeline functions are still wired through the legacy
         // path; the image rework is out of scope for this rebuild.
