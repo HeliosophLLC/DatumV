@@ -1,229 +1,242 @@
-# `.datum` File Format
+# `.datum` File Format (v2)
 
 [← Back to README](../README.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Providers](providers.md)
 
-The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It stores data in compressed column pages grouped by row group, with a self-describing footer that carries schema, encoding metadata, and per-column zone maps. Two optional companion sidecars extend the base format:
+The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. v2 is **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade is ~2–4× larger files vs the v1 zstd path; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
+
+Two optional companion sidecars extend the base format:
 
 - A companion [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics for query acceleration. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) variant provides memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
-- A companion [`.datum-blob`](#optional-sidecar-datum-blob) sidecar carries Large Binary Objects (images, byte arrays, future video) addressed by 64-bit offsets so the data file itself stays compact. The sidecar is created lazily — only `.datum` files that actually carry binary payload produce one.
+- A companion [`.datum-blob`](#optional-sidecar-datum-blob) sidecar carries non-inline payloads (long strings, byte arrays, images, vectors, structs) addressed by 64-bit offsets so the data file itself stays compact. The sidecar is created lazily — only `.datum` files that actually carry non-inline payload produce one.
 
 ## Design goals
 
-- **Column-selective reads.** Only decompress columns referenced by the query.
-- **Zone-map pruning.** Per-column min/max/null-count in every row group enables row-group skipping without touching data pages.
-- **Seekable access.** Footer-at-end layout lets readers locate metadata with two seeks (tail → footer → data) instead of a forward scan. Combined with source indexes that record byte offsets, readers can jump directly to relevant row groups.
-- **Streaming writes.** The writer appends data sequentially and patches the header on finalize. No pre-computed metadata is required; shapes and encoding strategies are inferred on first flush.
-- **Adaptive encoding.** Each column page independently selects its encoding (dictionary, delta, bit-packed, raw, etc.) based on the data observed in that row group.
-- **Compression.** Zstd (level 3) by default, with a BLOSC-style byte-lane shuffle pre-filter for floating-point pages to improve compression ratios on correlated data (embeddings, sensor readings, pixel values).
+- **Mmap zero-copy reads.** No decompress allocation, no decode buffer, no per-row indirection. Reading column N row M is `pages[N][M / 1024].offset + (M % 1024) × stride` for fixed-width pages.
+- **Three encoders, period.** `FixedWidth` for fixed-stride scalars, `BitPackedBoolean` for booleans, `VariableSlot` for everything else. Each one's logic fits on a screen; the encoder is picked by `DataKind` alone at column-creation time.
+- **Hierarchical zone-map pruning.** Page → chapter → volume tiers in the footer let the planner skip 1 K, 64 K, or 1 M-row blocks without touching data pages.
+- **Page-aligned with execution batch.** 1024 rows per page = one `RowBatch` = one execution-engine working unit. No aggregation or splitting on read.
+- **Streaming writes.** Pages flush directly to disk as they fill. Mid-ingest cancellation preserves the partial bytes; finalize patches the header and writes the footer.
+- **Per-cell inline-vs-sidecar.** The `VariableSlot` encoder decides per-row whether a value's payload fits in 16 bytes (inline) or spills to the sidecar (pointer). Mixed-length text columns get the best of both — short rows inline, long rows sidecar.
 
 ## Physical layout
 
 ```
+.datum file:
 ┌──────────────────────────────────────┐  Offset 0
-│  File Header (28 bytes)              │
-├──────────────────────────────────────┤  Offset 28
-│  Row Group 0                         │
-│    Column Page 0  (compressed)       │
-│    Column Page 1  (compressed)       │
+│  File Header (32 bytes)              │
+├──────────────────────────────────────┤  Offset 32
+│  Column pages, in flush order        │
+│    page 0 col 0   (1024 rows)        │
+│    page 0 col 1                      │
 │    ...                               │
-│    Column Page N-1 (compressed)      │
-├──────────────────────────────────────┤
-│  Row Group 1                         │
-│    Column Page 0  ...                │
+│    page 0 col N-1                    │
+│    page 1 col 0                      │
+│    page 1 col 1                      │
 │    ...                               │
-├──────────────────────────────────────┤
-│  ...                                 │
 ├──────────────────────────────────────┤  footerOffset
-│  Footer                              │
-│    Schema block                      │
-│    Row group directory               │
+│  Footer:                             │
+│    For each column:                  │
+│      Descriptor                      │
+│      Page directory                  │
+│      Chapter zone maps               │
+│      (optional) Volume zone maps     │
 ├──────────────────────────────────────┤
 │  Tail (8 bytes)                      │
 └──────────────────────────────────────┘  EOF
 ```
 
-Column pages are written consecutively within each row group, with no framing bytes between pages. Their byte offsets and sizes are recorded in the footer's row group directory. This means column data can only be located via the footer — there are no inline page headers.
+**Layout note:** the format spec (`project_datum_format_v2.md`) calls for column-major page layout (all of column 0's pages, then column 1's, …). The current writer streams pages in flush order — which interleaves columns at the page-batch boundary — to enable incremental visible file growth and partial-output preservation on cancel. Each `PageDescriptorV2` records its absolute file offset, so the on-disk order is invisible to the reader; only sequential per-column scans lose some locality. A future optimization could re-introduce column-major layout via per-column temp files when measurements justify the I/O write amplification.
 
 ## File header
 
-28 bytes, little-endian. Written on initialization; the last three fields are patched after all data has been flushed.
+32 bytes, little-endian. Written on initialization with placeholder zeros for `TotalRowCount` and `FooterOffset`; both are patched on finalize.
 
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
-| 0 | 4 | Magic | bytes | `DTMF` (ASCII) |
-| 4 | 2 | FormatVersion | uint16 | `1` |
-| 6 | 2 | Flags | uint16 | Bitmask: `HasDictionaryPages` (0x01), `HasZoneMaps` (0x02) |
-| 8 | 4 | RowGroupCount | uint32 | Total number of row groups (patched at finalize) |
-| 12 | 8 | TotalRowCount | int64 | Total rows across all row groups (patched at finalize) |
-| 20 | 8 | FooterOffset | int64 | Byte position of the start of the footer block (patched at finalize) |
+| 0 | 4 | Magic | bytes | `DTMF` (ASCII, unchanged from v1) |
+| 4 | 2 | FormatVersion | uint16 | `3` (v1=2; the version bump signals incompatible bytes) |
+| 6 | 2 | Flags | uint16 | `DatumFileFlagsV2` bitmask (see below) |
+| 8 | 4 | ColumnCount | int32 | Number of columns in the schema |
+| 12 | 4 | PageSize | int32 | Rows per page (default 1024) |
+| 16 | 8 | TotalRowCount | int64 | Patched at finalize |
+| 24 | 8 | FooterOffset | int64 | Absolute byte offset of the footer body, patched at finalize |
 
-## Data region
-
-### Row groups
-
-Rows are buffered in memory and flushed to disk as a **row group** when the buffer reaches the configured size (default 65,536 rows). Each row group produces one compressed column page per column, written sequentially to the output stream.
-
-The writer automatically halves the row group size (floor: 512 rows) for subsequent groups when any `FixedFloat32` page exceeds 32 MiB uncompressed. This prevents individual pages from dominating memory during decode.
-
-### Column pages
-
-Each column page is a single contiguous blob of compressed bytes. There is no inline page header — all metadata (byte offset, compressed length, uncompressed length, encoding, compression codec, zone map) is stored in the footer's `DatumColumnChunkDescriptor`.
-
-The page payload is produced by:
-
-1. **Encoding** — The encoder transforms `DataValue[]` into a raw byte buffer using one of the encoding strategies described below.
-2. **Compression** — The encoded bytes are compressed using the selected codec (Zstd by default).
-
-### Encoding strategies
-
-Each column page independently records its encoding as a single `DatumEncoding` byte. The writer selects the encoding based on the column's `DataKind` and may change strategy between row groups (e.g., promoting a column to dictionary encoding after observing its cardinality).
-
-| Encoding | Value | Used for | Layout |
-|----------|-------|----------|--------|
-| `Raw` | 0 | Float32, UInt8, Uuid | Dense binary array: `float32[N]`, `byte[N]`, or `byte[16×N]` |
-| `BitPacked` | 1 | Boolean | Two bit vectors: `nullBitmap[⌈N/8⌉]` then `valueBitmap[⌈N/8⌉]` |
-| `DeltaInt32` | 2 | Date | `nullBitmap[⌈N/8⌉]` then delta-encoded `int32[N]` relative to first non-null |
-| `DeltaInt64` | 3 | DateTime, Time, Duration | `nullBitmap[⌈N/8⌉]` then delta-encoded `int64[N]` relative to first non-null. DateTime pages append a secondary `int16[N]` array of UTC offset minutes |
-| `FixedFloat32` | 4 | Float32, Vector, Matrix, Tensor | `nullBitmap[⌈N/8⌉]` then `float32[N × elementsPerRow]`. Null rows store `NaN` to preserve implicit element offsets. A byte-lane shuffle is applied before compression |
-| `VariableBytes` | 5 | String, JsonValue, UInt8Array, Image | `nullBitmap[⌈N/8⌉]` then `uint32 offsets[N+1]` then `byte pool[offsets[N]]`. Null rows: `offsets[i] == offsets[i+1]` with null bit set |
-| `VariableDataValue` | 6 | Array (heterogeneous) | Same offset-pool layout as `VariableBytes`, but each pool entry is a serialized `DataValue` |
-| `DictionaryRLE` | 7 | Low-cardinality String, Float32 | In-page dictionary followed by code array: `uint8[N]` when ≤ 255 unique values (sentinel `0xFF` = null), otherwise `uint16[N]` (sentinel `0xFFFF`) |
-| `SidecarBlobs` | 9 | Image, UInt8Array routed to `.datum-blob` | `nullBitmap[⌈N/8⌉]` then `int64 offsets[N]` then `int64 lengths[N]`. Each pair is the absolute `(offset, length)` of one row's payload in the companion `.datum-blob` sidecar. Pages are zstd-compressed |
-
-#### Null bitmap
-
-Bit-major layout: bit `i % 8` in byte `⌊i / 8⌋`. A set bit indicates the row is null.
-
-#### Float byte-lane shuffle
-
-Before Zstd compression, `FixedFloat32` pages pass through a BLOSC-style byte shuffle that separates the four byte lanes of each `float32` into four contiguous blocks:
-
-```
-Input:   [b0 b1 b2 b3] [b0 b1 b2 b3] ... (N floats, 4N bytes)
-Output:  [b0 b0 b0 ...] [b1 b1 b1 ...] [b2 b2 b2 ...] [b3 b3 b3 ...]
-          └── N bytes ─┘ └── N bytes ─┘ └── N bytes ─┘ └── N bytes ─┘
-```
-
-This creates long runs of similar byte values (e.g., exponent bytes cluster together, sign bytes are mostly `0x00` or `0x3F`) that the LZ77 back-reference engine in Zstd can exploit. The unshuffle reverses the transform on decode.
-
-#### Variable-length offset table
-
-`VariableBytes` and `VariableDataValue` pages use an N+1 offset table: `offsets[0] = 0`, `offsets[i]` is the byte position of row `i` in the pool, and `offsets[N]` is the total pool length. This allows O(1) random access to any row. Null rows have `offsets[i] == offsets[i+1]`; the null bitmap distinguishes them from empty strings.
-
-#### Blob externalization
-
-Image and `UInt8Array` columns can be routed to a unified [`.datum-blob`](#optional-sidecar-datum-blob) companion file. When the writer is configured with a sidecar, image-column descriptors are flagged `SidecarBlobs` and their pages use the `SidecarBlobs` encoding — pointer-only, no payload bytes embedded. This keeps the `.datum` file compact and lets readers mmap the sidecar directly, avoiding heap copies for large binary payloads.
-
-## Footer
-
-The footer begins at the byte offset stored in the header's `FooterOffset` field. It contains two blocks written sequentially:
-
-### Schema block
-
-Describes all columns present in the file.
-
-```
-int32:   columnCount
-For each column:
-  string:  name              (BinaryWriter length-prefixed UTF-8)
-  byte:    DataKind           (enum value)
-  byte:    DatumColumnFlags   (bitmask)
-  If FixedShape flag is set:
-    uint16:  shapeRank
-    int32[]: dimensions[rank]  (e.g. [256, 512] for a 256×512 matrix)
-```
-
-**Column flags:**
+### File flags (`DatumFileFlagsV2`)
 
 | Flag | Value | Meaning |
 |------|-------|---------|
-| `Nullable` | 0x01 | Column may contain nulls |
-| `FixedShape` | 0x02 | Vector/Matrix/Tensor column with uniform dimensions (frozen on first row group) |
-| `DictionaryEligible` | 0x04 | Column uses or is eligible for dictionary encoding |
-| `SidecarBlobs` | 0x10 | Column's payload bytes live in the companion `.datum-blob` sidecar; pages use `SidecarBlobs` encoding |
+| `None` | 0 | No special flags |
+| `HasSidecarReferences` | 0x01 | At least one row spilled to the companion `.datum-blob`; the sidecar must be present at read time |
+| `HasVolumeZoneMaps` | 0x02 | Volume-level zone maps were emitted (file row count exceeded the 1 M-row threshold) |
 
-### Row group directory
+`HasSidecarReferences` is only set when the sidecar's blob sink actually received an `Append` — files whose variable-slot columns happened to all stay inline leave the flag clear so the reader doesn't try to open a non-existent companion file.
+
+## Page layouts
+
+Every page is uncompressed. The encoder kind is recorded once per column in the footer schema block; readers dispatch on `EncoderKind` to pick the decoder.
+
+### `FixedWidth` (Int8/16/32/64, UInt8/16/32/64, Float32/64, Date, Time, Duration, DateTime, Uuid)
 
 ```
-uint32:  rowGroupCount
-For each row group:
-  uint32:  rowCount
-  For each column (in schema order):
-    DatumColumnChunkDescriptor:
-      int64:   pageOffset             (absolute byte position)
-      uint32:  compressedByteLength
-      uint32:  uncompressedByteLength
-      byte:    DatumEncoding
-      byte:    DatumCompression
-      DatumZoneMap:
-        uint32:  nullCount
-        bool:    hasMinMax
-        If hasMinMax:
-          DataValue: minimum
-          DataValue: maximum
+[null bitmap : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[payload     : rows × stride bytes]   null cells store zero — bitmap is authoritative
 ```
 
-Zone maps are populated for comparable types (Float32, UInt8, Boolean, String, Date, DateTime, Time, Duration, Uuid). Non-comparable types (Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array) carry only `nullCount`; `minimum` and `maximum` are omitted.
+Stride is determined by `DataKind`:
+
+| Stride | Kinds |
+|--------|-------|
+| 1 | Int8, UInt8 |
+| 2 | Int16, UInt16 |
+| 4 | Int32, UInt32, Float32, Date |
+| 8 | Int64, UInt64, Float64, Time, Duration |
+| 10 | DateTime (int64 ticks + int16 offset minutes, packed) |
+| 16 | Uuid |
+
+### `BitPackedBoolean` (Boolean only)
+
+```
+[null bitmap   : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[value bitmap  : ⌈rows / 8⌉ bytes]   bit i = the row's boolean value (undefined when null)
+```
+
+A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-row). The 8× density reduction is the reason booleans get their own encoder rather than a `FixedWidth` special case.
+
+### `VariableSlot` (String, JsonValue, Array, UInt8Array, Image, Vector, Matrix, Tensor, Struct, typed arrays)
+
+```
+[null bitmap         : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
+[inline bitmap       : ⌈rows / 8⌉ bytes]   bit i = 1 means row i's slot is inline; 0 = sidecar pointer
+[inline-length array : rows × 1 byte ]    per-row inline-payload length 0..16; meaningful only when inline bit is set
+[slots               : rows × 16 bytes]
+```
+
+**Inline slot** (when inline bit is set): the 16 bytes are the payload itself, sliced to the per-row inline length.
+
+- For `String` / `JsonValue`: the active bytes are UTF-8.
+- For typed inline arrays (`UInt8`/`Int32`/`Float32`/… with `IsArray` + `InlineArray` flags): the active bytes are the packed elements.
+- For other variable kinds, the value either spills to the sidecar (most common) or fits the inline tier the same way DataValue does.
+
+**The inline-length array is a deviation from the spec.** The format spec called for the 16 inline bytes to be byte-for-byte equal to `DataValue._p0`–`_p3`. But `DataValue._charCount` (which holds the inline byte length / element count) lives in the 4-byte header *outside* the 16-byte payload region — so a strict byte-for-byte copy loses length info for variable-length kinds. The 1 KiB/page array (1 byte × 1024 rows) is negligible overhead; the reader uses it to slice the slot back to the active payload length when reconstructing the DataValue.
+
+**Sidecar-pointer slot** (when inline bit is clear):
+
+| Bytes | Field | Notes |
+|-------|-------|-------|
+| 0–7 | Offset | int64 absolute byte offset into `.datum-blob` (includes the sidecar's 32-byte header) |
+| 8–12 | Length | 5-byte (40-bit) payload length, max ~1 TiB |
+| 13–14 | Reserved | Zero in v1; reserved for future length-field expansion past 1 TiB |
+| 15 | Codec | `SidecarBlobCodec` byte: `0=Raw` (only legal value in v1), `1=Zstd`, `2=Zstd+ByteShuffle` reserved for v2.x |
+
+Readers reject any non-zero codec byte with a clear error so a future v2.x writer's bytes are never silently misinterpreted by a v1 reader.
+
+## Footer
+
+The footer body begins at the offset stored in the header's `FooterOffset` field and runs until the 8-byte tail. It contains one block per column, written in schema order. The column count is taken from the header — there's no separate `columnCount` prefix in the footer body.
+
+### Per-column block
+
+```
+For each column (in schema order):
+  string  : name                    (length-prefixed UTF-8)
+  byte    : DataKind                (enum value)
+  byte    : EncoderKind              (0=FixedWidth, 1=BitPackedBoolean, 2=VariableSlot)
+  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape)
+
+  If HasFixedShape:
+    uint16  : shapeRank
+    int32[] : dimensions[rank]      (e.g. [256, 512] for a 256×512 matrix)
+
+  int32: pageCount
+  For each page:
+    int64  : pageOffset             (absolute byte position)
+    uint32 : pageByteLength
+    uint16 : rowCount               (≤ pageSize; last page may be partial)
+    bool   : hasZoneMap
+    If hasZoneMap: ZoneMap          (per-page min/max/nullCount)
+
+  int32: chapterCount
+  ZoneMap[chapterCount]              (one per 64-page chapter; aggregated from page maps)
+
+  If file's HasVolumeZoneMaps flag is set:
+    int32: volumeCount
+    ZoneMap[volumeCount]             (one per 16-chapter volume; aggregated from chapter maps)
+```
+
+### Zone-map serialization
+
+```
+uint32 : nullCount
+bool   : hasMinMax                  (false for non-comparable kinds: Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array, Struct)
+If hasMinMax:
+  DataValue : minimum
+  DataValue : maximum
+```
+
+Zone maps are populated for comparable types (numerics, booleans, strings, temporals, UUID). Non-comparable types carry only `nullCount`; min/max are omitted.
+
+### Hierarchical pruning
+
+Each tier aggregates the next finer level:
+
+- **Page** — 1024 rows. Always present (one per page).
+- **Chapter** — 64 pages = 64 K rows. Always present (one per chapter).
+- **Volume** — 16 chapters = 1 M rows. Only emitted when `TotalRowCount > 1_000_000`; gated by the `HasVolumeZoneMaps` flag.
+
+`DatumFileTableProviderV2.ScanAsync` walks volume → chapter → page when given a filter hint: a volume the predicate provably can't match short-circuits all 16 of its chapters; same for chapters and their 64 pages.
 
 ## File tail
 
-The last 8 bytes of the file enable reverse-seek opening:
+8 bytes, enabling reverse-seek opens:
 
 | Offset from EOF | Size | Field | Type | Value |
 |-----------------|------|-------|------|-------|
-| −8 | 4 | FooterByteLength | uint32 | Size of the footer block in bytes |
-| −4 | 4 | TailMagic | bytes | `FMTD` (ASCII — `DTMF` reversed) |
+| −8 | 4 | FooterByteLength | uint32 | Size of the footer body in bytes |
+| −4 | 4 | TailMagic | bytes | `FMTD` (ASCII, `DTMF` reversed) |
 
-A reader opens a `.datum` file with two seeks:
+Reader open path:
 
 1. Seek to `fileLength − 8`, read the tail. Validate `FMTD` magic.
-2. Compute `footerOffset = fileLength − 8 − footerByteLength`. Seek there, read and deserialize the footer (schema + row group directory).
+2. Compute `footerOffset = fileLength − 8 − footerByteLength`. Cross-check against the header's `FooterOffset` field.
+3. Seek to `footerOffset`, deserialize the footer (schema + page directory + zone-map hierarchy per column).
 
-No forward scan is required. Column data is then demand-loaded by seeking to the `pageOffset` recorded in each `DatumColumnChunkDescriptor`.
+No forward scan is required. Column data is then demand-loaded by seeking to each `PageDescriptorV2.PageOffset`.
 
-## Compression
+## DataValue serialization (zone maps and indexes)
 
-| Codec | Enum value | Library | Notes |
-|-------|------------|---------|-------|
-| None | 0 | — | For already-compressed blobs (JPEG, PNG, WebP) |
-| Zstd | 1 | ZstdSharp.Port | Default for all columns. Level 3 balances speed and ratio |
-| Zlib | 2 | System.IO.Compression | BCL-only fallback (DeflateStream) |
-| Brotli | 3 | System.IO.Compression | High ratio, slow encode |
-
-The codec is selected per column page and recorded in the `DatumColumnChunkDescriptor`. A single file can mix codecs across columns and row groups.
-
-## DataValue serialization
-
-Both zone maps (in the footer) and index entries (in the sidecar) serialize `DataValue` using a common wire format:
+Zone maps in the footer and entries in the `.datum-index` sidecar serialize `DataValue` using the existing `IO.DataValueWriter` / `IO.DataValueReader` wire format, unchanged from v1:
 
 ```
 byte:  DataKind enum
 Then kind-specific payload:
-  Float32:    float32
-  UInt8:     byte
-  Boolean:   bool (1 byte)
-  String:    BinaryWriter length-prefixed UTF-8 string
+  Boolean:    bool (1 byte)
+  Int8/UInt8: 1 byte
+  Int16/UInt16: 2 bytes
+  Int32/UInt32/Float32: 4 bytes
+  Int64/UInt64/Float64: 8 bytes
   Date:      int32 (day number)
   DateTime:  int64 (UTC ticks) + int16 (offset minutes)
   Time:      int64 (ticks of day)
   Duration:  int64 (ticks)
   Uuid:      byte[16]
-  JsonValue: BinaryWriter length-prefixed UTF-8 string
-  UInt8Array: int32 length + byte[length]
+  String / JsonValue: BinaryWriter length-prefixed UTF-8 string
+  UInt8Array / Image: int32 length + byte[length]
   Vector:    int32 length + float32[length]
   Matrix:    int32 rows + int32 cols + float32[rows × cols]
   Tensor:    int32 rank + int32[rank] dimensions + float32[∏dims]
-  Image:     int32 length + byte[length]
-  Array:     recursive DataValue serialization
+  Array:     int32 length + recursive DataValue[length]
+  Struct:    uint16 fieldCount + recursive DataValue[fieldCount]
 ```
 
-Nullable wrapper: `bool hasValue`, then (if true) the `DataValue` payload.
+The same wire format is used to pack `Struct` and legacy `Array` payloads into the sidecar when a `VariableSlot` encoder spills them: `uint16 fieldCount` (or `byte elementKind + uint32 elementCount` for arrays) followed by N field/element records.
 
 ## Sidecar index (`.datum-index`)
 
-The `.datum` format is intentionally simple — all acceleration structures live in separate sidecar files. The [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) sidecar provides memory-mapped fixed-width sorted indexes designed for zero-copy multi-tenant deployments. This separation means the data file format never changes for index features, indexes can be rebuilt independently, and the same index format works across all source file types (CSV, Parquet, HDF5, ZIP archives, etc.).
+The `.datum` format is intentionally simple — all acceleration structures live in separate sidecar files. The [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics. The sidecar's chunk grain is 10 K rows by default (configurable); the v2 chapter (64 K rows) is its natural size if you want chunk boundaries to align with footer-level zone-map chapters.
 
-The sidecar provides:
+The index format is unchanged across v1 and v2 source files — `Indexer` opens either format via the version-aware `DatumFileTableProvider.Open` factory. Sidecar-bound values are skipped at the bloom layer (recall trade for self-contained content addressing); the existing v1 rule of dropping non-inline strings from sorted/B+Tree indexes still applies.
+
+The index sidecar provides:
 
 | Section | Purpose |
 |---------|---------|
@@ -231,23 +244,19 @@ The sidecar provides:
 | **Schema** | Cached column names, kinds, nullability, and total row count |
 | **Chunk directory** | Per-chunk row ranges with per-column min/max/null/cardinality statistics |
 | **Bloom filters** | Per-column, per-chunk Kirsch–Mitzenmacher double-hashed bloom filters |
-| **Sorted value indexes** | Per-column sorted arrays enabling binary-search key lookup (Zstd-compressed in v3) |
-| **ZIP directory** | Cached central directory for ZIP archive sources |
-| **Row offsets** | Byte offsets into the source file for seekable chunk access |
+| **Sorted value indexes** | Per-column sorted arrays enabling binary-search key lookup |
+| **B+Tree indexes** | Persistent paged B+Trees for high-cardinality scalar columns |
+| **Bitmap indexes** | Per-distinct-value chunk bitmaps for low-cardinality columns |
 
-The `.datum-mapped-index` sidecar (format version 4) stores memory-mapped fixed-width sorted indexes in a separate file with magic `DXIX`. See [Memory-mapped sorted indexes](indexes.md#memory-mapped-sorted-indexes) for the binary specification.
-
-See [indexes.md](indexes.md) for the full binary specification of both sidecar formats.
+See [indexes.md](indexes.md) for the full binary specification.
 
 ## Optional sidecar (`.datum-blob`)
 
-An optional `.datum-blob` companion file provides a unified sidecar for **Large Binary Objects (LBOs)** — images, byte arrays, and (eventually) video — that would otherwise inflate column pages. The `.datum-blob` is a single append-only file containing all sidecar-routed payloads concatenated.
-
-Bytes are addressed by absolute 64-bit file offset, so a single sidecar can hold terabytes of binary data without per-blob or per-file caps. Readers memory-map the entire sidecar and slice it directly — zero copy, zero decompression for already-compressed payloads (JPEG, PNG, MP4, etc.).
+A `.datum-blob` companion file is the **heap** for non-inline payloads — long strings, JsonValue, byte arrays, images, vectors, structs, anything where the per-row payload exceeds DataValue's 16-byte inline tier. Bytes are addressed by absolute 64-bit file offset, so a single sidecar can hold terabytes of binary data without per-blob caps. Readers memory-map the entire sidecar and slice it directly — zero copy, zero decompression.
 
 ### Lazy materialization
 
-The sidecar is created only when a write actually happens. `.datum` files containing only inline-sized data (numbers, short strings, dates) leave no orphan `.datum-blob` artifact. The `.datum` footer carries a sidecar fingerprint reference only when the sidecar was materialized; readers detect this and require the companion file to exist.
+The sidecar file is only created when a `VariableSlot` encoder actually emits a sidecar pointer. `.datum` files containing only inline-sized data leave no orphan `.datum-blob` artifact. The `HasSidecarReferences` file flag in the `.datum` header is set only when at least one `Append` actually fired against the sidecar.
 
 ### Header layout (32 bytes)
 
@@ -255,92 +264,117 @@ The sidecar is created only when a write actually happens. `.datum` files contai
 [magic       : 8 bytes  "DATUMBLB" little-endian (0x424C424D55544144)]
 [version     : 4 bytes  uint32 = 1]
 [reserved1   : 4 bytes  zero]
-[fingerprint : 8 bytes  uint64 — must match the .datum footer's reference]
-[reserved2   : 8 bytes  zero]
+[fingerprint : 8 bytes  uint64 — random per-write, embedded in both sidecar and .datum]
+[payloadHash : 8 bytes  xxHash3-64 over [HeaderSize..EOF), patched on close]
 [blob bytes  : append-only payload region — concatenated raw bytes]
 ```
 
-There is no internal framing between blobs in the payload region. Each blob's location is recorded in its referencing column page's pointer table (see *DataValue coordinates* below); the sidecar itself is opaque to anyone not holding the corresponding `.datum`.
+There is no internal framing between blobs in the payload region. Each blob's location is recorded in its referencing column page's pointer slot (offset + length + codec); the sidecar itself is opaque to anyone not holding the corresponding `.datum`.
 
-### Fingerprint linkage
+### Pointer slot
 
-The fingerprint is a random 64-bit value generated once when a sidecar is first materialized. It is stored both in the sidecar header (offset 16) and in the companion `.datum` footer. Readers compare both before opening the sidecar — a mismatch (file swap, manual edit, stale partial restore) raises a clear error rather than risking silent corruption.
+Per `VariableSlot` row whose inline bit is clear:
 
-### DataValue coordinates
+```
+[offset    : int64  absolute byte position in .datum-blob (includes the 32-byte header)]
+[length    : 5 bytes (40-bit) payload size, supports per-blob values up to 1 TiB]
+[reserved  : 2 bytes — zero in v1; reserved for length-field expansion past 1 TiB]
+[codec     : 1 byte SidecarBlobCodec (0=Raw)]
+```
 
-A `DataValue` referencing a sidecar payload carries:
+### Codec evolution
 
-- **64-bit absolute offset** — the byte position in `.datum-blob` (includes the 32-byte header, so readers slice the mmap directly without offset translation)
-- **40-bit length** — payload size, supports per-blob values up to 1 TiB (covers all realistic image, video, tensor, and scientific-array sizes)
-- **24 reserved bits** — for future per-value metadata (format ID, codec hint, dimensions, etc.); zero in v1
+The codec byte is reserved for future use; v1 always writes `Raw`:
 
-The encoder for sidecar-routed columns produces a column page consisting of `nullBitmap | (uint64 offset, uint40 length)[N]` — no inline byte pool. Decoders reconstruct `DataValue`s with sidecar coordinates, never copying bytes through arena memory at decode time.
+| Codec | Value | Notes |
+|-------|-------|-------|
+| `Raw` | 0 | Stored as-is. Only legal value in v1. |
+| `Zstd` | 1 | Reserved for v2.x — per-blob Zstd compression. |
+| `ZstdShuffle` | 2 | Reserved for v2.x — byte-shuffle pre-filter + Zstd. Intended for Vector/Matrix/Tensor where shuffle dramatically improves compression. |
 
-### Concurrency and atomicity
-
-`SidecarWriteStore.Append` serialises concurrent appenders internally; multiple producers (parallel deserializers, threaded ingest) can safely share a single sink without external coordination. On finalize, the sidecar is flushed and closed before the `.datum` footer is written, so a crash mid-finalize leaves either a complete pair of files or an orphaned sidecar (easily detected and discarded — the `.datum` footer's fingerprint reference is the source of truth for "valid pair").
+Per-blob codec means each value in a column can choose its own compression independently. The `Image` column might mix already-compressed JPEGs (codec=Raw) with uncompressed bitmaps that benefit from Zstd; the writer picks per blob.
 
 ## Reading flow
 
 ```
 1. Open file
    └─ Seek to EOF − 8, read tail, validate FMTD magic
-   └─ Compute footerOffset, seek there, deserialize schema + row group directory
+   └─ Compute footerOffset, deserialize footer (schema + page directory + zone-map hierarchy)
+   └─ If HasSidecarReferences flag set, mmap the .datum-blob sidecar
 
 2. Plan query
-   └─ Identify relevant columns from SELECT/WHERE/JOIN clauses
-   └─ Use zone maps to skip row groups that cannot match predicates
-   └─ If sidecar index exists, apply bloom filter and sorted index pruning
+   └─ Identify projected columns from SELECT/WHERE/JOIN clauses
+   └─ Walk filter predicate against zone maps:
+        Volume → Chapter → Page (skip whole subtrees on provable miss)
+   └─ If .datum-index sidecar exists, additionally apply bloom / sorted / B+Tree / bitmap pruning at chunk grain
 
-3. Read matching row groups
-   └─ For each surviving row group:
-      └─ For each needed column:
-         └─ Seek to pageOffset
-         └─ Read compressedByteLength bytes
-         └─ Decompress (Zstd/Zlib/Brotli/None)
-         └─ Decode (reverse encoding: unshuffle, un-delta, dictionary expand, etc.)
-         └─ Yield DataValue[] for this column
+3. Read surviving pages
+   └─ For each surviving page:
+      └─ Seek to PageOffset, read PageByteLength bytes (one I/O per page)
+      └─ Open the appropriate decoder (FixedWidth / BitPackedBoolean / VariableSlot)
+      └─ Materialize DataValues row by row:
+            FixedWidth → check null bit, slice stride bytes from payload
+            BitPackedBoolean → check null bit, read value bit
+            VariableSlot inline → check null + inline bit, slice 16 bytes by per-row length
+            VariableSlot pointer → emit sidecar-backed DataValue (offset, length, codec)
 ```
 
 ## Write flow
 
 ```
 1. Initialize
-   └─ Write 28-byte header (with zero placeholders for mutable fields)
+   └─ Open seekable stream
+   └─ Write 32-byte header with placeholder TotalRowCount and FooterOffset
+   └─ Build per-column encoders (FixedWidth / BitPackedBoolean / VariableSlot)
+   └─ Build per-column zone-map hierarchy builders
 
-2. Buffer rows
-   └─ Accumulate DataValue[] per column
-   └─ On first flush: freeze fixed shapes (Vector/Matrix/Tensor dimensions)
-   └─ When buffer reaches rowGroupSize:
-      └─ Encode each column → DatumEncodedPage
-      └─ Compress payload → write compressed bytes to stream
-      └─ Record DatumColumnChunkDescriptor (offset, sizes, encoding, codec, zone map)
-      └─ Auto-tune: halve row group size if any FixedFloat32 page > 32 MiB
+2. Per RowBatch
+   └─ For each row, for each column:
+      └─ encoder.Append(value)
+      └─ If encoder.IsFull (1024 rows), flush:
+            - Write page bytes directly to the data stream
+            - Record (offset, length, rowCount, zoneMap) in the column's page directory
+            - Roll the page zone map into the chapter / volume hierarchy
+   └─ Stream.Flush() so growing file is visible to readers / cancel preserves bytes
 
 3. Finalize
-   └─ Flush remaining rows as final row group
-   └─ Write footer (schema + row group directory)
-   └─ Write 8-byte tail (footer length + FMTD magic)
-   └─ Seek back to header, patch RowGroupCount, TotalRowCount, FooterOffset
+   └─ Flush trailing partial pages for each column
+   └─ For each column: build column footer (descriptor + page directory + chapter zone maps + optional volume zone maps)
+   └─ Write footer body, capture offset and byte length
+   └─ Write 8-byte tail (footerByteLength + FMTD magic)
+   └─ Seek to header offset 0, patch TotalRowCount, FooterOffset, and Flags
 ```
 
 ## Source files
 
 | File | Purpose |
 |------|---------|
-| `DatumFileConstants.cs` | Magic bytes, version, enums (`DatumEncoding`, `DatumCompression`, `DatumColumnFlags`, `DatumFileFlags`) |
-| `DatumFileWriter.cs` | Sequential writer with auto-tuning row group size |
-| `DatumFileReader.cs` | Footer-first reader with column-selective decode |
-| `DatumFileSchema.cs` | Schema serialization/deserialization |
-| `DatumColumnDescriptor.cs` | Per-column metadata record |
-| `DatumColumnChunkDescriptor.cs` | Per-column, per-row-group page location and zone map |
-| `DatumRowGroupDescriptor.cs` | Per-row-group metadata (row count + column chunks) |
-| `DatumZoneMap.cs` | Per-column min/max/null-count statistics |
-| `DatumCompressor.cs` | Compression/decompression dispatch (Zstd, Zlib, Brotli) |
-| `FloatByteShuffle.cs` | BLOSC-style byte-lane interleaving for float pages |
-| `DatumFileTableProvider.cs` | Query-engine table provider with seekable chunk access |
-| `Sidecar/IBlobSink.cs` | Append-only sink contract (64-bit offset/length) for the `.datum-blob` write path |
-| `Sidecar/IBlobSource.cs` | Read-only random-access source contract for the `.datum-blob` read path |
-| `Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout |
-| `Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
-| `Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |
+| `DatumFile/V2/DatumFormatV2.cs` | Magic bytes, version, file-flag enum, page/chapter/volume constants, sidecar slot offsets |
+| `DatumFile/V2/HeaderV2.cs` | 32-byte file header read/write |
+| `DatumFile/V2/FooterV2.cs` | Footer body read/write (per-column blocks) |
+| `DatumFile/V2/ColumnDescriptorV2.cs` | Per-column metadata (name, kind, encoder, flags, optional fixed shape) |
+| `DatumFile/V2/PageDescriptorV2.cs` | Per-page directory entry (offset, byte length, row count, zone map) |
+| `DatumFile/V2/ColumnFooterV2.cs` | Per-column block (descriptor + pages + chapter/volume zone maps) |
+| `DatumFile/V2/DatumFileWriterV2.cs` | Streaming writer with page-flush on encoder full + footer patch on finalize |
+| `DatumFile/V2/DatumFileReaderV2.cs` | Tail-first reader with random-access page reads |
+| `DatumFile/V2/Encoding/FixedWidthPageEncoderV2.cs` | Encoder for fixed-stride scalars |
+| `DatumFile/V2/Encoding/BitPackedBooleanPageEncoderV2.cs` | Encoder for booleans (null bitmap + value bitmap) |
+| `DatumFile/V2/Encoding/VariableSlotPageEncoderV2.cs` | Encoder for variable-length kinds (inline-vs-pointer 16-byte slots + sidecar spill) |
+| `DatumFile/V2/Encoding/PageEncoderFactoryV2.cs` | Picks the right encoder for a column descriptor |
+| `DatumFile/V2/Encoding/ZoneMapHierarchyBuilderV2.cs` | Aggregates page → chapter → volume zone maps |
+| `DatumFile/V2/Encoding/PageZoneMapBuilderV2.cs` | Per-column-page zone-map accumulator (records min/max/null) |
+| `DatumFile/V2/Decoding/FixedWidthPageDecoderV2.cs` | Random-access reader for fixed-width pages |
+| `DatumFile/V2/Decoding/BitPackedBooleanPageDecoderV2.cs` | Random-access reader for boolean pages |
+| `DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs` | Random-access reader for variable-slot pages (inline + sidecar pointer) |
+| `DatumFile/V2/Decoding/PageDecoderFactoryV2.cs` | Picks the right decoder for a column descriptor |
+| `Catalog/Providers/DatumFileTableProviderV2.cs` | Engine-facing provider with three-tier zone-map pruning + seek session + manifest/index discovery |
+| `Catalog/Providers/DatumFileSeekSessionV2.cs` | Caller-owned seek session with page-index math (`pageIndex = startRow / pageSize`) |
+| `DatumFile/Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout — unchanged from v1 |
+| `DatumFile/Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
+| `DatumFile/Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |
+
+## v1 compatibility
+
+v1 (`FormatVersion = 2`) files remain readable via the version-aware `DatumFileTableProvider.Open` factory, which peeks the format-version byte at offset 4–5 of the header and dispatches to the v1 or v2 reader. `TableCatalog.Add(TableDescriptor)` calls the factory transparently — registered tables work regardless of which format their `.datum` file uses.
+
+v1 will be retired in a future cleanup pass once the v2 reader has accumulated production miles. The v1 source files (compressed encoders, dictionary builder, byte-shuffle pre-filter, format dispatcher) are untouched until then so they remain a regression net.
