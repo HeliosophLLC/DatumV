@@ -524,7 +524,17 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private DataValue EvaluateFunction(FunctionCallExpression function, in EvaluationFrame frame)
+    private DataValue EvaluateFunction(FunctionCallExpression function, in EvaluationFrame frame) =>
+        ToDataValue(EvaluateFunctionAsValueRef(function, frame), frame);
+
+    /// <summary>
+    /// Evaluates a function call directly as a <see cref="ValueRef"/>. Used as
+    /// the inner step of nested function chains so intermediate values stay in
+    /// managed memory rather than round-tripping through the arena: in
+    /// <c>outer(middle(inner(x)))</c>, only <c>outer</c>'s top-level result
+    /// crosses the <see cref="ToDataValue"/> boundary.
+    /// </summary>
+    private ValueRef EvaluateFunctionAsValueRef(FunctionCallExpression function, in EvaluationFrame frame)
     {
         IScalarFunction? scalarFunction = _functions.TryGetScalar(function.FunctionName);
 
@@ -538,14 +548,9 @@ public sealed class ExpressionEvaluator
         ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(argumentCount);
         try
         {
-            // Per-row boundary conversion: evaluate each argument as a DataValue
-            // against the current frame, then materialise into a ValueRef so the
-            // function body operates on managed memory only. Arena/sidecar-backed
-            // payloads are resolved here; inline values pass through cheaply.
             for (int index = 0; index < argumentCount; index++)
             {
-                DataValue raw = Evaluate(function.Arguments[index], frame);
-                arguments[index] = ToValueRef(raw, frame);
+                arguments[index] = EvaluateAsValueRef(function.Arguments[index], frame);
             }
 
             if (_validatedScalarCalls.Add(function))
@@ -555,7 +560,7 @@ public sealed class ExpressionEvaluator
 
             ValueRef result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in frame);
             _meter?.Add(scalarFunction.QueryUnitCost);
-            return ToDataValue(result, frame);
+            return result;
         }
         finally
         {
@@ -563,6 +568,32 @@ public sealed class ExpressionEvaluator
             arguments.AsSpan(0, argumentCount).Clear();
             ArrayPool<ValueRef>.Shared.Return(arguments);
         }
+    }
+
+    /// <summary>
+    /// Evaluates an expression as a <see cref="ValueRef"/>. Function call
+    /// expressions short-circuit to <see cref="EvaluateFunctionAsValueRef"/>
+    /// to keep nested chains in managed memory; everything else falls back to
+    /// the existing <see cref="Evaluate(Expression, in EvaluationFrame)"/>
+    /// path and lifts the result via <see cref="ToValueRef"/>.
+    /// </summary>
+    /// <remarks>
+    /// This matters for <c>outer(middle(inner(x)))</c>-style chains: each
+    /// recursive call into <see cref="EvaluateFunctionAsValueRef"/> produces a
+    /// managed <see cref="ValueRef"/> the next stage consumes directly, so the
+    /// only arena write is the outermost call's <see cref="ToDataValue"/>.
+    /// Earlier intermediates become unreachable as soon as the next stage's
+    /// result is constructed and are reclaimed by the GC.
+    /// </remarks>
+    private ValueRef EvaluateAsValueRef(Expression expression, in EvaluationFrame frame)
+    {
+        if (expression is FunctionCallExpression functionCall)
+        {
+            return EvaluateFunctionAsValueRef(functionCall, frame);
+        }
+
+        DataValue raw = Evaluate(expression, frame);
+        return ToValueRef(raw, frame);
     }
 
     /// <summary>
@@ -814,8 +845,6 @@ public sealed class ExpressionEvaluator
 
     private DataValue EvaluateCast(CastExpression cast, in EvaluationFrame frame)
     {
-        DataValue value = Evaluate(cast.Expression, frame);
-
         IScalarFunction? castFunction = _functions.TryGetScalar("cast");
         if (castFunction is null)
         {
@@ -825,7 +854,7 @@ public sealed class ExpressionEvaluator
         ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(2);
         try
         {
-            arguments[0] = ToValueRef(value, frame);
+            arguments[0] = EvaluateAsValueRef(cast.Expression, frame);
             arguments[1] = ValueRef.FromString(cast.TargetType);
             ValueRef result = castFunction.Execute(arguments.AsSpan(0, 2), in frame);
             _meter?.Add(castFunction.QueryUnitCost);
