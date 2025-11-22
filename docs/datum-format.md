@@ -53,7 +53,7 @@ Two optional companion sidecars extend the base format:
 
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
-| 0 | 4 | Magic | bytes | `DTMF` (ASCII, unchanged from v1) |
+| 0 | 4 | Magic | bytes | `DTMF` (ASCII) |
 | 4 | 2 | FormatVersion | uint16 | `3` |
 | 6 | 2 | Flags | uint16 | `DatumFileFlagsV2` bitmask (see below) |
 | 8 | 4 | ColumnCount | int32 | Number of columns in the schema |
@@ -125,10 +125,10 @@ A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-ro
 |-------|-------|-------|
 | 0–7 | Offset | int64 absolute byte offset into `.datum-blob` (includes the sidecar's 32-byte header) |
 | 8–12 | Length | 5-byte (40-bit) payload length, max ~1 TiB |
-| 13–14 | Reserved | Zero in v1; reserved for future length-field expansion past 1 TiB |
-| 15 | Codec | `SidecarBlobCodec` byte: `0=Raw` (only legal value in v1), `1=Zstd`, `2=Zstd+ByteShuffle` reserved for v2.x |
+| 13–14 | Reserved | Zero today; reserved for future length-field expansion past 1 TiB |
+| 15 | Codec | `SidecarBlobCodec` byte: `0=Raw` (only legal value today), `1=Zstd`, `2=Zstd+ByteShuffle` reserved for future use |
 
-Readers reject any non-zero codec byte with a clear error so a future v2.x writer's bytes are never silently misinterpreted by a v1 reader.
+Readers reject any non-zero codec byte with a clear error so a future writer's bytes are never silently misinterpreted by a current reader.
 
 ## Footer
 
