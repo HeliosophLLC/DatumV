@@ -292,7 +292,7 @@ public sealed class LlamaModel : IModel, IDisposable
                 ? rowOverrides[1].ToInt32()
                 : _maxTokens;
 
-            string promptText = prompt.AsString(inputStore);
+            string promptText = prompt.AsString(inputStore, sidecarRegistry);
             string templated = _template.Format(promptText);
 
             string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);
