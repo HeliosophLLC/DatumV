@@ -227,7 +227,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// which <see cref="IBlobSource"/> in the per-query
     /// <see cref="DatumFile.Sidecar.SidecarRegistry"/> backs this value's bytes. Only
     /// meaningful when <see cref="IsInSidecar"/> is <c>true</c>; otherwise zero.
-    /// Stamped onto values by <see cref="DatumFile.Decoding.BinaryColumnDecoder"/>
+    /// Stamped onto values by the v2 <c>VariableSlotPageDecoderV2</c>
     /// using the storeId the table provider received from the registry at scan time.
     /// </summary>
     internal byte SidecarStoreId => (byte)(_charCount & 0xFF);

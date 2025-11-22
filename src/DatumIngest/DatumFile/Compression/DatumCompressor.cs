@@ -29,8 +29,7 @@ public static class DatumCompressor
     /// Compresses <paramref name="source"/> using the specified codec, returning a pooled
     /// buffer from <see cref="ArrayPool{T}.Shared"/> along with the number of compressed
     /// bytes written into it. The caller <em>must</em> return the buffer to the pool via
-    /// <see cref="ArrayPool{T}.Return"/> after the bytes have been consumed (typically via
-    /// <see cref="DatumIngest.DatumFile.Encoding.DatumEncodedPage.ReturnBuffer"/>).
+    /// <see cref="ArrayPool{T}.Return"/> after the bytes have been consumed.
     /// </summary>
     /// <param name="source">Raw bytes to compress.</param>
     /// <param name="kind">Codec to apply.</param>

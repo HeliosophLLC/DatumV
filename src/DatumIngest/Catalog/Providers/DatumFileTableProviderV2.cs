@@ -55,10 +55,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// memory-maps the companion <c>.datum-blob</c> for sidecar reads.
     /// Auto-discovers <c>.datum-manifest</c> and <c>.datum-index</c>
     /// sidecars alongside the source so <see cref="GetManifest"/> /
-    /// <see cref="GetSourceIndex"/> return live data. Use
-    /// <see cref="DatumFileTableProvider.Open"/> from
-    /// <see cref="TableCatalog"/> rather than this constructor directly so
-    /// v1 / v2 dispatch is centralized.
+    /// <see cref="GetSourceIndex"/> return live data.
     /// </summary>
     public DatumFileTableProviderV2(TableDescriptor descriptor, Pool pool)
     {

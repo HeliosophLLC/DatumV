@@ -1,8 +1,8 @@
-# `.datum` File Format (v2)
+# `.datum` File Format
 
 [← Back to README](../README.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Providers](providers.md)
 
-The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. v2 is **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade is ~2–4× larger files vs the v1 zstd path; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
+The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It's **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade vs a heavily-compressed alternative is ~2–4× larger files; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
 
 Two optional companion sidecars extend the base format:
 
@@ -54,7 +54,7 @@ Two optional companion sidecars extend the base format:
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
 | 0 | 4 | Magic | bytes | `DTMF` (ASCII, unchanged from v1) |
-| 4 | 2 | FormatVersion | uint16 | `3` (v1=2; the version bump signals incompatible bytes) |
+| 4 | 2 | FormatVersion | uint16 | `3` |
 | 6 | 2 | Flags | uint16 | `DatumFileFlagsV2` bitmask (see below) |
 | 8 | 4 | ColumnCount | int32 | Number of columns in the schema |
 | 12 | 4 | PageSize | int32 | Rows per page (default 1024) |
@@ -373,8 +373,3 @@ Per-blob codec means each value in a column can choose its own compression indep
 | `DatumFile/Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
 | `DatumFile/Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |
 
-## v1 compatibility
-
-v1 (`FormatVersion = 2`) files remain readable via the version-aware `DatumFileTableProvider.Open` factory, which peeks the format-version byte at offset 4–5 of the header and dispatches to the v1 or v2 reader. `TableCatalog.Add(TableDescriptor)` calls the factory transparently — registered tables work regardless of which format their `.datum` file uses.
-
-v1 will be retired in a future cleanup pass once the v2 reader has accumulated production miles. The v1 source files (compressed encoders, dictionary builder, byte-shuffle pre-filter, format dispatcher) are untouched until then so they remain a regression net.

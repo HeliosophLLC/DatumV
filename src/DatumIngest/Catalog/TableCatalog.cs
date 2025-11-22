@@ -124,7 +124,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     /// <summary>
     /// Per-catalog map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each
-    /// <see cref="DatumFileTableProvider"/> with a <c>.datum-blob</c> sidecar registers
+    /// <see cref="DatumFileTableProviderV2"/> with a <c>.datum-blob</c> sidecar registers
     /// its source here at <see cref="Add(TableDescriptor)"/> time and gets back a byte;
     /// the decoder stamps that byte onto every sidecar-flagged
     /// <see cref="DataValue"/>; image accessors resolve through the registry at access
@@ -248,10 +248,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
         }
-        // Version-aware open: peeks the format byte and returns either the
-        // v1 or v2 provider. Both expose the same ITableProvider surface and
-        // the small IDatumFileTableProvider extension for sidecar plumbing.
-        ITableProvider provider = DatumFileTableProvider.Open(tableDescriptor, Pool);
+        // v2 reader validates magic + version inside its constructor via
+        // DatumFileReaderV2.Open. Files written by older format versions
+        // throw InvalidDataException at open time.
+        DatumFileTableProviderV2 provider = new(tableDescriptor, Pool);
         if (Tables.TryAdd(tableDescriptor.Name, provider))
         {
             RegisterProviderSidecar(provider);

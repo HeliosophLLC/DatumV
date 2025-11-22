@@ -1,8 +1,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
-using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.DatumFile.V2;
 
 if (args.Length < 1)
 {
@@ -84,20 +84,15 @@ if (!File.Exists(datumPath))
     return magicOk && versionOk ? 0 : 2;
 }
 
-(bool hasSidecarFlag, ulong? datumFingerprint, string datumDiagnostic) = ReadDatumSidecarLink(datumPath);
+(bool hasSidecarFlag, string datumDiagnostic) = ReadDatumSidecarLink(datumPath);
 
 Console.WriteLine("Companion:");
 Console.WriteLine($"  Path:        {datumPath}");
-Console.WriteLine($"  HasSidecarBlobs flag: {(hasSidecarFlag ? "✓ set" : "✗ not set")}");
+Console.WriteLine($"  HasSidecarReferences flag: {(hasSidecarFlag ? "✓ set" : "✗ not set")}");
 
-if (datumFingerprint is ulong dfp)
+if (datumDiagnostic.Length > 0)
 {
-    bool match = dfp == fingerprint;
-    Console.WriteLine($"  Fingerprint: 0x{dfp:X16} {(match ? "✓ matches sidecar" : "✗ mismatch — sidecar is stale or swapped")}");
-}
-else
-{
-    Console.WriteLine($"  Fingerprint: {datumDiagnostic}");
+    Console.WriteLine($"  Note:        {datumDiagnostic}");
 }
 
 return magicOk && versionOk ? 0 : 2;
@@ -112,40 +107,31 @@ static string ResolveSidecarPath(string input)
     return Path.ChangeExtension(input, SidecarConstants.FileExtension);
 }
 
-static (bool HasSidecarFlag, ulong? Fingerprint, string Diagnostic) ReadDatumSidecarLink(string datumPath)
+static (bool HasSidecarFlag, string Diagnostic) ReadDatumSidecarLink(string datumPath)
 {
     using FileStream stream = new(datumPath, FileMode.Open, FileAccess.Read, FileShare.Read);
     long length = stream.Length;
 
-    if (length < DatumFileConstants.HeaderSize + DatumFileConstants.TailSize)
+    if (length < DatumFormatV2.HeaderSize + DatumFormatV2.TailSize)
     {
-        return (false, null, "companion .datum file is truncated");
+        return (false, "companion .datum file is truncated");
     }
 
     // Header flags live at offset 6 (magic[4] + version[2] + flags[2] + ...).
-    Span<byte> headerBuffer = stackalloc byte[DatumFileConstants.HeaderSize];
+    Span<byte> headerBuffer = stackalloc byte[DatumFormatV2.HeaderSize];
     stream.ReadExactly(headerBuffer);
     ushort flagsRaw = BinaryPrimitives.ReadUInt16LittleEndian(headerBuffer[6..8]);
-    DatumFileFlags flags = (DatumFileFlags)flagsRaw;
-    bool hasSidecarFlag = (flags & DatumFileFlags.HasSidecarBlobs) != 0;
+    DatumFileFlagsV2 flags = (DatumFileFlagsV2)flagsRaw;
+    bool hasSidecarFlag = (flags & DatumFileFlagsV2.HasSidecarReferences) != 0;
 
-    if (!hasSidecarFlag)
-    {
-        return (false, null, "companion .datum does not declare a sidecar — fingerprint not present in footer");
-    }
-
-    // The fingerprint is the 8 bytes immediately before the tail (footerByteLength + tailMagic = 8 bytes).
-    long fingerprintOffset = length - DatumFileConstants.TailSize - 8;
-    if (fingerprintOffset < DatumFileConstants.HeaderSize)
-    {
-        return (true, null, "companion .datum is too short to contain a footer fingerprint");
-    }
-
-    stream.Seek(fingerprintOffset, SeekOrigin.Begin);
-    Span<byte> fpBuffer = stackalloc byte[8];
-    stream.ReadExactly(fpBuffer);
-    ulong fingerprint = BinaryPrimitives.ReadUInt64LittleEndian(fpBuffer);
-    return (true, fingerprint, string.Empty);
+    // v2 doesn't yet store the sidecar fingerprint in the .datum footer
+    // (deferred follow-up in project_sidecar_integrity_hash.md). The
+    // sidecar's own header carries the fingerprint and that's what
+    // SidecarReadStore validates at open time.
+    return (hasSidecarFlag,
+        hasSidecarFlag
+            ? "v2 .datum does not embed the sidecar fingerprint in its footer; the sidecar's own header is authoritative"
+            : "companion .datum does not declare HasSidecarReferences");
 }
 
 static ulong HashSidecarPayload(string path, long payloadBytes)

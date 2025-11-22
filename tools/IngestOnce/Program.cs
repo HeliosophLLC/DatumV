@@ -7,16 +7,6 @@ using DatumIngest.Serialization.Csv;
 using DatumIngest.Serialization.Idx;
 using DatumIngest.Serialization.Zip;
 
-// Format selection: v2 is the default. Pass the literal "v1" anywhere in
-// the argument list to fall back to the legacy path (kept until Phase 5
-// drops v1 entirely). The "v2" token is still accepted as a no-op for
-// scripts that explicitly opt in. Pull both tokens out before positional
-// parsing so they don't shift source / dest / timeout / preset slots.
-bool useFormatV2 = !args.Any(a => a.Equals("v1", StringComparison.OrdinalIgnoreCase));
-args = [.. args.Where(a =>
-    !a.Equals("v2", StringComparison.OrdinalIgnoreCase)
-    && !a.Equals("v1", StringComparison.OrdinalIgnoreCase))];
-
 string sourcePath = args.Length > 0
     ? args[0]
     : @"E:\Datasets\Chicago Crimes Dataset\Crimes_-_2001_to_Present_20260331.csv";
@@ -37,10 +27,6 @@ IngestionOptions ingestionOptions = args.Length > 3
     ? IngestionOptions.MultiTenantServer
     : IngestionOptions.Default;
 
-// useFormatV2 was set above (before positional parsing). v2 is the
-// default; pass "v1" to opt out. See the top-of-file Where-filter that
-// strips both tokens out of args.
-
 if (!File.Exists(sourcePath))
 {
     Console.Error.WriteLine($"Source file not found: {sourcePath}");
@@ -56,7 +42,6 @@ Console.WriteLine(
     $"Memory:      row-group {ingestionOptions.RowGroupByteThreshold / (1024 * 1024)} MB, " +
     $"{(ingestionOptions.SerialColumnEncoding ? "serial" : "parallel")} encode, " +
     $"batch {ingestionOptions.BatchByteTarget / (1024 * 1024)} MB");
-Console.WriteLine($"Format:      {(useFormatV2 ? "v2 (uncompressed columnar + sidecar)" : "v1 (legacy)")}");
 Console.WriteLine();
 
 FormatRegistry registry = new([new CsvFileFormat(), new IdxFileFormat(), new ZipFileFormat()]);
@@ -80,9 +65,7 @@ long beforeAllocated = GC.GetTotalAllocatedBytes(precise: false);
 IngestionResult? result = null;
 try
 {
-    result = useFormatV2
-        ? await ingester.IngestV2Async(source, dest, ingestionOptions, cts.Token)
-        : await ingester.IngestAsync(source, dest, ingestionOptions, cts.Token);
+    result = await ingester.IngestAsync(source, dest, ingestionOptions, cts.Token);
 }
 catch (OperationCanceledException)
 {

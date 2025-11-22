@@ -133,7 +133,7 @@ public sealed class IndexerV2Tests : IAsyncLifetime
         FormatRegistry registry = new([new CsvFileFormat()]);
         Pool pool = new(new PoolBacking());
         Ingester ingester = new(registry, pool);
-        await ingester.IngestV2Async(source, destination);
+        await ingester.IngestAsync(source, destination);
         return datumPath;
     }
 }

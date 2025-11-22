@@ -154,10 +154,9 @@ public sealed record ColumnFooterV2(
 }
 
 /// <summary>
-/// Per-column flag byte serialized into the V2 footer. Mirrors the small
-/// subset of column-level state that needs round-tripping past file open;
-/// kept distinct from <see cref="DatumColumnFlags"/> (v1) so the v2 format
-/// has its own evolution headroom.
+/// Per-column flag byte serialized into the V2 footer. Captures the
+/// small subset of column-level state that needs round-tripping past
+/// file open (nullability, typed-array flag, fixed-shape presence).
 /// </summary>
 [Flags]
 internal enum ColumnFlagsV2 : byte

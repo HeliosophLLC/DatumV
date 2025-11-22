@@ -1,5 +1,3 @@
-using DatumIngest.DatumFile;
-
 namespace DatumIngest.Ingestion;
 
 /// <summary>
@@ -8,25 +6,22 @@ namespace DatumIngest.Ingestion;
 /// <remarks>
 /// The defaults are tuned for single-tenant bulk ingest (maximum throughput). For
 /// multi-tenant servers that also serve queries concurrently, use
-/// <see cref="MultiTenantServer"/> to cap peak working set at the cost of roughly
-/// 20% ingest wall time.
+/// <see cref="MultiTenantServer"/> to cap peak working set.
 /// </remarks>
 public sealed record IngestionOptions
 {
     /// <summary>
-    /// Soft cap on writer-arena bytes before a row group is flushed, even if the row
-    /// count hasn't reached <see cref="DatumFileConstants.DefaultRowGroupSize"/>. Lower
-    /// values reduce peak memory during heavy-blob ingestion (images, large binary
-    /// payloads) at the cost of more row groups, slightly larger footer metadata, and
-    /// reduced per-page compression ratio.
+    /// Hint to deserializers / spill writers about how big a working
+    /// arena to budget per row group / batch. Heavy-blob ingestion
+    /// (images, long strings) honours this to cap peak working set;
+    /// pure-tabular ingestion mostly ignores it. Default: 128 MB.
     /// </summary>
-    public int RowGroupByteThreshold { get; init; } = DatumFileConstants.RowGroupArenaByteThreshold;
+    public int RowGroupByteThreshold { get; init; } = 128 * 1024 * 1024;
 
     /// <summary>
-    /// When <c>true</c>, the writer encodes one column at a time during row group flush
-    /// instead of using <c>Parallel.For</c>. On wide tables (dozens of columns) parallel
-    /// encoding multiplies the per-column raw buffer by the degree of parallelism;
-    /// serial encoding caps peak at one column's worth of buffer.
+    /// When <c>true</c>, deserializers / writers serialize per-column work
+    /// rather than parallelize it. Lowers peak memory at the cost of wall
+    /// time on wide tables.
     /// </summary>
     public bool SerialColumnEncoding { get; init; } = false;
 

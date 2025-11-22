@@ -15,7 +15,7 @@ namespace DatumIngest.Ingestion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The indexer reads the source <c>.datum</c> file through <see cref="DatumFileTableProvider"/>
+/// The indexer reads the source <c>.datum</c> file through <see cref="DatumFileTableProviderV2"/>
 /// streaming one <see cref="RowBatch"/> at a time, accumulates per-chunk statistics and
 /// optional acceleration structures (bloom filters, bitmap indexes, sorted or B+Tree column
 /// indexes), and serialises the result via <see cref="UnifiedIndexWriter"/>. The output
@@ -72,11 +72,11 @@ public sealed class Indexer(Pool pool)
         long bytesWritten;
         long rowCount = 0;
 
-        // Version-aware open: dispatches to v1 or v2 reader based on the
-        // file's format-version byte. v2 files emit sidecar-bound DataValues
-        // for long strings / byte arrays / images; the index builder skips
-        // those at the bloom layer (see IncrementalIndexBuilder.AddRow).
-        using ITableProvider provider = DatumFileTableProvider.Open(descriptor, pool);
+        // v2 reader validates magic + version inside its constructor.
+        // v2 files emit sidecar-bound DataValues for long strings / byte
+        // arrays / images; the index builder skips those at the bloom
+        // layer (see IncrementalIndexBuilder.AddRow).
+        using DatumFileTableProviderV2 provider = new(descriptor, pool);
 
         try
         {

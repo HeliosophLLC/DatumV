@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Ingestion;
 
 /// <summary>
 /// End-to-end test for the v2 ingest path: CSV bytes →
-/// <see cref="Ingester.IngestV2Async(FileFormatDescriptor, OutputDescriptor, CancellationToken)"/>
+/// <see cref="Ingester.IngestAsync(FileFormatDescriptor, OutputDescriptor, CancellationToken)"/>
 /// → <c>.datum</c> bytes (v2 format) → <see cref="DatumFileReaderV2"/>.
 /// Verifies the v2 writer is correctly wired into the ingestion pipeline
 /// and that the resulting file is structurally valid and readable.
@@ -54,7 +54,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         Pool pool = new(new PoolBacking());
         Ingester ingester = new(registry, pool);
 
-        IngestionResult result = await ingester.IngestV2Async(source, destination);
+        IngestionResult result = await ingester.IngestAsync(source, destination);
 
         Assert.Equal(3, result.RowCount);
         Assert.True(result.BytesWritten > 0);
@@ -107,7 +107,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         Pool pool = new(new PoolBacking());
         Ingester ingester = new(registry, pool);
 
-        IngestionResult result = await ingester.IngestV2Async(source, destination);
+        IngestionResult result = await ingester.IngestAsync(source, destination);
 
         Assert.Equal(2, result.RowCount);
         Assert.True(File.Exists(sidecarPath), "Long string should have materialized the sidecar.");
@@ -142,7 +142,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         FormatRegistry registry = new([new CsvFileFormat()]);
         Pool pool = new(new PoolBacking());
         Ingester ingester = new(registry, pool);
-        await ingester.IngestV2Async(source, destination);
+        await ingester.IngestAsync(source, destination);
 
         // Open via TableCatalog to exercise the version-dispatch factory
         // and sidecar registration path.

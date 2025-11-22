@@ -122,10 +122,9 @@ public sealed class StatisticsCollector
     }
 
     /// <summary>
-    /// Notifies every accumulator that the writer is about to flush a row group
-    /// and reset its arena. Accumulators that hold arena-relative references
-    /// must materialize them here. Must be called before each
-    /// <see cref="DatumFile.DatumFileWriter.FlushRowGroup"/>.
+    /// Notifies every accumulator that the writer is about to flush a row
+    /// group and reset its arena. Accumulators that hold arena-relative
+    /// references must materialize them here.
     /// </summary>
     /// <param name="writerArenaStore">Read-only view over the row group's page of the writer's arena.</param>
     public void FlushRowGroup(IValueStore writerArenaStore)
