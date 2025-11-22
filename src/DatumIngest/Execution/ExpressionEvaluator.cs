@@ -271,7 +271,7 @@ public sealed class ExpressionEvaluator
     /// </summary>
     public bool EvaluateAsBoolean(Expression expression, in EvaluationFrame frame)
     {
-        DataValue result = Evaluate(expression, frame);
+        ValueRef result = EvaluateAsValueRef(expression, frame);
 
         if (result.IsNull)
         {
@@ -291,7 +291,7 @@ public sealed class ExpressionEvaluator
             DataKind.UInt32 => result.AsUInt32() != 0,
             DataKind.Int64 => result.AsInt64() != 0,
             DataKind.UInt64 => result.AsUInt64() != 0,
-            DataKind.String => !string.IsNullOrEmpty(Str(result, frame)),
+            DataKind.String => !string.IsNullOrEmpty(result.AsString()),
             _ => true,
         };
     }
@@ -426,99 +426,94 @@ public sealed class ExpressionEvaluator
                 : $"Column '{column.ColumnName}' not found in row.");
     }
 
-    private DataValue EvaluateBinary(BinaryExpression binary, in EvaluationFrame frame)
+    private DataValue EvaluateBinary(BinaryExpression binary, in EvaluationFrame frame) =>
+        ToDataValue(EvaluateBinaryAsValueRef(binary, frame), frame);
+
+    /// <summary>
+    /// ValueRef-native binary expression evaluation. Operands are pulled in as
+    /// ValueRef (not DataValue), so predicate-context callers consume the
+    /// resulting boolean without any function-result string ever crossing the
+    /// arena boundary. Result is always inline (Boolean / Float32 / Duration).
+    /// </summary>
+    private ValueRef EvaluateBinaryAsValueRef(BinaryExpression binary, in EvaluationFrame frame)
     {
-        // Short-circuit for AND/OR.
+        // Short-circuit for AND/OR — uses EvaluateAsBoolean which itself routes
+        // through EvaluateAsValueRef.
         if (binary.Operator == BinaryOperator.And)
         {
-            if (!EvaluateAsBoolean(binary.Left, frame))
-            {
-                return DataValue.FromBoolean(false);
-            }
-
-            if (!EvaluateAsBoolean(binary.Right, frame))
-            {
-                return DataValue.FromBoolean(false);
-            }
-
-            return DataValue.FromBoolean(true);
+            if (!EvaluateAsBoolean(binary.Left, frame)) return ValueRef.FromBoolean(false);
+            if (!EvaluateAsBoolean(binary.Right, frame)) return ValueRef.FromBoolean(false);
+            return ValueRef.FromBoolean(true);
         }
 
         if (binary.Operator == BinaryOperator.Or)
         {
-            if (EvaluateAsBoolean(binary.Left, frame))
-            {
-                return DataValue.FromBoolean(true);
-            }
-
-            if (EvaluateAsBoolean(binary.Right, frame))
-            {
-                return DataValue.FromBoolean(true);
-            }
-
-            return DataValue.FromBoolean(false);
+            if (EvaluateAsBoolean(binary.Left, frame)) return ValueRef.FromBoolean(true);
+            if (EvaluateAsBoolean(binary.Right, frame)) return ValueRef.FromBoolean(true);
+            return ValueRef.FromBoolean(false);
         }
 
+        ValueRef left = EvaluateAsValueRef(binary.Left, frame);
+        ValueRef right = EvaluateAsValueRef(binary.Right, frame);
+
+        if (left.IsNull || right.IsNull)
         {
-            DataValue left = Evaluate(binary.Left, frame);
-            DataValue right = Evaluate(binary.Right, frame);
-
-            // NULL propagation: any operation with NULL yields NULL (except IS NULL checks).
-            // Comparisons and pattern operators produce Boolean nulls; arithmetic produces
-            // Float32 nulls (the engine's default numeric kind).
-            if (left.IsNull || right.IsNull)
-            {
-                return binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
-                    or BinaryOperator.LessThan or BinaryOperator.GreaterThan
-                    or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual
-                    or BinaryOperator.Like or BinaryOperator.ILike or BinaryOperator.Regexp
-                    ? DataValue.Null(DataKind.Boolean)
-                    : DataValue.Null(DataKind.Float32);
-            }
-
-            return binary.Operator switch
-            {
-                BinaryOperator.Add when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
-                    => DataValue.FromDuration(left.AsDuration() + right.AsDuration()),
-                BinaryOperator.Subtract when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
-                    => DataValue.FromDuration(left.AsDuration() - right.AsDuration()),
-                BinaryOperator.Add => ArithmeticOp(left, right, static (a, b) => a + b),
-                BinaryOperator.Subtract => ArithmeticOp(left, right, static (a, b) => a - b),
-                BinaryOperator.Multiply => ArithmeticOp(left, right, static (a, b) => a * b),
-                BinaryOperator.Divide => ArithmeticOp(left, right, static (a, b) => b != 0f ? a / b : float.NaN),
-                BinaryOperator.Modulo => ArithmeticOp(left, right, static (a, b) => b != 0f ? a % b : float.NaN),
-                BinaryOperator.Power => ArithmeticOp(left, right, static (a, b) => MathF.Pow(a, b)),
-                BinaryOperator.Equal => CompareValues(left, right, 0, frame),
-                BinaryOperator.NotEqual => CompareValues(left, right, 0, frame, negate: true),
-                BinaryOperator.LessThan => CompareValues(left, right, -1, frame),
-                BinaryOperator.GreaterThan => CompareValues(left, right, 1, frame),
-                BinaryOperator.LessThanOrEqual => CompareValuesLe(left, right, frame),
-                BinaryOperator.GreaterThanOrEqual => CompareValuesGe(left, right, frame),
-                BinaryOperator.Like => EvaluateLike(left, right, frame),
-                BinaryOperator.ILike => EvaluateILike(left, right, frame),
-                BinaryOperator.Regexp => EvaluateRegexp(left, right, frame),
-                _ => throw new InvalidOperationException(
-                    $"Unsupported binary operator: {binary.Operator}."),
-            };
+            return binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
+                or BinaryOperator.LessThan or BinaryOperator.GreaterThan
+                or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual
+                or BinaryOperator.Like or BinaryOperator.ILike or BinaryOperator.Regexp
+                ? ValueRef.Null(DataKind.Boolean)
+                : ValueRef.Null(DataKind.Float32);
         }
+
+        return binary.Operator switch
+        {
+            BinaryOperator.Add when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
+                => ValueRef.FromDuration(left.AsDuration() + right.AsDuration()),
+            BinaryOperator.Subtract when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
+                => ValueRef.FromDuration(left.AsDuration() - right.AsDuration()),
+            BinaryOperator.Add => ArithmeticOpValueRef(left, right, static (a, b) => a + b),
+            BinaryOperator.Subtract => ArithmeticOpValueRef(left, right, static (a, b) => a - b),
+            BinaryOperator.Multiply => ArithmeticOpValueRef(left, right, static (a, b) => a * b),
+            BinaryOperator.Divide => ArithmeticOpValueRef(left, right, static (a, b) => b != 0f ? a / b : float.NaN),
+            BinaryOperator.Modulo => ArithmeticOpValueRef(left, right, static (a, b) => b != 0f ? a % b : float.NaN),
+            BinaryOperator.Power => ArithmeticOpValueRef(left, right, static (a, b) => MathF.Pow(a, b)),
+            BinaryOperator.Equal => CompareValuesValueRef(left, right, 0),
+            BinaryOperator.NotEqual => CompareValuesValueRef(left, right, 0, negate: true),
+            BinaryOperator.LessThan => CompareValuesValueRef(left, right, -1),
+            BinaryOperator.GreaterThan => CompareValuesValueRef(left, right, 1),
+            BinaryOperator.LessThanOrEqual => CompareValuesLeValueRef(left, right),
+            BinaryOperator.GreaterThanOrEqual => CompareValuesGeValueRef(left, right),
+            BinaryOperator.Like => EvaluateLikeValueRef(left, right),
+            BinaryOperator.ILike => EvaluateILikeValueRef(left, right),
+            BinaryOperator.Regexp => EvaluateRegexpValueRef(left, right),
+            _ => throw new InvalidOperationException(
+                $"Unsupported binary operator: {binary.Operator}."),
+        };
     }
 
-    private DataValue EvaluateUnary(UnaryExpression unary, in EvaluationFrame frame)
+    private DataValue EvaluateUnary(UnaryExpression unary, in EvaluationFrame frame) =>
+        ToDataValue(EvaluateUnaryAsValueRef(unary, frame), frame);
+
+    /// <summary>
+    /// ValueRef-native unary expression evaluation. Result is always inline
+    /// (Boolean for NOT, Float32 for negate).
+    /// </summary>
+    private ValueRef EvaluateUnaryAsValueRef(UnaryExpression unary, in EvaluationFrame frame)
     {
-        DataValue operand = Evaluate(unary.Operand, frame);
+        ValueRef operand = EvaluateAsValueRef(unary.Operand, frame);
 
         if (operand.IsNull)
         {
             return unary.Operator == UnaryOperator.Not
-                ? DataValue.Null(DataKind.Boolean)
-                : DataValue.Null(DataKind.Float32);
+                ? ValueRef.Null(DataKind.Boolean)
+                : ValueRef.Null(DataKind.Float32);
         }
 
         return unary.Operator switch
         {
-            UnaryOperator.Not => DataValue.FromBoolean(
-                !EvaluateAsBoolean(unary.Operand, frame)),
-            UnaryOperator.Negate => DataValue.FromFloat32(-ToFloat(operand)),
+            UnaryOperator.Not => ValueRef.FromBoolean(!EvaluateAsBoolean(unary.Operand, frame)),
+            UnaryOperator.Negate => ValueRef.FromFloat32(-ToFloatValueRef(operand)),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
         };
@@ -587,9 +582,22 @@ public sealed class ExpressionEvaluator
     /// </remarks>
     private ValueRef EvaluateAsValueRef(Expression expression, in EvaluationFrame frame)
     {
-        if (expression is FunctionCallExpression functionCall)
+        // Predicate-relevant expression types route through ValueRef-native
+        // handlers so no intermediate result writes to the arena. Anything else
+        // falls back to the DataValue path and lifts via ToValueRef — those
+        // expression types either produce inline values (literals, etc.) where
+        // the lift is free, or they're rare enough in predicate contexts that
+        // the optimisation isn't worth duplicating their handlers.
+        switch (expression)
         {
-            return EvaluateFunctionAsValueRef(functionCall, frame);
+            case FunctionCallExpression functionCall:
+                return EvaluateFunctionAsValueRef(functionCall, frame);
+            case BinaryExpression binary:
+                return EvaluateBinaryAsValueRef(binary, frame);
+            case UnaryExpression unary:
+                return EvaluateUnaryAsValueRef(unary, frame);
+            case IsNullExpression isNull:
+                return EvaluateIsNullAsValueRef(isNull, frame);
         }
 
         DataValue raw = Evaluate(expression, frame);
@@ -828,17 +836,22 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(inRange);
     }
 
-    private DataValue EvaluateIsNull(IsNullExpression isNull, in EvaluationFrame frame)
-    {
-        DataValue value = Evaluate(isNull.Expression, frame);
-        bool result = value.IsNull;
+    private DataValue EvaluateIsNull(IsNullExpression isNull, in EvaluationFrame frame) =>
+        ToDataValue(EvaluateIsNullAsValueRef(isNull, frame), frame);
 
+    /// <summary>
+    /// ValueRef-native IS NULL check. Avoids reading the inner expression's
+    /// payload from the arena when the predicate only needs a null/non-null bit.
+    /// </summary>
+    private ValueRef EvaluateIsNullAsValueRef(IsNullExpression isNull, in EvaluationFrame frame)
+    {
+        ValueRef value = EvaluateAsValueRef(isNull.Expression, frame);
+        bool result = value.IsNull;
         if (isNull.Negated)
         {
             result = !result;
         }
-
-        return DataValue.FromBoolean(result);
+        return ValueRef.FromBoolean(result);
     }
 
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
@@ -1076,11 +1089,62 @@ public sealed class ExpressionEvaluator
 
     // ──────────────────── Arithmetic helpers ────────────────────
 
-    private static DataValue ArithmeticOp(DataValue left, DataValue right, Func<float, float, float> operation)
+    /// <summary>
+    /// ValueRef arithmetic. Result is always an inline Float32 — no arena interaction.
+    /// </summary>
+    private static ValueRef ArithmeticOpValueRef(ValueRef left, ValueRef right, Func<float, float, float> operation)
     {
-        float leftValue = ToFloat(left);
-        float rightValue = ToFloat(right);
-        return DataValue.FromFloat32(operation(leftValue, rightValue));
+        return ValueRef.FromFloat32(operation(ToFloatValueRef(left), ToFloatValueRef(right)));
+    }
+
+    private static float ToFloatValueRef(ValueRef value)
+    {
+        switch (value.Kind)
+        {
+            case DataKind.Boolean: return value.AsBoolean() ? 1f : 0f;
+            case DataKind.UInt8: return value.AsUInt8();
+            case DataKind.Int8: return value.AsInt8();
+            case DataKind.Int16: return value.AsInt16();
+            case DataKind.UInt16: return value.AsUInt16();
+            case DataKind.Int32: return value.AsInt32();
+            case DataKind.UInt32: return value.AsUInt32();
+            case DataKind.Int64: return value.AsInt64();
+            case DataKind.UInt64: return value.AsUInt64();
+            case DataKind.Float32: return value.AsFloat32();
+            case DataKind.Float64: return (float)value.AsFloat64();
+            case DataKind.Duration: return (float)value.AsDuration().TotalSeconds;
+            case DataKind.Time:
+            {
+                TimeOnly t = value.AsTime();
+                return (float)(t.Hour * 3600 + t.Minute * 60 + t.Second + t.Millisecond / 1000.0);
+            }
+            case DataKind.String:
+                if (float.TryParse(value.AsString(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+                {
+                    return parsed;
+                }
+                throw new InvalidOperationException($"Cannot convert string '{value.AsString()}' to number.");
+            default:
+                throw new InvalidOperationException($"Cannot use {value.Kind} in arithmetic.");
+        }
+    }
+
+    private static bool TryGetValueRefAsDouble(ValueRef value, out double result)
+    {
+        switch (value.Kind)
+        {
+            case DataKind.UInt8: result = value.AsUInt8(); return true;
+            case DataKind.Int8: result = value.AsInt8(); return true;
+            case DataKind.Int16: result = value.AsInt16(); return true;
+            case DataKind.UInt16: result = value.AsUInt16(); return true;
+            case DataKind.Int32: result = value.AsInt32(); return true;
+            case DataKind.UInt32: result = value.AsUInt32(); return true;
+            case DataKind.Int64: result = value.AsInt64(); return true;
+            case DataKind.UInt64: result = value.AsUInt64(); return true;
+            case DataKind.Float32: result = value.AsFloat32(); return true;
+            case DataKind.Float64: result = value.AsFloat64(); return true;
+            default: result = 0; return false;
+        }
     }
 
     private static float ToFloat(DataValue value)
@@ -1099,30 +1163,6 @@ public sealed class ExpressionEvaluator
 
     // ──────────────────── Comparison helpers ────────────────────
 
-    private static DataValue CompareValues(DataValue left, DataValue right, int expectedSign, in EvaluationFrame frame, bool negate = false)
-    {
-        int comparison = CompareDataValues(left, right, frame);
-        bool result = expectedSign == 0 ? comparison == 0 : (expectedSign < 0 ? comparison < 0 : comparison > 0);
-        if (negate)
-        {
-            result = !result;
-        }
-
-        return DataValue.FromBoolean(result);
-    }
-
-    private static DataValue CompareValuesLe(DataValue left, DataValue right, in EvaluationFrame frame)
-    {
-        int comparison = CompareDataValues(left, right, frame);
-        return DataValue.FromBoolean(comparison <= 0);
-    }
-
-    private static DataValue CompareValuesGe(DataValue left, DataValue right, in EvaluationFrame frame)
-    {
-        int comparison = CompareDataValues(left, right, frame);
-        return DataValue.FromBoolean(comparison >= 0);
-    }
-
     /// <summary>
     /// Compares two <see cref="DataValue"/>s using the arenas carried by <paramref name="frame"/>.
     /// For non-inline String/JsonValue operands the comparer needs arena bytes to resolve
@@ -1136,6 +1176,63 @@ public sealed class ExpressionEvaluator
     {
         return DataValueComparer.Compare(left, frame.Source, right, frame.Target);
     }
+
+    /// <summary>
+    /// ValueRef counterpart of <see cref="CompareDataValues"/>. Reads accessors
+    /// directly off the ValueRefs without arena resolution. Both operands
+    /// non-null is the contract — the binary handler short-circuits NULL
+    /// before calling.
+    /// </summary>
+    private static int CompareValueRefs(ValueRef left, ValueRef right)
+    {
+        // Numeric coercion handles every cross-numeric pairing in one path.
+        if (TryGetValueRefAsDouble(left, out double l) && TryGetValueRefAsDouble(right, out double r))
+        {
+            return l.CompareTo(r);
+        }
+
+        if (left.Kind == DataKind.String && right.Kind == DataKind.String)
+        {
+            return string.CompareOrdinal(left.AsString(), right.AsString());
+        }
+
+        if (left.Kind == right.Kind)
+        {
+            return left.Kind switch
+            {
+                DataKind.Boolean => left.AsBoolean().CompareTo(right.AsBoolean()),
+                DataKind.Date => left.AsDate().CompareTo(right.AsDate()),
+                DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
+                DataKind.Time => left.AsTime().CompareTo(right.AsTime()),
+                DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
+                DataKind.Uuid => left.AsUuid().CompareTo(right.AsUuid()),
+                DataKind.Type => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
+                DataKind.JsonValue => string.CompareOrdinal(left.AsString(), right.AsString()),
+                _ => throw new InvalidOperationException(
+                    $"Cannot compare values of kind {left.Kind}."),
+            };
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot compare {left.Kind} with {right.Kind}.");
+    }
+
+    private static ValueRef CompareValuesValueRef(ValueRef left, ValueRef right, int expectedSign, bool negate = false)
+    {
+        int comparison = CompareValueRefs(left, right);
+        bool result = expectedSign == 0 ? comparison == 0 : (expectedSign < 0 ? comparison < 0 : comparison > 0);
+        if (negate)
+        {
+            result = !result;
+        }
+        return ValueRef.FromBoolean(result);
+    }
+
+    private static ValueRef CompareValuesLeValueRef(ValueRef left, ValueRef right) =>
+        ValueRef.FromBoolean(CompareValueRefs(left, right) <= 0);
+
+    private static ValueRef CompareValuesGeValueRef(ValueRef left, ValueRef right) =>
+        ValueRef.FromBoolean(CompareValueRefs(left, right) >= 0);
 
     // ───────────────── Struct and index-access evaluation ─────────────────
 
@@ -1332,16 +1429,8 @@ public sealed class ExpressionEvaluator
     /// Evaluates a case-sensitive LIKE expression. Converts SQL wildcards
     /// (<c>%</c> and <c>_</c>) into a regex pattern.
     /// </summary>
-    private DataValue EvaluateLike(DataValue left, DataValue right, in EvaluationFrame frame)
+    private bool LikeMatch(string input, string pattern)
     {
-        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
-        {
-            throw new InvalidOperationException("LIKE requires string operands.");
-        }
-
-        string input = Str(left, frame);
-        string pattern = Str(right, frame);
-
         if (!_likeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
             string regexPattern = "^" + Regex.Escape(pattern)
@@ -1352,24 +1441,15 @@ public sealed class ExpressionEvaluator
             _likeRegexCache[pattern] = regex;
         }
 
-        bool matches = regex.IsMatch(input);
-        return DataValue.FromBoolean(matches);
+        return regex.IsMatch(input);
     }
 
     /// <summary>
-    /// Evaluates a case-insensitive ILIKE expression. Same wildcard conversion
-    /// as LIKE but with <see cref="RegexOptions.IgnoreCase"/>.
+    /// Case-insensitive ILIKE wildcard match. Same wildcard conversion
+    /// as <see cref="LikeMatch"/> but with <see cref="RegexOptions.IgnoreCase"/>.
     /// </summary>
-    private DataValue EvaluateILike(DataValue left, DataValue right, in EvaluationFrame frame)
+    private bool ILikeMatch(string input, string pattern)
     {
-        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
-        {
-            throw new InvalidOperationException("ILIKE requires string operands.");
-        }
-
-        string input = Str(left, frame);
-        string pattern = Str(right, frame);
-
         if (!_iLikeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
             string regexPattern = "^" + Regex.Escape(pattern)
@@ -1380,34 +1460,50 @@ public sealed class ExpressionEvaluator
             _iLikeRegexCache[pattern] = regex;
         }
 
-        bool matches = regex.IsMatch(input);
-        return DataValue.FromBoolean(matches);
+        return regex.IsMatch(input);
     }
 
     /// <summary>
-    /// Evaluates a REGEXP expression. The right operand is a user-supplied regular
-    /// expression used for substring matching (unanchored). Uses
+    /// REGEXP substring match (unanchored). Uses
     /// <see cref="RegexOptions.NonBacktracking"/> to prevent catastrophic
     /// backtracking on adversarial patterns.
     /// </summary>
-    private DataValue EvaluateRegexp(DataValue left, DataValue right, in EvaluationFrame frame)
+    private bool RegexpMatch(string input, string pattern)
     {
-        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
-        {
-            throw new InvalidOperationException("REGEXP requires string operands.");
-        }
-
-        string input = Str(left, frame);
-        string pattern = Str(right, frame);
-
         if (!_regexpCache.TryGetValue(pattern, out Regex? regex))
         {
             regex = new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
             _regexpCache[pattern] = regex;
         }
 
-        bool matches = regex.IsMatch(input);
-        return DataValue.FromBoolean(matches);
+        return regex.IsMatch(input);
+    }
+
+    private ValueRef EvaluateLikeValueRef(ValueRef left, ValueRef right)
+    {
+        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("LIKE requires string operands.");
+        }
+        return ValueRef.FromBoolean(LikeMatch(left.AsString(), right.AsString()));
+    }
+
+    private ValueRef EvaluateILikeValueRef(ValueRef left, ValueRef right)
+    {
+        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("ILIKE requires string operands.");
+        }
+        return ValueRef.FromBoolean(ILikeMatch(left.AsString(), right.AsString()));
+    }
+
+    private ValueRef EvaluateRegexpValueRef(ValueRef left, ValueRef right)
+    {
+        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("REGEXP requires string operands.");
+        }
+        return ValueRef.FromBoolean(RegexpMatch(left.AsString(), right.AsString()));
     }
 
     /// <summary>
