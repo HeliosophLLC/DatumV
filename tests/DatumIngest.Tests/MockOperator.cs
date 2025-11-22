@@ -27,5 +27,5 @@ public sealed class MockOperator : IQueryOperator
     public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
     public IAsyncEnumerable<RowBatch> ExecuteAsync(DatumIngest.Execution.ExecutionContext context)
-        => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.CancellationToken);
+        => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.Store, context.CancellationToken);
 }

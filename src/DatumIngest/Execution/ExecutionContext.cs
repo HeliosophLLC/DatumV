@@ -69,7 +69,21 @@ public sealed class ExecutionContext
         Catalog = catalog;
         LocalBufferPool = localBufferPool;
         Pool = pool;
-        Store = store ?? new Arena();
+        if (store is null)
+        {
+            // We own this arena's lifetime — give it a baseline reference so
+            // mid-query batch returns can't drop refcount to 0 and pool it
+            // (which would trip "Arena is already pooled" on the next batch
+            // rent that adds it back). Caller-supplied stores are assumed to
+            // already carry a baseline owned by the caller (e.g. QueryPlan
+            // adds the baseline for its `_hoistStore`).
+            Store = new Arena();
+            Store.AddReference();
+        }
+        else
+        {
+            Store = store;
+        }
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
     }

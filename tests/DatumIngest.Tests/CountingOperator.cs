@@ -30,7 +30,7 @@ public sealed class CountingOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(DatumIngest.Execution.ExecutionContext context)
     {
         await foreach (RowBatch batch in _provider.ScanAsync(
-            requiredColumns: null, filterHint: null, context.CancellationToken))
+            requiredColumns: null, filterHint: null, context.Store, context.CancellationToken))
         {
             for (int i = 0; i < batch.Count; i++)
             {

@@ -79,19 +79,18 @@ public sealed class FoldScanOperator : IQueryOperator
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 
-        // Operator-owned arena: all materialised input rows are stabilised into it via
-        // RentAndCopyDataValues, so the source operator's batches can be returned to
-        // the pool as soon as we've consumed each one. The arena also backs the output
-        // batches (pool.RentRowBatch with this arena), so any arena-backed values from
-        // input columns remain resolvable through the emit phase.
-        Arena? operatorArena = null;
+        // Under one-arena-per-query, all input/output values share `context.Store`.
+        // RentAndCopyDataValues hits its same-store fast-path (no copy) when the input
+        // batch's arena is already context.Store; the materialised rows survive the
+        // input batch's return because context.Store outlives every batch.
+        Arena materializationArena = context.Store;
         ColumnLookup? sourceLookup = null;
         List<Row> allRows = [];
         RowBatch? outputBatch = null;
 
         try
         {
-            // ───── Step 1: materialise input into operator-owned arena ─────
+            // ───── Step 1: materialise input into context.Store ─────
             await foreach (RowBatch batch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
                 try
@@ -99,7 +98,6 @@ public sealed class FoldScanOperator : IQueryOperator
                     if (sourceLookup is null && batch.Count > 0)
                     {
                         sourceLookup = batch.ColumnLookup;
-                        operatorArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < batch.Count; i++)
@@ -108,7 +106,7 @@ public sealed class FoldScanOperator : IQueryOperator
 
                         Row sourceRow = batch[i];
                         DataValue[] copy = pool.RentAndCopyDataValues(
-                            sourceRow, batch.Arena, operatorArena!);
+                            sourceRow, batch.Arena, materializationArena);
                         // Preserve each row's own ColumnLookup (matches pre-migration
                         // semantics — the source could in principle yield batches with
                         // different per-batch ColumnLookup references for the same
@@ -221,7 +219,7 @@ public sealed class FoldScanOperator : IQueryOperator
                     values[inputFieldCount + j] = scanResults[rowIndex][j];
                 }
 
-                outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, operatorArena!);
+                outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
                 outputBatch.Add(values);
 
                 if (outputBatch.IsFull)
@@ -250,7 +248,7 @@ public sealed class FoldScanOperator : IQueryOperator
             allRows.Clear();
 
             if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
-            if (operatorArena is not null) pool.ReturnArena(operatorArena);
+            // No private-arena return: materialisation lives in context.Store, owned by QueryPlan.
         }
     }
 

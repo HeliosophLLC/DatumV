@@ -184,6 +184,7 @@ public sealed class DatumFileTableProviderV2PruningTests : IAsyncLifetime
         await foreach (RowBatch batch in provider.ScanAsync(
             requiredColumns: null,
             filterHint: filterHint,
+            targetArena: null,
             cancellationToken: default))
         {
             total += batch.Count;

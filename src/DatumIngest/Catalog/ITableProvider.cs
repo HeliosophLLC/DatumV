@@ -59,11 +59,20 @@ public interface ITableProvider : IDisposable
     /// Must not be used to suppress individual rows — the caller applies the filter for
     /// correctness.
     /// </param>
+    /// <param name="targetArena">
+    /// Optional arena that emitted batches must be bound to. When supplied, the provider
+    /// rents every output <see cref="RowBatch"/> against this arena (instead of a fresh
+    /// per-batch arena), so all non-inline values land in a single per-query store.
+    /// Required by the one-arena-per-query model — query callers pass
+    /// <c>ExecutionContext.Store</c>; ingest-time / standalone callers may pass
+    /// <c>null</c> to keep the legacy per-batch-arena behaviour.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of row batches from the data source.</returns>
     IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
+        Arena? targetArena,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -76,6 +85,12 @@ public interface ITableProvider : IDisposable
     /// Columns needed downstream. When <c>null</c>, all columns are returned. Cannot be
     /// changed after the session is opened — open a new session for a different projection.
     /// </param>
-    /// <returns>A seek session bound to the required columns.</returns>
-    ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns);
+    /// <param name="targetArena">
+    /// Optional arena that batches yielded by the session must be bound to. Same
+    /// semantics as the <c>targetArena</c> parameter on <see cref="ScanAsync"/>:
+    /// query callers pass <c>ExecutionContext.Store</c>; ingest-time / standalone
+    /// callers may pass <c>null</c>.
+    /// </param>
+    /// <returns>A seek session bound to the required columns and target arena.</returns>
+    ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null);
 }

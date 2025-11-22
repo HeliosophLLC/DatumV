@@ -231,7 +231,7 @@ public sealed class ScanOperator : IQueryOperator
         else
         {
             await foreach (RowBatch batch in TableProvider.ScanAsync(
-                _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+                _requiredColumns, _filterHint, context.Store, cancellationToken).ConfigureAwait(false))
             {
                 yield return batch;
             }
@@ -384,7 +384,7 @@ public sealed class ScanOperator : IQueryOperator
                 ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
 
-                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
+                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
 
                 foreach (long rowPosition in exactPositions)
                 {
@@ -434,7 +434,7 @@ public sealed class ScanOperator : IQueryOperator
                 // (mmap, decode buffers); we re-bind into the query's single arena
                 // so downstream operators can read without "which arena?" routing.
                 // ScanOperator is the boundary where that re-binding happens.
-                await foreach (RowBatch inputBatch in provider.ScanAsync(_requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+                await foreach (RowBatch inputBatch in provider.ScanAsync(_requiredColumns, _filterHint, context.Store, cancellationToken).ConfigureAwait(false))
                 {
                     try
                     {
@@ -468,7 +468,7 @@ public sealed class ScanOperator : IQueryOperator
             }
             else
             {
-                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns);
+                using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
 
                 foreach ((long start, long end, int activeChunkIndex) in activeRanges)
                 {

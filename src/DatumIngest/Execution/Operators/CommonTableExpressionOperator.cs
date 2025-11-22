@@ -167,7 +167,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
             {
                 for (int i = 0; i < cachedBatch.Count; i++)
                 {
-                    outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, cachedBatch.Arena);
+                    outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
                     pool.RentAndCopyToOutput(cachedBatch, i, outputBatch);
                     if (outputBatch.IsFull)
                     {

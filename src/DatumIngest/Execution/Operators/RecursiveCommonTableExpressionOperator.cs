@@ -134,7 +134,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             {
                 for (int i = 0; i < cached.Count; i++)
                 {
-                    outputBatch ??= pool.RentRowBatch(outputLookup, context.BatchSize, cached.Arena);
+                    outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
                     pool.RentAndCopyToOutput(cached, i, outputBatch);
                     if (outputBatch.IsFull)
                     {
@@ -395,7 +395,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 {
                     for (int i = 0; i < cached.Count; i++)
                     {
-                        outputBatch ??= pool.RentRowBatch(schema, context.BatchSize, cached.Arena);
+                        outputBatch ??= context.RentRowBatch(schema, context.BatchSize);
                         pool.RentAndCopyToOutput(cached, i, outputBatch);
                         if (outputBatch.IsFull)
                         {

@@ -160,23 +160,4 @@ public class RowBatchTests : ServiceTestBase
 
         Assert.Equal(0, batch.Count);
     }
-
-    /// <summary>
-    /// Verifies that <see cref="RowBatch.CreateSingleRow"/> creates a batch
-    /// with exactly one row and a count of 1.
-    /// </summary>
-    [Fact]
-    public void CreateSingleRowCreatesBatchWithCountOne()
-    {
-        Row row = MakeRow("name", "Alice", "age", 30.0f);
-
-        RowBatch batch = RowBatch.CreateSingleRow(row);
-
-        Assert.Equal(1, batch.Count);
-        Assert.Equal(1, batch.Capacity);
-        Assert.Equal("Alice", batch[0]["name"].AsString());
-        Assert.Equal(30.0f, batch[0]["age"].AsFloat32());
-
-        batch.Return();
-    }
 }

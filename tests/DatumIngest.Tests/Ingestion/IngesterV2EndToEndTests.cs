@@ -157,6 +157,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         await foreach (RowBatch batch in provider.ScanAsync(
             requiredColumns: null,
             filterHint: null,
+            targetArena: null,
             cancellationToken: default))
         {
             batches.Add(batch);

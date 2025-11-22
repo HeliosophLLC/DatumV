@@ -208,6 +208,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     public async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
+        Arena? targetArena,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
@@ -217,18 +218,18 @@ public sealed class InMemoryTableProvider : ITableProvider
         Projection projection = ResolveProjection(requiredColumns);
 
         await foreach (RowBatch batch in EmitRows(
-            _pool, projection, _rows, cancellationToken).ConfigureAwait(false))
+            _pool, projection, _rows, targetArena, cancellationToken).ConfigureAwait(false))
         {
             yield return batch;
         }
     }
 
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
+    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 
-        return new InMemorySeekSession(_pool, ResolveProjection(requiredColumns), _rows);
+        return new InMemorySeekSession(_pool, ResolveProjection(requiredColumns), _rows, targetArena);
     }
 
     /// <summary>
@@ -275,12 +276,14 @@ public sealed class InMemoryTableProvider : ITableProvider
         private Pool? _pool;
         private Projection? _projection;
         private object?[][]? _rows;
+        private readonly Arena? _targetArena;
 
-        internal InMemorySeekSession(Pool pool, Projection projection, object?[][] rows)
+        internal InMemorySeekSession(Pool pool, Projection projection, object?[][] rows, Arena? targetArena)
         {
             _pool = pool;
             _projection = projection;
             _rows = rows;
+            _targetArena = targetArena;
         }
 
         [MemberNotNullWhen(false, nameof(_pool), nameof(_projection), nameof(_rows))]
@@ -302,7 +305,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             int available = Math.Min(count, _rows.Length - start);
             ArraySegment<object?[]> slice = new(_rows, start, available);
 
-            await foreach (RowBatch batch in EmitRows(_pool, _projection, slice, cancellationToken).ConfigureAwait(false))
+            await foreach (RowBatch batch in EmitRows(_pool, _projection, slice, _targetArena, cancellationToken).ConfigureAwait(false))
             {
                 yield return batch;
             }
@@ -323,6 +326,7 @@ public sealed class InMemoryTableProvider : ITableProvider
         Pool pool,
         Projection projection,
         IEnumerable<object?[]> rows,
+        Arena? targetArena,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         RowBatch? batch = null;
@@ -331,7 +335,7 @@ public sealed class InMemoryTableProvider : ITableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            batch ??= pool.RentRowBatch(projection.Lookup, DefaultBatchSize);
+            batch ??= pool.RentRowBatch(projection.Lookup, DefaultBatchSize, targetArena);
 
             DataValue[] values = pool.RentDataValues(projection.SourceIndexes.Length);
             for (int i = 0; i < projection.SourceIndexes.Length; i++)

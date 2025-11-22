@@ -297,7 +297,7 @@ public sealed class SourceIndexBuilder
 
         int rowsInChunk = 0;
 
-        await foreach (RowBatch batch in provider.ScanAsync(requiredColumns: null, filterHint: null, cancellationToken)
+        await foreach (RowBatch batch in provider.ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
             .ConfigureAwait(false))
         {
             for (int batchRow = 0; batchRow < batch.Count; batchRow++)

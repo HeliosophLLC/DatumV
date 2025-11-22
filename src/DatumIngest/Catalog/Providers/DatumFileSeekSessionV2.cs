@@ -31,6 +31,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
     private readonly ColumnLookup _columnLookup;
     private readonly int[] _schemaIndices;
     private readonly byte _sidecarStoreId;
+    private readonly Arena? _targetArena;
     private DatumFileReaderV2? _reader;
     private SidecarReadStore? _sidecar;
     private bool _disposed;
@@ -41,7 +42,8 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
         SidecarReadStore? sidecar,
         ColumnLookup columnLookup,
         int[] schemaIndices,
-        byte sidecarStoreId)
+        byte sidecarStoreId,
+        Arena? targetArena = null)
     {
         _pool = pool;
         _reader = reader;
@@ -49,6 +51,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
         _columnLookup = columnLookup;
         _schemaIndices = schemaIndices;
         _sidecarStoreId = sidecarStoreId;
+        _targetArena = targetArena;
     }
 
     /// <inheritdoc/>
@@ -96,7 +99,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
             // decoders so Struct field arrays land somewhere with a
             // batch-bounded lifetime.
             int batchCapacity = Math.Min(sliceCount, DefaultBatchSize);
-            RowBatch batch = _pool.RentRowBatch(_columnLookup, batchCapacity);
+            RowBatch batch = _pool.RentRowBatch(_columnLookup, batchCapacity, _targetArena);
 
             for (int i = 0; i < _schemaIndices.Length; i++)
             {
@@ -115,7 +118,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
                 if (batch.IsFull)
                 {
                     yield return batch;
-                    batch = _pool.RentRowBatch(_columnLookup, Math.Min(sliceEnd - row, DefaultBatchSize));
+                    batch = _pool.RentRowBatch(_columnLookup, Math.Min(sliceEnd - row, DefaultBatchSize), _targetArena);
                     // Re-open decoders bound to the new batch's arena so
                     // Struct/Array materializations land in the right store.
                     for (int i = 0; i < _schemaIndices.Length; i++)

@@ -109,7 +109,8 @@ public sealed class IndexScanOperator : IQueryOperator
 
         // Open a seek session for the lifetime of this scan — reader and decode
         // buffers are owned by the session, not shared with concurrent calls.
-        using ISeekSession seekSession = TableProvider.OpenSeekSession(_requiredColumns);
+        // Bound to context.Store so emitted batches share the per-query arena.
+        using ISeekSession seekSession = TableProvider.OpenSeekSession(_requiredColumns, context.Store);
 
         // Traverse the index in sorted order (ascending or descending).
         // Batch consecutive entries from the same chunk into a single read.

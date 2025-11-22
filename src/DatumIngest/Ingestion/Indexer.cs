@@ -81,7 +81,7 @@ public sealed class Indexer(Pool pool)
         try
         {
             await foreach (RowBatch batch in provider
-                .ScanAsync(requiredColumns: null, filterHint: null, cancellationToken)
+                .ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
                 .ConfigureAwait(false))
             {
                 incremental.AddBatch(batch);

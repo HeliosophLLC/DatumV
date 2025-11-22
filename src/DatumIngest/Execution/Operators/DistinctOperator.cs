@@ -93,7 +93,10 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 
-        Arena? hashSetArena = null;
+        // Under one-arena-per-query, dedup keys + spill partition buffers + output
+        // batches all share `context.Store`. The QueryPlan owns this arena's
+        // baseline reference, so it outlives the operator's hash-set lifetime.
+        Arena hashSetArena = context.Store;
         SpillReaderWriter? spiller = null;
         RowBatch?[]? partitionBuffers = null;
 
@@ -121,7 +124,6 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                     if (schema is null && inputBatch.Count > 0)
                     {
                         schema = inputBatch.ColumnLookup;
-                        hashSetArena = pool.RentArena();
                     }
 
                     for (int i = 0; i < inputBatch.Count; i++)
@@ -169,7 +171,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                             int spillPartition = AssignPartition(spillHash);
                             partitionBuffers![spillPartition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena!);
+                                schema!, context.BatchSize, hashSetArena);
                             pool.RentAndCopyToOutput(inputBatch, i, partitionBuffers[spillPartition]!);
                             SpilledRowCount++;
 
@@ -226,7 +228,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                                 }
                             }
 
-                            outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                            outputBatch ??= context.RentRowBatch(schema!, context.BatchSize);
                             pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -312,7 +314,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                                 if (isNew)
                                 {
-                                    outputBatch ??= pool.RentRowBatch(schema!, context.BatchSize, hashSetArena!);
+                                    outputBatch ??= context.RentRowBatch(schema!, context.BatchSize);
                                     pool.RentAndCopyToOutput(spilledBatch, i, outputBatch);
                                     DrainEmittedRowCount++;
 
@@ -367,7 +369,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                 compositeComparer.ReturnPooledKeys(compositeKeySet);
             }
             spiller?.Dispose();
-            if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
+            // No private-arena return: hash set + buffers live in context.Store, owned by QueryPlan.
         }
     }
 

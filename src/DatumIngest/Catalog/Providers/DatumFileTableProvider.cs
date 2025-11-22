@@ -169,6 +169,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDatumFileTableProv
     public async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
+        Arena? targetArena,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         Schema schema = Reader.Schema;
@@ -221,7 +222,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDatumFileTableProv
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                ColumnBatch columnBatch = Pool.RentColumnBatch(columnLookup, maxRowGroupSize);
+                ColumnBatch columnBatch = Pool.RentColumnBatch(columnLookup, maxRowGroupSize, targetArena);
 
                 try
                 {
@@ -294,7 +295,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IDatumFileTableProv
     }
     
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
+    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
     {
         Schema schema = GetSchema();
         ColumnLookup columnLookup = ResolveProjection(schema, requiredColumns);
@@ -319,7 +320,10 @@ public sealed class DatumFileTableProvider : ITableProvider, IDatumFileTableProv
             }
         }
 
-        ColumnBatch columnBatch = Pool.RentColumnBatch(columnLookup, maxRowGroupSize);
+        // The seek session reuses one ColumnBatch across all seeks, so its arena
+        // also persists across calls. Bind it to targetArena when supplied so
+        // every yielded RowBatch lands in the per-query store.
+        ColumnBatch columnBatch = Pool.RentColumnBatch(columnLookup, maxRowGroupSize, targetArena);
 
         byte[] compressedBuffer = maxCompressed > 0
             ? ArrayPool<byte>.Shared.Rent(maxCompressed)

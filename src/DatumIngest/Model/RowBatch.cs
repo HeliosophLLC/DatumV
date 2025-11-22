@@ -180,15 +180,4 @@ public sealed class RowBatch : IDisposable
         Count = 0;
         Disposed = true;
     }
-
-    /// <summary>
-    /// Creates a batch containing exactly one row. Useful for operators
-    /// that yield a single result (e.g. scalar subquery, empty-row source).
-    /// </summary>
-    /// <param name="row">The single row.</param>
-    /// <returns>A batch with <see cref="Count"/> equal to 1.</returns>
-    public static RowBatch CreateSingleRow(Row row)
-    {
-        throw new NotImplementedException("DON'T USE THIS");
-    }
 }

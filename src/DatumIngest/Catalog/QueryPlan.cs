@@ -29,6 +29,15 @@ internal sealed class QueryPlan : IQueryPlan
         // payloads outlive any individual ExecuteAsync / AnalyzeAsync call. Otherwise
         // the second run would dereference a recycled arena.
         _hoistStore = new Arena();
+        // Baseline reference so the arena never hits refcount 0 and gets pooled by
+        // mid-query batch returns. Under one-arena-per-query, every batch rent /
+        // return cycles this arena's refcount; without the baseline, a balanced
+        // cycle dips through 0 and `PoolBacking.TryReturn → Arena.Pool()` adds it
+        // to the freelist, breaking subsequent rents and tripping the
+        // "already pooled" assertion. Released in `Dispose` (TODO when QueryPlan
+        // becomes IDisposable; for now leak is bounded by query lifetime since
+        // QueryPlan and _hoistStore have the same scope).
+        _hoistStore.AddReference();
         _operator = op.RewriteExpressions(expr => LiteralHoister.Hoist(expr, _hoistStore));
     }
 

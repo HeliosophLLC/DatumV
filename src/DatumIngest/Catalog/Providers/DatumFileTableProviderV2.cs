@@ -99,6 +99,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
+        Arena? targetArena,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_reader.Footer.Columns.Count == 0)
@@ -152,7 +153,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // decoders use to materialize Struct field arrays — values
             // stored against the batch's own arena resolve cleanly through
             // standard accessors downstream.
-            RowBatch batch = _pool.RentRowBatch(columnLookup, rowCount);
+            RowBatch batch = _pool.RentRowBatch(columnLookup, rowCount, targetArena);
 
             for (int i = 0; i < projectedCount; i++)
             {
@@ -360,7 +361,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// cost much. Resolved projection metadata is captured once and kept
     /// for the session's lifetime.
     /// </remarks>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns)
+    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
     {
         ColumnLookup columnLookup = ResolveProjection(_schema, requiredColumns);
         int projectedCount = columnLookup.Count;
@@ -376,7 +377,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             sessionSidecar = TryOpenSidecar(_descriptor.FilePath, sessionReader);
             return new DatumFileSeekSessionV2(
-                _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId);
+                _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId, targetArena);
         }
         catch
         {
