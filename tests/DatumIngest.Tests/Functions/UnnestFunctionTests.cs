@@ -26,15 +26,11 @@ public class UnnestFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Unnest_UInt8Array_ExpandsToUInt8Rows()
+    public async Task Unnest_ByteArray_RequiresStoreAwareDispatch()
     {
-        DataValue bytes = DataValue.FromUInt8Array([1, 2, 3]);
-        List<Row> rows = await CollectRows([bytes]);
-
-        Assert.Equal(3, rows.Count);
-        Assert.Equal((byte)1, rows[0]["value"].AsUInt8());
-        Assert.Equal((byte)2, rows[1]["value"].AsUInt8());
-        Assert.Equal((byte)3, rows[2]["value"].AsUInt8());
+        Arena arena = new();
+        DataValue bytes = DataValue.FromByteArray([1, 2, 3], arena);
+        await Assert.ThrowsAsync<NotSupportedException>(async () => await CollectRows([bytes]));
     }
 
     [Fact]

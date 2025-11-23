@@ -36,7 +36,8 @@ namespace DatumIngest.Functions;
 ///     <see cref="Kind"/> + <see cref="IsArray"/> only;
 ///     <c>Materialized</c> holds the real payload (e.g. a <see cref="string"/>
 ///     for <see cref="DataKind.String"/>, a <see cref="byte"/>[] for
-///     <see cref="DataKind.UInt8Array"/> / <see cref="DataKind.Image"/>).
+///     byte arrays — <see cref="DataKind.UInt8"/> with the IsArray flag —
+///     and <see cref="DataKind.Image"/>).
 ///   </description></item>
 /// </list>
 /// </para>
@@ -60,6 +61,9 @@ public readonly struct ValueRef
 
     /// <summary>True when the value carries the IsArray flag.</summary>
     public bool IsArray => _inline.IsArray;
+
+    /// <summary>True when the value is a byte array (Kind=UInt8 + IsArray).</summary>
+    public bool IsByteArrayKind => _inline.IsByteArrayKind;
 
     /// <summary>
     /// The inline carrier. Only meaningful when <see cref="IsNull"/> is
@@ -183,21 +187,25 @@ public readonly struct ValueRef
         new(DataValue.Null(DataKind.JsonValue), value);
 
     /// <summary>
-    /// Byte-array payload for kinds whose storage shape is bytes
-    /// (<see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>,
-    /// or any inline-array <see cref="DataKind.UInt8"/> with the IsArray
-    /// flag set).
+    /// Byte-array payload. Pass <see cref="DataKind.Image"/> for image bytes,
+    /// or <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set
+    /// to <c>true</c> for generic byte arrays. The DataValue tag carries the
+    /// kind (and IsArray flag for byte arrays); the actual bytes live in
+    /// <see cref="Materialized"/>.
     /// </summary>
-    public static ValueRef FromBytes(DataKind kind, byte[] value)
+    public static ValueRef FromBytes(DataKind kind, byte[] value, bool isArray = false)
     {
-        if (kind != DataKind.UInt8Array && kind != DataKind.Image
-            && !(kind == DataKind.UInt8))
+        if (kind == DataKind.Image)
         {
-            throw new ArgumentException(
-                $"FromBytes is only valid for UInt8Array, Image, or UInt8 (with IsArray set); got {kind}.",
-                nameof(kind));
+            return new(DataValue.Null(DataKind.Image), value);
         }
-        return new(DataValue.Null(kind), value);
+        if (kind == DataKind.UInt8 && isArray)
+        {
+            return new(DataValue.NullByteArray(), value);
+        }
+        throw new ArgumentException(
+            $"FromBytes is only valid for Image or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
+            nameof(kind));
     }
 
     /// <summary>

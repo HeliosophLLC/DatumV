@@ -623,23 +623,23 @@ public sealed class ExpressionEvaluator
         }
 
         // Non-inline: resolve managed payload from source store / sidecar.
-        switch (value.Kind)
+        // Byte arrays (UInt8 + IsArray) and Image both carry byte content.
+        if (value.IsByteArrayKind || value.Kind == DataKind.Image)
         {
-            case DataKind.String:
-                return ValueRef.FromString(value.AsString(frame.Source, frame.SidecarRegistry));
-            case DataKind.JsonValue:
-                return ValueRef.FromJsonValue(value.AsString(frame.Source, frame.SidecarRegistry));
-            case DataKind.UInt8Array:
-            case DataKind.Image:
-            {
-                ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
-                return ValueRef.FromBytes(value.Kind, bytes.ToArray());
-            }
-            default:
-                throw new InvalidOperationException(
-                    $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
-                    + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary.");
+            ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
+            return ValueRef.FromBytes(value.Kind, bytes.ToArray(), isArray: value.IsByteArrayKind);
         }
+
+        return value.Kind switch
+        {
+            DataKind.String =>
+                ValueRef.FromString(value.AsString(frame.Source, frame.SidecarRegistry)),
+            DataKind.JsonValue =>
+                ValueRef.FromJsonValue(value.AsString(frame.Source, frame.SidecarRegistry)),
+            _ => throw new InvalidOperationException(
+                $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
+                + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary."),
+        };
     }
 
     /// <summary>
@@ -664,7 +664,7 @@ public sealed class ExpressionEvaluator
         {
             string s when value.Kind == DataKind.String => DataValue.FromString(s, frame.Target),
             string s when value.Kind == DataKind.JsonValue => DataValue.FromJsonValue(s, frame.Target),
-            byte[] bytes when value.Kind == DataKind.UInt8Array => DataValue.FromUInt8Array(bytes, frame.Target),
+            byte[] bytes when value.IsByteArrayKind => DataValue.FromByteArray(bytes, frame.Target),
             byte[] bytes when value.Kind == DataKind.Image => DataValue.FromImage(bytes, frame.Target),
             _ => throw new InvalidOperationException(
                 $"Cannot lower ValueRef with managed payload of type {value.Materialized.GetType().Name} "

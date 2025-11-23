@@ -132,7 +132,7 @@ public sealed class DataValueRetentionTests : ServiceTestBase
         Arena retention = new();
 
         byte[] bytes = Enumerable.Range(0, 64).Select(i => (byte)i).ToArray();
-        DataValue original = DataValue.FromUInt8Array(bytes, source);
+        DataValue original = DataValue.FromByteArray(bytes, source);
 
         DataValue stable = DataValueRetention.Stabilize(original, source, retention);
 

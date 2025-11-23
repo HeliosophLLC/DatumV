@@ -153,7 +153,7 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     public void ConvertValue_UInt8Array_ReturnsSentinel()
     {
         object? result = SamplePreviewCollector.ConvertValue(
-            DataValue.FromUInt8Array([0x00, 0xFF], _arena), _arena);
+            DataValue.FromByteArray([0x00, 0xFF], _arena), _arena);
 
         Assert.Equal("[binary data]", result);
     }

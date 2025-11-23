@@ -146,7 +146,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Vector   => DataValue.FromVector([1.0f, 2.0f, 3.0f]),
         DataKind.Matrix   => DataValue.FromMatrix([1f, 2f, 3f, 4f], 2, 2),
         DataKind.Tensor   => DataValue.FromTensor([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f], [2, 2, 2]),
-        DataKind.UInt8Array => DataValue.FromUInt8Array([0x01, 0x02, 0x03]),
+        DataKind.UInt8Array => DataValue.FromByteArray([0x01, 0x02, 0x03], new Arena()),
         DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
         DataKind.Array    => DataValue.FromArray(
             DataKind.Float32, [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
@@ -235,7 +235,8 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 Assert.Equal(expectedTensor, actualTensor);
                 break;
             case DataKind.UInt8Array:
-                Assert.Equal(expected.AsUInt8Array(), actual.AsUInt8Array());
+                Arena byteArena = new();
+                Assert.Equal(expected.AsUInt8Array(byteArena), actual.AsUInt8Array(byteArena));
                 break;
             case DataKind.Image:
                 Assert.Equal(expected.AsImage(), actual.AsImage());

@@ -137,6 +137,11 @@ internal static class TableFormatter
             return FormatStructValue(value, arena, registry, structFields);
         }
 
+        if (value.IsByteArrayKind)
+        {
+            return FormatBlobPreview(value, arena, registry);
+        }
+
         return value.Kind switch
         {
             DataKind.Boolean => value.AsBoolean() ? "true" : "false",
@@ -157,7 +162,7 @@ internal static class TableFormatter
             DataKind.Uuid => value.AsUuid().ToString(),
             DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
             DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena, registry),
-            DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, registry),
+            DataKind.Image => FormatBlobPreview(value, arena, registry),
             _ => value.ToDisplayString(),
         };
     }

@@ -144,7 +144,7 @@ public sealed class BloomFilterTests : ServiceTestBase
     public void Add_And_MayContain_UInt8ArrayKind()
     {
         BloomFilter filter = new(expectedElements: 100);
-        DataValue value = DataValue.FromUInt8Array([10, 20, 30], Store);
+        DataValue value = DataValue.FromByteArray([10, 20, 30], Store);
         filter.Add(value, Store);
 
         Assert.True(filter.MayContain(value, Store));

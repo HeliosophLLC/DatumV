@@ -142,7 +142,8 @@ public class RowSerializerTests : ServiceTestBase
     [Fact]
     public void RoundTrip_UInt8Array()
     {
-        AssertSingleValueRoundTrip(DataValue.FromUInt8Array([0x01, 0x02, 0xFF]));
+        Arena arena = new();
+        AssertSingleValueRoundTrip(DataValue.FromByteArray([0x01, 0x02, 0xFF], arena));
     }
 
     [Fact]
@@ -327,14 +328,15 @@ public class RowSerializerTests : ServiceTestBase
     [Fact]
     public void RoundTrip_EmptyArrays()
     {
+        Arena arena = new();
         Row original = new(
             ["vec", "bytes"],
-            [DataValue.FromVector([]), DataValue.FromUInt8Array([])]);
+            [DataValue.FromVector([]), DataValue.FromByteArray([], arena)]);
 
         Row restored = WriteAndReadSingleRow(original);
 
         Assert.Empty(restored["vec"].AsVector());
-        Assert.Empty(restored["bytes"].AsUInt8Array());
+        Assert.Empty(restored["bytes"].AsUInt8Array(arena));
     }
 
     // ─────────────────────── Helpers ───────────────────────

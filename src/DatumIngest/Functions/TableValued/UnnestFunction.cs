@@ -5,11 +5,19 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.TableValued;
 
 /// <summary>
-/// Takes an array-valued column (Vector, UInt8Array, or JsonValue array) and
-/// expands each element into a separate row.
+/// Takes an array-valued column (Vector, JsonValue array, or generic Array)
+/// and expands each element into a separate row.
 /// When unnesting a JsonValue array of objects (e.g. from zip()), each object
 /// property becomes a named column.
 /// </summary>
+/// <remarks>
+/// Byte-array unnest (UInt8 + IsArray) requires a store-aware execution
+/// context that the current TVF dispatch doesn't supply; that path throws at
+/// runtime. The output-schema computation also can't infer "byte array" from
+/// the kind alone (post-UInt8Array migration), so byte-array inputs fall
+/// through to the default schema. Restored when the TVF interface grows
+/// IsArray-aware schema info.
+/// </remarks>
 public sealed class UnnestFunction : IElementKindAwareTableFunction
 {
     /// <summary>
@@ -47,10 +55,6 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
             DataKind.Vector => new Schema(
                 [new ColumnInfo("value", DataKind.Float32, nullable: false)]),
 
-            // UInt8Array elements are bytes.
-            DataKind.UInt8Array => new Schema(
-                [new ColumnInfo("value", DataKind.UInt8, nullable: false)]),
-
             // Use the element kind when it is known at plan time; otherwise fall
             // back to String, matching the existing JSON-array behaviour.
             DataKind.Array => elementKind is not null
@@ -58,7 +62,8 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 : new Schema([new ColumnInfo("value", DataKind.String, nullable: true)]),
 
             // JSON arrays may expand to objects with unknown columns;
-            // fall back to a single "value" column of String kind.
+            // fall back to a single "value" column of String kind. Byte-array
+            // inputs (UInt8 + IsArray) also reach here — see class remarks.
             _ => new Schema(
                 [new ColumnInfo("value", DataKind.String, nullable: true)]),
         };
@@ -103,24 +108,14 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 break;
             }
 
-            case DataKind.UInt8Array:
-            {
-                byte[] bytes = input.AsUInt8Array();
-                string[] names = ["value"];
-                Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
-                foreach (byte item in bytes)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    batch ??= RowBatch.Rent(DefaultBatchSize);
-                    batch.Add(new Row(names, [DataValue.FromUInt8(item)], nameIndex));
-                    if (batch.IsFull)
-                    {
-                        yield return batch;
-                        batch = null;
-                    }
-                }
-                break;
-            }
+            case DataKind.UInt8 when input.IsArray:
+                // Byte arrays require a target IValueStore to resolve their bytes;
+                // the current ExecuteAsync signature doesn't carry one. Restored
+                // when the TVF interface gets a store/context parameter alongside
+                // the other spill-operator migrations.
+                throw new NotSupportedException(
+                    "unnest() of a byte array requires a store-aware execution context "
+                    + "and is not currently wired through the TVF dispatch path.");
 
             case DataKind.JsonValue:
             {

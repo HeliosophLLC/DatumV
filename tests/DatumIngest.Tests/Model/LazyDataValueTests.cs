@@ -88,22 +88,23 @@ public class LazyDataValueTests : ServiceTestBase
     {
         int innerForceCount = 0;
         int outerForceCount = 0;
+        Arena arena = new();
 
         // Simulates load_image(file_bytes) in inner SELECT
         LazyDataValue innerLazy = new(() =>
         {
             innerForceCount++;
-            return DataValue.FromUInt8Array([0xFF, 0xD8]);
-        }, DataKind.UInt8Array);
+            return DataValue.FromByteArray([0xFF, 0xD8], arena);
+        }, DataKind.UInt8);
 
         // Simulates resize(raw_image) in outer SELECT
         LazyDataValue outerLazy = new(() =>
         {
             outerForceCount++;
             DataValue inner = innerLazy.Value;
-            byte[] bytes = inner.AsUInt8Array();
-            return DataValue.FromUInt8Array([.. bytes, 0x00]);
-        }, DataKind.UInt8Array);
+            byte[] bytes = inner.AsUInt8Array(arena);
+            return DataValue.FromByteArray([.. bytes, 0x00], arena);
+        }, DataKind.UInt8);
 
         // Neither should be forced yet
         Assert.Equal(0, innerForceCount);
@@ -113,7 +114,7 @@ public class LazyDataValueTests : ServiceTestBase
         DataValue result = outerLazy.Value;
         Assert.Equal(1, innerForceCount);
         Assert.Equal(1, outerForceCount);
-        Assert.Equal(new byte[] { 0xFF, 0xD8, 0x00 }, result.AsUInt8Array());
+        Assert.Equal(new byte[] { 0xFF, 0xD8, 0x00 }, result.AsUInt8Array(arena));
     }
 
     [Fact]

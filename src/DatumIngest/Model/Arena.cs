@@ -361,7 +361,8 @@ public sealed class Arena : IValueStore, IDisposable
     // ───────────────────────── Byte operations ─────────────────────────
 
     /// <summary>
-    /// Appends raw bytes (for <see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>)
+    /// Appends raw bytes (for byte-array values <see cref="DataKind.UInt8"/> with
+    /// the <c>IsArray</c> flag set, or <see cref="DataKind.Image"/>)
     /// and returns the byte offset and length.
     /// </summary>
     /// <param name="bytes">The bytes to append.</param>

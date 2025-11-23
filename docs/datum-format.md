@@ -102,7 +102,7 @@ Stride is determined by `DataKind`:
 
 A 1024-row nullable boolean page is 256 bytes (vs 1024 bytes for raw byte-per-row). The 8× density reduction is the reason booleans get their own encoder rather than a `FixedWidth` special case.
 
-### `VariableSlot` (String, JsonValue, Array, UInt8Array, Image, Vector, Matrix, Tensor, Struct, typed arrays)
+### `VariableSlot` (String, JsonValue, Array, Image, Vector, Matrix, Tensor, Struct, typed arrays)
 
 ```
 [null bitmap         : ⌈rows / 8⌉ bytes]   (omitted when column non-nullable)
@@ -167,7 +167,7 @@ For each column (in schema order):
 
 ```
 uint32 : nullCount
-bool   : hasMinMax                  (false for non-comparable kinds: Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array, Struct)
+bool   : hasMinMax                  (false for non-comparable kinds: Vector, Matrix, Tensor, Image, JsonValue, Array, Struct, byte arrays)
 If hasMinMax:
   DataValue : minimum
   DataValue : maximum
@@ -220,7 +220,10 @@ Then kind-specific payload:
   Duration:  int64 (ticks)
   Uuid:      byte[16]
   String / JsonValue: BinaryWriter length-prefixed UTF-8 string
-  UInt8Array / Image: int32 length + byte[length]
+  Image / byte arrays: int32 length + byte[length]
+                       (byte arrays use wire-tag 56 — the legacy
+                        UInt8Array enum value, kept as a wire constant
+                        independent of the in-memory DataKind enum)
   Vector:    int32 length + float32[length]
   Matrix:    int32 rows + int32 cols + float32[rows × cols]
   Tensor:    int32 rank + int32[rank] dimensions + float32[∏dims]

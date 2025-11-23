@@ -64,12 +64,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             return;
         }
 
-        // Accept Image, legacy UInt8Array, and new-model UInt8 + IsArray byte arrays.
-        // PR3 drops the UInt8Array clause.
-        bool isByteContent = value.Kind == DataKind.Image
-            || value.Kind == DataKind.UInt8Array
-            || (value.Kind == DataKind.UInt8 && value.IsArray);
-        if (!isByteContent)
+        if (value.Kind != DataKind.Image && !value.IsByteArrayKind)
         {
             return;
         }

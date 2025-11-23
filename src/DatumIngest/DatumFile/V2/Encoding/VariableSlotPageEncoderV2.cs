@@ -250,10 +250,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Image
                 => value.AsByteSpan(store!),
 
-            // Legacy UInt8Array AND new-model UInt8 + IsArray both go via AsByteSpan.
-            DataKind.UInt8Array
-                => value.AsByteSpan(store!),
-
+            // Byte arrays — UInt8 with the IsArray flag.
             DataKind.UInt8 when value.IsArray
                 => value.AsByteSpan(store!),
 

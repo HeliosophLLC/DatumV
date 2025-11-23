@@ -261,11 +261,10 @@ internal static class RowSerializer
                 writer.Write(value.AsJsonValue());
                 break;
 
-            case DataKind.UInt8Array:
-                byte[] bytes = value.AsUInt8Array();
-                writer.Write(bytes.Length);
-                writer.Write(bytes);
-                break;
+            // Byte arrays aren't supported in the no-store spill body writer
+            // (no arena to read bytes from). Falls through to the default arm
+            // if a caller actually constructs one — a clear NotSupportedException
+            // is the right failure mode.
 
             case DataKind.Vector:
                 float[] vector = value.AsVector();
@@ -389,7 +388,6 @@ internal static class RowSerializer
             DataKind.DateTime => DataValue.FromDateTime(
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString()),
-            DataKind.UInt8Array => ReadUInt8Array(reader),
             DataKind.Vector => ReadVector(reader),
             DataKind.Matrix => ReadMatrix(reader),
             DataKind.Tensor => ReadTensor(reader),
@@ -408,9 +406,14 @@ internal static class RowSerializer
 
     private static DataValue ReadUInt8Array(BinaryReader reader)
     {
-        int length = reader.ReadInt32();
-        byte[] bytes = reader.ReadBytes(length);
-        return DataValue.FromUInt8Array(bytes);
+        // Byte arrays require a target arena to land in — the no-store body reader is
+        // a remnant of the arena-migration throw-stub era. The spill path uses the
+        // store-aware overload further down. If this fires, the caller is reading
+        // a kind that shouldn't be in the spill format without a destination arena.
+        _ = reader.ReadInt32();
+        throw new InvalidOperationException(
+            "Cannot deserialize byte-array body without a target IValueStore. "
+            + "The store-aware overload is required for arena-backed byte payloads.");
     }
 
     private static DataValue ReadVector(BinaryReader reader)

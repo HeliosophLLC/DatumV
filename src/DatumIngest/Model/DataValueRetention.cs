@@ -63,11 +63,10 @@ public static class DataValueRetention
 
         return value.Kind switch
         {
-            // Byte array via the new IsArray flag — copy bytes into retention store.
-            // Must come before the scalar-UInt8 arm so it matches first; otherwise
-            // the scalar arm would return the value unchanged (incorrect for an
-            // arena-backed byte array). Parallel to the legacy UInt8Array case
-            // below; PR3 removes that case.
+            // Byte array (UInt8 + IsArray): copy bytes into retention store.
+            // Must come before the scalar-UInt8 arm below so this matches first;
+            // otherwise the scalar arm would return the value unchanged
+            // (incorrect for an arena-backed byte array).
             DataKind.UInt8 when value.IsArray => DataValue.FromByteArray(
                 value.AsUInt8Array(sourceStore),
                 retentionStore),
@@ -92,10 +91,6 @@ public static class DataValueRetention
 
             DataKind.JsonValue => DataValue.FromJsonValue(
                 value.AsJsonValue(sourceStore),
-                retentionStore),
-
-            DataKind.UInt8Array => DataValue.FromByteArray(
-                value.AsUInt8Array(sourceStore),
                 retentionStore),
 
             // Image is just encoded bytes now — the legacy ImageHandle-in-object-slot

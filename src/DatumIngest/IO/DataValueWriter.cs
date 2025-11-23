@@ -7,7 +7,17 @@ namespace DatumIngest.IO;
 /// and datum-file encoding paths. All methods are static; this class carries no state.
 /// </summary>
 internal static class DataValueWriter
-{    internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
+{
+    /// <summary>
+    /// Wire-format byte for a byte-array payload (was the value of the
+    /// retired <c>DataKind.UInt8Array</c> enum entry). Lives here as a
+    /// pure wire constant so the in-memory <see cref="DataKind"/> type
+    /// system can express byte arrays as <see cref="DataKind.UInt8"/> +
+    /// <c>DataValueFlags.IsArray</c> without a dedicated enum slot.
+    /// </summary>
+    internal const byte WireKindByteArray = 56;
+
+    internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {
         if (!value.HasValue || value.Value.IsNull)
         {
@@ -26,6 +36,18 @@ internal static class DataValueWriter
     /// </summary>
     internal static void WriteDataValue(BinaryWriter writer, DataValue value, IValueStore store)
     {
+        // Byte arrays carry Kind == UInt8 + IsArray; emit the wire-format
+        // byte-array tag (56) instead of UInt8 (16) so the reader can
+        // distinguish from a scalar UInt8.
+        if (value.IsByteArrayKind)
+        {
+            writer.Write(WireKindByteArray);
+            byte[] bytes = value.AsUInt8Array(store);
+            writer.Write(bytes.Length);
+            writer.Write(bytes);
+            return;
+        }
+
         writer.Write((byte)value.Kind);
 
         switch (value.Kind)
@@ -59,12 +81,6 @@ internal static class DataValueWriter
 
             case DataKind.JsonValue:
                 writer.Write(value.AsJsonValue(store));
-                break;
-
-            case DataKind.UInt8Array:
-                byte[] u8 = value.AsUInt8Array(store);
-                writer.Write(u8.Length);
-                writer.Write(u8);
                 break;
 
             case DataKind.Image:
@@ -133,11 +149,10 @@ internal static class DataValueWriter
                 writer.Write(value.AsJsonValue());
                 break;
 
-            case DataKind.UInt8Array:
-                byte[] bytes = value.AsUInt8Array();
-                writer.Write(bytes.Length);
-                writer.Write(bytes);
-                break;
+            // Byte arrays aren't supported in the no-store wire format
+            // (zone maps don't carry byte-array min/max). Falls through to the
+            // default arm if any caller actually constructs one — a clear
+            // NotSupportedException is the right failure mode.
 
             case DataKind.Vector:
                 float[] vector = value.AsVector();
@@ -288,11 +303,10 @@ internal static class DataValueWriter
                 writer.Write(value.AsJsonValue());
                 break;
 
-            case DataKind.UInt8Array:
-                byte[] byteArray = value.AsUInt8Array();
-                writer.Write(byteArray.Length);
-                writer.Write(byteArray);
-                break;
+            // Byte arrays aren't supported in the no-store wire format
+            // (zone maps don't carry byte-array min/max). Falls through to the
+            // default arm if any caller actually constructs one — a clear
+            // NotSupportedException is the right failure mode.
 
             case DataKind.Vector:
                 float[] vectorArray = value.AsVector();

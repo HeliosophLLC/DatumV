@@ -30,8 +30,12 @@ internal static class DataValueReader
     /// </summary>
     internal static DataValue ReadDataValue(BinaryReader reader)
     {
-        DataKind kind = (DataKind)reader.ReadByte();
-        return ReadDataValueBody(reader, kind);
+        byte kindByte = reader.ReadByte();
+        if (kindByte == DataValueWriter.WireKindByteArray)
+        {
+            return ReadUInt8Array(reader);
+        }
+        return ReadDataValueBody(reader, (DataKind)kindByte);
     }
 
     /// <summary>
@@ -39,8 +43,12 @@ internal static class DataValueReader
     /// </summary>
     internal static DataValue ReadDataValue(BinaryReader reader, IValueStore store)
     {
-        DataKind kind = (DataKind)reader.ReadByte();
-        return ReadDataValueBody(reader, kind, store);
+        byte kindByte = reader.ReadByte();
+        if (kindByte == DataValueWriter.WireKindByteArray)
+        {
+            return ReadUInt8Array(reader, store);
+        }
+        return ReadDataValueBody(reader, (DataKind)kindByte, store);
     }
 
     /// <summary>
@@ -57,7 +65,6 @@ internal static class DataValueReader
             DataKind.DateTime => DataValue.FromDateTime(
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString(), store),
-            DataKind.UInt8Array => ReadUInt8Array(reader, store),
             DataKind.Vector => ReadVector(reader, store),
             DataKind.Matrix => ReadMatrix(reader, store),
             DataKind.Tensor => ReadTensor(reader, store),
@@ -94,7 +101,6 @@ internal static class DataValueReader
             DataKind.DateTime => DataValue.FromDateTime(
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString()),
-            DataKind.UInt8Array => ReadUInt8Array(reader),
             DataKind.Vector => ReadVector(reader),
             DataKind.Matrix => ReadMatrix(reader),
             DataKind.Tensor => ReadTensor(reader),
@@ -118,9 +124,13 @@ internal static class DataValueReader
 
     private static DataValue ReadUInt8Array(BinaryReader reader)
     {
-        int length = reader.ReadInt32();
-        byte[] bytes = reader.ReadBytes(length);
-        return DataValue.FromUInt8Array(bytes);
+        // The no-store body reader is used by zone-map readers, which never carry
+        // byte-array min/max values (byte arrays aren't comparable). Throw if a
+        // caller hits this — they should be using the store-aware overload.
+        _ = reader.ReadInt32();
+        throw new InvalidOperationException(
+            "Cannot deserialize byte-array body without a target IValueStore. "
+            + "Byte arrays are not expected in zone-map / no-store wire-format payloads.");
     }
 
     private static DataValue ReadUInt8Array(BinaryReader reader, IValueStore store)

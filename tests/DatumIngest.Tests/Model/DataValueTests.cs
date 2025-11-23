@@ -41,13 +41,16 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void UInt8ArrayValueStoresByteArray()
+    public void ByteArrayValueStoresByteArray()
     {
         byte[] data = [1, 2, 3, 4];
-        DataValue value = DataValue.FromUInt8Array(data);
+        Arena arena = new();
+        DataValue value = DataValue.FromByteArray(data, arena);
 
-        Assert.Equal(DataKind.UInt8Array, value.Kind);
-        Assert.Equal(data, value.AsUInt8Array());
+        Assert.Equal(DataKind.UInt8, value.Kind);
+        Assert.True(value.IsArray);
+        Assert.True(value.IsByteArrayKind);
+        Assert.Equal(data, value.AsUInt8Array(arena));
     }
 
     [Fact]

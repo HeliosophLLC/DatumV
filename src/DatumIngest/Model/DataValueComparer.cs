@@ -307,9 +307,10 @@ internal static class DataValueComparer
             (DataKind.JsonValue, DataKind.String) => true,
             (DataKind.String, DataKind.JsonValue) => true,
 
-            // Byte ↔ Image (binary reinterpretation)
-            (DataKind.UInt8Array, DataKind.Image) => true,
-            (DataKind.Image, DataKind.UInt8Array) => true,
+            // Byte-array ↔ Image cast was supported in the old model but the
+            // (DataKind, DataKind) signature can't express "UInt8 + IsArray".
+            // Add it back — keyed on (DataValue, DataKind) — when a demo needs
+            // it. The rebuilt cast function deliberately doesn't ship byte↔Image.
 
             _ => false,
         };
@@ -337,7 +338,9 @@ internal static class DataValueComparer
         if (t == typeof(sbyte)) return DataKind.Int8;
         if (t == typeof(byte)) return DataKind.UInt8;
         if (t == typeof(string)) return DataKind.String;
-        if (t == typeof(byte[])) return DataKind.UInt8Array;
+        // byte[] → UInt8; callers that need the array shape must set IsArray
+        // on the descriptor / DataValue separately.
+        if (t == typeof(byte[])) return DataKind.UInt8;
         if (t == typeof(DateTime) || t == typeof(DateTimeOffset)) return DataKind.DateTime;
         if (t == typeof(DateOnly)) return DataKind.Date;
         if (t == typeof(bool)) return DataKind.Boolean;

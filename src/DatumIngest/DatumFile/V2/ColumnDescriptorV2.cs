@@ -65,9 +65,9 @@ public sealed record ColumnDescriptorV2(
                 => EncoderKind.FixedWidth,
 
             // Variable-length kinds — the slot is 16 bytes either inline
-            // or sidecar-pointer.
+            // or sidecar-pointer. Byte-array columns reach VariableSlot via
+            // the IsArray short-circuit at the top of this method.
             DataKind.String or DataKind.JsonValue
-                or DataKind.UInt8Array
                 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor
                 or DataKind.Image
                 or DataKind.Array or DataKind.Struct

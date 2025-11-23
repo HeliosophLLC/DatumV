@@ -194,8 +194,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public bool IsArray =>
         (_flags & DataValueFlags.IsArray) != 0
-        || _kind is DataKind.UInt8Array
-            or DataKind.Vector
+        || _kind is DataKind.Vector
             or DataKind.Matrix
             or DataKind.Tensor
             or DataKind.Array;
@@ -318,42 +317,26 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Float64, flags: 0, p0: (int)bits, p1: (int)(bits >> 32));
     }
 
-    /// <summary>Creates a value from a byte array.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromUInt8Array(byte[], IValueStore)"/> instead.</remarks>
-    public static DataValue FromUInt8Array(byte[] value) =>
-        throw new InvalidOperationException("Use FromUInt8Array(value, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates a value from a byte array using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromUInt8Array(byte[] value, IValueStore store)
-    {
-        var (p0, p1) = store.StoreBytes(value);
-        return new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: p0, p1: p1);
-    }
-
     /// <summary>
-    /// Creates a byte array using the migration-stage model: <see cref="DataKind.UInt8Array"/>
-    /// with the new <c>IsArray</c> flag set. During the multi-PR migration off
-    /// <c>DataKind.UInt8Array</c>, this factory produces values that satisfy both
-    /// kind-based switches (still matching <c>case DataKind.UInt8Array</c>) and
-    /// flag-based dispatch (<see cref="IsArray"/> property and the new
-    /// <c>case DataKind.UInt8 when IsArray</c> pattern). The final cutover PR will
-    /// flip the kind to <see cref="DataKind.UInt8"/> once all switch dispatches have
-    /// been migrated to the flag-based form.
+    /// Creates a byte-array value: <see cref="DataKind.UInt8"/> with the
+    /// <see cref="DataValueFlags.IsArray"/> flag set. Bytes are written to
+    /// <paramref name="store"/>. Use <see cref="AsByteSpan"/> or
+    /// <see cref="AsUInt8Array(IValueStore, SidecarRegistry?)"/> to read.
     /// </summary>
     public static DataValue FromByteArray(byte[] value, IValueStore store)
     {
         var (p0, p1) = store.StoreBytes(value);
         return new(
-            DataKind.UInt8Array,
+            DataKind.UInt8,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
             p0: p0, p1: p1);
     }
 
     /// <summary>
-    /// Creates a <see cref="DataKind.UInt8Array"/> value whose bytes live in a
-    /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset and
-    /// 40-bit length; resolution requires an <see cref="IBlobSource"/>, typically the
-    /// table provider's sidecar read store.
+    /// Creates a byte-array value whose bytes live in a <c>.datum-blob</c>
+    /// sidecar. The DataValue carries 64-bit absolute offset and 40-bit
+    /// length; resolution requires an <see cref="IBlobSource"/> via the
+    /// per-query <see cref="SidecarRegistry"/>.
     /// </summary>
     /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
     /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
@@ -362,18 +345,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// when the table provider registered its sidecar. Resolved at access time to find
     /// the right <see cref="IBlobSource"/>. Defaults to 0 (single-sidecar / first-registered).
     /// </param>
-    public static DataValue FromUInt8ArrayInSidecar(long offset, long length, byte storeId = 0) =>
-        BuildSidecar(DataKind.UInt8Array, offset, length, storeId);
-
-    /// <summary>
-    /// Migration-stage parallel to <see cref="FromUInt8ArrayInSidecar"/>: byte array
-    /// in a <c>.datum-blob</c> sidecar, with the new <c>IsArray</c> flag set on top
-    /// of <see cref="DataKind.UInt8Array"/>. Switches on <c>UInt8Array</c> still
-    /// match; <see cref="IsArray"/> reports <c>true</c> via the flag. The final
-    /// cutover PR flips the kind to <see cref="DataKind.UInt8"/>.
-    /// </summary>
     public static DataValue FromByteArrayInSidecar(long offset, long length, byte storeId = 0) =>
-        BuildSidecar(DataKind.UInt8Array, offset, length, storeId, isArray: true);
+        BuildSidecar(DataKind.UInt8, offset, length, storeId, isArray: true);
 
     /// <summary>
     /// Creates a <see cref="DataKind.String"/> value whose UTF-8 bytes live in a
@@ -843,24 +816,15 @@ public readonly struct DataValue : IEquatable<DataValue>
         new(DataKind.Image, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
     /// <summary>
-    /// Creates a <see cref="DataKind.UInt8Array"/> value that references bytes
-    /// already written to an <see cref="IValueStore"/> at the given offset and
-    /// length. Parallel to <see cref="FromImageAtOffset"/>, for generic binary
-    /// payloads where the bytes are already arena-resident.
-    /// </summary>
-    public static DataValue FromUInt8ArrayAtOffset(int offset, int length) =>
-        new(DataKind.UInt8Array, flags: DataValueFlags.InArena, p0: offset, p1: length);
-
-    /// <summary>
-    /// Migration-stage parallel to <see cref="FromUInt8ArrayAtOffset"/>: arena-slice
-    /// byte array using <see cref="DataKind.UInt8Array"/> + <c>IsArray</c> +
-    /// <c>InArena</c> flags. Bytes already live in the arena at the given
-    /// coordinates; this factory wraps them without re-storing. Final cutover PR
-    /// flips the kind to <see cref="DataKind.UInt8"/>.
+    /// Creates a byte-array value that references bytes already written to an
+    /// <see cref="IValueStore"/> at the given offset and length. Parallel to
+    /// <see cref="FromImageAtOffset"/> for generic binary payloads where the
+    /// bytes are already arena-resident. Produces <see cref="DataKind.UInt8"/>
+    /// with the <see cref="DataValueFlags.IsArray"/> flag.
     /// </summary>
     public static DataValue FromByteArrayAtOffset(int offset, int length) =>
         new(
-            DataKind.UInt8Array,
+            DataKind.UInt8,
             flags: DataValueFlags.InArena | DataValueFlags.IsArray,
             p0: offset, p1: length);
 
@@ -1072,6 +1036,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
         => new(kind, flags: DataValueFlags.IsNull, p0: 0);
+
+    /// <summary>Creates a typed null byte array (UInt8 + IsNull + IsArray).</summary>
+    public static DataValue NullByteArray()
+        => new(DataKind.UInt8, flags: DataValueFlags.IsNull | DataValueFlags.IsArray, p0: 0);
 
     /// <summary>
     /// Creates a null value whose type is not statically known.
@@ -1582,15 +1550,6 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     // ─────────────────────── Reference-type accessors ─────────────────────────
 
-    /// <summary>Returns the byte array payload.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore, SidecarRegistry?)"/> instead.</remarks>
-    public byte[] AsUInt8Array()
-    {
-        ThrowIfNullOrWrongKind(DataKind.UInt8Array);
-        throw new InvalidOperationException("Use AsUInt8Array(store). ReferenceStore is no longer available.");
-    }
-
     /// <summary>
     /// Returns the byte array payload. For arena-backed values, reads from
     /// <paramref name="store"/>; for sidecar-backed values, looks up the source in
@@ -1599,13 +1558,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public byte[] AsUInt8Array(IValueStore store, SidecarRegistry? registry = null)
     {
-        // Accept either the legacy DataKind.UInt8Array kind OR the new-model
-        // UInt8 + IsArray-flag form. Both produce byte content at the same
-        // (_p0, _p1) coordinates; only the kind+flag intent representation differs.
-        if (!IsByteArrayKind())
+        if (!IsByteArrayKind)
         {
             throw new InvalidOperationException(
-                $"AsUInt8Array is only valid for byte arrays (UInt8Array, or UInt8 + IsArray); got {_kind}.");
+                $"AsUInt8Array is only valid for byte arrays (UInt8 + IsArray); got {_kind}.");
         }
         if (IsNull)
         {
@@ -1620,15 +1576,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Returns <c>true</c> when this value carries a byte-array payload — either via
-    /// the legacy <see cref="DataKind.UInt8Array"/> kind or via the new-model
-    /// <see cref="DataKind.UInt8"/> + <see cref="DataValueFlags.IsArray"/> flag pair.
-    /// Used by <see cref="AsUInt8Array(IValueStore, DatumFile.Sidecar.SidecarRegistry?)"/>
-    /// and <see cref="AsByteSpan"/> to bridge both shapes during the migration.
+    /// True when this value carries a byte-array payload — i.e.
+    /// <see cref="DataKind.UInt8"/> with the <see cref="DataValueFlags.IsArray"/>
+    /// flag set. Used to dispatch byte-content paths
+    /// (<see cref="AsByteSpan"/>, <see cref="AsUInt8Array(IValueStore, SidecarRegistry?)"/>)
+    /// without enumerating the kind in every call site.
     /// </summary>
-    private bool IsByteArrayKind() =>
-        _kind == DataKind.UInt8Array
-        || (_kind == DataKind.UInt8 && (_flags & DataValueFlags.IsArray) != 0);
+    public bool IsByteArrayKind =>
+        _kind == DataKind.UInt8 && (_flags & DataValueFlags.IsArray) != 0;
 
     /// <summary>
     /// Returns the byte payload for a <see cref="DataKind.UInt8Array"/> or
@@ -1643,12 +1598,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </remarks>
     public ReadOnlySpan<byte> AsByteSpan(IValueStore store, SidecarRegistry? registry = null)
     {
-        // Accept legacy UInt8Array, Image, and the new-model UInt8 + IsArray form.
-        // All three carry byte content at (_p0, _p1) — read path is identical.
-        if (_kind != DataKind.Image && !IsByteArrayKind())
+        // Image and (UInt8 + IsArray) both carry byte content at (_p0, _p1) — read path is identical.
+        if (_kind != DataKind.Image && !IsByteArrayKind)
         {
             throw new InvalidOperationException(
-                $"AsByteSpan is only valid for byte-content kinds (Image, UInt8Array, or UInt8 + IsArray); got {_kind}.");
+                $"AsByteSpan is only valid for byte-content kinds (Image or UInt8 + IsArray); got {_kind}.");
         }
 
         if (IsInSidecar)
@@ -1813,10 +1767,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             }
 
             // Arena-backed.
+            if (IsByteArrayKind || _kind == DataKind.Image) return _p1;
             return _kind switch
             {
-                DataKind.String or DataKind.JsonValue
-                    or DataKind.UInt8Array or DataKind.Image => _p1,
+                DataKind.String or DataKind.JsonValue => _p1,
                 DataKind.Vector => _p1 * 4,
                 DataKind.Matrix => _p1 * _p2 * 4,
                 DataKind.Tensor => _p2 * 4,
@@ -1865,20 +1819,26 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the element count for collection-type values without accessing the store.
     /// <list type="bullet">
     /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>
-    /// <item><see cref="DataKind.UInt8Array"/>: number of bytes (<c>_p1</c>)</item>
+    /// <item>Byte arrays (<see cref="DataKind.UInt8"/> + <see cref="IsArray"/>): number of bytes (<c>_p1</c>)</item>
     /// <item><see cref="DataKind.Matrix"/>: rows × columns (<c>_p1 * _p2</c>)</item>
     /// <item><see cref="DataKind.Tensor"/>: total elements (<c>_p2</c>, cached at creation)</item>
     /// </list>
     /// </summary>
     /// <returns>The element count, or -1 if not available inline.</returns>
-    public int ElementCount => _kind switch
+    public int ElementCount
     {
-        DataKind.Vector => _p1,
-        DataKind.UInt8Array => _p1,
-        DataKind.Matrix => _p1 * _p2,
-        DataKind.Tensor when _p2 != 0 => _p2,
-        _ => -1,
-    };
+        get
+        {
+            if (IsByteArrayKind) return _p1;
+            return _kind switch
+            {
+                DataKind.Vector => _p1,
+                DataKind.Matrix => _p1 * _p2,
+                DataKind.Tensor when _p2 != 0 => _p2,
+                _ => -1,
+            };
+        }
+    }
 
     /// <summary>
     /// Returns the raw UTF-8 bytes for a string value without allocating a managed
@@ -2310,6 +2270,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (IsNull && other.IsNull) return true;
         if (IsNull != other.IsNull) return false;
 
+        // Byte arrays (UInt8 + IsArray) use offset-equality on (_p0, _p1) like other
+        // arena-backed reference types — must come before the scalar UInt8 arm below.
+        if (IsByteArrayKind)
+        {
+            return other.IsByteArrayKind && _p0 == other._p0 && _p1 == other._p1;
+        }
+
         return _kind switch
         {
             // Unknown sentinel: no payload, so non-null Unknown values are always equal.
@@ -2346,8 +2313,6 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             DataKind.Tensor
                 => _p0 == other._p0 && _p1 == other._p1,
-            DataKind.UInt8Array
-                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Image
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Array
@@ -2362,6 +2327,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     public override int GetHashCode()
     {
         if (IsNull) return HashCode.Combine(_kind, true);
+
+        // Byte arrays (UInt8 + IsArray) hash on (_p0, _p1) — must come before the
+        // scalar UInt8 arm below.
+        if (IsByteArrayKind)
+        {
+            return HashCode.Combine(_kind, true, _p0, _p1);
+        }
 
         return _kind switch
         {
@@ -2399,8 +2371,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Matrix
                 => HashCode.Combine(_kind, _p0, _p1, _p2),
             DataKind.Tensor
-                => HashCode.Combine(_kind, _p0, _p1),
-            DataKind.UInt8Array
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Image
                 => HashCode.Combine(_kind, _p0, _p1),
@@ -2553,6 +2523,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull) return $"NULL({_kind})";
 
+        if (IsByteArrayKind) return $"UInt8[{_p1} bytes]";
+
         return _kind switch
         {
             DataKind.Float32 => BitConverter.Int32BitsToSingle(_p0).ToString("G"),
@@ -2580,7 +2552,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Vector => $"Vector[{_p1} elements]",
             DataKind.Matrix => $"Matrix[{_p1}x{_p2}]",
             DataKind.Tensor => $"Tensor[{_p2} elements]",
-            DataKind.UInt8Array => $"UInt8Array[{_p1} bytes]",
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
             DataKind.Array => $"Array<{(DataKind)_meta}>",
             DataKind.Struct => $"Struct({_meta} fields)",

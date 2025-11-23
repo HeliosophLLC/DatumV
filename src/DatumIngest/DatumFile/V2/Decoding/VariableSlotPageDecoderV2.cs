@@ -169,8 +169,6 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 => DataValue.FromStringInSidecar(offset, length, _sidecarStoreId),
             DataKind.JsonValue
                 => DataValue.FromJsonValueInSidecar(offset, length, _sidecarStoreId),
-            DataKind.UInt8Array
-                => DataValue.FromUInt8ArrayInSidecar(offset, length, _sidecarStoreId),
             DataKind.Image
                 => DataValue.FromImageInSidecar(offset, length, _sidecarStoreId),
             DataKind.UInt8 when _column.IsArray
