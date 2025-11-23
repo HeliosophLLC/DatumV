@@ -58,7 +58,9 @@ public sealed record ColumnDescriptorV2(
                 or DataKind.Int16 or DataKind.UInt16
                 or DataKind.Int32 or DataKind.UInt32
                 or DataKind.Int64 or DataKind.UInt64
-                or DataKind.Float32 or DataKind.Float64
+                or DataKind.Int128 or DataKind.UInt128
+                or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+                or DataKind.Decimal
                 or DataKind.Date or DataKind.Time
                 or DataKind.Duration or DataKind.DateTime
                 or DataKind.Uuid
@@ -87,11 +89,11 @@ public sealed record ColumnDescriptorV2(
     public int FixedWidthStrideBytes => Kind switch
     {
         DataKind.Int8 or DataKind.UInt8 => 1,
-        DataKind.Int16 or DataKind.UInt16 => 2,
+        DataKind.Int16 or DataKind.UInt16 or DataKind.Float16 => 2,
         DataKind.Int32 or DataKind.UInt32 or DataKind.Float32 or DataKind.Date => 4,
         DataKind.Int64 or DataKind.UInt64 or DataKind.Float64 or DataKind.Time or DataKind.Duration => 8,
         DataKind.DateTime => 10, // int64 ticks + int16 offset minutes
-        DataKind.Uuid => 16,
+        DataKind.Uuid or DataKind.Decimal or DataKind.UInt128 or DataKind.Int128 => 16,
         _ => throw new InvalidOperationException(
             $"FixedWidthStrideBytes is undefined for DataKind.{Kind} (encoder = {Encoder})."),
     };

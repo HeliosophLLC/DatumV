@@ -58,7 +58,9 @@ internal static class DataValueReader
     {
         return kind switch
         {
+            DataKind.Float16 => DataValue.FromFloat16(BitConverter.UInt16BitsToHalf(reader.ReadUInt16())),
             DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
+            DataKind.Decimal => DataValue.FromDecimal(reader.ReadDecimal()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
             DataKind.String => DataValue.FromString(reader.ReadString(), store),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
@@ -79,6 +81,8 @@ internal static class DataValueReader
             DataKind.UInt32 => DataValue.FromUInt32(reader.ReadUInt32()),
             DataKind.Int64 => DataValue.FromInt64(reader.ReadInt64()),
             DataKind.UInt64 => DataValue.FromUInt64(reader.ReadUInt64()),
+            DataKind.Int128 => DataValue.FromInt128(ReadInt128(reader)),
+            DataKind.UInt128 => DataValue.FromUInt128(ReadUInt128(reader)),
             DataKind.Type => DataValue.FromType((DataKind)reader.ReadByte()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
@@ -92,7 +96,9 @@ internal static class DataValueReader
     {
         return kind switch
         {
+            DataKind.Float16 => DataValue.FromFloat16(BitConverter.UInt16BitsToHalf(reader.ReadUInt16())),
             DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
+            DataKind.Decimal => DataValue.FromDecimal(reader.ReadDecimal()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
@@ -113,9 +119,31 @@ internal static class DataValueReader
             DataKind.UInt32 => DataValue.FromUInt32(reader.ReadUInt32()),
             DataKind.Int64 => DataValue.FromInt64(reader.ReadInt64()),
             DataKind.UInt64 => DataValue.FromUInt64(reader.ReadUInt64()),
+            DataKind.Int128 => DataValue.FromInt128(ReadInt128(reader)),
+            DataKind.UInt128 => DataValue.FromUInt128(ReadUInt128(reader)),
             DataKind.Type => DataValue.FromType((DataKind)reader.ReadByte()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
+    }
+
+    private static Int128 ReadInt128(BinaryReader reader)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        if (reader.Read(buffer) != 16)
+        {
+            throw new EndOfStreamException("Unexpected end of stream while reading Int128 value.");
+        }
+        return System.Buffers.Binary.BinaryPrimitives.ReadInt128LittleEndian(buffer);
+    }
+
+    private static UInt128 ReadUInt128(BinaryReader reader)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        if (reader.Read(buffer) != 16)
+        {
+            throw new EndOfStreamException("Unexpected end of stream while reading UInt128 value.");
+        }
+        return System.Buffers.Binary.BinaryPrimitives.ReadUInt128LittleEndian(buffer);
     }
 
     private static DataValue ReadUInt8Array(BinaryReader reader)

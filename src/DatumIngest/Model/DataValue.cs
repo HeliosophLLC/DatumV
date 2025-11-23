@@ -313,6 +313,46 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Float64, flags: 0, p0: (int)bits, p1: (int)(bits >> 32));
     }
 
+    /// <summary>Creates a value from a 16-bit IEEE 754 binary16 floating-point number.</summary>
+    public static DataValue FromFloat16(Half value)
+    {
+        ushort bits = BitConverter.HalfToUInt16Bits(value);
+        return new(DataKind.Float16, flags: 0, p0: bits);
+    }
+
+    /// <summary>Creates a value from a 128-bit decimal floating-point number.</summary>
+    public static DataValue FromDecimal(decimal value)
+    {
+        // System.Decimal is 16 bytes — fits exactly inline in DataValue's _p0–_p3.
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(value, bits);
+        return new(DataKind.Decimal, flags: 0,
+            p0: bits[0], p1: bits[1], p2: bits[2], p3: bits[3]);
+    }
+
+    /// <summary>Creates a value from an unsigned 128-bit integer.</summary>
+    public static DataValue FromUInt128(UInt128 value)
+    {
+        // UInt128 is 16 bytes — reinterpret as four int32 words and store inline.
+        ref int words = ref Unsafe.As<UInt128, int>(ref value);
+        return new(DataKind.UInt128, flags: 0,
+            p0: words,
+            p1: Unsafe.Add(ref words, 1),
+            p2: Unsafe.Add(ref words, 2),
+            p3: Unsafe.Add(ref words, 3));
+    }
+
+    /// <summary>Creates a value from a signed 128-bit integer.</summary>
+    public static DataValue FromInt128(Int128 value)
+    {
+        ref int words = ref Unsafe.As<Int128, int>(ref value);
+        return new(DataKind.Int128, flags: 0,
+            p0: words,
+            p1: Unsafe.Add(ref words, 1),
+            p2: Unsafe.Add(ref words, 2),
+            p3: Unsafe.Add(ref words, 3));
+    }
+
     /// <summary>
     /// Creates a byte-array value: <see cref="DataKind.UInt8"/> with the
     /// <see cref="DataValueFlags.IsArray"/> flag set. Bytes are written to
@@ -666,11 +706,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     private static int ElementByteSize(DataKind kind) => kind switch
     {
         DataKind.UInt8 or DataKind.Int8 or DataKind.Boolean => 1,
-        DataKind.UInt16 or DataKind.Int16 => 2,
+        DataKind.UInt16 or DataKind.Int16 or DataKind.Float16 => 2,
         DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date => 4,
         DataKind.UInt64 or DataKind.Int64 or DataKind.Float64
             or DataKind.DateTime or DataKind.Time or DataKind.Duration => 8,
-        DataKind.Uuid => 16,
+        DataKind.Uuid or DataKind.Decimal or DataKind.UInt128 or DataKind.Int128 => 16,
         _ => throw new InvalidOperationException(
             $"DataKind.{kind} has no fixed element byte size — inline arrays of this kind are not supported."),
     };
@@ -1095,6 +1135,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return kind is DataKind.Float32 or DataKind.Float64
             or DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Int128 or DataKind.UInt128
             or DataKind.Boolean;
     }
 
@@ -1115,6 +1156,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt32 => (uint)_p0,
             DataKind.Int64 => ReadLong(),
             DataKind.UInt64 => (ulong)ReadLong(),
+            DataKind.Int128 => (double)AsInt128(),
+            DataKind.UInt128 => (double)AsUInt128(),
             DataKind.Boolean => _p0 != 0 ? 1d : 0d,
             _ => 0d,
         };
@@ -1145,6 +1188,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt32 => FromUInt32((uint)value),
             DataKind.Int64 => FromInt64((long)value),
             DataKind.UInt64 => FromUInt64((ulong)value),
+            DataKind.Int128 => FromInt128((Int128)value),
+            DataKind.UInt128 => FromUInt128((UInt128)value),
             DataKind.Boolean => FromBoolean(value != 0d),
             _ => throw new ArgumentException(
                 $"Cannot coerce to non-numeric kind {targetKind}.", nameof(targetKind)),
@@ -1233,6 +1278,38 @@ public readonly struct DataValue : IEquatable<DataValue>
         return BitConverter.Int64BitsToDouble(ReadLong());
     }
 
+    /// <summary>Returns the 16-bit IEEE 754 binary16 floating-point payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Half AsFloat16()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Float16);
+        return BitConverter.UInt16BitsToHalf((ushort)_p0);
+    }
+
+    /// <summary>Returns the 128-bit decimal floating-point payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public decimal AsDecimal()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Decimal);
+        return new decimal([_p0, _p1, _p2, _p3]);
+    }
+
+    /// <summary>Returns the 128-bit unsigned integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public UInt128 AsUInt128()
+    {
+        ThrowIfNullOrWrongKind(DataKind.UInt128);
+        return Unsafe.As<int, UInt128>(ref Unsafe.AsRef(in _p0));
+    }
+
+    /// <summary>Returns the 128-bit signed integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Int128 AsInt128()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Int128);
+        return Unsafe.As<int, Int128>(ref Unsafe.AsRef(in _p0));
+    }
+
     // ─────────────────────── Widening numeric conversions ───────────────────────
 
     /// <summary>
@@ -1247,9 +1324,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// floating-point, or boolean scalar that can be converted to a numeric value.
     /// </summary>
     public static bool IsNumericScalarKind(DataKind kind) =>
-        kind is DataKind.Float32 or DataKind.Float64
-            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
-            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+        kind is DataKind.Float16 or DataKind.Float32 or DataKind.Float64 or DataKind.Decimal
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Boolean;
 
     /// <summary>
@@ -1321,6 +1398,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt32:  result = AsUInt32(); return true;
             case DataKind.Int64:   result = AsInt64(); return true;
             case DataKind.UInt64:  result = AsUInt64(); return true;
+            case DataKind.Int128:  result = (float)AsInt128(); return true;
+            case DataKind.UInt128: result = (float)AsUInt128(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1f : 0f; return true;
             default: result = default; return false;
         }
@@ -1342,6 +1421,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt32:  result = AsUInt32(); return true;
             case DataKind.Int64:   result = AsInt64(); return true;
             case DataKind.UInt64:  result = (double)AsUInt64(); return true;
+            case DataKind.Int128:  result = (double)AsInt128(); return true;
+            case DataKind.UInt128: result = (double)AsUInt128(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1.0 : 0.0; return true;
             default: result = default; return false;
         }
@@ -1363,6 +1444,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt32:  result = (int)AsUInt32(); return true;
             case DataKind.Int64:   result = (int)AsInt64(); return true;
             case DataKind.UInt64:  result = (int)AsUInt64(); return true;
+            case DataKind.Int128:  result = (int)AsInt128(); return true;
+            case DataKind.UInt128: result = (int)AsUInt128(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1 : 0; return true;
             default: result = default; return false;
         }
@@ -1384,6 +1467,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt32:  result = AsUInt32(); return true;
             case DataKind.Int64:   result = AsInt64(); return true;
             case DataKind.UInt64:  result = (long)AsUInt64(); return true;
+            case DataKind.Int128:  result = (long)AsInt128(); return true;
+            case DataKind.UInt128: result = (long)AsUInt128(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1L : 0L; return true;
             default: result = default; return false;
         }
@@ -1440,6 +1525,9 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt32    => AsUInt32(),
             DataKind.Int64     => AsInt64(),
             DataKind.UInt64    => AsUInt64(),
+            DataKind.Int128    => AsInt128(),
+            DataKind.UInt128   => AsUInt128(),
+            DataKind.Decimal   => AsDecimal(),
             DataKind.Boolean   => AsBoolean(),
             DataKind.Date      => AsDate(),
             DataKind.DateTime  => AsDateTime(),
@@ -1489,6 +1577,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt32   => AsUInt32().ToString(),
             DataKind.Int64    => AsInt64().ToString(),
             DataKind.UInt64   => AsUInt64().ToString(),
+            DataKind.Int128   => AsInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.UInt128  => AsUInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.Decimal  => AsDecimal().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.Float16  => AsFloat16().ToString("G"),
             DataKind.Boolean  => AsBoolean() ? "true" : "false",
             DataKind.Date     => AsDate().ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
@@ -2123,10 +2215,20 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1,
 
             // Float types: recover the actual float so IEEE semantics (NaN != NaN, -0 == 0) are preserved.
+            DataKind.Float16
+                => BitConverter.UInt16BitsToHalf((ushort)_p0) == BitConverter.UInt16BitsToHalf((ushort)other._p0),
             DataKind.Float32
                 => BitConverter.Int32BitsToSingle(_p0) == BitConverter.Int32BitsToSingle(other._p0),
             DataKind.Float64
                 => BitConverter.Int64BitsToDouble(ReadLong()) == BitConverter.Int64BitsToDouble(other.ReadLong()),
+
+            // Decimal: 16 bytes inline; bit-equality is value-equality (decimal has no -0/NaN).
+            DataKind.Decimal
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
+
+            // 128-bit integers: 16 bytes inline, bit-equality = value-equality.
+            DataKind.UInt128 or DataKind.Int128
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
@@ -2174,10 +2276,20 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, _p0, _p1),
 
             // Float types: delegate to float/double GetHashCode so -0 == 0 hashing is preserved.
+            DataKind.Float16
+                => HashCode.Combine(_kind, BitConverter.UInt16BitsToHalf((ushort)_p0)),
             DataKind.Float32
                 => HashCode.Combine(_kind, BitConverter.Int32BitsToSingle(_p0)),
             DataKind.Float64
                 => HashCode.Combine(_kind, BitConverter.Int64BitsToDouble(ReadLong())),
+
+            // Decimal: 16 bytes inline; combine all four ints.
+            DataKind.Decimal
+                => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
+
+            // 128-bit integers: same — four-int hash.
+            DataKind.UInt128 or DataKind.Int128
+                => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
 
             // Reference types:
             // RawContentHash returns XxHash64-over-UTF-8 for both inline and cached-hash
@@ -2359,6 +2471,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int64 => ReadLong().ToString(),
             DataKind.UInt64 => unchecked((ulong)ReadLong()).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
+            DataKind.Float16 => BitConverter.UInt16BitsToHalf((ushort)_p0).ToString("G"),
+            DataKind.Decimal => AsDecimal().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.UInt128 => AsUInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataKind.Int128 => AsInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
             DataKind.String => IsInline
                 ? $"String[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
                 : $"String[arena@{_p0}+{_p1}]",

@@ -17,6 +17,43 @@ internal static class DataValueWriter
     /// </summary>
     internal const byte WireKindByteArray = 56;
 
+    /// <summary>
+    /// Writes a 128-bit signed integer as 16 little-endian bytes. <see cref="BinaryWriter"/>
+    /// has no <c>Write(Int128)</c> overload, so we round-trip through a 16-byte span.
+    /// </summary>
+    private static void WriteInt128(BinaryWriter writer, Int128 value)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt128LittleEndian(buffer, value);
+        writer.Write(buffer);
+    }
+
+    /// <summary>
+    /// Writes a 128-bit unsigned integer as 16 little-endian bytes.
+    /// </summary>
+    private static void WriteUInt128(BinaryWriter writer, UInt128 value)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt128LittleEndian(buffer, value);
+        writer.Write(buffer);
+    }
+
+    /// <summary>BufferedWriter overload of <see cref="WriteInt128(BinaryWriter, Int128)"/>.</summary>
+    private static void WriteInt128(BufferedWriter writer, Int128 value)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt128LittleEndian(buffer, value);
+        writer.Write(buffer);
+    }
+
+    /// <summary>BufferedWriter overload of <see cref="WriteUInt128(BinaryWriter, UInt128)"/>.</summary>
+    private static void WriteUInt128(BufferedWriter writer, UInt128 value)
+    {
+        Span<byte> buffer = stackalloc byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt128LittleEndian(buffer, value);
+        writer.Write(buffer);
+    }
+
     internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {
         if (!value.HasValue || value.Value.IsNull)
@@ -52,8 +89,10 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Float16:  writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16())); break;
             case DataKind.Float32:  writer.Write(value.AsFloat32()); break;
             case DataKind.Float64:  writer.Write(value.AsFloat64()); break;
+            case DataKind.Decimal:  writer.Write(value.AsDecimal()); break;
             case DataKind.UInt8:    writer.Write(value.AsUInt8()); break;
             case DataKind.Int8:     writer.Write(value.AsInt8()); break;
             case DataKind.Int16:    writer.Write(value.AsInt16()); break;
@@ -62,6 +101,8 @@ internal static class DataValueWriter
             case DataKind.UInt32:   writer.Write(value.AsUInt32()); break;
             case DataKind.Int64:    writer.Write(value.AsInt64()); break;
             case DataKind.UInt64:   writer.Write(value.AsUInt64()); break;
+            case DataKind.Int128:   WriteInt128(writer, value.AsInt128()); break;
+            case DataKind.UInt128:  WriteUInt128(writer, value.AsUInt128()); break;
             case DataKind.Boolean:  writer.Write(value.AsBoolean()); break;
             case DataKind.Date:     writer.Write(value.AsDate().DayNumber); break;
             case DataKind.Time:     writer.Write(value.AsTime().Ticks); break;
@@ -106,8 +147,16 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Float16:
+                writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16()));
+                break;
+
             case DataKind.Float32:
                 writer.Write(value.AsFloat32());
+                break;
+
+            case DataKind.Decimal:
+                writer.Write(value.AsDecimal());
                 break;
 
             case DataKind.UInt8:
@@ -202,6 +251,14 @@ internal static class DataValueWriter
                 writer.Write(value.AsUInt64());
                 break;
 
+            case DataKind.Int128:
+                WriteInt128(writer, value.AsInt128());
+                break;
+
+            case DataKind.UInt128:
+                WriteUInt128(writer, value.AsUInt128());
+                break;
+
             case DataKind.Type:
                 writer.Write((byte)value.AsType());
                 break;
@@ -236,8 +293,16 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Float16:
+                writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16()));
+                break;
+
             case DataKind.Float32:
                 writer.Write(value.AsFloat32());
+                break;
+
+            case DataKind.Decimal:
+                writer.Write(value.AsDecimal());
                 break;
 
             case DataKind.UInt8:
@@ -329,6 +394,14 @@ internal static class DataValueWriter
 
             case DataKind.UInt64:
                 writer.Write(value.AsUInt64());
+                break;
+
+            case DataKind.Int128:
+                WriteInt128(writer, value.AsInt128());
+                break;
+
+            case DataKind.UInt128:
+                WriteUInt128(writer, value.AsUInt128());
                 break;
 
             case DataKind.Type:

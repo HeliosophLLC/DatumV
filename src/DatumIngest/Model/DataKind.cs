@@ -43,7 +43,8 @@ public enum DataKind : byte
     /// <summary>An unsigned 64-bit integer.</summary>
     UInt64 = 19,
 
-    // 20 = UInt128 (future)
+    /// <summary>An unsigned 128-bit integer (.NET <see cref="System.UInt128"/>).</summary>
+    UInt128 = 20,
 
     // ───────────────────────── Signed integers (24–31) ─────────────────────────
 
@@ -59,13 +60,14 @@ public enum DataKind : byte
     /// <summary>A signed 64-bit integer.</summary>
     Int64 = 27,
 
-    // 28 = Int128 (future)
+    /// <summary>A signed 128-bit integer (.NET <see cref="System.Int128"/>).</summary>
+    Int128 = 28,
 
     // ───────────────────────── Floating point (32–39) ─────────────────────────
 
     // 32 = Float8 (future, e.g. E4M3/E5M2)
 
-    /// <summary>A 16-bit IEEE 754 binary16 floating-point number (.NET <see cref="System.Half"/>).</summary>
+    /// <summary>A 16-bit IEEE 754 binary16 floating-point number (.NET <see cref="Half"/>).</summary>
     Float16 = 33,
 
     /// <summary>A single 32-bit floating-point number.</summary>
@@ -76,7 +78,7 @@ public enum DataKind : byte
 
     // 36 = Float128 (future)
 
-    /// <summary>A 128-bit decimal floating-point number (.NET <see cref="System.Decimal"/>).</summary>
+    /// <summary>A 128-bit decimal floating-point number (.NET <see cref="decimal"/>).</summary>
     Decimal = 37,
 
     // ───────────────────────── Temporal (40–47) ─────────────────────────

@@ -17,12 +17,16 @@ public class DataKindTests : ServiceTestBase
             DataKind.UInt16,
             DataKind.UInt32,
             DataKind.UInt64,
+            DataKind.UInt128,
             DataKind.Int8,
             DataKind.Int16,
             DataKind.Int32,
             DataKind.Int64,
+            DataKind.Int128,
+            DataKind.Float16,
             DataKind.Float32,
             DataKind.Float64,
+            DataKind.Decimal,
             DataKind.Date,
             DataKind.Time,
             DataKind.DateTime,
@@ -51,13 +55,14 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsTwentyFour()
+    public void TotalEnumMemberCountIsTwentyEight()
     {
-        // Was 27 before UInt8Array (-1), Matrix (-1), Tensor (-1) were retired.
+        // Was 27 before UInt8Array (-1), Matrix (-1), Tensor (-1) were retired,
+        // then bumped back up by Float16 (+1), Decimal (+1), UInt128 (+1), Int128 (+1).
         // Byte arrays use Kind=UInt8 + IsArray flag; multi-rank float tensors
         // are deferred to the typed-array consolidation effort.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(24, allValues.Length);
+        Assert.Equal(28, allValues.Length);
     }
 
     [Fact]

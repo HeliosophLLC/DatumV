@@ -127,6 +127,24 @@ internal sealed class BufferedWriter : IDisposable
     }
 
     /// <summary>
+    /// Writes a 128-bit <see cref="decimal"/> as four little-endian int32s,
+    /// matching <see cref="BinaryWriter.Write(decimal)"/>'s wire format so the
+    /// stream can be round-tripped via <see cref="BinaryReader.ReadDecimal"/>.
+    /// </summary>
+    public void Write(decimal value)
+    {
+        EnsureCapacity(16);
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(value, bits);
+        Span<byte> dest = _buffer.AsSpan(_position);
+        BinaryPrimitives.WriteInt32LittleEndian(dest, bits[0]);
+        BinaryPrimitives.WriteInt32LittleEndian(dest[4..], bits[1]);
+        BinaryPrimitives.WriteInt32LittleEndian(dest[8..], bits[2]);
+        BinaryPrimitives.WriteInt32LittleEndian(dest[12..], bits[3]);
+        _position += 16;
+    }
+
+    /// <summary>
     /// Writes a length-prefixed UTF-8 string using the same 7-bit encoded integer
     /// length prefix as <see cref="BinaryWriter"/>, ensuring binary compatibility
     /// with existing <c>.datum-index</c> readers.

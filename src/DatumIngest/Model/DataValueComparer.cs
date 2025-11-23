@@ -78,8 +78,10 @@ internal static class DataValueComparer
 
         return left.Kind switch
         {
+            DataKind.Float16  => left.AsFloat16().CompareTo(right.AsFloat16()),
             DataKind.Float32  => left.AsFloat32().CompareTo(right.AsFloat32()),
             DataKind.Float64  => left.AsFloat64().CompareTo(right.AsFloat64()),
+            DataKind.Decimal  => left.AsDecimal().CompareTo(right.AsDecimal()),
             DataKind.UInt8    => left.AsUInt8().CompareTo(right.AsUInt8()),
             DataKind.Int8     => left.AsInt8().CompareTo(right.AsInt8()),
             DataKind.Int16    => left.AsInt16().CompareTo(right.AsInt16()),
@@ -88,6 +90,8 @@ internal static class DataValueComparer
             DataKind.UInt32   => left.AsUInt32().CompareTo(right.AsUInt32()),
             DataKind.Int64    => left.AsInt64().CompareTo(right.AsInt64()),
             DataKind.UInt64   => left.AsUInt64().CompareTo(right.AsUInt64()),
+            DataKind.Int128   => left.AsInt128().CompareTo(right.AsInt128()),
+            DataKind.UInt128  => left.AsUInt128().CompareTo(right.AsUInt128()),
             DataKind.Boolean  => left.AsBoolean().CompareTo(right.AsBoolean()),
             DataKind.Date     => left.AsDate().CompareTo(right.AsDate()),
             DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
@@ -107,9 +111,10 @@ internal static class DataValueComparer
     /// date/time types, duration, uuid, and boolean.
     /// </summary>
     internal static bool IsComparable(DataKind kind) =>
-        kind is DataKind.Float32 or DataKind.Float64
-            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
-            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+        kind is DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+            or DataKind.Decimal
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Boolean
             or DataKind.String
             or DataKind.Date or DataKind.DateTime or DataKind.Time
@@ -117,13 +122,19 @@ internal static class DataValueComparer
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="kind"/> is any integer or
-    /// floating-point scalar kind that can be losslessly widened to <see cref="float"/>
-    /// or <see cref="double"/>.
+    /// floating-point scalar kind that can be widened to <see cref="float"/>
+    /// or <see cref="double"/>. <see cref="DataKind.Decimal"/> is included even
+    /// though widening to <see cref="double"/> may lose precision — comparison
+    /// callers stay in same-kind decimal arithmetic via the
+    /// <see cref="Compare(DataValue, IValueStore, DataValue, IValueStore)"/>
+    /// switch; the cross-kind double fallback is the same compromise applied to
+    /// <see cref="DataKind.Int64"/>/<see cref="DataKind.UInt64"/>.
     /// </summary>
     internal static bool IsNumericScalar(DataKind kind) =>
-        kind is DataKind.Float32 or DataKind.Float64
-            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
-            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+        kind is DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+            or DataKind.Decimal
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Boolean;
 
     // ───────────────────── Cast compatibility ─────────────────────
@@ -154,8 +165,15 @@ internal static class DataValueComparer
             DataKind.UInt32  => value >= 0 && value <= uint.MaxValue,
             DataKind.Int64   => value >= long.MinValue && value <= long.MaxValue,
             DataKind.UInt64  => value >= 0 && value <= ulong.MaxValue,
+            // Int128/UInt128 always cover the entire double range — Int128.MaxValue ≈ 1.7e38,
+            // UInt128.MaxValue ≈ 3.4e38, both well past double's exponent ceiling. The double
+            // intermediate is only narrowing, never overflowing, so any finite double fits.
+            DataKind.Int128  => true,
+            DataKind.UInt128 => value >= 0,
+            DataKind.Float16 => value == 0 || (Math.Abs(value) >= (double)Half.Epsilon && Math.Abs(value) <= 65504.0),
             DataKind.Float32 => value == 0 || (System.Math.Abs(value) >= float.MinValue && System.Math.Abs(value) <= float.MaxValue),
             DataKind.Float64 => true, // Already a double — always fits.
+            DataKind.Decimal => value >= (double)decimal.MinValue && value <= (double)decimal.MaxValue,
             _ => false,
         };
     }
@@ -189,8 +207,12 @@ internal static class DataValueComparer
             DataKind.UInt32  => DataValue.FromUInt32((uint)value),
             DataKind.Int64   => DataValue.FromInt64((long)value),
             DataKind.UInt64  => DataValue.FromUInt64((ulong)value),
+            DataKind.Int128  => DataValue.FromInt128((Int128)value),
+            DataKind.UInt128 => DataValue.FromUInt128((UInt128)value),
+            DataKind.Float16 => DataValue.FromFloat16((Half)value),
             DataKind.Float32 => DataValue.FromFloat32((float)value),
             DataKind.Float64 => DataValue.FromFloat64(value),
+            DataKind.Decimal => DataValue.FromDecimal((decimal)value),
             _ => null,
         };
     }
@@ -219,8 +241,12 @@ internal static class DataValueComparer
             DataKind.UInt32   => DataValue.FromUInt32((uint)boxed),
             DataKind.Int64    => DataValue.FromInt64((long)boxed),
             DataKind.UInt64   => DataValue.FromUInt64((ulong)boxed),
+            DataKind.Int128   => DataValue.FromInt128((Int128)boxed),
+            DataKind.UInt128  => DataValue.FromUInt128((UInt128)boxed),
+            DataKind.Float16  => DataValue.FromFloat16((Half)boxed),
             DataKind.Float32  => DataValue.FromFloat32((float)boxed),
             DataKind.Float64  => DataValue.FromFloat64((double)boxed),
+            DataKind.Decimal  => DataValue.FromDecimal((decimal)boxed),
             DataKind.Date     => DataValue.FromDate((DateOnly)boxed),
             DataKind.DateTime => DataValue.FromDateTime((DateTimeOffset)boxed),
             DataKind.Time     => DataValue.FromTime((TimeOnly)boxed),
@@ -249,8 +275,12 @@ internal static class DataValueComparer
             DataKind.UInt32   => uint.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
             DataKind.Int64    => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
             DataKind.UInt64   => ulong.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
+            DataKind.Int128   => Int128.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
+            DataKind.UInt128  => UInt128.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
+            DataKind.Float16  => Half.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
             DataKind.Float32  => float.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
             DataKind.Float64  => double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
+            DataKind.Decimal  => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _),
             DataKind.Boolean  => string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)
                 || value == "1" || value == "0",
@@ -327,14 +357,18 @@ internal static class DataValueComparer
     {
         Type t = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
+        if (t == typeof(Half)) return DataKind.Float16;
         if (t == typeof(float)) return DataKind.Float32;
-        if (t == typeof(double) || t == typeof(decimal)) return DataKind.Float64;
+        if (t == typeof(double)) return DataKind.Float64;
+        if (t == typeof(decimal)) return DataKind.Decimal;
         if (t == typeof(int)) return DataKind.Int32;
         if (t == typeof(long)) return DataKind.Int64;
+        if (t == typeof(Int128)) return DataKind.Int128;
         if (t == typeof(short)) return DataKind.Int16;
         if (t == typeof(ushort)) return DataKind.UInt16;
         if (t == typeof(uint)) return DataKind.UInt32;
         if (t == typeof(ulong)) return DataKind.UInt64;
+        if (t == typeof(UInt128)) return DataKind.UInt128;
         if (t == typeof(sbyte)) return DataKind.Int8;
         if (t == typeof(byte)) return DataKind.UInt8;
         if (t == typeof(string)) return DataKind.String;
