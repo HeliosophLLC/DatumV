@@ -67,7 +67,7 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
-    public void Build_VectorColumn_ProducesVectorFeatureManifest()
+    public void Build_VectorColumn_ProducesArrayFeatureManifest()
     {
         ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();
@@ -82,7 +82,7 @@ public sealed class ManifestBuilderTests : ServiceTestBase
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
 
-        VectorFeatureManifest feature = Assert.IsType<VectorFeatureManifest>(manifest.Features[0]);
+        ArrayFeatureManifest feature = Assert.IsType<ArrayFeatureManifest>(manifest.Features[0]);
         Assert.Equal(2, feature.MinLength);
         Assert.Equal(3, feature.MaxLength);
         Assert.Equal(5, feature.ElementStats.Count);

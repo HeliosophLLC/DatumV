@@ -191,11 +191,12 @@ public sealed class StatisticsCollector
             accumulators.Add(new StringLengthAccumulator());
         }
 
-        // Vector stats accumulator now keys on Float32 + IsArray (the former Vector
-        // kind). Other typed-array kinds don't yet have a dedicated stats path.
+        // Array stats accumulator currently keys on Float32 + IsArray (the former
+        // Vector kind). Other typed-array kinds will dispatch through here when
+        // their element-stat paths land.
         if (kind == DataKind.Float32 && isArrayValue)
         {
-            accumulators.Add(new VectorStatsAccumulator());
+            accumulators.Add(new ArrayStatsAccumulator());
         }
 
         if (kind is DataKind.Image && !sidecarBacked)

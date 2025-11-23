@@ -41,12 +41,12 @@ public sealed class ManifestSerializerTests : ServiceTestBase
     }
 
     [Fact]
-    public void Serialize_VectorManifest_ContainsElementStats()
+    public void Serialize_ArrayManifest_ContainsElementStats()
     {
-        QueryResultsManifest manifest = BuildVectorManifest();
+        QueryResultsManifest manifest = BuildArrayManifest();
         string json = ManifestSerializer.Serialize("test", manifest);
 
-        Assert.Contains("\"type\": \"vector\"", json);
+        Assert.Contains("\"type\": \"array\"", json);
         Assert.Contains("\"minLength\":", json);
         Assert.Contains("\"elementStats\":", json);
     }
@@ -177,7 +177,7 @@ public sealed class ManifestSerializerTests : ServiceTestBase
         return ManifestBuilder.Build(stats, kinds, 1);
     }
 
-    private QueryResultsManifest BuildVectorManifest()
+    private QueryResultsManifest BuildArrayManifest()
     {
         ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();

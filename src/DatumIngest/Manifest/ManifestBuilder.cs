@@ -173,6 +173,15 @@ public static class ManifestBuilder
             return BuildBinaryManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats);
         }
 
+        // Any other typed-array column (Float32 + IsArray today; other element kinds
+        // when their accumulators land) takes the array-manifest path. Must come
+        // before the scalar arms so e.g. Float32 + IsArray hits the array branch
+        // rather than NumericFeatureManifest.
+        if (isArray)
+        {
+            return BuildArrayManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats);
+        }
+
         return kind switch
         {
             DataKind.Float32 or DataKind.UInt8
@@ -181,11 +190,6 @@ public static class ManifestBuilder
                 or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
-            // Vector → BuildVectorManifest dispatch was retired alongside DataKind.Vector.
-            // Float32 + IsArray columns reach this dispatch via DataKind.Float32 (without
-            // visibility of IsArray) and currently flow to the numeric arm. Restoring
-            // typed-array manifest stats requires plumbing IsArray through the per-column
-            // dispatch signature.
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
@@ -274,13 +278,13 @@ public static class ManifestBuilder
         };
     }
 
-    private static VectorFeatureManifest BuildVectorManifest(
+    private static ArrayFeatureManifest BuildArrayManifest(
         string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
-        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ?? VectorStatsResult.Empty;
+        ArrayStatsResult arrayResult = GetResultValue<ArrayStatsResult>(stats, "array_stats") ?? ArrayStatsResult.Empty;
 
-        return new VectorFeatureManifest
+        return new ArrayFeatureManifest
         {
             Name = name,
             Kind = kind,
@@ -293,15 +297,15 @@ public static class ManifestBuilder
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
-            MinLength = vectorResult.MinElementCount,
-            MaxLength = vectorResult.MaxElementCount,
-            ElementStats = ToSummaryData(vectorResult.ElementStats),
-            ZeroElementCount = vectorResult.ZeroElementCount,
-            ZeroElementRatio = vectorResult.ZeroElementRatio,
-            ZeroVectorCount = vectorResult.ZeroVectorCount,
-            NormMin = vectorResult.NormMin,
-            NormMax = vectorResult.NormMax,
-            NormMean = vectorResult.NormMean
+            MinLength = arrayResult.MinElementCount,
+            MaxLength = arrayResult.MaxElementCount,
+            ElementStats = ToSummaryData(arrayResult.ElementStats),
+            ZeroElementCount = arrayResult.ZeroElementCount,
+            ZeroElementRatio = arrayResult.ZeroElementRatio,
+            ZeroArrayCount = arrayResult.ZeroArrayCount,
+            NormMin = arrayResult.NormMin,
+            NormMax = arrayResult.NormMax,
+            NormMean = arrayResult.NormMean
         };
     }
 

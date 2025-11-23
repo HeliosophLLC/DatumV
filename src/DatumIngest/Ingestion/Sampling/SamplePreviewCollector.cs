@@ -1,5 +1,6 @@
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Image;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 using SkiaSharp;
@@ -16,14 +17,32 @@ namespace DatumIngest.Ingestion.Sampling;
 /// Image values are resized to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>
 /// (preserving aspect ratio), re-encoded as PNG, and stored as <c>"base64://…"</c> strings.
 /// Byte-array columns (<see cref="DataKind.UInt8"/> + <c>IsArray</c>) are represented
-/// as the sentinel string <c>"[binary data]"</c>. Vectors, matrices, and tensors are
-/// represented as nested numeric arrays.
+/// as the sentinel string <c>"[binary data]"</c>. Float32 + <c>IsArray</c> columns
+/// (the former Vector kind) are emitted as a numeric array truncated to the first
+/// <see cref="MaxArrayPreviewElements"/> elements.
+/// </para>
+/// <para>
+/// Both image and Float32-array values may be sidecar-backed at the time
+/// <see cref="Consider(Row, IValueStore)"/> is called (the writer hasn't flushed yet).
+/// Those values land in the reservoir as <see cref="SidecarImageRef"/> /
+/// <see cref="SidecarArrayRef"/> placeholders and are resolved against a
+/// <see cref="SidecarRegistry"/> in <see cref="Build(Schema, SidecarRegistry?)"/>.
 /// </para>
 /// </remarks>
 internal sealed class SamplePreviewCollector
 {
     /// <summary>Maximum width or height for image thumbnails in the preview.</summary>
     internal const int MaxThumbnailDimension = 64;
+
+    /// <summary>
+    /// Maximum number of elements emitted for array previews. Embeddings can carry
+    /// hundreds of dimensions; rendering all of them in every preview row bloats the
+    /// JSON without informational value. The first <see cref="MaxArrayPreviewElements"/>
+    /// elements are kept and the rest dropped — consumers wanting full arrays should
+    /// query the column directly. Per-array length stays available on
+    /// <see cref="ArrayFeatureManifest.MinLength"/> / <see cref="ArrayFeatureManifest.MaxLength"/>.
+    /// </summary>
+    internal const int MaxArrayPreviewElements = 16;
 
     private const string BinarySentinel = "[binary data]";
 
@@ -111,7 +130,7 @@ internal sealed class SamplePreviewCollector
             features.Add(new SampleFeature(column.Name, column.Kind.ToString().ToLowerInvariant()));
         }
 
-        ResolveSidecarThumbnails(registry);
+        ResolveSidecars(registry);
 
         object?[][] samples = new object?[_reservoirCount][];
         Array.Copy(_reservoir, samples, _reservoirCount);
@@ -124,11 +143,13 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>
-    /// Walks the reservoir and replaces every <see cref="SidecarImageRef"/> placeholder
-    /// with the rendered <c>base64://...</c> thumbnail string. Throws when a placeholder
-    /// is found but no registry was provided or the storeId isn't registered.
+    /// Walks the reservoir and replaces every sidecar-backed placeholder
+    /// (<see cref="SidecarImageRef"/>, <see cref="SidecarArrayRef"/>) with its
+    /// resolved preview value: rendered <c>base64://…</c> thumbnail for images,
+    /// truncated numeric array for Float32 arrays. Throws when a placeholder is
+    /// present but no registry was supplied or the storeId isn't registered.
     /// </summary>
-    private void ResolveSidecarThumbnails(SidecarRegistry? registry)
+    private void ResolveSidecars(SidecarRegistry? registry)
     {
         for (int row = 0; row < _reservoirCount; row++)
         {
@@ -137,26 +158,46 @@ internal sealed class SamplePreviewCollector
 
             for (int col = 0; col < cells.Length; col++)
             {
-                if (cells[col] is not SidecarImageRef refValue) continue;
-
-                if (registry is null)
+                cells[col] = cells[col] switch
                 {
-                    throw new InvalidOperationException(
-                        "SamplePreviewCollector reservoir contains a sidecar-backed image " +
-                        "but Build was called without a SidecarRegistry. Wrap the just-finalised " +
-                        "SidecarReadStore in a registry and pass it.");
-                }
-
-                IBlobSource source = registry.Resolve(refValue.StoreId)
-                    ?? throw new InvalidOperationException(
-                        $"Sidecar storeId {refValue.StoreId} from a sample reservoir entry is " +
-                        "not registered in the supplied SidecarRegistry.");
-
-                ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
-                byte[] thumbnailBytes = CreateThumbnail(bytes.ToArray());
-                cells[col] = "base64://" + Convert.ToBase64String(thumbnailBytes);
+                    SidecarImageRef imageRef => ResolveSidecarImage(imageRef, registry),
+                    SidecarArrayRef arrayRef => ResolveSidecarFloat32Array(arrayRef, registry),
+                    _ => cells[col],
+                };
             }
         }
+    }
+
+    private static object ResolveSidecarImage(SidecarImageRef refValue, SidecarRegistry? registry)
+    {
+        IBlobSource source = ResolveBlobSource(refValue.StoreId, registry, "image");
+        ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
+        byte[] thumbnailBytes = CreateThumbnail(bytes.ToArray());
+        return "base64://" + Convert.ToBase64String(thumbnailBytes);
+    }
+
+    private static object ResolveSidecarFloat32Array(SidecarArrayRef refValue, SidecarRegistry? registry)
+    {
+        IBlobSource source = ResolveBlobSource(refValue.StoreId, registry, "Float32 array");
+        ReadOnlySpan<byte> bytes = source.Read(refValue.Offset, refValue.Length);
+        ReadOnlySpan<float> elements = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes);
+        return ConvertFloat32Array(elements);
+    }
+
+    private static IBlobSource ResolveBlobSource(byte storeId, SidecarRegistry? registry, string payloadKind)
+    {
+        if (registry is null)
+        {
+            throw new InvalidOperationException(
+                $"SamplePreviewCollector reservoir contains a sidecar-backed {payloadKind} " +
+                "but Build was called without a SidecarRegistry. Wrap the just-finalised " +
+                "SidecarReadStore in a registry and pass it.");
+        }
+
+        return registry.Resolve(storeId)
+            ?? throw new InvalidOperationException(
+                $"Sidecar storeId {storeId} from a sample reservoir entry is " +
+                "not registered in the supplied SidecarRegistry.");
     }
 
     /// <summary>
@@ -191,12 +232,18 @@ internal sealed class SamplePreviewCollector
             return BinarySentinel;
         }
 
-        // Float32 + IsArray (formerly DataKind.Vector) needs to serialise as a JSON
-        // array of floats. Generic typed-array dispatch comes later; for now this
-        // arm preserves the legacy preview output for vector columns.
+        // Float32 + IsArray (formerly DataKind.Vector) serialises as a numeric JSON
+        // array, truncated to MaxArrayPreviewElements. Sidecar-backed values land
+        // as a deferred SidecarArrayRef placeholder — the writer hasn't flushed
+        // yet, so we can't read the bytes here. Build() resolves the placeholder
+        // against a SidecarRegistry once the sidecar is finalised.
         if (value.Kind == DataKind.Float32 && value.IsArray)
         {
-            return ConvertVector(value.AsArraySpan<float>(store));
+            if (value.IsInSidecar)
+            {
+                return new SidecarArrayRef(value.SidecarStoreId, value.SidecarOffset, value.SidecarLength);
+            }
+            return ConvertFloat32Array(value.AsArraySpan<float>(store));
         }
 
         return value.Kind switch
@@ -218,13 +265,19 @@ internal sealed class SamplePreviewCollector
         };
     }
 
-    /// <summary>Converts a float vector to a boxed float array for JSON.</summary>
-    private static object ConvertVector(ReadOnlySpan<float> vector)
+    /// <summary>
+    /// Converts a Float32 array to a boxed float array for JSON, truncated to the
+    /// first <see cref="MaxArrayPreviewElements"/> elements. Length context for the
+    /// full array is available on <see cref="ArrayFeatureManifest"/>; this preview
+    /// path optimises for compact output rather than completeness.
+    /// </summary>
+    private static object ConvertFloat32Array(ReadOnlySpan<float> elements)
     {
-        object[] result = new object[vector.Length];
-        for (int i = 0; i < vector.Length; i++)
+        int previewLength = Math.Min(elements.Length, MaxArrayPreviewElements);
+        object[] result = new object[previewLength];
+        for (int i = 0; i < previewLength; i++)
         {
-            result[i] = vector[i];
+            result[i] = elements[i];
         }
 
         return result;
@@ -257,6 +310,16 @@ internal sealed class SamplePreviewCollector
     /// <see cref="IBlobSource"/> is available.
     /// </summary>
     private sealed record SidecarImageRef(byte StoreId, long Offset, long Length);
+
+    /// <summary>
+    /// Reservoir placeholder for sidecar-backed Float32-array cells. Same role as
+    /// <see cref="SidecarImageRef"/> — bytes aren't readable when
+    /// <see cref="Consider(Row, IValueStore)"/> runs (writer mid-stream), so the
+    /// placeholder defers byte resolution to <see cref="Build(Schema, SidecarRegistry?)"/>.
+    /// On resolution the bytes are read, reinterpreted as <see cref="float"/>, and
+    /// truncated to the first <see cref="MaxArrayPreviewElements"/> for the preview.
+    /// </summary>
+    private sealed record SidecarArrayRef(byte StoreId, long Offset, long Length);
 
     /// <summary>
     /// Decodes an image, resizes it to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>

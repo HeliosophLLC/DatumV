@@ -18,7 +18,7 @@ public sealed record FrequencyEntry(string Value, long Frequency);
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(NumericFeatureManifest), "numeric")]
 [JsonDerivedType(typeof(StringFeatureManifest), "string")]
-[JsonDerivedType(typeof(VectorFeatureManifest), "vector")]
+[JsonDerivedType(typeof(ArrayFeatureManifest), "array")]
 [JsonDerivedType(typeof(ImageFeatureManifest), "image")]
 [JsonDerivedType(typeof(BinaryFeatureManifest), "binary")]
 [JsonDerivedType(typeof(TemporalFeatureManifest), "temporal")]
@@ -220,17 +220,21 @@ public sealed record NumericSummaryData(
     long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation);
 
 /// <summary>
-/// Feature manifest for rank-1 vector columns (Float32 + IsArray).
+/// Feature manifest for typed-array columns (any <see cref="DataKind"/> +
+/// <see cref="FeatureManifest.IsArray"/>). Currently emitted only for
+/// <see cref="DataKind.Float32"/> + <see cref="FeatureManifest.IsArray"/> arrays
+/// (the former Vector kind); other typed-array element kinds gain dedicated
+/// element-stats paths as they're demanded.
 /// </summary>
-public sealed class VectorFeatureManifest : FeatureManifest
+public sealed class ArrayFeatureManifest : FeatureManifest
 {
-    /// <summary>Gets the minimum vector length.</summary>
+    /// <summary>Gets the minimum array length (in elements).</summary>
     public required int MinLength { get; init; }
 
-    /// <summary>Gets the maximum vector length.</summary>
+    /// <summary>Gets the maximum array length (in elements).</summary>
     public required int MaxLength { get; init; }
 
-    /// <summary>Gets aggregate element-wise numeric statistics across all vectors.</summary>
+    /// <summary>Gets aggregate element-wise numeric statistics across all arrays.</summary>
     public required NumericSummaryData ElementStats { get; init; }
 
     /// <summary>Gets the total number of elements exactly equal to zero.</summary>
@@ -239,16 +243,16 @@ public sealed class VectorFeatureManifest : FeatureManifest
     /// <summary>Gets the ratio of zero elements to total element count.</summary>
     public required double ZeroElementRatio { get; init; }
 
-    /// <summary>Gets the number of vectors where every element is zero.</summary>
-    public required long ZeroVectorCount { get; init; }
+    /// <summary>Gets the number of arrays where every element is zero.</summary>
+    public required long ZeroArrayCount { get; init; }
 
-    /// <summary>Gets the minimum L2 norm across all vectors.</summary>
+    /// <summary>Gets the minimum L2 norm across all arrays.</summary>
     public required double NormMin { get; init; }
 
-    /// <summary>Gets the maximum L2 norm across all vectors.</summary>
+    /// <summary>Gets the maximum L2 norm across all arrays.</summary>
     public required double NormMax { get; init; }
 
-    /// <summary>Gets the mean L2 norm across all vectors.</summary>
+    /// <summary>Gets the mean L2 norm across all arrays.</summary>
     public required double NormMean { get; init; }
 }
 
