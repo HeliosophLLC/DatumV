@@ -1088,7 +1088,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     private static bool IsCoercibleKind(DataKind kind)
     {
-        return kind is DataKind.Float32 or DataKind.Float64
+        return kind is DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+            or DataKind.Decimal
             or DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
             or DataKind.Int128 or DataKind.UInt128
@@ -1102,8 +1103,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         return _kind switch
         {
+            DataKind.Float16 => (double)BitConverter.UInt16BitsToHalf((ushort)_p0),
             DataKind.Float32 => BitConverter.Int32BitsToSingle(_p0),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()),
+            DataKind.Decimal => (double)AsDecimal(),
             DataKind.UInt8 => (byte)_p0,
             DataKind.Int8 => (sbyte)_p0,
             DataKind.Int16 => (short)_p0,
@@ -1134,8 +1137,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         return targetKind switch
         {
+            DataKind.Float16 => FromFloat16((Half)value),
             DataKind.Float32 => FromFloat32((float)value),
             DataKind.Float64 => FromFloat64(value),
+            DataKind.Decimal => FromDecimal((decimal)value),
             DataKind.UInt8 => FromUInt8((byte)value),
             DataKind.Int8 => FromInt8((sbyte)value),
             DataKind.Int16 => FromInt16((short)value),
@@ -1356,6 +1361,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt64:  result = AsUInt64(); return true;
             case DataKind.Int128:  result = (float)AsInt128(); return true;
             case DataKind.UInt128: result = (float)AsUInt128(); return true;
+            case DataKind.Float16: result = (float)AsFloat16(); return true;
+            case DataKind.Decimal: result = (float)AsDecimal(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1f : 0f; return true;
             default: result = default; return false;
         }
@@ -1379,6 +1386,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt64:  result = (double)AsUInt64(); return true;
             case DataKind.Int128:  result = (double)AsInt128(); return true;
             case DataKind.UInt128: result = (double)AsUInt128(); return true;
+            case DataKind.Float16: result = (double)AsFloat16(); return true;
+            case DataKind.Decimal: result = (double)AsDecimal(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1.0 : 0.0; return true;
             default: result = default; return false;
         }
@@ -1402,6 +1411,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt64:  result = (int)AsUInt64(); return true;
             case DataKind.Int128:  result = (int)AsInt128(); return true;
             case DataKind.UInt128: result = (int)AsUInt128(); return true;
+            case DataKind.Float16: result = (int)AsFloat16(); return true;
+            case DataKind.Decimal: result = (int)AsDecimal(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1 : 0; return true;
             default: result = default; return false;
         }
@@ -1425,6 +1436,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             case DataKind.UInt64:  result = (long)AsUInt64(); return true;
             case DataKind.Int128:  result = (long)AsInt128(); return true;
             case DataKind.UInt128: result = (long)AsUInt128(); return true;
+            case DataKind.Float16: result = (long)AsFloat16(); return true;
+            case DataKind.Decimal: result = (long)AsDecimal(); return true;
             case DataKind.Boolean: result = AsBoolean() ? 1L : 0L; return true;
             default: result = default; return false;
         }

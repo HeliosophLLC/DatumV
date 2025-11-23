@@ -140,6 +140,10 @@ public readonly struct ValueRef
     public static ValueRef FromUInt64(ulong value) =>
         new(DataValue.FromUInt64(value), null);
 
+    /// <summary>Float16 inline value.</summary>
+    public static ValueRef FromFloat16(Half value) =>
+        new(DataValue.FromFloat16(value), null);
+
     /// <summary>Float32 inline value.</summary>
     public static ValueRef FromFloat32(float value) =>
         new(DataValue.FromFloat32(value), null);
@@ -147,6 +151,18 @@ public readonly struct ValueRef
     /// <summary>Float64 inline value.</summary>
     public static ValueRef FromFloat64(double value) =>
         new(DataValue.FromFloat64(value), null);
+
+    /// <summary>Decimal inline value.</summary>
+    public static ValueRef FromDecimal(decimal value) =>
+        new(DataValue.FromDecimal(value), null);
+
+    /// <summary>Int128 inline value.</summary>
+    public static ValueRef FromInt128(Int128 value) =>
+        new(DataValue.FromInt128(value), null);
+
+    /// <summary>UInt128 inline value.</summary>
+    public static ValueRef FromUInt128(UInt128 value) =>
+        new(DataValue.FromUInt128(value), null);
 
     /// <summary>Date inline value.</summary>
     public static ValueRef FromDate(DateOnly value) =>
@@ -251,10 +267,25 @@ public readonly struct ValueRef
     public long AsInt64() => _inline.AsInt64();
     /// <summary>UInt64 accessor (inline only).</summary>
     public ulong AsUInt64() => _inline.AsUInt64();
+    /// <summary>Float16 accessor (inline only).</summary>
+    public Half AsFloat16() => _inline.AsFloat16();
     /// <summary>Float32 accessor (inline only).</summary>
     public float AsFloat32() => _inline.AsFloat32();
     /// <summary>Float64 accessor (inline only).</summary>
     public double AsFloat64() => _inline.AsFloat64();
+    /// <summary>Decimal accessor (inline only).</summary>
+    public decimal AsDecimal() => _inline.AsDecimal();
+    /// <summary>Int128 accessor (inline only).</summary>
+    public Int128 AsInt128() => _inline.AsInt128();
+    /// <summary>UInt128 accessor (inline only).</summary>
+    public UInt128 AsUInt128() => _inline.AsUInt128();
+
+    /// <summary>
+    /// Widens any numeric scalar (integer, float, boolean) to <see cref="double"/>.
+    /// Returns <see langword="false"/> for non-numeric kinds or null values.
+    /// Mirrors <see cref="DataValue.TryToDouble"/>.
+    /// </summary>
+    public bool TryToDouble(out double result) => _inline.TryToDouble(out result);
     /// <summary>Date accessor (inline only).</summary>
     public DateOnly AsDate() => _inline.AsDate();
     /// <summary>DateTime accessor (inline only).</summary>

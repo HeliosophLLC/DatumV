@@ -259,6 +259,20 @@ internal static class DataValueComparer
     }
 
     /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="text"/> is a recognised
+    /// boolean literal: case-insensitive <c>"true"</c> / <c>"false"</c>, or single-character
+    /// <c>"0"</c> / <c>"1"</c>. Span-based and zero-allocation; callers on hot paths
+    /// (e.g. CSV inference) avoid the <see cref="string"/>-allocating overload of
+    /// <see cref="CanParseString"/>.
+    /// </summary>
+    internal static bool IsBooleanLiteral(ReadOnlySpan<char> text)
+    {
+        if (text.Length == 1) return text[0] == '0' || text[0] == '1';
+        return text.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Returns whether a string can be parsed as the target type without failure.
     /// Uses culture-invariant TryParse for each supported target kind.
     /// </summary>
@@ -280,14 +294,12 @@ internal static class DataValueComparer
             DataKind.Float32  => float.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
             DataKind.Float64  => double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _),
             DataKind.Decimal  => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _),
-            DataKind.Boolean  => string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)
-                || value == "1" || value == "0",
             DataKind.Date     => DateOnly.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.DateTime => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
             DataKind.Time     => TimeOnly.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Duration => TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Uuid     => Guid.TryParse(value, out _),
+            DataKind.Boolean  => IsBooleanLiteral(value.AsSpan()),
             DataKind.String   => true,
             _ => false,
         };

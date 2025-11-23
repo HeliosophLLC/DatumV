@@ -256,10 +256,32 @@ public static class CsvTypeScanner
                 // Integer values above |2^24| lose precision in Float32 even if float-parseable.
                 if (state.AllFloat32Safe && (i < -(1L << 24) || i > (1L << 24)))
                     state.AllFloat32Safe = false;
+                // i is non-negative? UInt128 still in play; otherwise UInt128 falls out.
+                if (i < 0) state.UInt128Candidate = false;
             }
             else
             {
+                // long.TryParse failed. Two possibilities: (a) the value is a 128-bit
+                // integer that overflows Int64 — keep Int128/UInt128 candidates alive
+                // and flag Float32 unsafety; (b) the value isn't an integer at all
+                // (e.g. "1.5", "true") — drop all integer candidates and don't punish
+                // Float32-safety based on this non-integer value.
                 state.IntegerCandidate = false;
+
+                bool fitsInt128 = Int128.TryParse(
+                    field, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+                bool fitsUInt128 = UInt128.TryParse(
+                    field, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+
+                if (!fitsInt128) state.Int128Candidate = false;
+                if (!fitsUInt128) state.UInt128Candidate = false;
+
+                // 128-bit integers always exceed Float32's 24-bit integer-precision
+                // ceiling — but only flag this when we actually saw a 128-bit value.
+                if (state.AllFloat32Safe && (fitsInt128 || fitsUInt128))
+                {
+                    state.AllFloat32Safe = false;
+                }
             }
         }
 
@@ -304,7 +326,7 @@ public static class CsvTypeScanner
 
         if (state.BooleanCandidate)
         {
-            if (!IsBooleanLiteral(field))
+            if (!DataValueComparer.IsBooleanLiteral(field))
                 state.BooleanCandidate = false;
         }
     }
@@ -314,13 +336,6 @@ public static class CsvTypeScanner
         for (int i = 0; i < s.Length; i++)
             if (s[i] < '0' || s[i] > '9') return false;
         return true;
-    }
-
-    private static bool IsBooleanLiteral(ReadOnlySpan<char> s)
-    {
-        if (s.Length == 1) return s[0] == '0' || s[0] == '1';
-        return s.Equals("true", StringComparison.OrdinalIgnoreCase)
-            || s.Equals("false", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsFloat32RoundTripSafe(double d)
@@ -376,6 +391,22 @@ public static class CsvTypeScanner
             return (narrowed, new SchemaInferenceDecision(
                 SchemaInferenceReason.NarrowedByObservedRange,
                 SchemaInferenceSeverity.Routine, explanation, evidence));
+        }
+
+        // Int64 overflow but 128-bit-fits. Prefer UInt128 over Int128 when both
+        // hold (column is non-negative + exceeds Int64) — UInt128 has more headroom
+        // and matches the "high-value identifier" intent that typically drives
+        // 128-bit columns.
+        if (state.UInt128Candidate || state.Int128Candidate)
+        {
+            DataKind chosen = state.UInt128Candidate ? DataKind.UInt128 : DataKind.Int128;
+            return (chosen, new SchemaInferenceDecision(
+                SchemaInferenceReason.NarrowedByObservedRange, SchemaInferenceSeverity.Routine,
+                $"Integer column with at least one value outside Int64 range; promoted to {chosen}.",
+                new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["narrowed_to"] = chosen.ToString(),
+                }));
         }
 
         // Float column (some non-int value observed, but all numeric).
@@ -499,6 +530,16 @@ public sealed record CsvScanResult(
 internal struct ColumnScanState
 {
     public bool IntegerCandidate;
+    /// <summary>
+    /// All non-null values fit in <see cref="Int128"/>. Implied true when
+    /// <see cref="IntegerCandidate"/> is true (every Int64 value fits Int128).
+    /// </summary>
+    public bool Int128Candidate;
+    /// <summary>
+    /// All non-null values fit in <see cref="UInt128"/>. Implied true when
+    /// <see cref="IntegerCandidate"/> is true *and* every value seen so far is non-negative.
+    /// </summary>
+    public bool UInt128Candidate;
     public bool FloatCandidate;
     public bool BooleanCandidate;
     public bool DateCandidate;
@@ -520,6 +561,8 @@ internal struct ColumnScanState
     public static ColumnScanState Initial() => new()
     {
         IntegerCandidate = true,
+        Int128Candidate = true,
+        UInt128Candidate = true,
         FloatCandidate = true,
         BooleanCandidate = true,
         DateCandidate = true,

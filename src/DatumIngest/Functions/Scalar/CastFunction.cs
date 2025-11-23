@@ -116,7 +116,7 @@ public sealed class CastFunction : IFunction, IScalarFunction
         result = default;
 
         // Numeric ↔ numeric / Numeric ↔ Boolean / Numeric → String
-        if (TryGetAsDouble(input, out double inputDouble))
+        if (input.TryToDouble(out double inputDouble))
         {
             if (TryMakeNumeric(inputDouble, targetKind, out result))
             {
@@ -136,16 +136,24 @@ public sealed class CastFunction : IFunction, IScalarFunction
             }
         }
 
-        // Boolean → numeric.
-        if (input.Kind == DataKind.Boolean && IsNumericKind(targetKind))
+        // Boolean → numeric. (TryToDouble above handles Boolean as 0/1, so this
+        // is currently unreachable, but kept for explicitness.) On failure we
+        // fall through to the switch so e.g. (Boolean, String) below still wins.
+        if (input.Kind == DataKind.Boolean
+            && DataValueComparer.IsNumericScalar(targetKind)
+            && TryMakeNumeric(input.AsBoolean() ? 1.0 : 0.0, targetKind, out result))
         {
-            return TryMakeNumeric(input.AsBoolean() ? 1.0 : 0.0, targetKind, out result);
+            return true;
         }
 
-        // String → numeric.
-        if (input.Kind == DataKind.String && IsNumericKind(targetKind))
+        // String → numeric. Falls through to the switch on parse failure so the
+        // explicit (String, Boolean) case below — which IsNumericScalar matches
+        // but TryParseStringToNumeric does not — still wins.
+        if (input.Kind == DataKind.String
+            && DataValueComparer.IsNumericScalar(targetKind)
+            && TryParseStringToNumeric(input.AsString(), targetKind, out result))
         {
-            return TryParseStringToNumeric(input.AsString(), targetKind, out result);
+            return true;
         }
 
         switch ((input.Kind, targetKind))
@@ -217,64 +225,22 @@ public sealed class CastFunction : IFunction, IScalarFunction
         }
     }
 
-    private static bool IsNumericKind(DataKind kind) => kind switch
-    {
-        DataKind.Int8 or DataKind.UInt8 or
-        DataKind.Int16 or DataKind.UInt16 or
-        DataKind.Int32 or DataKind.UInt32 or
-        DataKind.Int64 or DataKind.UInt64 or
-        DataKind.Float32 or DataKind.Float64 => true,
-        _ => false,
-    };
-
-    private static bool TryGetAsDouble(ValueRef value, out double result)
-    {
-        switch (value.Kind)
-        {
-            case DataKind.UInt8: result = value.AsUInt8(); return true;
-            case DataKind.Int8: result = value.AsInt8(); return true;
-            case DataKind.Int16: result = value.AsInt16(); return true;
-            case DataKind.UInt16: result = value.AsUInt16(); return true;
-            case DataKind.Int32: result = value.AsInt32(); return true;
-            case DataKind.UInt32: result = value.AsUInt32(); return true;
-            case DataKind.Int64: result = value.AsInt64(); return true;
-            case DataKind.UInt64: result = value.AsUInt64(); return true;
-            case DataKind.Float32: result = value.AsFloat32(); return true;
-            case DataKind.Float64: result = value.AsFloat64(); return true;
-            default:
-                result = 0;
-                return false;
-        }
-    }
-
+    /// <summary>
+    /// Constructs a numeric <see cref="ValueRef"/> from a <see cref="double"/>
+    /// intermediate via <see cref="DataValueComparer.MakeNumeric"/>. Returns
+    /// <see langword="false"/> for non-numeric target kinds. Coverage is the
+    /// same as <see cref="DataValueComparer.IsNumericScalar"/>.
+    /// </summary>
     private static bool TryMakeNumeric(double value, DataKind targetKind, out ValueRef result)
     {
-        switch (targetKind)
+        DataValue? made = DataValueComparer.MakeNumeric(value, targetKind);
+        if (made.HasValue)
         {
-            case DataKind.Int8:
-                result = ValueRef.FromInt8((sbyte)value); return true;
-            case DataKind.UInt8:
-                result = ValueRef.FromUInt8((byte)value); return true;
-            case DataKind.Int16:
-                result = ValueRef.FromInt16((short)value); return true;
-            case DataKind.UInt16:
-                result = ValueRef.FromUInt16((ushort)value); return true;
-            case DataKind.Int32:
-                result = ValueRef.FromInt32((int)value); return true;
-            case DataKind.UInt32:
-                result = ValueRef.FromUInt32((uint)value); return true;
-            case DataKind.Int64:
-                result = ValueRef.FromInt64((long)value); return true;
-            case DataKind.UInt64:
-                result = ValueRef.FromUInt64((ulong)value); return true;
-            case DataKind.Float32:
-                result = ValueRef.FromFloat32((float)value); return true;
-            case DataKind.Float64:
-                result = ValueRef.FromFloat64(value); return true;
-            default:
-                result = default;
-                return false;
+            result = ValueRef.FromInline(made.Value);
+            return true;
         }
+        result = default;
+        return false;
     }
 
     private static bool TryParseStringToNumeric(string text, DataKind targetKind, out ValueRef result)
@@ -313,6 +279,18 @@ public sealed class CastFunction : IFunction, IScalarFunction
                 if (ulong.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong u64))
                 { result = ValueRef.FromUInt64(u64); return true; }
                 break;
+            case DataKind.Int128:
+                if (Int128.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out Int128 i128))
+                { result = ValueRef.FromInt128(i128); return true; }
+                break;
+            case DataKind.UInt128:
+                if (UInt128.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out UInt128 u128))
+                { result = ValueRef.FromUInt128(u128); return true; }
+                break;
+            case DataKind.Float16:
+                if (Half.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out Half f16))
+                { result = ValueRef.FromFloat16(f16); return true; }
+                break;
             case DataKind.Float32:
                 if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float f32))
                 { result = ValueRef.FromFloat32(f32); return true; }
@@ -320,6 +298,10 @@ public sealed class CastFunction : IFunction, IScalarFunction
             case DataKind.Float64:
                 if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double f64))
                 { result = ValueRef.FromFloat64(f64); return true; }
+                break;
+            case DataKind.Decimal:
+                if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal dec))
+                { result = ValueRef.FromDecimal(dec); return true; }
                 break;
         }
 
@@ -353,8 +335,12 @@ public sealed class CastFunction : IFunction, IScalarFunction
         DataKind.UInt32 => value.AsUInt32().ToString(CultureInfo.InvariantCulture),
         DataKind.Int64 => value.AsInt64().ToString(CultureInfo.InvariantCulture),
         DataKind.UInt64 => value.AsUInt64().ToString(CultureInfo.InvariantCulture),
+        DataKind.Int128 => value.AsInt128().ToString(CultureInfo.InvariantCulture),
+        DataKind.UInt128 => value.AsUInt128().ToString(CultureInfo.InvariantCulture),
+        DataKind.Float16 => value.AsFloat16().ToString(CultureInfo.InvariantCulture),
         DataKind.Float32 => value.AsFloat32().ToString(CultureInfo.InvariantCulture),
         DataKind.Float64 => value.AsFloat64().ToString(CultureInfo.InvariantCulture),
+        DataKind.Decimal => value.AsDecimal().ToString(CultureInfo.InvariantCulture),
         _ => throw new InvalidOperationException($"Not a numeric kind: {value.Kind}."),
     };
 }
