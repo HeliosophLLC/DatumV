@@ -234,7 +234,7 @@ The same wire format is used to pack `Struct` and legacy `Array` payloads into t
 
 The `.datum` format is intentionally simple — all acceleration structures live in separate sidecar files. The [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics. The sidecar's chunk grain is 10 K rows by default (configurable); the v2 chapter (64 K rows) is its natural size if you want chunk boundaries to align with footer-level zone-map chapters.
 
-The index format is unchanged across v1 and v2 source files — `Indexer` opens either format via the version-aware `DatumFileTableProvider.Open` factory. Sidecar-bound values are skipped at the bloom layer (recall trade for self-contained content addressing); the existing v1 rule of dropping non-inline strings from sorted/B+Tree indexes still applies.
+Sidecar-bound values are skipped at the bloom layer (recall trade for self-contained content addressing); columns with any non-inline string are dropped from sorted / B+Tree / bitmap indexing entirely (the "indexable = self-contained" rule).
 
 The index sidecar provides:
 
@@ -284,13 +284,13 @@ Per `VariableSlot` row whose inline bit is clear:
 
 ### Codec evolution
 
-The codec byte is reserved for future use; v1 always writes `Raw`:
+The codec byte is reserved for future use; the writer always emits `Raw` today:
 
 | Codec | Value | Notes |
 |-------|-------|-------|
-| `Raw` | 0 | Stored as-is. Only legal value in v1. |
-| `Zstd` | 1 | Reserved for v2.x — per-blob Zstd compression. |
-| `ZstdShuffle` | 2 | Reserved for v2.x — byte-shuffle pre-filter + Zstd. Intended for Vector/Matrix/Tensor where shuffle dramatically improves compression. |
+| `Raw` | 0 | Stored as-is. Only legal value today. |
+| `Zstd` | 1 | Reserved — per-blob Zstd compression. |
+| `ZstdShuffle` | 2 | Reserved — byte-shuffle pre-filter + Zstd. Intended for Vector/Matrix/Tensor where shuffle dramatically improves compression. |
 
 Per-blob codec means each value in a column can choose its own compression independently. The `Image` column might mix already-compressed JPEGs (codec=Raw) with uncompressed bitmaps that benefit from Zstd; the writer picks per blob.
 
@@ -369,7 +369,7 @@ Per-blob codec means each value in a column can choose its own compression indep
 | `DatumFile/V2/Decoding/PageDecoderFactoryV2.cs` | Picks the right decoder for a column descriptor |
 | `Catalog/Providers/DatumFileTableProviderV2.cs` | Engine-facing provider with three-tier zone-map pruning + seek session + manifest/index discovery |
 | `Catalog/Providers/DatumFileSeekSessionV2.cs` | Caller-owned seek session with page-index math (`pageIndex = startRow / pageSize`) |
-| `DatumFile/Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout — unchanged from v1 |
+| `DatumFile/Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout |
 | `DatumFile/Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
 | `DatumFile/Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |
 
