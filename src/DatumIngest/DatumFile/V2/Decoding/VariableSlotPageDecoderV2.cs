@@ -105,38 +105,24 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
     [MethodImpl(MethodImplOptions.NoInlining)]
     private DataValue DecodeInline(ReadOnlySpan<byte> payload)
     {
-        switch (_column.Kind)
+        if (_column.Kind == DataKind.String)
         {
-            case DataKind.String:
-            {
-                int charCount = System.Text.Encoding.UTF8.GetCharCount(payload);
-                return DataValue.FromUtf8Span(payload, charCount, store: null!);
-            }
-            case DataKind.UInt8 when _column.IsArray:
-                return DataValue.FromInlineArray<byte>(payload, DataKind.UInt8);
-            case DataKind.Int8 when _column.IsArray:
-                return DataValue.FromInlineArray<sbyte>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, sbyte>(payload), DataKind.Int8);
-            case DataKind.Int16 when _column.IsArray:
-                return DataValue.FromInlineArray<short>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(payload), DataKind.Int16);
-            case DataKind.UInt16 when _column.IsArray:
-                return DataValue.FromInlineArray<ushort>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(payload), DataKind.UInt16);
-            case DataKind.Int32 when _column.IsArray:
-                return DataValue.FromInlineArray<int>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(payload), DataKind.Int32);
-            case DataKind.UInt32 when _column.IsArray:
-                return DataValue.FromInlineArray<uint>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(payload), DataKind.UInt32);
-            case DataKind.Int64 when _column.IsArray:
-                return DataValue.FromInlineArray<long>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, long>(payload), DataKind.Int64);
-            case DataKind.UInt64 when _column.IsArray:
-                return DataValue.FromInlineArray<ulong>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ulong>(payload), DataKind.UInt64);
-            case DataKind.Float32 when _column.IsArray:
-                return DataValue.FromInlineArray<float>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(payload), DataKind.Float32);
-            case DataKind.Float64 when _column.IsArray:
-                return DataValue.FromInlineArray<double>(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, double>(payload), DataKind.Float64);
-            default:
-                throw new InvalidDataException(
-                    $"VariableSlot inline decode not implemented for column '{_column.Name}' " +
-                    $"(kind={_column.Kind}, isArray={_column.IsArray}).");
+            int charCount = System.Text.Encoding.UTF8.GetCharCount(payload);
+            return DataValue.FromUtf8Span(payload, charCount, store: null!);
         }
+
+        // All fixed-width typed-array kinds (UInt8/Int8/.../Float64, plus the new
+        // Float16/Decimal/Int128/UInt128) share the same inline payload layout: a
+        // contiguous run of element bytes packed into _p0–_p3. FromInlineArrayBytes
+        // derives the element count from payload length and the kind's element size.
+        if (_column.IsArray)
+        {
+            return DataValue.FromInlineArrayBytes(payload, _column.Kind);
+        }
+
+        throw new InvalidDataException(
+            $"VariableSlot inline decode not implemented for column '{_column.Name}' " +
+            $"(kind={_column.Kind}, isArray={_column.IsArray}).");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -156,14 +142,22 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         // Per-kind sidecar DataValue construction. Kinds without a sidecar
         // factory throw — adding one is a small DataValue.cs change when the
         // first scenario lands.
+        // Any fixed-width typed-array column (Kind + IsArray) routes through the
+        // generic sidecar factory: the bytes already live at (offset, length) in the
+        // sidecar, regardless of element kind. Must come before the per-kind arms so
+        // that, e.g., UInt8 + IsArray hits the array path rather than a hypothetical
+        // scalar UInt8 sidecar arm.
+        if (_column.IsArray)
+        {
+            return DataValue.FromArrayInSidecar(_column.Kind, offset, length, _sidecarStoreId);
+        }
+
         return _column.Kind switch
         {
             DataKind.String
                 => DataValue.FromStringInSidecar(offset, length, _sidecarStoreId),
             DataKind.Image
                 => DataValue.FromImageInSidecar(offset, length, _sidecarStoreId),
-            DataKind.UInt8 when _column.IsArray
-                => DataValue.FromByteArrayInSidecar(offset, length, _sidecarStoreId),
             DataKind.Struct
                 => DecodeStructEagerly(offset, length),
             DataKind.Array

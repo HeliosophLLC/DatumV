@@ -175,4 +175,126 @@ public sealed class InlineArrayTests : ServiceTestBase
             () => scalar.AsArraySpan<int>());
         Assert.Contains("non-array", ex.Message);
     }
+
+    // ─── New numeric kinds (Float16, Decimal, Int128, UInt128) ───
+
+    [Fact]
+    public void RoundTrip_Float16x8_FillsPayload()
+    {
+        // 8 × Half = 16 bytes — exactly fills the inline payload region.
+        Half[] source =
+        [
+            (Half)0.0f, (Half)1.0f, (Half)(-1.5f), (Half)2.5f,
+            (Half)(-3.25f), Half.NaN, Half.PositiveInfinity, Half.NegativeInfinity,
+        ];
+        DataValue value = DataValue.FromInlineArray<Half>(source, DataKind.Float16);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsInlineArray);
+        Assert.Equal(DataKind.Float16, value.Kind);
+
+        ReadOnlySpan<Half> recovered = value.AsArraySpan<Half>();
+        Assert.Equal(8, recovered.Length);
+        for (int i = 0; i < 6; i++) Assert.Equal(source[i], recovered[i]);
+        Assert.True(Half.IsNaN(recovered[5]));
+        Assert.True(Half.IsPositiveInfinity(recovered[6]));
+        Assert.True(Half.IsNegativeInfinity(recovered[7]));
+    }
+
+    [Fact]
+    public void RoundTrip_Decimalx1_FillsPayload()
+    {
+        // 1 × decimal = 16 bytes — exactly fills the inline payload region.
+        decimal[] source = [123456789.0123456789m];
+        DataValue value = DataValue.FromInlineArray<decimal>(source, DataKind.Decimal);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsInlineArray);
+        Assert.Equal(DataKind.Decimal, value.Kind);
+
+        ReadOnlySpan<decimal> recovered = value.AsArraySpan<decimal>();
+        Assert.Equal(1, recovered.Length);
+        Assert.Equal(123456789.0123456789m, recovered[0]);
+    }
+
+    [Fact]
+    public void RoundTrip_Int128x1_FillsPayload()
+    {
+        Int128[] source = [Int128.MaxValue];
+        DataValue value = DataValue.FromInlineArray<Int128>(source, DataKind.Int128);
+
+        Assert.True(value.IsArray);
+        Assert.Equal(DataKind.Int128, value.Kind);
+        ReadOnlySpan<Int128> recovered = value.AsArraySpan<Int128>();
+        Assert.Equal(Int128.MaxValue, recovered[0]);
+    }
+
+    [Fact]
+    public void RoundTrip_UInt128x1_FillsPayload()
+    {
+        UInt128[] source = [UInt128.MaxValue];
+        DataValue value = DataValue.FromInlineArray<UInt128>(source, DataKind.UInt128);
+
+        Assert.True(value.IsArray);
+        Assert.Equal(DataKind.UInt128, value.Kind);
+        ReadOnlySpan<UInt128> recovered = value.AsArraySpan<UInt128>();
+        Assert.Equal(UInt128.MaxValue, recovered[0]);
+    }
+
+    // ─── Arena-backed round-trips (large arrays via FromArenaArray) ───
+
+    [Fact]
+    public void RoundTrip_ArenaInt128_LongerThanInline()
+    {
+        // 4 × Int128 = 64 bytes — far past the 16-byte inline cap, must arena-back.
+        Int128[] source = [1, -2, Int128.MaxValue, Int128.MinValue];
+        Arena arena = new();
+
+        DataValue value = DataValue.FromArenaArray<Int128>(source, DataKind.Int128, arena);
+
+        Assert.True(value.IsArray);
+        Assert.False(value.IsInlineArray);
+        Assert.Equal(DataKind.Int128, value.Kind);
+
+        ReadOnlySpan<Int128> recovered = value.AsArraySpan<Int128>(arena);
+        Assert.Equal(source, recovered.ToArray());
+    }
+
+    [Fact]
+    public void RoundTrip_ArenaFloat16_LargeBatch()
+    {
+        // 100 Half elements = 200 bytes — exercises the arena path.
+        Half[] source = new Half[100];
+        for (int i = 0; i < source.Length; i++) source[i] = (Half)(i * 0.5f);
+
+        Arena arena = new();
+        DataValue value = DataValue.FromArenaArray<Half>(source, DataKind.Float16, arena);
+
+        Assert.False(value.IsInlineArray);
+        ReadOnlySpan<Half> recovered = value.AsArraySpan<Half>(arena);
+        Assert.Equal(source, recovered.ToArray());
+    }
+
+    [Fact]
+    public void FromInlineArrayBytes_RejectsNonMultipleOfElementSize()
+    {
+        // 5 bytes is not a multiple of 4 (Float32 element size).
+        byte[] payload = [1, 2, 3, 4, 5];
+        Assert.Throws<ArgumentException>(
+            () => DataValue.FromInlineArrayBytes(payload, DataKind.Float32));
+    }
+
+    [Fact]
+    public void FromInlineArrayBytes_DerivesElementCount_FromKindStride()
+    {
+        // 12 bytes, Int32 stride = 4 → 3 elements.
+        byte[] payload = new byte[12];
+        BitConverter.GetBytes(7).CopyTo(payload, 0);
+        BitConverter.GetBytes(11).CopyTo(payload, 4);
+        BitConverter.GetBytes(13).CopyTo(payload, 8);
+
+        DataValue value = DataValue.FromInlineArrayBytes(payload, DataKind.Int32);
+        ReadOnlySpan<int> recovered = value.AsArraySpan<int>();
+        Assert.Equal(new[] { 7, 11, 13 }, recovered.ToArray());
+    }
 }

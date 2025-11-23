@@ -241,6 +241,16 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                 "sidecar values should pass through Append's IsInSidecar branch, not arrive here.");
         }
 
+        // Any fixed-width typed-array value (Kind + IsArray, arena-backed) — bytes
+        // already live contiguously at (_p0, _p1) in the store, regardless of element
+        // kind. AsArraySpan<byte> is the universal byte-level reader. Must run before
+        // the per-kind arms so byte arrays (UInt8 + IsArray) hit this path rather than
+        // a scalar arm.
+        if (value.IsArray)
+        {
+            return value.AsArraySpan<byte>(store!);
+        }
+
         // Arena-backed paths — kind dispatch picks the right read-side accessor.
         return value.Kind switch
         {
@@ -248,10 +258,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                 => value.AsUtf8Span(store!),
 
             DataKind.Image
-                => value.AsByteSpan(store!),
-
-            // Byte arrays — UInt8 with the IsArray flag.
-            DataKind.UInt8 when value.IsArray
                 => value.AsByteSpan(store!),
 
             DataKind.Vector

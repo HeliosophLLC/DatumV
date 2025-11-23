@@ -382,7 +382,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// the right <see cref="IBlobSource"/>. Defaults to 0 (single-sidecar / first-registered).
     /// </param>
     public static DataValue FromByteArrayInSidecar(long offset, long length, byte storeId = 0) =>
-        BuildSidecar(DataKind.UInt8, offset, length, storeId, isArray: true);
+        FromArrayInSidecar(DataKind.UInt8, offset, length, storeId);
+
+    /// <summary>
+    /// Creates a typed-array value (<paramref name="elementKind"/> + <see cref="DataValueFlags.IsArray"/>)
+    /// whose element bytes live in a <c>.datum-blob</c> sidecar. Generalisation of
+    /// <see cref="FromByteArrayInSidecar"/> for any fixed-width element kind. The
+    /// DataValue carries 64-bit absolute offset and 40-bit length; resolution requires
+    /// an <see cref="IBlobSource"/> via the per-query <see cref="SidecarRegistry"/>.
+    /// </summary>
+    /// <param name="elementKind">The fixed-width element kind (e.g. <see cref="DataKind.Float32"/>).</param>
+    /// <param name="offset">Absolute byte offset into the sidecar file (includes header).</param>
+    /// <param name="length">Number of bytes; 0 ≤ length ≤ <c>2^40 − 1</c> (~1 TiB).</param>
+    /// <param name="storeId">
+    /// The byte assigned by the per-query <see cref="DatumFile.Sidecar.SidecarRegistry"/>.
+    /// Resolved at access time. Defaults to 0 (single-sidecar / first-registered).
+    /// </param>
+    public static DataValue FromArrayInSidecar(DataKind elementKind, long offset, long length, byte storeId = 0) =>
+        BuildSidecar(elementKind, offset, length, storeId, isArray: true);
 
     /// <summary>
     /// Creates a <see cref="DataKind.String"/> value whose UTF-8 bytes live in a
@@ -604,29 +621,52 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </exception>
     public static DataValue FromInlineArray<T>(ReadOnlySpan<T> elements, DataKind elementKind)
         where T : unmanaged
+        => FromInlineArrayBytes(MemoryMarshal.AsBytes(elements), elementKind);
+
+    /// <summary>
+    /// Creates an inline typed-array value from raw bytes, deriving the element count
+    /// from <paramref name="bytes"/>.Length and <see cref="ElementByteSize"/>(<paramref name="elementKind"/>).
+    /// Used by the v2 decoder and any caller that already has the byte payload — the
+    /// <see cref="FromInlineArray{T}"/> overload is a typed wrapper for callers with
+    /// element-typed spans.
+    /// </summary>
+    /// <remarks>
+    /// The flag layout, payload packing, and 16-byte cap are identical to
+    /// <see cref="FromInlineArray{T}"/>; this is the single packing implementation both
+    /// factories share. Callers must ensure <paramref name="bytes"/>.Length is a
+    /// multiple of <see cref="ElementByteSize"/>(<paramref name="elementKind"/>).
+    /// </remarks>
+    public static DataValue FromInlineArrayBytes(ReadOnlySpan<byte> bytes, DataKind elementKind)
     {
-        int elementSize = Unsafe.SizeOf<T>();
-        int byteCount = elements.Length * elementSize;
-        if (byteCount > InlineArrayMaxBytes)
+        int elementSize = ElementByteSize(elementKind);
+        if (bytes.Length % elementSize != 0)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(elements), elements.Length,
-                $"Inline array payload {byteCount} bytes ({elements.Length} × {elementSize}) " +
-                $"exceeds the {InlineArrayMaxBytes}-byte limit. Use the arena-backed array factory instead.");
+            throw new ArgumentException(
+                $"Inline array byte length {bytes.Length} is not a multiple of element size " +
+                $"{elementSize} for DataKind.{elementKind}.",
+                nameof(bytes));
         }
-        if (elements.Length > byte.MaxValue)
+        if (bytes.Length > InlineArrayMaxBytes)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(elements), elements.Length,
-                $"Inline array element count {elements.Length} exceeds the 255-element field cap.");
+                nameof(bytes), bytes.Length,
+                $"Inline array payload {bytes.Length} bytes exceeds the {InlineArrayMaxBytes}-byte " +
+                "limit. Use the arena-backed array factory instead.");
+        }
+        int elementCount = bytes.Length / elementSize;
+        if (elementCount > byte.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(bytes), elementCount,
+                $"Inline array element count {elementCount} exceeds the 255-element field cap.");
         }
 
-        // Pack element bytes into the four payload words via a stack buffer. The buffer
-        // is 16 bytes (= InlineArrayMaxBytes), and the validated byteCount fits within
-        // it, so the unfilled tail stays zero — readers slice by element count, not by
-        // buffer size, so the trailing zeros don't leak.
+        // Pack bytes into the four payload words via a stack buffer. The buffer is 16
+        // bytes (= InlineArrayMaxBytes); the validated byteCount fits within it, so the
+        // unfilled tail stays zero — readers slice by element count, not by buffer
+        // size, so the trailing zeros don't leak.
         Span<byte> buffer = stackalloc byte[InlineArrayMaxBytes];
-        MemoryMarshal.AsBytes(elements).CopyTo(buffer);
+        bytes.CopyTo(buffer);
 
         int p0 = MemoryMarshal.Read<int>(buffer[..4]);
         int p1 = MemoryMarshal.Read<int>(buffer[4..8]);
@@ -637,7 +677,33 @@ public readonly struct DataValue : IEquatable<DataValue>
             elementKind,
             flags: DataValueFlags.IsArray | DataValueFlags.InlineArray,
             p0: p0, p1: p1, p2: p2, p3: p3,
-            charCount: (ushort)elements.Length);
+            charCount: (ushort)elementCount);
+    }
+
+    /// <summary>
+    /// Creates an arena-backed typed-array value from a span of elements. Bytes are
+    /// written contiguously to <paramref name="store"/>; the resulting DataValue carries
+    /// <see cref="DataKind"/> = <paramref name="elementKind"/> with
+    /// <see cref="DataValueFlags.IsArray"/> | <see cref="DataValueFlags.InArena"/> set.
+    /// Use <see cref="AsArraySpan{T}"/> to read.
+    /// </summary>
+    /// <typeparam name="T">
+    /// Element type. Must be unmanaged and must match <paramref name="elementKind"/>'s
+    /// storage shape — caller is responsible (e.g. <c>T = float</c> for
+    /// <see cref="DataKind.Float32"/>). The store sees only bytes; mismatched T/kind
+    /// pairings produce silently wrong reads.
+    /// </typeparam>
+    public static DataValue FromArenaArray<T>(
+        ReadOnlySpan<T> elements,
+        DataKind elementKind,
+        IValueStore store)
+        where T : unmanaged
+    {
+        var (p0, p1) = store.StoreBytes(MemoryMarshal.AsBytes(elements));
+        return new(
+            elementKind,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray,
+            p0: p0, p1: p1);
     }
 
     /// <summary>
