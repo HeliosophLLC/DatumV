@@ -66,8 +66,6 @@ internal static class DataValueReader
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString(), store),
             DataKind.Vector => ReadVector(reader, store),
-            DataKind.Matrix => ReadMatrix(reader, store),
-            DataKind.Tensor => ReadTensor(reader, store),
             DataKind.Image => ReadImage(reader, store),
             DataKind.Boolean => DataValue.FromBoolean(reader.ReadBoolean()),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
@@ -102,8 +100,6 @@ internal static class DataValueReader
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString()),
             DataKind.Vector => ReadVector(reader),
-            DataKind.Matrix => ReadMatrix(reader),
-            DataKind.Tensor => ReadTensor(reader),
             DataKind.Image => ReadImage(reader),
             DataKind.Boolean => DataValue.FromBoolean(reader.ReadBoolean()),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
@@ -156,54 +152,6 @@ internal static class DataValueReader
         for (int i = 0; i < length; i++)
             values[i] = reader.ReadSingle();
         return DataValue.FromVector(values, store);
-    }
-
-    private static DataValue ReadMatrix(BinaryReader reader)
-    {
-        int rows = reader.ReadInt32();
-        int columns = reader.ReadInt32();
-        int dataLength = reader.ReadInt32();
-        float[] values = new float[dataLength];
-        for (int i = 0; i < dataLength; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromMatrix(values, rows, columns);
-    }
-
-    private static DataValue ReadMatrix(BinaryReader reader, IValueStore store)
-    {
-        int rows = reader.ReadInt32();
-        int columns = reader.ReadInt32();
-        int dataLength = reader.ReadInt32();
-        float[] values = new float[dataLength];
-        for (int i = 0; i < dataLength; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromMatrix(values, rows, columns, store);
-    }
-
-    private static DataValue ReadTensor(BinaryReader reader)
-    {
-        int rank = reader.ReadInt32();
-        int[] shape = new int[rank];
-        for (int i = 0; i < rank; i++)
-            shape[i] = reader.ReadInt32();
-        int dataLength = reader.ReadInt32();
-        float[] values = new float[dataLength];
-        for (int i = 0; i < dataLength; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromTensor(values, shape);
-    }
-
-    private static DataValue ReadTensor(BinaryReader reader, IValueStore store)
-    {
-        int rank = reader.ReadInt32();
-        int[] shape = new int[rank];
-        for (int i = 0; i < rank; i++)
-            shape[i] = reader.ReadInt32();
-        int dataLength = reader.ReadInt32();
-        float[] values = new float[dataLength];
-        for (int i = 0; i < dataLength; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromTensor(values, shape, store);
     }
 
     private static DataValue ReadImage(BinaryReader reader)

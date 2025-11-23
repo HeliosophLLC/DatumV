@@ -68,7 +68,7 @@ public sealed record ColumnDescriptorV2(
             // or sidecar-pointer. Byte-array columns reach VariableSlot via
             // the IsArray short-circuit at the top of this method.
             DataKind.String or DataKind.JsonValue
-                or DataKind.Vector or DataKind.Matrix or DataKind.Tensor
+                or DataKind.Vector
                 or DataKind.Image
                 or DataKind.Array or DataKind.Struct
                 => EncoderKind.VariableSlot,

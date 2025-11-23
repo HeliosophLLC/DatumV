@@ -19,7 +19,6 @@ public sealed record FrequencyEntry(string Value, long Frequency);
 [JsonDerivedType(typeof(NumericFeatureManifest), "numeric")]
 [JsonDerivedType(typeof(StringFeatureManifest), "string")]
 [JsonDerivedType(typeof(VectorFeatureManifest), "vector")]
-[JsonDerivedType(typeof(TensorFeatureManifest), "tensor")]
 [JsonDerivedType(typeof(ImageFeatureManifest), "image")]
 [JsonDerivedType(typeof(BinaryFeatureManifest), "binary")]
 [JsonDerivedType(typeof(TemporalFeatureManifest), "temporal")]
@@ -250,45 +249,6 @@ public sealed class VectorFeatureManifest : FeatureManifest
     public required double NormMax { get; init; }
 
     /// <summary>Gets the mean L2 norm across all vectors.</summary>
-    public required double NormMean { get; init; }
-}
-
-/// <summary>
-/// Feature manifest for multi-dimensional tensor columns (<see cref="DataKind.Matrix"/>, <see cref="DataKind.Tensor"/>).
-/// </summary>
-public sealed class TensorFeatureManifest : FeatureManifest
-{
-    /// <summary>Gets the minimum rank (number of dimensions) observed.</summary>
-    public required int MinRank { get; init; }
-
-    /// <summary>Gets the maximum rank observed.</summary>
-    public required int MaxRank { get; init; }
-
-    /// <summary>Gets the minimum total element count.</summary>
-    public required int MinElementCount { get; init; }
-
-    /// <summary>Gets the maximum total element count.</summary>
-    public required int MaxElementCount { get; init; }
-
-    /// <summary>Gets aggregate element-wise numeric statistics across all tensors.</summary>
-    public required NumericSummaryData ElementStats { get; init; }
-
-    /// <summary>Gets the total number of elements exactly equal to zero.</summary>
-    public required long ZeroElementCount { get; init; }
-
-    /// <summary>Gets the ratio of zero elements to total element count.</summary>
-    public required double ZeroElementRatio { get; init; }
-
-    /// <summary>Gets the number of tensors where every element is zero.</summary>
-    public required long ZeroVectorCount { get; init; }
-
-    /// <summary>Gets the minimum L2 norm across all tensors.</summary>
-    public required double NormMin { get; init; }
-
-    /// <summary>Gets the maximum L2 norm across all tensors.</summary>
-    public required double NormMax { get; init; }
-
-    /// <summary>Gets the mean L2 norm across all tensors.</summary>
     public required double NormMean { get; init; }
 }
 

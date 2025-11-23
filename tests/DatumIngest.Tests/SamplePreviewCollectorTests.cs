@@ -119,37 +119,6 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     }
 
     [Fact]
-    public void ConvertValue_Matrix_ReturnsNestedArrays()
-    {
-        float[] data = [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromMatrix(data, 2, 3, _arena), _arena);
-
-        object[][] matrix = Assert.IsType<object[][]>(result);
-        Assert.Equal(2, matrix.Length);
-        Assert.Equal(3, matrix[0].Length);
-        Assert.Equal(1.0f, matrix[0][0]);
-        Assert.Equal(4.0f, matrix[1][0]);
-        Assert.Equal(6.0f, matrix[1][2]);
-    }
-
-    [Fact]
-    public void ConvertValue_Tensor_ReturnsNestedArrays()
-    {
-        float[] data = [1, 2, 3, 4, 5, 6, 7, 8];
-        int[] shape = [2, 2, 2];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromTensor(data, shape, _arena), _arena);
-
-        object[] outer = Assert.IsType<object[]>(result);
-        Assert.Equal(2, outer.Length);
-        object[] middle = Assert.IsType<object[]>(outer[0]);
-        Assert.Equal(2, middle.Length);
-        object[] inner = Assert.IsType<object[]>(middle[0]);
-        Assert.Equal(2, inner.Length);
-        Assert.Equal(1.0f, inner[0]);
-        Assert.Equal(2.0f, inner[1]);
-    }
-
-    [Fact]
     public void ConvertValue_UInt8Array_ReturnsSentinel()
     {
         object? result = SamplePreviewCollector.ConvertValue(

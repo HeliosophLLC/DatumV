@@ -32,8 +32,6 @@ public class DataKindTests : ServiceTestBase
             DataKind.Uuid,
             DataKind.Image,
             DataKind.Vector,
-            DataKind.Matrix,
-            DataKind.Tensor,
             DataKind.Array,
             DataKind.Struct,
         ];
@@ -46,8 +44,6 @@ public class DataKindTests : ServiceTestBase
     [Theory]
     [InlineData(DataKind.Float32)]
     [InlineData(DataKind.Vector)]
-    [InlineData(DataKind.Matrix)]
-    [InlineData(DataKind.Tensor)]
     [InlineData(DataKind.UInt8)]
     public void NumericKindsHaveDistinctValues(DataKind kind)
     {
@@ -55,12 +51,13 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsTwentySix()
+    public void TotalEnumMemberCountIsTwentyFour()
     {
-        // Was 27 before the UInt8Array enum entry was retired in favour of
-        // Kind=UInt8 + IsArray flag for byte-array columns.
+        // Was 27 before UInt8Array (-1), Matrix (-1), Tensor (-1) were retired.
+        // Byte arrays use Kind=UInt8 + IsArray flag; multi-rank float tensors
+        // are deferred to the typed-array consolidation effort.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(26, allValues.Length);
+        Assert.Equal(24, allValues.Length);
     }
 
     [Fact]

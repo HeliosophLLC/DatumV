@@ -144,8 +144,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
         DataKind.JsonValue => DataValue.FromJsonValue("{\"key\":\"value\"}"),
         DataKind.Vector   => DataValue.FromVector([1.0f, 2.0f, 3.0f]),
-        DataKind.Matrix   => DataValue.FromMatrix([1f, 2f, 3f, 4f], 2, 2),
-        DataKind.Tensor   => DataValue.FromTensor([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f], [2, 2, 2]),
         DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
         DataKind.Array    => DataValue.FromArray(
             DataKind.Float32, [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
@@ -219,19 +217,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 break;
             case DataKind.Vector:
                 Assert.Equal(expected.AsVector(), actual.AsVector());
-                break;
-            case DataKind.Matrix:
-                float[] expectedMatrix = expected.AsMatrix(out int er, out int ec);
-                float[] actualMatrix = actual.AsMatrix(out int ar, out int ac);
-                Assert.Equal(er, ar);
-                Assert.Equal(ec, ac);
-                Assert.Equal(expectedMatrix, actualMatrix);
-                break;
-            case DataKind.Tensor:
-                float[] expectedTensor = expected.AsTensor(out int[] es);
-                float[] actualTensor = actual.AsTensor(out int[] aShape);
-                Assert.Equal(es, aShape);
-                Assert.Equal(expectedTensor, actualTensor);
                 break;
             case DataKind.Image:
                 Assert.Equal(expected.AsImage(), actual.AsImage());

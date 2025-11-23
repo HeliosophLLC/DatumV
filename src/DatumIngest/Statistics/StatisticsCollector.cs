@@ -165,7 +165,7 @@ public sealed class StatisticsCollector
         // would just return the row count. Perceptual-hash cardinality is available
         // on demand via the phash() SQL function.
         if (!isByteArray
-            && kind is not (DataKind.Image or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
+            && kind is not (DataKind.Image or DataKind.Vector or DataKind.Array or DataKind.Struct))
         {
             accumulators.Add(new CardinalityAccumulator());
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
@@ -185,7 +185,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new StringLengthAccumulator());
         }
 
-        if (kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor)
+        if (kind == DataKind.Vector)
         {
             accumulators.Add(new VectorStatsAccumulator());
         }

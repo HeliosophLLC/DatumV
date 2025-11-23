@@ -50,18 +50,6 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
                 elementCount = elements.Length;
                 break;
 
-            case DataKind.Matrix:
-                elements = value.AsMatrix(store, out int rows, out int cols);
-                rank = 2;
-                elementCount = rows * cols;
-                break;
-
-            case DataKind.Tensor:
-                elements = value.AsTensor(store, out int[] shape);
-                rank = shape.Length;
-                elementCount = elements.Length;
-                break;
-
             default:
                 return;
         }

@@ -111,8 +111,6 @@ public static class TypeCoercion
             DataKind.Float32 => DataKind.Float64,
             DataKind.Duration => DataKind.Float64,
             DataKind.Float64 => DataKind.Vector,
-            DataKind.Vector => DataKind.Tensor,
-            DataKind.Matrix => DataKind.Tensor,
             _ => null,
         };
     }
@@ -136,8 +134,6 @@ public static class TypeCoercion
             DataKind.Float32 => DataValue.FromFloat64(value.AsFloat32()),
             DataKind.Duration => DataValue.FromFloat64(value.AsDuration().TotalSeconds),
             DataKind.Float64 => DataValue.FromVector([(float)value.AsFloat64()]),
-            DataKind.Vector => value.ToTensor(),
-            DataKind.Matrix => value.ToTensor(),
             _ => throw new InvalidOperationException($"No widening step exists for {value.Kind}."),
         };
     }

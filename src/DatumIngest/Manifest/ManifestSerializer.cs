@@ -89,7 +89,6 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(NumericFeatureManifest))]
 [JsonSerializable(typeof(StringFeatureManifest))]
 [JsonSerializable(typeof(VectorFeatureManifest))]
-[JsonSerializable(typeof(TensorFeatureManifest))]
 [JsonSerializable(typeof(ImageFeatureManifest))]
 [JsonSerializable(typeof(BinaryFeatureManifest))]
 [JsonSerializable(typeof(TemporalFeatureManifest))]

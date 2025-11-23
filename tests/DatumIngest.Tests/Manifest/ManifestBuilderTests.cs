@@ -93,25 +93,6 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
-    public void Build_MatrixColumn_ProducesTensorFeatureManifest()
-    {
-        ColumnLookup columnLookup = new (["weights"]);
-        StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(columnLookup, DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena)), _arena);
-
-        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["weights"] = DataKind.Matrix };
-
-        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 1);
-
-        TensorFeatureManifest feature = Assert.IsType<TensorFeatureManifest>(manifest.Features[0]);
-        Assert.Equal(2, feature.MinRank);
-        Assert.Equal(2, feature.MaxRank);
-        Assert.Equal(4, feature.MinElementCount);
-        Assert.Equal(4, feature.MaxElementCount);
-    }
-
-    [Fact]
     public void Build_BinaryColumn_ProducesBinaryFeatureManifest()
     {
         ColumnLookup columnLookup = new (["raw"]);

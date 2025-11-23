@@ -425,17 +425,6 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
         Assert.Equal(ColumnRole.Structural, role);
     }
 
-    [Fact]
-    public void Classify_Tensor_ReturnsStructural()
-    {
-        FeatureManifest manifest = MakeFallbackManifest(
-            DataKind.Tensor, estimatedDistinctCount: 100, nullRatio: 0.0);
-
-        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000);
-
-        Assert.Equal(ColumnRole.Structural, role);
-    }
-
     // ─────────────── ManifestBuilder integration ───────────────
 
     [Fact]

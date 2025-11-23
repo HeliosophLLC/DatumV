@@ -257,12 +257,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Vector
                 => MemoryMarshal.AsBytes(value.AsVector(store!).AsSpan()),
 
-            DataKind.Matrix
-                => MemoryMarshal.AsBytes(value.AsMatrix(store!, out _, out _).AsSpan()),
-
-            DataKind.Tensor
-                => MemoryMarshal.AsBytes(value.AsTensor(store!, out _).AsSpan()),
-
             DataKind.Struct
                 => SerializeStructFields(value, store!),
 

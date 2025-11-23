@@ -182,7 +182,6 @@ public static class ManifestBuilder
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
@@ -292,39 +291,6 @@ public static class ManifestBuilder
             TopKValues = topK,
             MinLength = vectorResult.MinElementCount,
             MaxLength = vectorResult.MaxElementCount,
-            ElementStats = ToSummaryData(vectorResult.ElementStats),
-            ZeroElementCount = vectorResult.ZeroElementCount,
-            ZeroElementRatio = vectorResult.ZeroElementRatio,
-            ZeroVectorCount = vectorResult.ZeroVectorCount,
-            NormMin = vectorResult.NormMin,
-            NormMax = vectorResult.NormMax,
-            NormMean = vectorResult.NormMean
-        };
-    }
-
-    private static TensorFeatureManifest BuildTensorManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
-        IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
-    {
-        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ?? VectorStatsResult.Empty;
-
-        return new TensorFeatureManifest
-        {
-            Name = name,
-            Kind = kind,
-            IsArray = true,
-            Count = count,
-            NullCount = nullCount,
-            ValidCount = count,
-            NullRatio = nullRatio,
-            DominantValueRatio = dominantValueRatio,
-            MissingRuns = missingRuns,
-            EstimatedDistinctCount = distinctCount,
-            TopKValues = topK,
-            MinRank = vectorResult.MinRank,
-            MaxRank = vectorResult.MaxRank,
-            MinElementCount = vectorResult.MinElementCount,
-            MaxElementCount = vectorResult.MaxElementCount,
             ElementStats = ToSummaryData(vectorResult.ElementStats),
             ZeroElementCount = vectorResult.ZeroElementCount,
             ZeroElementRatio = vectorResult.ZeroElementRatio,

@@ -195,8 +195,6 @@ internal sealed class SamplePreviewCollector
         {
             // Composite types need recursive conversion for JSON nesting.
             DataKind.Vector => ConvertVector(value.AsVector(store)),
-            DataKind.Matrix => ConvertMatrix(value, store),
-            DataKind.Tensor => ConvertTensor(value, store),
             DataKind.Image => ConvertImage(value, store),
             DataKind.Array => ConvertArray(value, store),
             DataKind.Struct => ConvertStruct(value, store),
@@ -221,62 +219,6 @@ internal sealed class SamplePreviewCollector
         for (int i = 0; i < vector.Length; i++)
         {
             result[i] = vector[i];
-        }
-
-        return result;
-    }
-
-    /// <summary>Converts a matrix to a nested array of arrays.</summary>
-    private static object ConvertMatrix(DataValue value, IValueStore store)
-    {
-        float[] data = value.AsMatrix(store, out int rows, out int columns);
-        object[][] result = new object[rows][];
-        for (int r = 0; r < rows; r++)
-        {
-            object[] row = new object[columns];
-            for (int c = 0; c < columns; c++)
-            {
-                row[c] = data[r * columns + c];
-            }
-
-            result[r] = row;
-        }
-
-        return result;
-    }
-
-    /// <summary>Converts an arbitrary-rank tensor to recursively nested arrays.</summary>
-    private static object ConvertTensor(DataValue value, IValueStore store)
-    {
-        float[] data = value.AsTensor(store, out int[] shape);
-        return BuildNestedArray(data, shape, offset: 0, dimension: 0);
-    }
-
-    /// <summary>Recursively builds nested arrays for tensor dimensions.</summary>
-    private static object BuildNestedArray(float[] data, int[] shape, int offset, int dimension)
-    {
-        if (dimension == shape.Length - 1)
-        {
-            // Leaf dimension — return flat float array.
-            object[] leaf = new object[shape[dimension]];
-            for (int i = 0; i < shape[dimension]; i++)
-            {
-                leaf[i] = data[offset + i];
-            }
-
-            return leaf;
-        }
-
-        int stride = 1;
-        for (int d = dimension + 1; d < shape.Length; d++)
-        {
-            stride *= shape[d];
-        }
-
-        object[] result = new object[shape[dimension]];
-        for (int i = 0; i < shape[dimension]; i++)
-        {
-            result[i] = BuildNestedArray(data, shape, offset + i * stride, dimension + 1);
         }
 
         return result;

@@ -73,8 +73,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// inline) tells where the bytes live; this flag tells how to interpret them.
         /// New typed-array kinds (UInt8[], Int32[], Float64[], Date[], …) all come into
         /// existence via <c>Kind + IsArray</c>. Legacy multi-dimensional array kinds
-        /// (<see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
-        /// <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/>) predate this flag
+        /// (<see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/>) predate this flag
         /// and don't set it; <see cref="DataValue.IsArray"/> reports <c>true</c> for both.
         /// </summary>
         IsArray = 0x08,
@@ -183,8 +182,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///   </description></item>
     ///   <item><description>
     ///     <see cref="Kind"/> is one of the legacy multi-dimensional array kinds —
-    ///     <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
-    ///     <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/> — which predate
+    ///     <see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/> — which predate
     ///     the flag and don't set it. Treated as arrays so callers don't need to know
     ///     the migration history.
     ///   </description></item>
@@ -195,8 +193,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     public bool IsArray =>
         (_flags & DataValueFlags.IsArray) != 0
         || _kind is DataKind.Vector
-            or DataKind.Matrix
-            or DataKind.Tensor
             or DataKind.Array;
 
     /// <summary>
@@ -485,46 +481,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Vector, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
-    /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromMatrix(float[], int, int, IValueStore)"/> instead.</remarks>
-    public static DataValue FromMatrix(float[] data, int rows, int columns) =>
-        throw new InvalidOperationException("Use FromMatrix(data, rows, columns, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates a rank-2 tensor (matrix) using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromMatrix(float[] data, int rows, int columns, IValueStore store)
-    {
-        if (data.Length != rows * columns)
-        {
-            throw new ArgumentException(
-                $"Data length {data.Length} does not match shape {rows}x{columns}.");
-        }
-
-        var (p0, _) = store.StoreFloats(data);
-        return new(DataKind.Matrix, flags: DataValueFlags.InArena, p0: p0, p1: rows, p2: columns);
-    }
-
-    /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromTensor(float[], int[], IValueStore)"/> instead.</remarks>
-    public static DataValue FromTensor(float[] data, int[] shape) =>
-        throw new InvalidOperationException("Use FromTensor(data, shape, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates an arbitrary-rank tensor using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromTensor(float[] data, int[] shape, IValueStore store)
-    {
-        int expectedLength = 1;
-        foreach (int dimension in shape)
-            expectedLength *= dimension;
-
-        if (data.Length != expectedLength)
-        {
-            throw new ArgumentException(
-                $"Data length {data.Length} does not match shape [{string.Join(", ", shape)}].");
-        }
-
-        var (p0, p1) = store.StoreTensor(data, shape);
-        return new(DataKind.Tensor, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: expectedLength);
-    }
-
     /// <summary>Creates a value from encoded image bytes.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImage(byte[], IValueStore)"/> instead.</remarks>
     public static DataValue FromImage(byte[] value) =>
@@ -748,10 +704,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///   <item><description>Arena-backed values produced via the new <c>IsArray</c> flag model: byte-level read from <paramref name="store"/>.</description></item>
     /// </list>
     /// <para>
-    /// The legacy array kinds (<see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
-    /// <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/>) without the new
+    /// The legacy array kinds (<see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/>) without the new
     /// <c>IsArray</c> flag still go through their dedicated accessors
-    /// (<c>AsVector</c>, <c>AsMatrix</c>, etc.) and throw here. They will fold into
+    /// (<c>AsVector</c>, <c>AsArray</c>, etc.) and throw here. They will fold into
     /// this auto-router as part of the deferred kind-consolidation cleanup.
     /// </para>
     /// </remarks>
@@ -801,7 +756,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         // until the kind-consolidation cleanup folds them into the IsArray-flag model.
         throw new InvalidOperationException(
             $"AsArraySpan does not yet route DataKind.{_kind} arrays. " +
-            "Use the kind-specific accessor (AsVector / AsMatrix / AsTensor / AsArray) for legacy arrays.");
+            "Use the kind-specific accessor (AsVector / AsArray) for legacy arrays.");
     }
 
     /// <summary>
@@ -1747,8 +1702,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///   <item>Byte arrays (UInt8 + IsArray), <see cref="DataKind.Image"/>:
     ///     byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
     ///   <item><see cref="DataKind.Vector"/>: float count × 4 (<c>_p1 * 4</c>, arena-only).</item>
-    ///   <item><see cref="DataKind.Matrix"/>: rows × columns × 4 (<c>_p1 * _p2 * 4</c>, arena-only).</item>
-    ///   <item><see cref="DataKind.Tensor"/>: element count × 4 (<c>_p2 * 4</c>, arena-only).</item>
     ///   <item>Inline arrays (<see cref="IsInlineArray"/>): element count × element size.</item>
     ///   <item>All other kinds (inline scalars, null, sidecar): <c>0</c>.</item>
     /// </list>
@@ -1772,8 +1725,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             {
                 DataKind.String or DataKind.JsonValue => _p1,
                 DataKind.Vector => _p1 * 4,
-                DataKind.Matrix => _p1 * _p2 * 4,
-                DataKind.Tensor => _p2 * 4,
                 _ => 0,
             };
         }
@@ -1820,8 +1771,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <list type="bullet">
     /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>
     /// <item>Byte arrays (<see cref="DataKind.UInt8"/> + <see cref="IsArray"/>): number of bytes (<c>_p1</c>)</item>
-    /// <item><see cref="DataKind.Matrix"/>: rows × columns (<c>_p1 * _p2</c>)</item>
-    /// <item><see cref="DataKind.Tensor"/>: total elements (<c>_p2</c>, cached at creation)</item>
     /// </list>
     /// </summary>
     /// <returns>The element count, or -1 if not available inline.</returns>
@@ -1833,8 +1782,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             return _kind switch
             {
                 DataKind.Vector => _p1,
-                DataKind.Matrix => _p1 * _p2,
-                DataKind.Tensor when _p2 != 0 => _p2,
                 _ => -1,
             };
         }
@@ -1942,43 +1889,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.Vector);
         return store.RetrieveFloats(_p0, _p1);
-    }
-
-    /// <summary>Returns the matrix (rank-2) flat float array and its dimensions.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsMatrix(IValueStore, out int, out int)"/> instead.</remarks>
-    public float[] AsMatrix(out int rows, out int columns)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Matrix);
-        rows = _p1;
-        columns = _p2;
-        throw new InvalidOperationException("Use AsMatrix(store, out rows, out columns). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>Returns the matrix (rank-2) flat float array and its dimensions from an explicit <see cref="IValueStore"/>.</summary>
-    public float[] AsMatrix(IValueStore store, out int rows, out int columns)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Matrix);
-        rows = _p1;
-        columns = _p2;
-        return store.RetrieveFloats(_p0, _p1 * _p2);
-    }
-
-    /// <summary>Returns the tensor flat float array and its shape.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsTensor(IValueStore, out int[])"/> instead.</remarks>
-    public float[] AsTensor(out int[] shape)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Tensor);
-        shape = [];
-        throw new InvalidOperationException("Use AsTensor(store, out shape). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>Returns the tensor flat float array and its shape from an explicit <see cref="IValueStore"/>.</summary>
-    public float[] AsTensor(IValueStore store, out int[] shape)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Tensor);
-        return store.RetrieveTensor(_p0, _p1, out shape);
     }
 
     /// <summary>
@@ -2178,86 +2088,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
     }
 
-    // ───────────────────── Zero-copy conversions ──────────────────────
-
-    /// <summary>
-    /// Converts a <see cref="DataKind.Vector"/> or <see cref="DataKind.Matrix"/> to a
-    /// <see cref="DataKind.Tensor"/> using an explicit store.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Called on a non-vector, non-matrix value.</exception>
-    public DataValue ToTensor(IValueStore store)
-    {
-        return _kind switch
-        {
-            DataKind.Vector =>
-                FromTensor(store.RetrieveFloats(_p0, _p1), [_p1], store),
-            DataKind.Matrix =>
-                FromTensor(store.RetrieveFloats(_p0, _p1 * _p2), [_p1, _p2], store),
-            _ => throw new InvalidOperationException(
-                $"Cannot convert {_kind} to Tensor. Only Vector and Matrix are supported."),
-        };
-    }
-
-    /// <summary>
-    /// Converts a <see cref="DataKind.Vector"/> or <see cref="DataKind.Matrix"/> to a
-    /// <see cref="DataKind.Tensor"/> without copying the underlying data.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Called on a non-vector, non-matrix value.</exception>
-    public DataValue ToTensor() =>
-        throw new InvalidOperationException("Use ToTensor(store). ReferenceStore is no longer available.");
-
-    /// <summary>
-    /// Converts a rank-1 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Vector"/>
-    /// using an explicit store.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Called on a non-tensor or tensor with rank != 1.</exception>
-    public DataValue ToVector(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Tensor);
-        store.RetrieveTensor(_p0, _p1, out int[] shape);
-
-        if (shape.Length != 1)
-        {
-            throw new InvalidOperationException(
-                $"Cannot convert rank-{shape.Length} tensor to Vector. Rank must be 1.");
-        }
-
-        return FromVector(store.RetrieveFloats(_p0, _p1), store);
-    }
-
-    /// <summary>
-    /// Converts a rank-1 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Vector"/>
-    /// without copying the underlying data.
-    /// </summary>
-    public DataValue ToVector() =>
-        throw new InvalidOperationException("Use ToVector(store). ReferenceStore is no longer available.");
-
-    /// <summary>
-    /// Converts a rank-2 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Matrix"/>
-    /// using an explicit store.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Called on a non-tensor or tensor with rank != 2.</exception>
-    public DataValue ToMatrix(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Tensor);
-        store.RetrieveTensor(_p0, _p1, out int[] shape);
-
-        if (shape.Length != 2)
-        {
-            throw new InvalidOperationException(
-                $"Cannot convert rank-{shape.Length} tensor to Matrix. Rank must be 2.");
-        }
-
-        return FromMatrix(store.RetrieveFloats(_p0, _p1), shape[0], shape[1], store);
-    }
-
-    /// <summary>
-    /// Converts a rank-2 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Matrix"/>
-    /// without copying the underlying data.
-    /// </summary>
-    public DataValue ToMatrix() =>
-        throw new InvalidOperationException("Use ToMatrix(store). ReferenceStore is no longer available.");
-
     // ───────────────────────── Equality ─────────────────────────
 
     /// <inheritdoc/>
@@ -2308,10 +2138,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
             DataKind.Vector
-                => _p0 == other._p0 && _p1 == other._p1,
-            DataKind.Matrix
-                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
-            DataKind.Tensor
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Image
                 => _p0 == other._p0 && _p1 == other._p1,
@@ -2367,10 +2193,6 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
             DataKind.Vector
-                => HashCode.Combine(_kind, _p0, _p1),
-            DataKind.Matrix
-                => HashCode.Combine(_kind, _p0, _p1, _p2),
-            DataKind.Tensor
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Image
                 => HashCode.Combine(_kind, _p0, _p1),
@@ -2550,8 +2372,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
             DataKind.Vector => $"Vector[{_p1} elements]",
-            DataKind.Matrix => $"Matrix[{_p1}x{_p2}]",
-            DataKind.Tensor => $"Tensor[{_p2} elements]",
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
             DataKind.Array => $"Array<{(DataKind)_meta}>",
             DataKind.Struct => $"Struct({_meta} fields)",

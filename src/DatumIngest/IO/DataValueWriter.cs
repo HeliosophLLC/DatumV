@@ -95,22 +95,6 @@ internal static class DataValueWriter
                 foreach (float element in vec) writer.Write(element);
                 break;
 
-            case DataKind.Matrix:
-                float[] mat = value.AsMatrix(store, out int rows, out int columns);
-                writer.Write(rows);
-                writer.Write(columns);
-                writer.Write(mat.Length);
-                foreach (float element in mat) writer.Write(element);
-                break;
-
-            case DataKind.Tensor:
-                float[] tensor = value.AsTensor(store, out int[] shape);
-                writer.Write(shape.Length);
-                foreach (int dimension in shape) writer.Write(dimension);
-                writer.Write(tensor.Length);
-                foreach (float element in tensor) writer.Write(element);
-                break;
-
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }
@@ -163,30 +147,6 @@ internal static class DataValueWriter
                 }
                 break;
 
-            case DataKind.Matrix:
-                float[] matrix = value.AsMatrix(out int rows, out int columns);
-                writer.Write(rows);
-                writer.Write(columns);
-                writer.Write(matrix.Length);
-                foreach (float element in matrix)
-                {
-                    writer.Write(element);
-                }
-                break;
-
-            case DataKind.Tensor:
-                float[] tensor = value.AsTensor(out int[] shape);
-                writer.Write(shape.Length);
-                foreach (int dimension in shape)
-                {
-                    writer.Write(dimension);
-                }
-                writer.Write(tensor.Length);
-                foreach (float element in tensor)
-                {
-                    writer.Write(element);
-                }
-                break;
 
             case DataKind.Image:
                 byte[] imageBytes = value.AsImage();
@@ -312,31 +272,6 @@ internal static class DataValueWriter
                 float[] vectorArray = value.AsVector();
                 writer.Write(vectorArray.Length);
                 foreach (float element in vectorArray)
-                {
-                    writer.Write(element);
-                }
-                break;
-
-            case DataKind.Matrix:
-                float[] matrixArray = value.AsMatrix(out int matrixRows, out int matrixColumns);
-                writer.Write(matrixRows);
-                writer.Write(matrixColumns);
-                writer.Write(matrixArray.Length);
-                foreach (float element in matrixArray)
-                {
-                    writer.Write(element);
-                }
-                break;
-
-            case DataKind.Tensor:
-                float[] tensorArray = value.AsTensor(out int[] tensorShape);
-                writer.Write(tensorShape.Length);
-                foreach (int dimension in tensorShape)
-                {
-                    writer.Write(dimension);
-                }
-                writer.Write(tensorArray.Length);
-                foreach (float element in tensorArray)
                 {
                     writer.Write(element);
                 }

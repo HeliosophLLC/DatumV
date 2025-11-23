@@ -30,15 +30,14 @@ internal static class IdxValueReader
         {
             0 => DataValue.FromFloat32(ReadScalarElement(header.TypeCode, itemBuffer)),
             1 => DataValue.FromVector(ReadFloatArray(header, itemBuffer), store),
-            2 => DataValue.FromMatrix(
-                ReadFloatArray(header, itemBuffer),
-                header.ItemShape[0],
-                header.ItemShape[1],
-                store),
-            _ => DataValue.FromTensor(
-                ReadFloatArray(header, itemBuffer),
-                header.ItemShape.ToArray(),
-                store),
+            // Higher-rank float tensors aren't supported — Matrix/Tensor kinds
+            // were retired in favour of a future (Float32, IsArray, HasFixedShape)
+            // model. IDX files with rank ≥ 2 float arrays should be reshaped at
+            // ingest time or loaded via a multi-column schema.
+            _ => throw new NotSupportedException(
+                $"IDX rank-{header.ItemDimensionCount} float arrays aren't supported. "
+                + "Use rank 0 (scalar) or 1 (vector); higher-rank float tensors will "
+                + "land via the typed-array consolidation effort."),
         };
     }
 

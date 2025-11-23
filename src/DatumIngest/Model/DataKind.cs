@@ -64,7 +64,9 @@ public enum DataKind : byte
     // ───────────────────────── Floating point (32–39) ─────────────────────────
 
     // 32 = Float8 (future, e.g. E4M3/E5M2)
-    // 33 = Float16 / Half (future)
+
+    /// <summary>A 16-bit IEEE 754 binary16 floating-point number (.NET <see cref="System.Half"/>).</summary>
+    Float16 = 33,
 
     /// <summary>A single 32-bit floating-point number.</summary>
     Float32 = 34,
@@ -73,7 +75,9 @@ public enum DataKind : byte
     Float64 = 35,
 
     // 36 = Float128 (future)
-    // 37 = Decimal128 (future)
+
+    /// <summary>A 128-bit decimal floating-point number (.NET <see cref="System.Decimal"/>).</summary>
+    Decimal = 37,
 
     // ───────────────────────── Temporal (40–47) ─────────────────────────
 
@@ -114,11 +118,11 @@ public enum DataKind : byte
     /// <summary>A one-dimensional array of 32-bit floats (rank-1 tensor).</summary>
     Vector = 64,
 
-    /// <summary>A two-dimensional array of 32-bit floats (rank-2 tensor).</summary>
-    Matrix = 65,
+    // 65 = retired Matrix enum entry. Multi-rank float arrays will land via
+    // (Float32, IsArray, HasFixedShape=[…]) once the typed-array consolidation
+    // ships. Don't reuse — keep the slot reserved for future shape-aware kinds.
 
-    /// <summary>An N-dimensional array of 32-bit floats with arbitrary rank.</summary>
-    Tensor = 66,
+    // 66 = retired Tensor enum entry. Same reasoning as Matrix above.
 
     /// <summary>
     /// A typed array of <see cref="DataValue"/> elements sharing a common element kind.

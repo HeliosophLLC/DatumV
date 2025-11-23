@@ -83,47 +83,10 @@ public class DataValueTests : ServiceTestBase
         Assert.Equal(data, value.AsVector());
     }
 
-    [Fact]
-    public void MatrixValueStoresFloatArrayWithShape()
-    {
-        float[] data = [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f];
-        DataValue value = DataValue.FromMatrix(data, 2, 3);
-
-        Assert.Equal(DataKind.Matrix, value.Kind);
-        Assert.Equal(data, value.AsMatrix(out int rows, out int columns));
-        Assert.Equal(2, rows);
-        Assert.Equal(3, columns);
-    }
-
-    [Fact]
-    public void MatrixRejectsShapeMismatch()
-    {
-        float[] data = [1.0f, 2.0f, 3.0f];
-
-        Assert.Throws<ArgumentException>(() => DataValue.FromMatrix(data, 2, 3));
-    }
-
-    [Fact]
-    public void TensorValueStoresFloatArrayWithArbitraryShape()
-    {
-        float[] data = new float[24];
-        int[] shape = [2, 3, 4];
-        DataValue value = DataValue.FromTensor(data, shape);
-
-        Assert.Equal(DataKind.Tensor, value.Kind);
-        Assert.Equal(data, value.AsTensor(out int[] resultShape));
-        Assert.Equal(shape, resultShape);
-    }
-
-    [Fact]
-    public void TensorRejectsShapeMismatch()
-    {
-        float[] data = new float[10];
-        int[] shape = [2, 3, 4];
-
-        Assert.Throws<ArgumentException>(() => DataValue.FromTensor(data, shape));
-    }
-
+    // Matrix and Tensor kinds were retired; their tests were deleted.
+    // Multi-rank float arrays will land via the typed-array consolidation
+    // (Float32 + IsArray + HasFixedShape).
+#if FALSE_RETIRED_MATRIX_TENSOR
     [Fact]
     public void VectorToTensorIsZeroCopy()
     {
@@ -195,6 +158,7 @@ public class DataValueTests : ServiceTestBase
 
         Assert.Throws<InvalidOperationException>(() => tensor.ToMatrix());
     }
+#endif
 
     [Fact]
     public void DateValueStoresDateOnly()
@@ -338,17 +302,6 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void TensorEqualityComparesDataAndShape()
-    {
-        DataValue a = DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f], [2, 2]);
-        DataValue b = DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f], [2, 2]);
-        DataValue c = DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f], [4]);
-
-        Assert.Equal(a, b);
-        Assert.NotEqual(a, c);
-    }
-
-    [Fact]
     public void GetHashCodeIsConsistentWithEquality()
     {
         DataValue a = DataValue.FromFloat32(42.0f);
@@ -381,12 +334,6 @@ public class DataValueTests : ServiceTestBase
     public void ToString_Vector_ShowsLength()
     {
         Assert.Equal("Vector[3]", DataValue.FromVector([1f, 2f, 3f]).ToString());
-    }
-
-    [Fact]
-    public void ToString_Matrix_ShowsShape()
-    {
-        Assert.Equal("Matrix[2x3]", DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3).ToString());
     }
 
     [Fact]

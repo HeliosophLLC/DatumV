@@ -70,8 +70,10 @@ internal sealed class IdxHeader
         {
             0 => (DataKind.Float32, false),
             1 => (DataKind.Vector, false),
-            2 => (DataKind.Matrix, false),
-            _ => (DataKind.Tensor, false),
+            // Higher-rank float tensors are deferred. The IdxValueReader throws
+            // on rank ≥ 2 too — these match.
+            _ => throw new NotSupportedException(
+                $"IDX rank-{ItemDimensionCount} float arrays aren't supported yet."),
         };
     }
 

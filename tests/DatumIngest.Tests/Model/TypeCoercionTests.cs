@@ -25,40 +25,12 @@ public class TypeCoercionTests : ServiceTestBase
     }
 
     [Fact]
-    public void VectorWidensToTensorRankOne()
-    {
-        float[] data = [1.0f, 2.0f, 3.0f];
-        DataValue vector = DataValue.FromVector(data);
-        DataValue tensor = TypeCoercion.Widen(vector, DataKind.Tensor);
-
-        Assert.Equal(DataKind.Tensor, tensor.Kind);
-        float[] tensorData = tensor.AsTensor(out int[] shape);
-        Assert.Same(data, tensorData);
-        Assert.Equal([3], shape);
-    }
-
-    [Fact]
-    public void MatrixWidensToTensorRankTwo()
-    {
-        float[] data = [1.0f, 2.0f, 3.0f, 4.0f];
-        DataValue matrix = DataValue.FromMatrix(data, 2, 2);
-        DataValue tensor = TypeCoercion.Widen(matrix, DataKind.Tensor);
-
-        Assert.Equal(DataKind.Tensor, tensor.Kind);
-        float[] tensorData = tensor.AsTensor(out int[] shape);
-        Assert.Same(data, tensorData);
-        Assert.Equal([2, 2], shape);
-    }
-
-    [Fact]
     public void CanWiden_ReturnsTrueForValidWidening()
     {
         Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Int16));
         Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Float64));
         Assert.True(TypeCoercion.CanWiden(DataKind.Float32, DataKind.Float64));
         Assert.True(TypeCoercion.CanWiden(DataKind.Float64, DataKind.Vector));
-        Assert.True(TypeCoercion.CanWiden(DataKind.Vector, DataKind.Tensor));
-        Assert.True(TypeCoercion.CanWiden(DataKind.Matrix, DataKind.Tensor));
     }
 
     [Fact]
@@ -66,7 +38,6 @@ public class TypeCoercionTests : ServiceTestBase
     {
         Assert.False(TypeCoercion.CanWiden(DataKind.String, DataKind.Float32));
         Assert.False(TypeCoercion.CanWiden(DataKind.Float32, DataKind.UInt8));
-        Assert.False(TypeCoercion.CanWiden(DataKind.Tensor, DataKind.Vector));
         Assert.False(TypeCoercion.CanWiden(DataKind.Image, DataKind.Float32));
     }
 
@@ -104,7 +75,6 @@ public class TypeCoercionTests : ServiceTestBase
         Assert.Equal(DataKind.Float64, TypeCoercion.FindCommonKind(DataKind.Int32, DataKind.Float32));
         Assert.Equal(DataKind.Int32, TypeCoercion.FindCommonKind(DataKind.Int32, DataKind.UInt16));
         Assert.Equal(DataKind.Int64, TypeCoercion.FindCommonKind(DataKind.Int64, DataKind.UInt32));
-        Assert.Equal(DataKind.Tensor, TypeCoercion.FindCommonKind(DataKind.Vector, DataKind.Matrix));
     }
 
     [Fact]
@@ -222,7 +192,6 @@ public class TypeCoercionTests : ServiceTestBase
     [InlineData(DataKind.Date, true)]
     [InlineData(DataKind.Vector, false)]
     [InlineData(DataKind.Image, false)]
-    [InlineData(DataKind.Tensor, false)]
     public void CanCoerceStringTo_ReturnsExpected(DataKind kind, bool expected)
     {
         Assert.Equal(expected, TypeCoercion.CanCoerceStringTo(kind));

@@ -204,8 +204,6 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
     [Theory]
     [InlineData(DataKind.Image)]
     [InlineData(DataKind.Vector)]
-    [InlineData(DataKind.Matrix)]
-    [InlineData(DataKind.Tensor)]
     public void AddRow_BinaryOrArrayKind_OmitsTopK(DataKind kind)
     {
         StatisticsCollector collector = new();
@@ -214,8 +212,6 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
         {
             DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }, _arena),
             DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }, _arena),
-            DataKind.Matrix => DataValue.FromMatrix(new float[] { 1.0f, 2.0f }, 1, 2, _arena),
-            DataKind.Tensor => DataValue.FromTensor(new float[] { 1.0f }, new int[] { 1 }, _arena),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
 

@@ -69,7 +69,7 @@ public static class ColumnRoleClassifier
     public static ColumnRole Classify(FeatureManifest manifest, long rowCount)
     {
         // Structural kinds: Vector, Matrix, Tensor.
-        if (manifest.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor)
+        if (manifest.Kind == DataKind.Vector)
         {
             return ColumnRole.Structural;
         }
