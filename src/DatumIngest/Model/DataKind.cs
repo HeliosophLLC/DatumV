@@ -120,12 +120,6 @@ public enum DataKind : byte
     /// <summary>A one-dimensional array of 32-bit floats (rank-1 tensor).</summary>
     Vector = 64,
 
-    // 65 = retired Matrix enum entry. Multi-rank float arrays will land via
-    // (Float32, IsArray, HasFixedShape=[…]) once the typed-array consolidation
-    // ships. Don't reuse — keep the slot reserved for future shape-aware kinds.
-
-    // 66 = retired Tensor enum entry. Same reasoning as Matrix above.
-
     /// <summary>
     /// A typed array of <see cref="DataValue"/> elements sharing a common element kind.
     /// The element kind is stored in the shape metadata of the owning <see cref="DataValue"/>.

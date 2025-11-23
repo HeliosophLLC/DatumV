@@ -89,26 +89,26 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Type:     writer.Write((byte)value.AsType()); break;
+            case DataKind.Boolean:  writer.Write(value.AsBoolean()); break;
+            case DataKind.Int8:     writer.Write(value.AsInt8()); break;
+            case DataKind.Int16:    writer.Write(value.AsInt16()); break;
+            case DataKind.Int32:    writer.Write(value.AsInt32()); break;
+            case DataKind.Int64:    writer.Write(value.AsInt64()); break;
+            case DataKind.Int128:   WriteInt128(writer, value.AsInt128()); break;
+            case DataKind.UInt8:    writer.Write(value.AsUInt8()); break;
+            case DataKind.UInt16:   writer.Write(value.AsUInt16()); break;
+            case DataKind.UInt32:   writer.Write(value.AsUInt32()); break;
+            case DataKind.UInt64:   writer.Write(value.AsUInt64()); break;
+            case DataKind.UInt128:  WriteUInt128(writer, value.AsUInt128()); break;
             case DataKind.Float16:  writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16())); break;
             case DataKind.Float32:  writer.Write(value.AsFloat32()); break;
             case DataKind.Float64:  writer.Write(value.AsFloat64()); break;
             case DataKind.Decimal:  writer.Write(value.AsDecimal()); break;
-            case DataKind.UInt8:    writer.Write(value.AsUInt8()); break;
-            case DataKind.Int8:     writer.Write(value.AsInt8()); break;
-            case DataKind.Int16:    writer.Write(value.AsInt16()); break;
-            case DataKind.UInt16:   writer.Write(value.AsUInt16()); break;
-            case DataKind.Int32:    writer.Write(value.AsInt32()); break;
-            case DataKind.UInt32:   writer.Write(value.AsUInt32()); break;
-            case DataKind.Int64:    writer.Write(value.AsInt64()); break;
-            case DataKind.UInt64:   writer.Write(value.AsUInt64()); break;
-            case DataKind.Int128:   WriteInt128(writer, value.AsInt128()); break;
-            case DataKind.UInt128:  WriteUInt128(writer, value.AsUInt128()); break;
-            case DataKind.Boolean:  writer.Write(value.AsBoolean()); break;
             case DataKind.Date:     writer.Write(value.AsDate().DayNumber); break;
             case DataKind.Time:     writer.Write(value.AsTime().Ticks); break;
             case DataKind.Duration: writer.Write(value.AsDuration().Ticks); break;
             case DataKind.Uuid:     writer.Write(value.AsUuid().ToByteArray()); break;
-            case DataKind.Type:     writer.Write((byte)value.AsType()); break;
 
             case DataKind.DateTime:
                 DateTimeOffset dto = value.AsDateTime();
@@ -147,6 +147,54 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Type:
+                writer.Write((byte)value.AsType());
+                break;
+
+            case DataKind.Boolean:
+                writer.Write(value.AsBoolean());
+                break;
+
+            case DataKind.Int8:
+                writer.Write(value.AsInt8());
+                break;
+
+            case DataKind.Int16:
+                writer.Write(value.AsInt16());
+                break;
+
+            case DataKind.Int32:
+                writer.Write(value.AsInt32());
+                break;
+
+            case DataKind.Int64:
+                writer.Write(value.AsInt64());
+                break;
+
+            case DataKind.Int128:
+                WriteInt128(writer, value.AsInt128());
+                break;
+
+            case DataKind.UInt8:
+                writer.Write(value.AsUInt8());
+                break;
+
+            case DataKind.UInt16:
+                writer.Write(value.AsUInt16());
+                break;
+
+            case DataKind.UInt32:
+                writer.Write(value.AsUInt32());
+                break;
+
+            case DataKind.UInt64:
+                writer.Write(value.AsUInt64());
+                break;
+
+            case DataKind.UInt128:
+                WriteUInt128(writer, value.AsUInt128());
+                break;
+
             case DataKind.Float16:
                 writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16()));
                 break;
@@ -155,13 +203,14 @@ internal static class DataValueWriter
                 writer.Write(value.AsFloat32());
                 break;
 
+            case DataKind.Float64:
+                writer.Write(value.AsFloat64());
+                break;
+
             case DataKind.Decimal:
                 writer.Write(value.AsDecimal());
                 break;
 
-            case DataKind.UInt8:
-                writer.Write(value.AsUInt8());
-                break;
 
             case DataKind.String:
                 writer.Write(value.AsString());
@@ -176,6 +225,20 @@ internal static class DataValueWriter
                 DateTimeOffset dateTimeOffset = value.AsDateTime();
                 writer.Write(dateTimeOffset.Ticks);
                 writer.Write((short)dateTimeOffset.Offset.TotalMinutes);
+                break;
+
+            case DataKind.Image:
+                byte[] imageBytes = value.AsImage();
+                writer.Write(imageBytes.Length);
+                writer.Write(imageBytes);
+                break;
+
+            case DataKind.Time:
+                writer.Write(value.AsTime().Ticks);
+                break;
+
+            case DataKind.Duration:
+                writer.Write(value.AsDuration().Ticks);
                 break;
 
             case DataKind.JsonValue:
@@ -196,71 +259,8 @@ internal static class DataValueWriter
                 }
                 break;
 
-
-            case DataKind.Image:
-                byte[] imageBytes = value.AsImage();
-                writer.Write(imageBytes.Length);
-                writer.Write(imageBytes);
-                break;
-
-            case DataKind.Boolean:
-                writer.Write(value.AsBoolean());
-                break;
-
-            case DataKind.Time:
-                writer.Write(value.AsTime().Ticks);
-                break;
-
-            case DataKind.Duration:
-                writer.Write(value.AsDuration().Ticks);
-                break;
-
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());
-                break;
-
-            case DataKind.Float64:
-                writer.Write(value.AsFloat64());
-                break;
-
-            case DataKind.Int8:
-                writer.Write(value.AsInt8());
-                break;
-
-            case DataKind.Int16:
-                writer.Write(value.AsInt16());
-                break;
-
-            case DataKind.UInt16:
-                writer.Write(value.AsUInt16());
-                break;
-
-            case DataKind.Int32:
-                writer.Write(value.AsInt32());
-                break;
-
-            case DataKind.UInt32:
-                writer.Write(value.AsUInt32());
-                break;
-
-            case DataKind.Int64:
-                writer.Write(value.AsInt64());
-                break;
-
-            case DataKind.UInt64:
-                writer.Write(value.AsUInt64());
-                break;
-
-            case DataKind.Int128:
-                WriteInt128(writer, value.AsInt128());
-                break;
-
-            case DataKind.UInt128:
-                WriteUInt128(writer, value.AsUInt128());
-                break;
-
-            case DataKind.Type:
-                writer.Write((byte)value.AsType());
                 break;
 
             default:
@@ -293,6 +293,54 @@ internal static class DataValueWriter
 
         switch (value.Kind)
         {
+            case DataKind.Type:
+                writer.Write((byte)value.AsType());
+                break;
+
+            case DataKind.Boolean:
+                writer.Write(value.AsBoolean());
+                break;
+
+            case DataKind.Int8:
+                writer.Write(value.AsInt8());
+                break;
+
+            case DataKind.Int16:
+                writer.Write(value.AsInt16());
+                break;
+
+            case DataKind.Int32:
+                writer.Write(value.AsInt32());
+                break;
+
+            case DataKind.Int64:
+                writer.Write(value.AsInt64());
+                break;
+
+            case DataKind.Int128:
+                WriteInt128(writer, value.AsInt128());
+                break;
+
+            case DataKind.UInt8:
+                writer.Write(value.AsUInt8());
+                break;
+
+            case DataKind.UInt16:
+                writer.Write(value.AsUInt16());
+                break;
+
+            case DataKind.UInt32:
+                writer.Write(value.AsUInt32());
+                break;
+
+            case DataKind.UInt64:
+                writer.Write(value.AsUInt64());
+                break;
+                
+            case DataKind.UInt128:
+                WriteUInt128(writer, value.AsUInt128());
+                break;
+
             case DataKind.Float16:
                 writer.Write(BitConverter.HalfToUInt16Bits(value.AsFloat16()));
                 break;
@@ -301,13 +349,14 @@ internal static class DataValueWriter
                 writer.Write(value.AsFloat32());
                 break;
 
+            case DataKind.Float64:
+                writer.Write(value.AsFloat64());
+                break;
+
             case DataKind.Decimal:
                 writer.Write(value.AsDecimal());
                 break;
 
-            case DataKind.UInt8:
-                writer.Write(value.AsUInt8());
-                break;
 
             case DataKind.String:
                 writer.Write(value.AsString());
@@ -322,6 +371,14 @@ internal static class DataValueWriter
                 DateTimeOffset dateTimeValue = value.AsDateTime();
                 writer.Write(dateTimeValue.Ticks);
                 writer.Write((short)dateTimeValue.Offset.TotalMinutes);
+                break;
+
+            case DataKind.Time:
+                writer.Write(value.AsTime().Ticks);
+                break;
+
+            case DataKind.Duration:
+                writer.Write(value.AsDuration().Ticks);
                 break;
 
             case DataKind.JsonValue:
@@ -348,64 +405,8 @@ internal static class DataValueWriter
                 writer.Write(imageData);
                 break;
 
-            case DataKind.Boolean:
-                writer.Write(value.AsBoolean());
-                break;
-
-            case DataKind.Time:
-                writer.Write(value.AsTime().Ticks);
-                break;
-
-            case DataKind.Duration:
-                writer.Write(value.AsDuration().Ticks);
-                break;
-
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());
-                break;
-
-            case DataKind.Float64:
-                writer.Write(value.AsFloat64());
-                break;
-
-            case DataKind.Int8:
-                writer.Write(value.AsInt8());
-                break;
-
-            case DataKind.Int16:
-                writer.Write(value.AsInt16());
-                break;
-
-            case DataKind.UInt16:
-                writer.Write(value.AsUInt16());
-                break;
-
-            case DataKind.Int32:
-                writer.Write(value.AsInt32());
-                break;
-
-            case DataKind.UInt32:
-                writer.Write(value.AsUInt32());
-                break;
-
-            case DataKind.Int64:
-                writer.Write(value.AsInt64());
-                break;
-
-            case DataKind.UInt64:
-                writer.Write(value.AsUInt64());
-                break;
-
-            case DataKind.Int128:
-                WriteInt128(writer, value.AsInt128());
-                break;
-
-            case DataKind.UInt128:
-                WriteUInt128(writer, value.AsUInt128());
-                break;
-
-            case DataKind.Type:
-                writer.Write((byte)value.AsType());
                 break;
 
             default:
