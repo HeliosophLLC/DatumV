@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 
@@ -208,7 +209,7 @@ internal sealed class SpillReaderWriter : IDisposable
 
         if (!_schemaWritten[partition])
         {
-            RowSerializer.WriteSchema(_writers[partition]!, _schema);
+            WriteSchemaHeader(_writers[partition]!, _schema);
             // Flush so we can read the underlying stream's position — BinaryWriter buffers,
             // so the byte offset of "first row" must be captured against bytes actually
             // written to the FileStream.
@@ -230,7 +231,7 @@ internal sealed class SpillReaderWriter : IDisposable
                 {
                     DataValue stabilized = DataValueRetention.Stabilize(
                         row[columnIndex], sourceArena, _consolidatedArena);
-                    RowSerializer.WriteStabilizedDataValue(writer, stabilized);
+                    WriteRawDataValue(writer, stabilized);
                 }
                 _rowCounts[partition]++;
             }
@@ -360,7 +361,7 @@ internal sealed class SpillReaderWriter : IDisposable
                     {
                         for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
                         {
-                            values[columnIndex] = RowSerializer.ReadStabilizedDataValue(reader);
+                            values[columnIndex] = ReadRawDataValue(reader);
                         }
 
                         outputBatch ??= _pool.RentRowBatch(
@@ -453,5 +454,66 @@ internal sealed class SpillReaderWriter : IDisposable
                 // Best-effort cleanup — OS handles temp files on shutdown.
             }
         }
+    }
+
+    // ─────────────── Wire format helpers (formerly RowSerializer) ───────────────
+
+    /// <summary>
+    /// Writes a schema header (column count + names) to a partition stream.
+    /// Read back via <see cref="ReadSchemaHeader"/>.
+    /// </summary>
+    private static void WriteSchemaHeader(BinaryWriter writer, ColumnLookup columnLookup)
+    {
+        writer.Write(columnLookup.Count);
+        for (int index = 0; index < columnLookup.Count; index++)
+        {
+            writer.Write(columnLookup.ColumnNames[index]);
+        }
+    }
+
+    /// <summary>
+    /// Reads a schema header written by <see cref="WriteSchemaHeader"/>.
+    /// Currently unused — replay paths take the schema from the spiller in hand —
+    /// kept for symmetry with the writer.
+    /// </summary>
+    private static ColumnLookup ReadSchemaHeader(BinaryReader reader)
+    {
+        int fieldCount = reader.ReadInt32();
+        string[] names = new string[fieldCount];
+        for (int index = 0; index < fieldCount; index++)
+        {
+            names[index] = reader.ReadString();
+        }
+        return new ColumnLookup(names);
+    }
+
+    /// <summary>
+    /// Writes a <see cref="DataValue"/>'s raw 20-byte struct image. The caller
+    /// must stabilise any arena-backed payload into <see cref="ConsolidatedArena"/>
+    /// before calling so the offsets resolve on replay. Inline and sidecar-backed
+    /// values round-trip without arena dependency.
+    /// </summary>
+    private static void WriteRawDataValue(BinaryWriter writer, DataValue value)
+    {
+        Span<byte> buffer = stackalloc byte[DataValueRawSize];
+        MemoryMarshal.Write(buffer, in value);
+        writer.Write(buffer);
+    }
+
+    /// <summary>
+    /// Inverse of <see cref="WriteRawDataValue"/>. The returned value's
+    /// arena-backed offsets resolve only when read against the same arena
+    /// the writer stabilised into (the spiller's <see cref="ConsolidatedArena"/>).
+    /// </summary>
+    private static DataValue ReadRawDataValue(BinaryReader reader)
+    {
+        Span<byte> buffer = stackalloc byte[DataValueRawSize];
+        int read = reader.Read(buffer);
+        if (read != DataValueRawSize)
+        {
+            throw new EndOfStreamException(
+                $"Expected {DataValueRawSize} bytes for a DataValue, got {read}.");
+        }
+        return MemoryMarshal.Read<DataValue>(buffer);
     }
 }
