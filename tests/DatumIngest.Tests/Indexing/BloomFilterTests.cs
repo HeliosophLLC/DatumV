@@ -134,7 +134,7 @@ public sealed class BloomFilterTests : ServiceTestBase
     public void Add_And_MayContain_VectorKind()
     {
         BloomFilter filter = new(expectedElements: 100);
-        DataValue value = DataValue.FromVector([1.0f, 2.0f, 3.0f], Store);
+        DataValue value = DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, Store);
         filter.Add(value, Store);
 
         Assert.True(filter.MayContain(value, Store));

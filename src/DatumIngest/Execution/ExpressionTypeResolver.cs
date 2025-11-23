@@ -142,11 +142,10 @@ public static class ExpressionTypeResolver
                 ?? DataKind.Float32;
         }
 
-        if (sourceKind == DataKind.Vector)
-        {
-            // Vector element access: always returns a Float32 scalar.
-            return DataKind.Float32;
-        }
+        // Vector (Float32 + IsArray) indexing returned Float32 scalars. With Vector
+        // retired, indexing a "Float32 array" column needs the IsArray flag plumbed
+        // through this resolver's signature — deferred to the broader typed-array
+        // schema-resolution work.
 
         if (sourceKind == DataKind.Struct
             && indexAccess.Index is LiteralExpression { Value: string fieldName })

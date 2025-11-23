@@ -176,17 +176,24 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     // ───────────────────── Unsupported kinds throw with a pointer to the helper ─────────────────────
 
     [Fact]
-    public void Stabilize_Vector_ThrowsNotSupported()
+    public void Stabilize_ArenaFloat32Array_CopiesToRetentionStore()
     {
         Arena source = new();
         Arena retention = new();
 
-        DataValue original = DataValue.FromVector(new[] { 1.0f, 2.0f, 3.0f }, source);
+        // 100 floats = 400 bytes — exceeds the inline cap, so this lands arena-backed.
+        float[] values = Enumerable.Range(0, 100).Select(i => i * 0.5f).ToArray();
+        DataValue original = DataValue.FromArenaArray<float>(values, DataKind.Float32, source);
+        Assert.False(original.IsInline);
 
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(
-            () => DataValueRetention.Stabilize(original, source, retention));
+        DataValue stable = DataValueRetention.Stabilize(original, source, retention);
 
-        Assert.Contains("Vector", ex.Message);
-        Assert.Contains("DataValueRetention.Stabilize", ex.Message);
+        // Source disposal must not corrupt the stabilised value.
+        source.Dispose();
+
+        ReadOnlySpan<float> recovered = stable.AsArraySpan<float>(retention);
+        Assert.Equal(values, recovered.ToArray());
+        Assert.Equal(DataKind.Float32, stable.Kind);
+        Assert.True(stable.IsArray);
     }
 }

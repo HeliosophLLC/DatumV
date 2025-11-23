@@ -1276,16 +1276,20 @@ public sealed class ExpressionEvaluator
             return elements[position];
         }
 
-        if (source.Kind == DataKind.Vector)
+        // Float32 + IsArray (formerly DataKind.Vector). Generalises to any typed
+        // numeric array: Float64 + IsArray, Int32 + IsArray, etc. — but the existing
+        // index-access semantics returned a Float32 scalar specifically for vectors,
+        // so we keep that arm and let other typed-array kinds error out for now.
+        if (source.Kind == DataKind.Float32 && source.IsArray)
         {
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{Str(index, frame)}') is not supported on Vector — " +
+                    $"Named field access ('{Str(index, frame)}') is not supported on Float32[] — " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
-            float[] vector = source.AsVector();
+            ReadOnlySpan<float> vector = source.AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
 
             // Use 0-based integer index.
             int position = (int)ToFloat(index);

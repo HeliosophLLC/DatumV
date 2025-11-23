@@ -14,15 +14,10 @@ public class TypeCoercionTests : ServiceTestBase
         Assert.Equal((short)200, int16.AsInt16());
     }
 
-    [Fact]
-    public void ScalarWidensToVectorOfLengthOne()
-    {
-        DataValue scalar = DataValue.FromFloat32(5.0f);
-        DataValue vector = TypeCoercion.Widen(scalar, DataKind.Vector);
-
-        Assert.Equal(DataKind.Vector, vector.Kind);
-        Assert.Equal([5.0f], vector.AsVector());
-    }
+    // ScalarWidensToVectorOfLengthOne and the Float64 → Vector CanWiden assertion
+    // were retired alongside DataKind.Vector. The widening chain still terminates
+    // numeric coercions at Float64; restoring "scalar → 1-element typed array"
+    // requires a (DataKind, IsArray) target descriptor in TypeCoercion's API.
 
     [Fact]
     public void CanWiden_ReturnsTrueForValidWidening()
@@ -30,7 +25,6 @@ public class TypeCoercionTests : ServiceTestBase
         Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Int16));
         Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Float64));
         Assert.True(TypeCoercion.CanWiden(DataKind.Float32, DataKind.Float64));
-        Assert.True(TypeCoercion.CanWiden(DataKind.Float64, DataKind.Vector));
     }
 
     [Fact]
@@ -89,19 +83,6 @@ public class TypeCoercionTests : ServiceTestBase
     public void FindCommonKind_SameTypeReturnsSame()
     {
         Assert.Equal(DataKind.String, TypeCoercion.FindCommonKind(DataKind.String, DataKind.String));
-    }
-
-    [Fact]
-    public void UInt8ToFloat64ChainToVector()
-    {
-        DataValue uint8 = DataValue.FromUInt8(128);
-
-        // UInt8 → Int16 → Int32 → Int64 → Float64 → Vector
-        DataValue float64 = TypeCoercion.Widen(uint8, DataKind.Float64);
-        DataValue vector = TypeCoercion.Widen(float64, DataKind.Vector);
-
-        Assert.Equal(DataKind.Vector, vector.Kind);
-        Assert.Equal([128.0f], vector.AsVector());
     }
 
     // ─────────────── CoerceValue ───────────────
@@ -190,7 +171,6 @@ public class TypeCoercionTests : ServiceTestBase
     [InlineData(DataKind.Float32, true)]
     [InlineData(DataKind.Boolean, true)]
     [InlineData(DataKind.Date, true)]
-    [InlineData(DataKind.Vector, false)]
     [InlineData(DataKind.Image, false)]
     public void CanCoerceStringTo_ReturnsExpected(DataKind kind, bool expected)
     {

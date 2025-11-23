@@ -260,9 +260,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Image
                 => value.AsByteSpan(store!),
 
-            DataKind.Vector
-                => MemoryMarshal.AsBytes(value.AsVector(store!).AsSpan()),
-
             DataKind.Struct
                 => SerializeStructFields(value, store!),
 

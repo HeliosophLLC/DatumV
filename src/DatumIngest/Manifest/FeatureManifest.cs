@@ -220,7 +220,7 @@ public sealed record NumericSummaryData(
     long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation);
 
 /// <summary>
-/// Feature manifest for rank-1 vector columns (<see cref="DataKind.Vector"/>).
+/// Feature manifest for rank-1 vector columns (Float32 + IsArray).
 /// </summary>
 public sealed class VectorFeatureManifest : FeatureManifest
 {

@@ -414,16 +414,10 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
 
     // ─────────────── Structural ───────────────
 
-    [Fact]
-    public void Classify_Vector_ReturnsStructural()
-    {
-        FeatureManifest manifest = MakeFallbackManifest(
-            DataKind.Vector, estimatedDistinctCount: 1000, nullRatio: 0.0);
-
-        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000);
-
-        Assert.Equal(ColumnRole.Structural, role);
-    }
+    // The legacy Vector-classified-as-Structural test was retired alongside the
+    // DataKind.Vector slot. Float32 + IsArray columns currently fall through to
+    // the numeric classifier; restore a dedicated typed-array role classifier
+    // when the model-feature stats path lands.
 
     // ─────────────── ManifestBuilder integration ───────────────
 

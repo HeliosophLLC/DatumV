@@ -13,7 +13,7 @@ namespace DatumIngest.DatumFile;
 /// Only the comparable types that can appear in zone maps are supported:
 /// numeric scalars, <see cref="DataKind.Boolean"/>, <see cref="DataKind.String"/>,
 /// temporal types, and <see cref="DataKind.Uuid"/>. Reference types like
-/// <see cref="DataKind.Vector"/> or <see cref="DataKind.Image"/> never
+/// <see cref="DataKind.Image"/> or typed-array columns never
 /// appear in zone maps and are rejected.
 /// </remarks>
 internal static class ZoneMapValueSerializer

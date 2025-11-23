@@ -36,7 +36,9 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     [Fact]
     public void GetKeyWidth_UnsupportedKind_Throws()
     {
-        Assert.Throws<NotSupportedException>(() => SortedIndexKeyEncoder.GetKeyWidth(DataKind.Vector));
+        // Image stands in for "non-comparable kind" since DataKind.Vector was retired
+        // (Float32 + IsArray now). Image arrays don't have a fixed key width either.
+        Assert.Throws<NotSupportedException>(() => SortedIndexKeyEncoder.GetKeyWidth(DataKind.Image));
     }
 
     // ──────────────── Round-trip tests ────────────────
@@ -458,7 +460,7 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     [Fact]
     public void Encode_UnsupportedKind_Throws()
     {
-        DataValue vector = DataValue.FromVector([1.0f, 2.0f]);
+        DataValue vector = DataValue.FromInlineArray<float>([1.0f, 2.0f], DataKind.Float32);
         byte[] buffer = new byte[16];
         Assert.Throws<NotSupportedException>(() => SortedIndexKeyEncoder.Encode(vector, buffer));
     }

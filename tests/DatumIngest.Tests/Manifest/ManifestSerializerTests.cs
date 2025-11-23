@@ -181,10 +181,13 @@ public sealed class ManifestSerializerTests : ServiceTestBase
     {
         ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
+        Dictionary<string, ColumnInfo> kinds = new()
+        {
+            ["embedding"] = new ColumnInfo("embedding", DataKind.Float32, nullable: true) { IsArray = true },
+        };
 
         return ManifestBuilder.Build(stats, kinds, 1);
     }

@@ -74,13 +74,14 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void VectorValueStoresFloatArray()
+    public void Float32ArrayValueStoresFloatArray()
     {
         float[] data = [1.0f, 2.0f, 3.0f];
-        DataValue value = DataValue.FromVector(data);
+        DataValue value = DataValue.FromInlineArray<float>(data, DataKind.Float32);
 
-        Assert.Equal(DataKind.Vector, value.Kind);
-        Assert.Equal(data, value.AsVector());
+        Assert.Equal(DataKind.Float32, value.Kind);
+        Assert.True(value.IsArray);
+        Assert.Equal(data, value.AsArraySpan<float>().ToArray());
     }
 
     // Matrix and Tensor kinds were retired; their tests were deleted.
@@ -91,7 +92,7 @@ public class DataValueTests : ServiceTestBase
     public void VectorToTensorIsZeroCopy()
     {
         float[] data = [1.0f, 2.0f, 3.0f];
-        DataValue vector = DataValue.FromVector(data);
+        DataValue vector = DataValue.FromInlineArray<float>(data, DataKind.Float32);
         DataValue tensor = vector.ToTensor();
 
         Assert.Equal(DataKind.Tensor, tensor.Kind);
@@ -124,7 +125,7 @@ public class DataValueTests : ServiceTestBase
         DataValue vector = tensor.ToVector();
 
         Assert.Equal(DataKind.Vector, vector.Kind);
-        Assert.Same(data, vector.AsVector());
+        Assert.Same(data, vector.AsArraySpan<float>().ToArray());
     }
 
     [Fact]
@@ -283,9 +284,9 @@ public class DataValueTests : ServiceTestBase
     [Fact]
     public void VectorEquality()
     {
-        DataValue a = DataValue.FromVector([1.0f, 2.0f]);
-        DataValue b = DataValue.FromVector([1.0f, 2.0f]);
-        DataValue c = DataValue.FromVector([1.0f, 3.0f]);
+        DataValue a = DataValue.FromInlineArray<float>([1.0f, 2.0f], DataKind.Float32);
+        DataValue b = DataValue.FromInlineArray<float>([1.0f, 2.0f], DataKind.Float32);
+        DataValue c = DataValue.FromInlineArray<float>([1.0f, 3.0f], DataKind.Float32);
 
         Assert.Equal(a, b);
         Assert.NotEqual(a, c);
@@ -321,9 +322,13 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void ToString_Vector_ShowsLength()
+    public void ToString_Float32Array_ShowsKind()
     {
-        Assert.Equal("Vector[3]", DataValue.FromVector([1f, 2f, 3f]).ToString());
+        // Float32 + IsArray (formerly Vector). ToDisplayString on inline arrays
+        // uses the default _kind.ToString() arm — typed-array preview is a future
+        // improvement.
+        string display = DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32).ToString();
+        Assert.Contains("Float32", display);
     }
 
     [Fact]

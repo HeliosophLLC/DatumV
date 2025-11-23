@@ -29,7 +29,7 @@ internal static class IdxValueReader
         return header.ItemDimensionCount switch
         {
             0 => DataValue.FromFloat32(ReadScalarElement(header.TypeCode, itemBuffer)),
-            1 => DataValue.FromVector(ReadFloatArray(header, itemBuffer), store),
+            1 => DataValue.FromArenaArray<float>(ReadFloatArray(header, itemBuffer), DataKind.Float32, store),
             // Higher-rank float tensors aren't supported — Matrix/Tensor kinds
             // were retired in favour of a future (Float32, IsArray, HasFixedShape)
             // model. IDX files with rank ≥ 2 float arrays should be reshaped at

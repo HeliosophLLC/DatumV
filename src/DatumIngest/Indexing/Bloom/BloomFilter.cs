@@ -305,11 +305,10 @@ public sealed class BloomFilter
     {
         switch (value.Kind)
         {
-            // Byte array — DataValues carry Kind=UInt8 + IsArray.
-            case DataKind.UInt8 when value.IsArray:
-                return value.AsUInt8Array(store);
-            case DataKind.Vector:
-                return MemoryMarshal.AsBytes(value.AsVector(store).AsSpan());
+            // Any typed array (UInt8 / Float32 / etc. + IsArray): bytes are the raw
+            // contiguous element payload regardless of element kind.
+            case var _ when value.IsArray:
+                return value.AsArraySpan<byte>(store);
             default:
             {
                 // Matrix, Tensor, Image, and any future complex types.

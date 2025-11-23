@@ -181,7 +181,11 @@ public static class ManifestBuilder
                 or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
-            DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
+            // Vector → BuildVectorManifest dispatch was retired alongside DataKind.Vector.
+            // Float32 + IsArray columns reach this dispatch via DataKind.Float32 (without
+            // visibility of IsArray) and currently flow to the numeric arm. Restoring
+            // typed-array manifest stats requires plumbing IsArray through the per-column
+            // dispatch signature.
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),

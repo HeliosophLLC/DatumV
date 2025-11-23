@@ -201,22 +201,29 @@ public sealed class StatisticsCollectorTests : ServiceTestBase
         Assert.Equal("my_column", stats["my_column"].ColumnName);
     }
 
-    [Theory]
-    [InlineData(DataKind.Image)]
-    [InlineData(DataKind.Vector)]
-    public void AddRow_BinaryOrArrayKind_OmitsTopK(DataKind kind)
+    [Fact]
+    public void AddRow_ImageKind_OmitsTopK()
     {
+        // Binary/multi-dim opaque kinds (Image and any typed array) skip top_k
+        // because cardinality of the underlying bytes isn't meaningful.
         StatisticsCollector collector = new();
+        DataValue value = DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xC0], _arena);
 
-        DataValue value = kind switch
-        {
-            DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }, _arena),
-            DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }, _arena),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind))
-        };
+        ColumnLookup columnLookup = new(["data"]);
+        collector.AddRow(CreateRow(columnLookup, value), _arena);
 
-        ColumnLookup columnLookup = new (["data"]);
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Assert.DoesNotContain("top_k", stats["data"].Results.Keys);
+    }
 
+    [Fact]
+    public void AddRow_Float32ArrayKind_OmitsTopK()
+    {
+        // Float32 + IsArray (formerly DataKind.Vector) — same opaque-payload rule.
+        StatisticsCollector collector = new();
+        DataValue value = DataValue.FromArenaArray<float>([1.0f, 2.0f], DataKind.Float32, _arena);
+
+        ColumnLookup columnLookup = new(["data"]);
         collector.AddRow(CreateRow(columnLookup, value), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();

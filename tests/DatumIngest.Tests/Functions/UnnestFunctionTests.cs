@@ -16,7 +16,7 @@ public class UnnestFunctionTests : ServiceTestBase
     [Fact]
     public async Task Unnest_Vector_ExpandsToScalarRows()
     {
-        DataValue vector = DataValue.FromVector([10, 20, 30]);
+        DataValue vector = DataValue.FromInlineArray<float>([10, 20, 30], DataKind.Float32);
         List<Row> rows = await CollectRows([vector]);
 
         Assert.Equal(3, rows.Count);
@@ -36,7 +36,7 @@ public class UnnestFunctionTests : ServiceTestBase
     [Fact]
     public async Task Unnest_EmptyVector_YieldsNoRows()
     {
-        DataValue vector = DataValue.FromVector([]);
+        DataValue vector = DataValue.FromInlineArray<float>([], DataKind.Float32);
         List<Row> rows = await CollectRows([vector]);
         Assert.Empty(rows);
     }
@@ -44,7 +44,7 @@ public class UnnestFunctionTests : ServiceTestBase
     [Fact]
     public async Task Unnest_NullInput_YieldsNoRows()
     {
-        DataValue nullValue = DataValue.Null(DataKind.Vector);
+        DataValue nullValue = DataValue.Null(DataKind.Float32);
         List<Row> rows = await CollectRows([nullValue]);
         Assert.Empty(rows);
     }
@@ -67,7 +67,7 @@ public class UnnestFunctionTests : ServiceTestBase
     {
         // Vector must span multiple batches (DefaultBatchSize = 1024) so that
         // cancellation is checked on the next MoveNextAsync after the first batch.
-        DataValue vector = DataValue.FromVector(new float[2048]);
+        DataValue vector = DataValue.FromInlineArray<float>(new float[2048], DataKind.Float32);
         CancellationTokenSource cancellationTokenSource = new();
         List<Row> rows = [];
 

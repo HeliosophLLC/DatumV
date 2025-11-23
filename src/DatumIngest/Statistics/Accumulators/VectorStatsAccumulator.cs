@@ -38,20 +38,21 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
             return;
         }
 
-        float[]? elements = null;
+        ReadOnlySpan<float> elements;
         int rank = 0;
         int elementCount = 0;
 
-        switch (value.Kind)
+        // Float32 + IsArray (formerly DataKind.Vector). The accumulator is opted
+        // in by StatisticsCollector only for this kind/flag combination.
+        if (value.Kind == DataKind.Float32 && value.IsArray)
         {
-            case DataKind.Vector:
-                elements = value.AsVector(store);
-                rank = 1;
-                elementCount = elements.Length;
-                break;
-
-            default:
-                return;
+            elements = value.AsArraySpan<float>(store);
+            rank = 1;
+            elementCount = elements.Length;
+        }
+        else
+        {
+            return;
         }
 
         _count++;

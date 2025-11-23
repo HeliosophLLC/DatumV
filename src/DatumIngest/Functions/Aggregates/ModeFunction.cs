@@ -33,10 +33,10 @@ public sealed class ModeFunction : IAggregateFunction
             throw new ArgumentException("MODE() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is DataKind.Vector)
-        {
-            throw new ArgumentException($"MODE() does not support Vector arguments.");
-        }
+        // Note: typed-array arguments (Float32 + IsArray, etc.) reach here as their
+        // element kind only — IsArray isn't visible through this signature, so MODE()
+        // currently can't reject them at validation time. Argument-kind plumbing
+        // for IsArray is deferred to the broader typed-array dispatch effort.
 
         return argumentKinds[0];
     }

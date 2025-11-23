@@ -16,7 +16,7 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
     [
         new ColumnInfo("id", DataKind.Float32, nullable: false),
         new ColumnInfo("name", DataKind.String, nullable: true),
-        new ColumnInfo("embedding", DataKind.Vector, nullable: false),
+        new ColumnInfo("embedding", DataKind.Float32, nullable: false) { IsArray = true },
         new ColumnInfo("created", DataKind.Date, nullable: false),
         new ColumnInfo("t.qualified_col", DataKind.Float32, nullable: false),
     ]);

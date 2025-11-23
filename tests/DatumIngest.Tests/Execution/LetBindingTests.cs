@@ -334,7 +334,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["v"],
-            [DataValue.FromVector([5f, 6f])]);
+            [DataValue.FromInlineArray<float>([5f, 6f], DataKind.Float32)]);
 
         // sin_v, cos_v appear both as LET names and directly as output columns
         List<Row> results = await ExecuteQueryAsync(
@@ -385,7 +385,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["v"],
-            [DataValue.FromVector([1f, 2f])]);  // only 2 elements
+            [DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)]);  // only 2 elements
 
         // LET (a, b, c) = v — c is out of bounds
         List<Row> results = await ExecuteQueryAsync(
@@ -408,7 +408,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["v"],
-            [DataValue.FromVector([1f, 2f])]);
+            [DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)]);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteQueryAsync("SELECT LET {a, b} = v, a AS x, b AS y FROM t", catalog));

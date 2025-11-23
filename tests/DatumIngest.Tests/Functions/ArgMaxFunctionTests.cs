@@ -203,7 +203,7 @@ public class ArgMaxFunctionTests : ServiceTestBase
         ArgMaxFunction function = new(findMaximum: true, "ARG_MAX");
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.String, DataKind.Vector]));
+            function.ValidateArguments([DataKind.String, DataKind.Image]));
     }
 
     [Fact]

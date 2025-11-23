@@ -109,7 +109,7 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     public void ConvertValue_Vector_ReturnsObjectArray()
     {
         float[] vector = [1.0f, 2.0f, 3.0f];
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromVector(vector, _arena), _arena);
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromArenaArray<float>(vector, DataKind.Float32, _arena), _arena);
 
         object[] array = Assert.IsType<object[]>(result);
         Assert.Equal(3, array.Length);
@@ -267,10 +267,10 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     [Fact]
     public void Serialize_Deserialize_Vector_PreservesStructure()
     {
-        Schema schema = new([new ColumnInfo("embedding", DataKind.Vector, nullable: false)]);
+        Schema schema = new([new ColumnInfo("embedding", DataKind.Float32, nullable: false) { IsArray = true }]);
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(
-            SingleValueRow(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)),
+            SingleValueRow(DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, _arena)),
             _arena);
 
         SamplePreview original = collector.Build(schema);

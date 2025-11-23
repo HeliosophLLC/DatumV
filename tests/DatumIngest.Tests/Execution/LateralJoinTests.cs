@@ -20,8 +20,8 @@ public sealed class LateralJoinTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("data",
             columns: ["name", "scores"],
-            ["alice", DataValue.FromVector([1f, 2f, 3f])],
-            ["bob", DataValue.FromVector([10f, 20f])]);
+            ["alice", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)],
+            ["bob", DataValue.FromInlineArray<float>([10f, 20f], DataKind.Float32)]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -47,7 +47,7 @@ public sealed class LateralJoinTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("data",
             columns: ["name", "scores"],
-            ["alice", DataValue.FromVector([1f, 2f])]);
+            ["alice", DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data CROSS APPLY UNNEST(data.scores) AS s",
             catalog);
@@ -68,9 +68,9 @@ public sealed class LateralJoinTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("data",
             columns: ["name", "scores"],
-            ["alice", DataValue.FromVector([1f, 2f])],
-            ["bob", DataValue.FromVector([])],
-            ["carol", DataValue.FromVector([5f])]);
+            ["alice", DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)],
+            ["bob", DataValue.FromInlineArray<float>([], DataKind.Float32)],
+            ["carol", DataValue.FromInlineArray<float>([5f], DataKind.Float32)]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data LEFT JOIN LATERAL UNNEST(data.scores) AS s",
             catalog);
@@ -98,8 +98,8 @@ public sealed class LateralJoinTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("data",
             columns: ["name", "scores"],
-            ["alice", DataValue.FromVector([1f])],
-            ["bob", DataValue.FromVector([])]);
+            ["alice", DataValue.FromInlineArray<float>([1f], DataKind.Float32)],
+            ["bob", DataValue.FromInlineArray<float>([], DataKind.Float32)]);
         List<Row> results = await ExecuteQueryAsync(
             "SELECT data.name, s.value FROM data OUTER APPLY UNNEST(data.scores) AS s",
             catalog);

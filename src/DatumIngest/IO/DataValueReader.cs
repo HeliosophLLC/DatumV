@@ -80,7 +80,6 @@ internal static class DataValueReader
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
-            DataKind.Vector => ReadVector(reader, store),
             DataKind.Image => ReadImage(reader, store),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
@@ -117,7 +116,6 @@ internal static class DataValueReader
                 new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
-            DataKind.Vector => ReadVector(reader),
             DataKind.Image => ReadImage(reader),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
@@ -160,24 +158,6 @@ internal static class DataValueReader
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
         return DataValue.FromByteArray(bytes, store);
-    }
-
-    private static DataValue ReadVector(BinaryReader reader)
-    {
-        int length = reader.ReadInt32();
-        float[] values = new float[length];
-        for (int i = 0; i < length; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromVector(values);
-    }
-
-    private static DataValue ReadVector(BinaryReader reader, IValueStore store)
-    {
-        int length = reader.ReadInt32();
-        float[] values = new float[length];
-        for (int i = 0; i < length; i++)
-            values[i] = reader.ReadSingle();
-        return DataValue.FromVector(values, store);
     }
 
     private static DataValue ReadImage(BinaryReader reader)

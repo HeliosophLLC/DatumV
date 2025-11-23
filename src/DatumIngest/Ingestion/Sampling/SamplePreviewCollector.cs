@@ -191,10 +191,17 @@ internal sealed class SamplePreviewCollector
             return BinarySentinel;
         }
 
+        // Float32 + IsArray (formerly DataKind.Vector) needs to serialise as a JSON
+        // array of floats. Generic typed-array dispatch comes later; for now this
+        // arm preserves the legacy preview output for vector columns.
+        if (value.Kind == DataKind.Float32 && value.IsArray)
+        {
+            return ConvertVector(value.AsArraySpan<float>(store));
+        }
+
         return value.Kind switch
         {
             // Composite types need recursive conversion for JSON nesting.
-            DataKind.Vector => ConvertVector(value.AsVector(store)),
             DataKind.Image => ConvertImage(value, store),
             DataKind.Array => ConvertArray(value, store),
             DataKind.Struct => ConvertStruct(value, store),
@@ -212,7 +219,7 @@ internal sealed class SamplePreviewCollector
     }
 
     /// <summary>Converts a float vector to a boxed float array for JSON.</summary>
-    private static object ConvertVector(float[] vector)
+    private static object ConvertVector(ReadOnlySpan<float> vector)
     {
         object[] result = new object[vector.Length];
         for (int i = 0; i < vector.Length; i++)

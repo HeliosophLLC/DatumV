@@ -114,9 +114,6 @@ public enum DataKind : byte
 
     // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
-    /// <summary>A one-dimensional array of 32-bit floats (rank-1 tensor).</summary>
-    Vector = 64,
-
     /// <summary>
     /// A typed array of <see cref="DataValue"/> elements sharing a common element kind.
     /// The element kind is stored in the shape metadata of the owning <see cref="DataValue"/>.

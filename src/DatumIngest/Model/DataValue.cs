@@ -7,7 +7,7 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.
-/// Use the static factory methods (<see cref="FromFloat32"/>, <see cref="FromVector(float[])"/>, etc.)
+/// Use the static factory methods (<see cref="FromFloat32"/>, <see cref="FromArenaArray{T}"/>, etc.)
 /// to construct instances and the accessor methods to retrieve typed payloads.
 /// </summary>
 /// <remarks>
@@ -72,9 +72,10 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// than a scalar. Storage flag (<see cref="InArena"/> / <see cref="InSidecar"/> /
         /// inline) tells where the bytes live; this flag tells how to interpret them.
         /// New typed-array kinds (UInt8[], Int32[], Float64[], Date[], …) all come into
-        /// existence via <c>Kind + IsArray</c>. Legacy multi-dimensional array kinds
-        /// (<see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/>) predate this flag
-        /// and don't set it; <see cref="DataValue.IsArray"/> reports <c>true</c> for both.
+        /// existence via <c>Kind + IsArray</c>. The legacy heterogeneous-element
+        /// <see cref="DataKind.Array"/> kind predates this flag and doesn't set it;
+        /// <see cref="DataValue.IsArray"/> reports <c>true</c> for it via a kind-based
+        /// fallback so callers don't need to know the migration history.
         /// </summary>
         IsArray = 0x08,
 
@@ -181,10 +182,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///     arbitrary element kinds: Int32[], Float64[], Date[], …)
     ///   </description></item>
     ///   <item><description>
-    ///     <see cref="Kind"/> is one of the legacy multi-dimensional array kinds —
-    ///     <see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/> — which predate
-    ///     the flag and don't set it. Treated as arrays so callers don't need to know
-    ///     the migration history.
+    ///     <see cref="Kind"/> is the legacy heterogeneous-element
+    ///     <see cref="DataKind.Array"/> kind — which predates the flag and doesn't
+    ///     set it. Treated as an array so callers don't need to know the migration
+    ///     history.
     ///   </description></item>
     /// </list>
     /// Switch dispatch can use <c>case DataKind.UInt8 when value.IsArray:</c> to handle
@@ -192,8 +193,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public bool IsArray =>
         (_flags & DataValueFlags.IsArray) != 0
-        || _kind is DataKind.Vector
-            or DataKind.Array;
+        || _kind == DataKind.Array;
 
     /// <summary>
     /// Whether this value's array payload is packed inline into <c>_p0</c>-<c>_p3</c>
@@ -518,18 +518,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStringSlice(int offset, int length) =>
         new(DataKind.String, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
-    /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVector(float[], IValueStore)"/> instead.</remarks>
-    public static DataValue FromVector(float[] value) =>
-        throw new InvalidOperationException("Use FromVector(value, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates a rank-1 tensor (vector) from a float array using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromVector(float[] value, IValueStore store)
-    {
-        var (p0, p1) = store.StoreFloats(value);
-        return new(DataKind.Vector, flags: DataValueFlags.InArena, p0: p0, p1: p1);
-    }
-
     /// <summary>Creates a value from encoded image bytes.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImage(byte[], IValueStore)"/> instead.</remarks>
     public static DataValue FromImage(byte[] value) =>
@@ -802,16 +790,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///   <item><description>Arena-backed values produced via the new <c>IsArray</c> flag model: byte-level read from <paramref name="store"/>.</description></item>
     /// </list>
     /// <para>
-    /// The legacy array kinds (<see cref="DataKind.Vector"/>, <see cref="DataKind.Array"/>) without the new
-    /// <c>IsArray</c> flag still go through their dedicated accessors
-    /// (<c>AsVector</c>, <c>AsArray</c>, etc.) and throw here. They will fold into
-    /// this auto-router as part of the deferred kind-consolidation cleanup.
+    /// The legacy <see cref="DataKind.Array"/> kind (heterogeneous-element array
+    /// stored as <c>DataValue[]</c>) does not route through this auto-router and
+    /// must use <c>AsArray(store)</c>. Folding it in is deferred to the composite
+    /// reference-array design.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the value isn't an array, when a required parameter is missing for
-    /// the resolved storage path, or when the value uses one of the legacy array
-    /// kinds that this method doesn't yet route through.
+    /// the resolved storage path, or when the value uses the legacy
+    /// <see cref="DataKind.Array"/> kind.
     /// </exception>
     public ReadOnlySpan<T> AsArraySpan<T>(IValueStore? store = null, SidecarRegistry? registry = null)
         where T : unmanaged
@@ -848,13 +836,13 @@ public readonly struct DataValue : IEquatable<DataValue>
             return MemoryMarshal.Cast<byte, T>(arenaBytes);
         }
 
-        // Legacy array kinds (Vector/Matrix/Tensor/Array) reach IsArray=true via the
-        // kind-based fallback in the IsArray getter, but their byte coordinates and
-        // shape are managed by their dedicated accessors. They aren't routed here
-        // until the kind-consolidation cleanup folds them into the IsArray-flag model.
+        // Legacy DataKind.Array reaches IsArray=true via the kind-based fallback in
+        // the IsArray getter, but its DataValue[]-backed payload is managed by its
+        // dedicated AsArray(store) accessor. Folding it in is deferred to the
+        // composite reference-array design.
         throw new InvalidOperationException(
             $"AsArraySpan does not yet route DataKind.{_kind} arrays. " +
-            "Use the kind-specific accessor (AsVector / AsArray) for legacy arrays.");
+            "Use AsArray(store) for the legacy heterogeneous-element array kind.");
     }
 
     /// <summary>
@@ -1826,9 +1814,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <list type="bullet">
     ///   <item><see cref="DataKind.String"/>:
     ///     UTF-8 byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
-    ///   <item>Byte arrays (UInt8 + IsArray), <see cref="DataKind.Image"/>:
+    ///   <item>Any typed array (Kind + IsArray) and <see cref="DataKind.Image"/>:
     ///     byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
-    ///   <item><see cref="DataKind.Vector"/>: float count × 4 (<c>_p1 * 4</c>, arena-only).</item>
     ///   <item>Inline arrays (<see cref="IsInlineArray"/>): element count × element size.</item>
     ///   <item>All other kinds (inline scalars, null, sidecar): <c>0</c>.</item>
     /// </list>
@@ -1847,11 +1834,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             }
 
             // Arena-backed.
-            if (IsByteArrayKind || _kind == DataKind.Image) return _p1;
+            if (IsArray || _kind == DataKind.Image) return _p1;
             return _kind switch
             {
                 DataKind.String => _p1,
-                DataKind.Vector => _p1 * 4,
                 _ => 0,
             };
         }
@@ -1894,23 +1880,23 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Returns the element count for collection-type values without accessing the store.
-    /// <list type="bullet">
-    /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>
-    /// <item>Byte arrays (<see cref="DataKind.UInt8"/> + <see cref="IsArray"/>): number of bytes (<c>_p1</c>)</item>
-    /// </list>
+    /// Returns the element count for arena-backed typed-array values without
+    /// allocating. Returns the byte count for byte arrays (1 element = 1 byte) and
+    /// derives element count from byte count for wider element kinds via
+    /// <see cref="ElementByteSize"/>.
     /// </summary>
-    /// <returns>The element count, or -1 if not available inline.</returns>
+    /// <returns>The element count, or -1 when not derivable inline (non-array, sidecar, etc.).</returns>
     public int ElementCount
     {
         get
         {
             if (IsByteArrayKind) return _p1;
-            return _kind switch
+            if (IsArray && (_flags & DataValueFlags.InArena) != 0)
             {
-                DataKind.Vector => _p1,
-                _ => -1,
-            };
+                int elementSize = ElementByteSize(_kind);
+                return elementSize > 0 ? _p1 / elementSize : -1;
+            }
+            return -1;
         }
     }
 
@@ -1999,21 +1985,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         return arena.GetSpan(_p0, _p1);
     }
 
-    /// <summary>Returns the vector (rank-1) float array payload.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsVector(IValueStore)"/> instead.</remarks>
-    public float[] AsVector()
-    {
-        ThrowIfNullOrWrongKind(DataKind.Vector);
-        throw new InvalidOperationException("Use AsVector(store). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>Returns the vector (rank-1) float array payload from an explicit <see cref="IValueStore"/>.</summary>
-    public float[] AsVector(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Vector);
-        return store.RetrieveFloats(_p0, _p1);
-    }
 
     /// <summary>
     /// Returns the encoded image byte array payload.
@@ -2231,8 +2202,6 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
-            DataKind.Vector
-                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Image
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Array
@@ -2296,8 +2265,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
-            DataKind.Vector
-                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Image
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Array
@@ -2476,7 +2443,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
-            DataKind.Vector => $"Vector[{_p1} elements]",
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
             DataKind.Array => $"Array<{(DataKind)_meta}>",
             DataKind.Struct => $"Struct({_meta} fields)",

@@ -1698,7 +1698,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_UnsupportedPair_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromVector([1f, 2f, 3f])));
+        Row row = MakeRow(("x", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1778,7 +1778,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_UnsupportedPair_ReturnsNull()
     {
-        Row row = MakeRow(("x", DataValue.FromVector([1f, 2f, 3f])));
+        Row row = MakeRow(("x", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 

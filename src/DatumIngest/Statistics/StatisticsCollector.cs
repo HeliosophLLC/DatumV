@@ -150,7 +150,12 @@ public sealed class StatisticsCollector
         // if the first non-null value is sidecar-backed, every value is.
         bool sidecarBacked = firstValue.IsInSidecar;
 
-        // Byte-array columns (Kind=UInt8 + IsArray flag set on values).
+        // Typed-array columns (Kind + IsArray flag set on values). Covers byte arrays
+        // (UInt8 + IsArray), vector arrays (Float32 + IsArray, the former Vector kind),
+        // and any other typed-array column. Numeric/cardinality accumulators must not
+        // fire for these; their element-level stats are handled by dedicated array
+        // accumulators where defined.
+        bool isArrayValue = firstValue.IsArray;
         bool isByteArray = firstValue.IsByteArrayKind;
 
         List<IStatisticAccumulator> accumulators =
@@ -160,20 +165,21 @@ public sealed class StatisticsCollector
         ];
 
         // Cardinality and top-K are skipped for binary/multi-dim kinds that have no
-        // useful distinct-value or frequency semantics. Images, byte blobs, vectors,
-        // and tensors are treated as opaque payloads — HLL on their arena offsets
-        // would just return the row count. Perceptual-hash cardinality is available
-        // on demand via the phash() SQL function.
-        if (!isByteArray
-            && kind is not (DataKind.Image or DataKind.Vector or DataKind.Array or DataKind.Struct))
+        // useful distinct-value or frequency semantics. Images, byte blobs, typed
+        // arrays, structs, and heterogeneous arrays are treated as opaque payloads —
+        // HLL on their arena offsets would just return the row count. Perceptual-hash
+        // cardinality is available on demand via the phash() SQL function.
+        if (!isArrayValue
+            && kind is not (DataKind.Image or DataKind.Array or DataKind.Struct))
         {
             accumulators.Add(new CardinalityAccumulator());
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
         }
 
-        // IsNumericScalar returns true for UInt8 — but a byte-array value (UInt8 +
-        // IsArray) is not a scalar and must not get numeric stats. Gate explicitly.
-        if (!isByteArray && DataValueComparer.IsNumericScalar(kind))
+        // IsNumericScalar returns true for UInt8/Float32/etc. — but a typed-array
+        // value (UInt8 + IsArray, Float32 + IsArray) is not a scalar and must not
+        // get numeric stats. Gate on the IsArray flag explicitly.
+        if (!isArrayValue && DataValueComparer.IsNumericScalar(kind))
         {
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());
@@ -185,7 +191,9 @@ public sealed class StatisticsCollector
             accumulators.Add(new StringLengthAccumulator());
         }
 
-        if (kind == DataKind.Vector)
+        // Vector stats accumulator now keys on Float32 + IsArray (the former Vector
+        // kind). Other typed-array kinds don't yet have a dedicated stats path.
+        if (kind == DataKind.Float32 && isArrayValue)
         {
             accumulators.Add(new VectorStatsAccumulator());
         }

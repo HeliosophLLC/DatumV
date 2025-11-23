@@ -110,7 +110,7 @@ public static class TypeCoercion
             DataKind.UInt64 => DataKind.Float64,
             DataKind.Float32 => DataKind.Float64,
             DataKind.Duration => DataKind.Float64,
-            DataKind.Float64 => DataKind.Vector,
+
             _ => null,
         };
     }
@@ -133,7 +133,6 @@ public static class TypeCoercion
             DataKind.UInt64 => DataValue.FromFloat64(value.AsUInt64()),
             DataKind.Float32 => DataValue.FromFloat64(value.AsFloat32()),
             DataKind.Duration => DataValue.FromFloat64(value.AsDuration().TotalSeconds),
-            DataKind.Float64 => DataValue.FromVector([(float)value.AsFloat64()]),
             _ => throw new InvalidOperationException($"No widening step exists for {value.Kind}."),
         };
     }

@@ -13,8 +13,8 @@ namespace DatumIngest.Model;
 /// </para>
 /// <para>
 /// Returns <c>0</c> for kinds that have no ordinal semantics such as
-/// <see cref="DataKind.Array"/>, <see cref="DataKind.Vector"/>, and
-/// <see cref="DataKind.Image"/>. In practice those kinds are blocked by the type
+/// <see cref="DataKind.Array"/>, <see cref="DataKind.Image"/>, and any typed-array
+/// (Kind + IsArray) value. In practice those kinds are blocked by the type
 /// resolver before reaching comparison contexts.
 /// </para>
 /// </remarks>

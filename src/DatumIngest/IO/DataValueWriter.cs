@@ -126,12 +126,6 @@ internal static class DataValueWriter
                 writer.Write(img);
                 break;
 
-            case DataKind.Vector:
-                float[] vec = value.AsVector(store);
-                writer.Write(vec.Length);
-                foreach (float element in vec) writer.Write(element);
-                break;
-
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }
@@ -241,15 +235,6 @@ internal static class DataValueWriter
             // (zone maps don't carry byte-array min/max). Falls through to the
             // default arm if any caller actually constructs one — a clear
             // NotSupportedException is the right failure mode.
-
-            case DataKind.Vector:
-                float[] vector = value.AsVector();
-                writer.Write(vector.Length);
-                foreach (float element in vector)
-                {
-                    writer.Write(element);
-                }
-                break;
 
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());
@@ -377,15 +362,6 @@ internal static class DataValueWriter
             // (zone maps don't carry byte-array min/max). Falls through to the
             // default arm if any caller actually constructs one — a clear
             // NotSupportedException is the right failure mode.
-
-            case DataKind.Vector:
-                float[] vectorArray = value.AsVector();
-                writer.Write(vectorArray.Length);
-                foreach (float element in vectorArray)
-                {
-                    writer.Write(element);
-                }
-                break;
 
             case DataKind.Image:
                 byte[] imageData = value.AsImage();

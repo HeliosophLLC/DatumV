@@ -68,11 +68,10 @@ public static class ColumnRoleClassifier
     /// <returns>The inferred <see cref="ColumnRole"/>.</returns>
     public static ColumnRole Classify(FeatureManifest manifest, long rowCount)
     {
-        // Structural kinds: Vector, Matrix, Tensor.
-        if (manifest.Kind == DataKind.Vector)
-        {
-            return ColumnRole.Structural;
-        }
+        // Structural kinds previously covered Vector. Float32 + IsArray columns
+        // now flow through the numeric-array path; restoring a dedicated
+        // structural classifier for them is deferred to the typed-array
+        // feature-stats work.
 
         // Binary kinds: byte arrays (UInt8 + IsArray), Image.
         if (manifest.Kind == DataKind.Image

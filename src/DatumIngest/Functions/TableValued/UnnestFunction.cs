@@ -47,12 +47,9 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
 
         return inputKind switch
         {
-            // Vector elements are floats.
-            DataKind.Vector => new Schema(
-                [new ColumnInfo("value", DataKind.Float32, nullable: false)]),
-
             // Use the element kind when it is known at plan time; otherwise fall
-            // back to String.
+            // back to String. Float32 + IsArray (formerly Vector) reaches here as
+            // DataKind.Float32 with elementKind = Float32 plumbed by the planner.
             DataKind.Array => elementKind is not null
                 ? new Schema([new ColumnInfo("value", elementKind.Value, nullable: true)])
                 : new Schema([new ColumnInfo("value", DataKind.String, nullable: true)]),
@@ -83,9 +80,20 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
 
         switch (input.Kind)
         {
-            case DataKind.Vector:
+            // Float32 + IsArray (formerly DataKind.Vector). Inline arrays decode
+            // without a store; arena-backed arrays need TVF dispatch to thread an
+            // EvaluationFrame through — deferred until that interface lands.
+            case DataKind.Float32 when input.IsArray:
             {
-                float[] values = input.AsVector();
+                if (!input.IsInlineArray)
+                {
+                    throw new NotSupportedException(
+                        "unnest() of an arena-backed Float32 array requires a store-aware execution context "
+                        + "and is not currently wired through the TVF dispatch path.");
+                }
+                // Materialise to a heap array because ReadOnlySpan<T> cannot cross
+                // the yield/await boundary in this iterator.
+                float[] values = input.AsInlineArraySpan<float>().ToArray();
                 string[] names = ["value"];
                 Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
                 foreach (float item in values)

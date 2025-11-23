@@ -164,14 +164,14 @@ public sealed class ColumnInteractionCollectorTests : ServiceTestBase
                 collector.AddRow(MakeRow(
                     columnLookup,
                     DataValue.Null(DataKind.Image),
-                    DataValue.Null(DataKind.Vector)));
+                    DataValue.Null(DataKind.Float32)));
             }
             else
             {
                 collector.AddRow(MakeRow(
                     columnLookup,
                     DataValue.FromImage([0xFF, 0xD8, 0xFF], arena),
-                    DataValue.FromVector([1.0f, 2.0f], arena)));
+                    DataValue.FromArenaArray<float>([1.0f, 2.0f], DataKind.Float32, arena)));
             }
         }
 

@@ -94,11 +94,14 @@ public sealed class IndexHintTests : ServiceTestBase
     {
         ColumnLookup columnLookup = new (["embedding"]);
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([1.0f, 2.0f], _arena)), _arena);
-        collector.AddRow(MakeRow(columnLookup, DataValue.FromVector([3.0f, 4.0f], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<float>([1.0f, 2.0f], DataKind.Float32, _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<float>([3.0f, 4.0f], DataKind.Float32, _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
+        Dictionary<string, ColumnInfo> kinds = new()
+        {
+            ["embedding"] = new ColumnInfo("embedding", DataKind.Float32, nullable: true) { IsArray = true },
+        };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(statistics, kinds, 2);
 
@@ -177,7 +180,7 @@ public sealed class IndexHintTests : ServiceTestBase
     {
         Schema schema = new([
             new ColumnInfo("value", DataKind.Float32, false),
-            new ColumnInfo("embedding", DataKind.Vector, false),
+            new ColumnInfo("embedding", DataKind.Float32, false) { IsArray = true },
         ]);
 
         Dictionary<string, BitmapChunkAccumulator>? accumulators =

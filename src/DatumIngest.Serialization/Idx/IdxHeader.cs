@@ -69,7 +69,8 @@ internal sealed class IdxHeader
         return ItemDimensionCount switch
         {
             0 => (DataKind.Float32, false),
-            1 => (DataKind.Vector, false),
+            // Rank-1 float arrays land as Float32 + IsArray (the former Vector kind).
+            1 => (DataKind.Float32, true),
             // Higher-rank float tensors are deferred. The IdxValueReader throws
             // on rank ≥ 2 too — these match.
             _ => throw new NotSupportedException(

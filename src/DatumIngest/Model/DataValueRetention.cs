@@ -61,16 +61,18 @@ public static class DataValueRetention
         // Struct retention path: nobody actually copies them across stores.
         if (ReferenceEquals(sourceStore, retentionStore)) return value;
 
+        // Any arena-backed typed array (Kind + IsArray) — bytes live contiguously at
+        // (_p0, _p1) in sourceStore, regardless of element kind. Copy bytes verbatim
+        // into retentionStore and rebuild the DataValue with the same kind tag.
+        // Must come before the scalar arms below so e.g. UInt8 + IsArray matches first.
+        if (value.IsArray)
+        {
+            ReadOnlySpan<byte> bytes = value.AsArraySpan<byte>(sourceStore);
+            return DataValue.FromArenaArray<byte>(bytes, value.Kind, retentionStore);
+        }
+
         return value.Kind switch
         {
-            // Byte array (UInt8 + IsArray): copy bytes into retention store.
-            // Must come before the scalar-UInt8 arm below so this matches first;
-            // otherwise the scalar arm would return the value unchanged
-            // (incorrect for an arena-backed byte array).
-            DataKind.UInt8 when value.IsArray => DataValue.FromByteArray(
-                value.AsUInt8Array(sourceStore),
-                retentionStore),
-
             // Fixed-size scalars: self-contained in the struct's inline payload bytes.
             DataKind.Unknown
                 or DataKind.Boolean
@@ -101,8 +103,8 @@ public static class DataValueRetention
             // up — e.g. an array of vectors would still be unsupported.
             DataKind.Array => StabilizeArray(value, sourceStore, retentionStore),
 
-            // Vector / Matrix / Tensor / Struct retention paths aren't implemented yet
-            // because no current retention site uses them as keys. Add a case when needed.
+            // Struct retention path isn't implemented yet because no current retention
+            // site uses it as a key. Add a case when needed.
             _ => throw new NotSupportedException(
                 $"Retention of {value.Kind} is not implemented. Add a case to " +
                 "DataValueRetention.Stabilize when a retention site needs it."),
