@@ -634,8 +634,6 @@ public sealed class ExpressionEvaluator
         {
             DataKind.String =>
                 ValueRef.FromString(value.AsString(frame.Source, frame.SidecarRegistry)),
-            DataKind.JsonValue =>
-                ValueRef.FromJsonValue(value.AsString(frame.Source, frame.SidecarRegistry)),
             _ => throw new InvalidOperationException(
                 $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
                 + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary."),
@@ -663,7 +661,6 @@ public sealed class ExpressionEvaluator
         return value.Materialized switch
         {
             string s when value.Kind == DataKind.String => DataValue.FromString(s, frame.Target),
-            string s when value.Kind == DataKind.JsonValue => DataValue.FromJsonValue(s, frame.Target),
             byte[] bytes when value.IsByteArrayKind => DataValue.FromByteArray(bytes, frame.Target),
             byte[] bytes when value.Kind == DataKind.Image => DataValue.FromImage(bytes, frame.Target),
             _ => throw new InvalidOperationException(
@@ -1165,7 +1162,7 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Compares two <see cref="DataValue"/>s using the arenas carried by <paramref name="frame"/>.
-    /// For non-inline String/JsonValue operands the comparer needs arena bytes to resolve
+    /// For non-inline String operands the comparer needs arena bytes to resolve
     /// UTF-8 payloads; we pass <see cref="EvaluationFrame.Source"/> for the left operand (row
     /// values typically live in the input batch's arena) and <see cref="EvaluationFrame.Target"/>
     /// for the right (materialised literals go there). This convention matches the common
@@ -1207,7 +1204,6 @@ public sealed class ExpressionEvaluator
                 DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
                 DataKind.Uuid => left.AsUuid().CompareTo(right.AsUuid()),
                 DataKind.Type => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
-                DataKind.JsonValue => string.CompareOrdinal(left.AsString(), right.AsString()),
                 _ => throw new InvalidOperationException(
                     $"Cannot compare values of kind {left.Kind}."),
             };

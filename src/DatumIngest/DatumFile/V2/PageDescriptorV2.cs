@@ -20,9 +20,8 @@ namespace DatumIngest.DatumFile.V2;
 /// </param>
 /// <param name="ZoneMap">
 /// Page-level zone map for this column page. <see langword="null"/> for
-/// non-comparable kinds (Vector, Matrix, Tensor, Image, UInt8Array,
-/// JsonValue, Array, Struct) — for those kinds only chapter+volume null
-/// counts are meaningful.
+/// non-comparable kinds (Vector, Image, Array, Struct, byte arrays) —
+/// for those kinds only chapter+volume null counts are meaningful.
 /// </param>
 public sealed record PageDescriptorV2(
     long PageOffset,

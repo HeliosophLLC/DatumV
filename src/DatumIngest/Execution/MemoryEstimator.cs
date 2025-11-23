@@ -8,8 +8,8 @@ namespace DatumIngest.Execution;
 /// <para>
 /// For fixed-width schemas (all columns are Scalar, UInt8, Boolean, Date, DateTime, Time,
 /// Duration, or Uuid), the per-row size is computed exactly once on the first row.
-/// For variable-width schemas (any column is String, Vector, Matrix, Tensor, Image,
-/// UInt8Array, or JsonValue), every Nth row is sampled to maintain a running average.
+/// For variable-width schemas (any column is String, Vector, Image, Struct, or
+/// a typed array), every Nth row is sampled to maintain a running average.
 /// When the estimate crosses a budget threshold, callers should escalate to every-row
 /// sampling for higher accuracy near the spill decision point.
 /// </para>
@@ -141,8 +141,7 @@ internal sealed class MemoryEstimator
             if (field.IsArray) return false;
 
             DataKind kind = field.Kind;
-            if (kind is DataKind.String or DataKind.Image
-                or DataKind.JsonValue or DataKind.Struct)
+            if (kind is DataKind.String or DataKind.Image or DataKind.Struct)
             {
                 return false;
             }

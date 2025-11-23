@@ -11,7 +11,7 @@ namespace DatumIngest.Indexing;
 /// <para>
 /// Only retains <see cref="DataValue"/> instances that are self-contained: inline strings
 /// (≤16 UTF-8 bytes, stored in the struct) and fixed-size scalars. On observing a non-inline
-/// String or JsonValue, min/max tracking for that column is invalidated and no further
+/// String, min/max tracking for that column is invalidated and no further
 /// min/max is recorded — the serialized statistics will have <c>null</c> min/max, which
 /// downstream zone-map pruning correctly treats as "no pruning possible."
 /// </para>
@@ -82,11 +82,11 @@ internal sealed class ChunkAccumulator
             return;
         }
 
-        // Non-inline String/JsonValue can't be retained across batches without an external
+        // Non-inline String can't be retained across batches without an external
         // arena. Rather than chase retention plumbing, we invalidate min/max for the column
         // on first sight. Downstream zone-map pruning treats null min/max as "unknown, do
         // not prune" — correct, conservative behaviour.
-        if ((value.Kind is DataKind.String or DataKind.JsonValue) && !value.IsInline)
+        if (value.Kind == DataKind.String && !value.IsInline)
         {
             _minimum = null;
             _maximum = null;
@@ -145,7 +145,6 @@ internal sealed class ChunkAccumulator
             case DataKind.DateTime:
                 _cardinality!.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
-            case DataKind.JsonValue:
             case DataKind.String:
                 _cardinality!.Add(value.RawContentHash);
                 break;

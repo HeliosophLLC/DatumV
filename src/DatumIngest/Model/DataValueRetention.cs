@@ -89,10 +89,6 @@ public static class DataValueRetention
                 value.StringCharCount(sourceStore),
                 retentionStore),
 
-            DataKind.JsonValue => DataValue.FromJsonValue(
-                value.AsJsonValue(sourceStore),
-                retentionStore),
-
             // Image is just encoded bytes now — the legacy ImageHandle-in-object-slot
             // path is gone, since image functions are lowered to fused pipelines that
             // emit raw bytes at the boundaries. So retention is the same as UInt8Array.

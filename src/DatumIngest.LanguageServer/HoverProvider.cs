@@ -466,7 +466,6 @@ public sealed class HoverProvider
             ["Time"] = "**Time** — Time of day without date component.",
             ["Duration"] = "**Duration** — Elapsed time span with microsecond precision.",
             ["Uuid"] = "**Uuid** — 128-bit universally unique identifier (RFC 4122).",
-            ["JsonValue"] = "**JsonValue** — Arbitrary JSON value stored as text. Supports JSON path operations.",
             ["Vector"] = "**Vector** — Fixed-length array of Float32 values. Supports distance and similarity operations.",
             ["Matrix"] = "**Matrix** — Two-dimensional array of Float32 values.",
             ["Tensor"] = "**Tensor** — Multi-dimensional array of Float32 values.",

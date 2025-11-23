@@ -145,7 +145,7 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
                 string name = reader.ReadString();
                 DataKind kind = (DataKind)reader.ReadByte();
                 int keyWidth = reader.ReadInt32();
-                bool isStringType = kind is DataKind.String or DataKind.JsonValue;
+                bool isStringType = kind == DataKind.String;
                 int entryStride = 2 * (1 + keyWidth) + ScalarStatisticsWidth;
 
                 columns[columnIndex] = new ZoneMapColumnDescriptor(
@@ -300,9 +300,7 @@ internal sealed class MappedChunkDirectory : IReadOnlyList<IndexChunk>
 
             string value = _stringTable[entryIndex];
 
-            return kind == DataKind.String
-                ? DataValue.FromString(value)
-                : DataValue.FromJsonValue(value);
+            return DataValue.FromString(value);
         }
 
         return SortedIndexKeyEncoder.Decode(kind, keyBytes);

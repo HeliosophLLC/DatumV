@@ -112,13 +112,6 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 int charCount = System.Text.Encoding.UTF8.GetCharCount(payload);
                 return DataValue.FromUtf8Span(payload, charCount, store: null!);
             }
-            case DataKind.JsonValue:
-            {
-                int charCount = System.Text.Encoding.UTF8.GetCharCount(payload);
-                // FromUtf8Span only supports the String kind; fall through to FromJsonValue
-                // by materializing the string. The bytes are <= 15 so the allocation is cheap.
-                return DataValue.FromJsonValue(System.Text.Encoding.UTF8.GetString(payload));
-            }
             case DataKind.UInt8 when _column.IsArray:
                 return DataValue.FromInlineArray<byte>(payload, DataKind.UInt8);
             case DataKind.Int8 when _column.IsArray:
@@ -167,8 +160,6 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         {
             DataKind.String
                 => DataValue.FromStringInSidecar(offset, length, _sidecarStoreId),
-            DataKind.JsonValue
-                => DataValue.FromJsonValueInSidecar(offset, length, _sidecarStoreId),
             DataKind.Image
                 => DataValue.FromImageInSidecar(offset, length, _sidecarStoreId),
             DataKind.UInt8 when _column.IsArray

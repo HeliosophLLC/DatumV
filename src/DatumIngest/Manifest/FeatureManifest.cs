@@ -170,7 +170,7 @@ public sealed class NumericFeatureManifest : FeatureManifest
 public sealed record HistogramData(IReadOnlyList<double> BinEdges, IReadOnlyList<long> Counts);
 
 /// <summary>
-/// Feature manifest for string columns (<see cref="DataKind.String"/>, <see cref="DataKind.JsonValue"/>).
+/// Feature manifest for string columns (<see cref="DataKind.String"/>).
 /// </summary>
 public sealed class StringFeatureManifest : FeatureManifest
 {

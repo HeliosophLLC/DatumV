@@ -117,8 +117,8 @@ public static class ColumnRoleClassifier
             return ClassifyFloatingPointColumn(manifest, distinctRatio);
         }
 
-        // String / JsonValue kinds.
-        if (manifest.Kind is DataKind.String or DataKind.JsonValue)
+        // String kinds.
+        if (manifest.Kind == DataKind.String)
         {
             return ClassifyStringColumn(manifest, distinctRatio);
         }

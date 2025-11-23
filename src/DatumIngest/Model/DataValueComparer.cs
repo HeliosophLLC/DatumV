@@ -24,11 +24,11 @@ internal static class DataValueComparer
     /// Compares two non-null values without providing an <see cref="Arena"/>. Safe for
     /// scalar kinds, null values, and inline strings (which are self-contained in the
     /// <see cref="DataValue"/> struct). Throws for non-inline <see cref="DataKind.String"/>
-    /// or <see cref="DataKind.JsonValue"/> values — those require arenas to resolve payload
+    /// values — those require arenas to resolve payload
     /// bytes; use <see cref="Compare(DataValue, IValueStore, DataValue, IValueStore)"/> instead.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when either side is a non-inline String or JsonValue. The caller must
+    /// Thrown when either side is a non-inline String. The caller must
     /// supply arenas via the two-arena overload to compare those content-correctly.
     /// </exception>
     internal static int Compare(DataValue left, DataValue right)
@@ -38,17 +38,17 @@ internal static class DataValueComparer
         if (leftNeedsArena || rightNeedsArena)
         {
             throw new InvalidOperationException(
-                "Comparing non-inline String/JsonValue requires arenas. " +
+                "Comparing non-inline String requires arenas. " +
                 "Use DataValueComparer.Compare(left, leftArena, right, rightArena) instead.");
         }
 
-        // Safe: arena is only read inside Compare for String/JsonValue reference-store kinds,
+        // Safe: arena is only read inside Compare for String reference-store kinds,
         // and we've just proven both sides are either inline, null, or scalar.
         return Compare(left, null!, right, null!);
     }
 
     private static bool NeedsArenaForCompare(DataValue value) =>
-        (value.Kind is DataKind.String or DataKind.JsonValue)
+        value.Kind == DataKind.String
         && !value.IsNull
         && !value.IsInline;
 
@@ -100,7 +100,6 @@ internal static class DataValueComparer
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
             DataKind.Type     => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
             DataKind.String   => left.AsUtf8Span(leftArena).SequenceCompareTo(right.AsUtf8Span(rightArena)),
-            DataKind.JsonValue => left.AsUtf8Span(leftArena).SequenceCompareTo(right.AsUtf8Span(rightArena)),
             _ => 0,
         };
     }
@@ -289,7 +288,6 @@ internal static class DataValueComparer
             DataKind.Time     => TimeOnly.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Duration => TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out _),
             DataKind.Uuid     => Guid.TryParse(value, out _),
-            DataKind.JsonValue => true,
             DataKind.String   => true,
             _ => false,
         };
@@ -332,10 +330,6 @@ internal static class DataValueComparer
             // Duration ↔ numeric (total seconds)
             (DataKind.Duration, DataKind.Float32 or DataKind.Float64) => true,
             (DataKind.Float32 or DataKind.Float64, DataKind.Duration) => true,
-
-            // JSON ↔ String (text reinterpretation)
-            (DataKind.JsonValue, DataKind.String) => true,
-            (DataKind.String, DataKind.JsonValue) => true,
 
             // Byte-array ↔ Image cast was supported in the old model but the
             // (DataKind, DataKind) signature can't express "UInt8 + IsArray".

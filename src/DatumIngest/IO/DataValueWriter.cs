@@ -120,10 +120,6 @@ internal static class DataValueWriter
                 writer.Write(value.AsString(store));
                 break;
 
-            case DataKind.JsonValue:
-                writer.Write(value.AsJsonValue(store));
-                break;
-
             case DataKind.Image:
                 byte[] img = value.AsImage(store);
                 writer.Write(img.Length);
@@ -239,10 +235,6 @@ internal static class DataValueWriter
 
             case DataKind.Duration:
                 writer.Write(value.AsDuration().Ticks);
-                break;
-
-            case DataKind.JsonValue:
-                writer.Write(value.AsJsonValue());
                 break;
 
             // Byte arrays aren't supported in the no-store wire format
@@ -379,10 +371,6 @@ internal static class DataValueWriter
 
             case DataKind.Duration:
                 writer.Write(value.AsDuration().Ticks);
-                break;
-
-            case DataKind.JsonValue:
-                writer.Write(value.AsJsonValue());
                 break;
 
             // Byte arrays aren't supported in the no-store wire format

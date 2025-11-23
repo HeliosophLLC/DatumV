@@ -10,7 +10,7 @@ namespace DatumIngest.DatumFile.V2.Encoding;
 /// </summary>
 /// <remarks>
 /// Min/max are captured only for comparable kinds. Non-comparable kinds
-/// (Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array, Struct)
+/// (Vector, Image, byte arrays, Array, Struct)
 /// produce a zone map with <see cref="DatumZoneMap.NullCount"/> only —
 /// callers can still prune on null count alone.
 /// </remarks>
@@ -103,8 +103,8 @@ internal sealed class PageZoneMapBuilderV2
             DataKind.Duration => v.AsDuration(),
             DataKind.Uuid => v.AsUuid(),
             DataKind.String when store is not null => v.AsString(store),
-            // Vector / Matrix / Tensor / Image / UInt8Array (legacy) / JsonValue
-            // / Array / Struct / Type / Unknown — non-comparable.
+            // Vector / Image / byte arrays / Array / Struct / Type / Unknown —
+            // non-comparable.
             _ => null,
         };
     }

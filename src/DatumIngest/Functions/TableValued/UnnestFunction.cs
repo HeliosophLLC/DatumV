@@ -1,14 +1,11 @@
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.TableValued;
 
 /// <summary>
-/// Takes an array-valued column (Vector, JsonValue array, or generic Array)
-/// and expands each element into a separate row.
-/// When unnesting a JsonValue array of objects (e.g. from zip()), each object
-/// property becomes a named column.
+/// Takes an array-valued column (Vector or generic Array) and expands each
+/// element into a separate row.
 /// </summary>
 /// <remarks>
 /// Byte-array unnest (UInt8 + IsArray) requires a store-aware execution
@@ -36,8 +33,7 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
     /// <remarks>
     /// When <paramref name="argumentKinds"/>[0] is <see cref="DataKind.Array"/> and
     /// <paramref name="arrayElementKinds"/>[0] is known, the output column uses the
-    /// element kind directly. Without element kind metadata the fallback is String,
-    /// matching the existing JSON-array behaviour.
+    /// element kind directly. Without element kind metadata the fallback is String.
     /// </remarks>
     public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds, ReadOnlySpan<DataKind?> arrayElementKinds)
     {
@@ -56,14 +52,12 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 [new ColumnInfo("value", DataKind.Float32, nullable: false)]),
 
             // Use the element kind when it is known at plan time; otherwise fall
-            // back to String, matching the existing JSON-array behaviour.
+            // back to String.
             DataKind.Array => elementKind is not null
                 ? new Schema([new ColumnInfo("value", elementKind.Value, nullable: true)])
                 : new Schema([new ColumnInfo("value", DataKind.String, nullable: true)]),
 
-            // JSON arrays may expand to objects with unknown columns;
-            // fall back to a single "value" column of String kind. Byte-array
-            // inputs (UInt8 + IsArray) also reach here — see class remarks.
+            // Byte-array inputs (UInt8 + IsArray) also reach here — see class remarks.
             _ => new Schema(
                 [new ColumnInfo("value", DataKind.String, nullable: true)]),
         };
@@ -117,62 +111,6 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                     "unnest() of a byte array requires a store-aware execution context "
                     + "and is not currently wired through the TVF dispatch path.");
 
-            case DataKind.JsonValue:
-            {
-                string jsonText = input.AsJsonValue();
-                using JsonDocument document = JsonDocument.Parse(jsonText);
-                JsonElement root = document.RootElement;
-
-                if (root.ValueKind != JsonValueKind.Array)
-                {
-                    throw new ArgumentException("unnest() JSON argument must be an array.");
-                }
-
-                foreach (JsonElement item in root.EnumerateArray())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    if (item.ValueKind == JsonValueKind.Object)
-                    {
-                        // Expand object properties into named columns.
-                        int propertyCount = 0;
-                        foreach (JsonProperty _ in item.EnumerateObject())
-                        {
-                            propertyCount++;
-                        }
-
-                        string[] names = new string[propertyCount];
-                        DataValue[] values = new DataValue[propertyCount];
-                        int index = 0;
-                        foreach (JsonProperty property in item.EnumerateObject())
-                        {
-                            names[index] = property.Name;
-                            values[index] = ConvertJsonElement(property.Value);
-                            index++;
-                        }
-                        batch ??= RowBatch.Rent(DefaultBatchSize);
-                        batch.Add(new Row(names, values));
-                        if (batch.IsFull)
-                        {
-                            yield return batch;
-                            batch = null;
-                        }
-                    }
-                    else
-                    {
-                        // Scalar elements get a single "value" column.
-                        batch ??= RowBatch.Rent(DefaultBatchSize);
-                        batch.Add(new Row(["value"], [ConvertJsonElement(item)]));
-                        if (batch.IsFull)
-                        {
-                            yield return batch;
-                            batch = null;
-                        }
-                    }
-                }
-                break;
-            }
-
             case DataKind.Array:
             {
                 DataValue[] elements = input.AsArray();
@@ -205,17 +143,4 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
         await Task.CompletedTask;
     }
 
-    private static DataValue ConvertJsonElement(JsonElement element)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.String => DataValue.FromString(element.GetString()!),
-            JsonValueKind.Number => DataValue.FromFloat64(element.GetDouble()),
-            JsonValueKind.True => DataValue.FromBoolean(true),
-            JsonValueKind.False => DataValue.FromBoolean(false),
-            JsonValueKind.Null => DataValue.Null(DataKind.String),
-            JsonValueKind.Array or JsonValueKind.Object => DataValue.FromJsonValue(element.GetRawText()),
-            _ => DataValue.Null(DataKind.String),
-        };
-    }
 }

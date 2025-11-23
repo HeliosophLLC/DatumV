@@ -198,9 +198,9 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     /// </summary>
     private static int ExtractInlinePayload(DataValue value, Span<byte> slot)
     {
-        // Strings / JsonValue: UTF-8 bytes from the inline tier. AsUtf8Span
+        // Strings: UTF-8 bytes from the inline tier. AsUtf8Span
         // handles inline without consulting any store.
-        if (value.Kind is DataKind.String or DataKind.JsonValue)
+        if (value.Kind == DataKind.String)
         {
             ReadOnlySpan<byte> utf8 = value.AsUtf8Span(store: null!);
             utf8.CopyTo(slot);
@@ -244,7 +244,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         // Arena-backed paths — kind dispatch picks the right read-side accessor.
         return value.Kind switch
         {
-            DataKind.String or DataKind.JsonValue
+            DataKind.String
                 => value.AsUtf8Span(store!),
 
             DataKind.Image

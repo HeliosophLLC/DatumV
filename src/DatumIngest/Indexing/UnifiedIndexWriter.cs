@@ -346,7 +346,7 @@ internal static class UnifiedIndexWriter
         // Write per-column zone maps: ChunkCount records per column.
         foreach ((string columnName, DataKind kind, int keyWidth) in zoneMapColumns)
         {
-            bool isStringType = kind is DataKind.String or DataKind.JsonValue;
+            bool isStringType = kind == DataKind.String;
             long colStartPos = writer.BaseStream.Position;
 
             foreach (IndexChunk chunk in chunks)
@@ -434,9 +434,7 @@ internal static class UnifiedIndexWriter
         if (isStringType)
         {
             // String zone maps store a string table reference.
-            string stringValue = kind == DataKind.String
-                ? value.Value.AsString()
-                : value.Value.AsJsonValue();
+            string stringValue = value.Value.AsString();
 
             byte[] utf8Bytes = Encoding.UTF8.GetBytes(stringValue);
 
@@ -603,7 +601,7 @@ internal static class UnifiedIndexWriter
 
             long keysOffset = writer.BaseStream.Position;
 
-            if (kind is DataKind.String or DataKind.JsonValue)
+            if (kind == DataKind.String)
             {
                 List<byte[]> stringTable = new();
                 Dictionary<string, (int Offset, int Length)> stringDedup = new(StringComparer.Ordinal);
@@ -612,9 +610,7 @@ internal static class UnifiedIndexWriter
 
                 foreach (ValueIndexEntry entry in entries)
                 {
-                    string stringValue = kind == DataKind.String
-                        ? entry.Key.AsString()
-                        : entry.Key.AsJsonValue();
+                    string stringValue = entry.Key.AsString();
 
                     if (!stringDedup.TryGetValue(stringValue, out (int Offset, int Length) reference))
                     {

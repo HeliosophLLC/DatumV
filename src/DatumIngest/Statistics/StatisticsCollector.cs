@@ -180,7 +180,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new QuantileAccumulator());
         }
 
-        if (kind is DataKind.String or DataKind.JsonValue)
+        if (kind == DataKind.String)
         {
             accumulators.Add(new StringLengthAccumulator());
         }

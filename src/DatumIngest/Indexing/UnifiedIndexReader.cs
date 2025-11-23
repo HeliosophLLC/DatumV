@@ -463,7 +463,7 @@ internal static class UnifiedIndexReader
             // Peek at the first key's DataKind to determine string vs non-string path.
             DataKind firstKind = (DataKind)reader.ReadByte();
 
-            if (firstKind is DataKind.String or DataKind.JsonValue)
+            if (firstKind == DataKind.String)
             {
                 // String-keyed: read keys as raw strings, bypassing ReferenceStore.
                 Dictionary<string, BitmapColumnIndex.ChunkLocation[]> stringLocations = new(distinctValueCount, StringComparer.Ordinal);

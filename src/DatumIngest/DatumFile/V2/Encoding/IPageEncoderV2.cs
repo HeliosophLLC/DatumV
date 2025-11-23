@@ -24,7 +24,7 @@ internal interface IPageEncoderV2
 
     /// <summary>
     /// Appends one row's value. <paramref name="store"/> resolves
-    /// arena-backed payloads (Strings, JsonValue, byte arrays, etc.) and
+    /// arena-backed payloads (Strings, byte arrays, etc.) and
     /// is unused by encoders whose kinds are always inline. The
     /// <c>VariableSlotPageEncoderV2</c> (when implemented) additionally
     /// uses <paramref name="sidecar"/> to spill non-inline payloads.

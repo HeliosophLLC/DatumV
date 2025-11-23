@@ -212,12 +212,6 @@ public sealed class CastFunction : IFunction, IScalarFunction
             case (DataKind.Boolean, DataKind.String):
                 result = ValueRef.FromString(input.AsBoolean() ? "true" : "false");
                 return true;
-            case (DataKind.String, DataKind.JsonValue):
-                result = ValueRef.FromJsonValue(input.AsString());
-                return true;
-            case (DataKind.JsonValue, DataKind.String):
-                result = ValueRef.FromString(input.AsString());
-                return true;
             default:
                 return false;
         }

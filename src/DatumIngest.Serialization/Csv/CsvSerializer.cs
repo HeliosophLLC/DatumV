@@ -143,12 +143,8 @@ public sealed class CsvSerializer : IFormatSerializer
                 WriteField(writer, value.AsString(store), delimiter);
                 break;
 
-            case DataKind.JsonValue:
-                WriteField(writer, value.AsJsonValue(store), delimiter);
-                break;
-
             default:
-                // Vector, Matrix, Tensor, Array, Struct, Image, UInt8Array — not CSV-friendly.
+                // Vector, Array, Struct, Image, UInt8Array — not CSV-friendly.
                 // Write empty field rather than failing.
                 break;
         }

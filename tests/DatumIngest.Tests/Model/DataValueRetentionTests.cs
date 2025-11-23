@@ -109,23 +109,6 @@ public sealed class DataValueRetentionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Stabilize_JsonValue_CopiesToRetentionStore()
-    {
-        Arena source = new();
-        Arena retention = new();
-
-        string json = "{\"name\":\"this is longer than sixteen bytes\"}";
-        DataValue original = DataValue.FromJsonValue(json, source);
-        Assert.False(original.IsInline);
-
-        DataValue stable = DataValueRetention.Stabilize(original, source, retention);
-
-        source.Dispose();
-
-        Assert.Equal(json, stable.AsJsonValue(retention));
-    }
-
-    [Fact]
     public void Stabilize_UInt8Array_CopiesToRetentionStore()
     {
         Arena source = new();

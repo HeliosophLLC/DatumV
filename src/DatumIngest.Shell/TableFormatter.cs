@@ -161,7 +161,6 @@ internal static class TableFormatter
             DataKind.Duration => value.AsDuration().ToString(),
             DataKind.Uuid => value.AsUuid().ToString(),
             DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
-            DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena, registry),
             DataKind.Image => FormatBlobPreview(value, arena, registry),
             _ => value.ToDisplayString(),
         };

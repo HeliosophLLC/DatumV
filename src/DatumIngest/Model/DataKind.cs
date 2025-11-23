@@ -100,9 +100,6 @@ public enum DataKind : byte
     /// <summary>A Unicode text string.</summary>
     String = 48,
 
-    /// <summary>A raw JSON string for deferred parsing.</summary>
-    JsonValue = 49,
-
     /// <summary>A 128-bit universally unique identifier (RFC 9562).</summary>
     Uuid = 50,
 

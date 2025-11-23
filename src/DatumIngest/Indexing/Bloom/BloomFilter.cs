@@ -273,7 +273,6 @@ public sealed class BloomFilter
                 return FinalizeHashes(buffer);
             }
             case DataKind.String:
-            case DataKind.JsonValue:
             {
                 ulong h = value.RawContentHash;
                 if (h == 0) h = XxHash64.HashToUInt64(value.AsUtf8Span(store));

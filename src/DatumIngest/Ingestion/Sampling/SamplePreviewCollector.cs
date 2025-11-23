@@ -200,7 +200,6 @@ internal sealed class SamplePreviewCollector
             DataKind.Struct => ConvertStruct(value, store),
             // Strings need the store to resolve arena- or handle-backed content.
             DataKind.String => value.AsString(store),
-            DataKind.JsonValue => value.AsJsonValue(store),
             // Date/time types: ISO string for JSON (DateOnly/DateTimeOffset don't serialize well).
             DataKind.Date => value.AsDate().ToString("O"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),

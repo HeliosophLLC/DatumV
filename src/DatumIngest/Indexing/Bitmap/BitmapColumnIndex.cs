@@ -82,7 +82,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         _chunkRowCounts = chunkRowCounts;
         _keyKind = InferKeyKind(compressedBitmaps.Keys);
 
-        if (_keyKind is DataKind.String or DataKind.JsonValue)
+        if (_keyKind == DataKind.String)
         {
             _stringCompressedBitmaps = ConvertToStringKeys(compressedBitmaps);
         }
@@ -133,7 +133,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         _chunkRowCounts = chunkRowCounts;
         _keyKind = InferKeyKind(chunkLocations.Keys);
 
-        if (_keyKind is DataKind.String or DataKind.JsonValue)
+        if (_keyKind == DataKind.String)
         {
             _stringChunkLocations = ConvertToStringKeys(chunkLocations);
         }
@@ -178,11 +178,9 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
                 : _stringChunkLocations!.Keys;
 
             // Keys are guaranteed ≤16 UTF-8 bytes (enforced at build time by the
-            // indexable = inline rule), so FromString / FromJsonValue land on the inline
-            // path and don't require a store.
-            return keys.Select(s => _keyKind == DataKind.JsonValue
-                ? DataValue.FromJsonValue(s)
-                : DataValue.FromString(s)).ToList();
+            // indexable = inline rule), so FromString lands on the inline path and
+            // doesn't require a store.
+            return keys.Select(DataValue.FromString).ToList();
         }
     }
 
@@ -229,9 +227,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
 
         foreach (KeyValuePair<string, byte[][]> entry in source)
         {
-            DataValue key = _keyKind == DataKind.JsonValue
-                ? DataValue.FromJsonValue(entry.Key)
-                : DataValue.FromString(entry.Key);
+            DataValue key = DataValue.FromString(entry.Key);
             result[key] = entry.Value;
         }
 
@@ -266,9 +262,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
             DataValue key = entry.Key switch
             {
                 DataValue dv => dv,
-                string s => _keyKind == DataKind.JsonValue
-                    ? DataValue.FromJsonValue(s)
-                    : DataValue.FromString(s),
+                string s => DataValue.FromString(s),
                 _ => throw new InvalidOperationException("Unexpected key type."),
             };
 

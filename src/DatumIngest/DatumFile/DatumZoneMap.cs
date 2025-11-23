@@ -11,8 +11,8 @@ namespace DatumIngest.DatumFile;
 /// <para>
 /// Zone maps are only populated for comparable types — scalar numerics,
 /// <see cref="DataKind.Boolean"/>, <see cref="DataKind.String"/>, temporal types,
-/// and <see cref="DataKind.Uuid"/>. Non-comparable types (Vector, Matrix, Tensor,
-/// Image, UInt8Array, JsonValue, Array, Struct) carry only <see cref="NullCount"/>;
+/// and <see cref="DataKind.Uuid"/>. Non-comparable types (Vector, Image, Array,
+/// Struct, byte arrays) carry only <see cref="NullCount"/>;
 /// <see cref="Minimum"/> and <see cref="Maximum"/> are <c>null</c> in that case.
 /// </para>
 /// <para>

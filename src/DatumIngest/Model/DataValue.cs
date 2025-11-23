@@ -394,14 +394,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         BuildSidecar(DataKind.String, offset, length, storeId);
 
     /// <summary>
-    /// Creates a <see cref="DataKind.JsonValue"/> value whose raw JSON UTF-8 bytes
-    /// live in a <c>.datum-blob</c> sidecar. Mirror of
-    /// <see cref="FromStringInSidecar"/> for the JsonValue kind.
-    /// </summary>
-    public static DataValue FromJsonValueInSidecar(long offset, long length, byte storeId = 0) =>
-        BuildSidecar(DataKind.JsonValue, offset, length, storeId);
-
-    /// <summary>
     /// Creates a value from a text string without a store. Works only when the string's
     /// UTF-8 form fits in 16 bytes (inline path); longer strings require a store —
     /// see <see cref="FromString(string, IValueStore)"/>.
@@ -469,8 +461,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Creates an inline <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>
-    /// whose UTF-8 bytes live directly in <c>_p0</c>-<c>_p3</c>. Requires
+    /// Creates an inline <see cref="DataKind.String"/> whose UTF-8 bytes live directly
+    /// in <c>_p0</c>-<c>_p3</c>. Requires
     /// <paramref name="utf8Bytes"/>.Length &lt;= 16 and <paramref name="charCount"/> &lt;= 16.
     /// Unused payload bytes are zeroed. Byte length and char count are packed into
     /// <c>_charCount</c> (low byte = bytes, high byte = chars).
@@ -837,41 +829,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Creates a value from a raw JSON string without a store. Works only when the string's
-    /// UTF-8 form fits in 16 bytes (inline path); longer strings require a store.
-    /// </summary>
-    public static DataValue FromJsonValue(string value)
-    {
-        Span<byte> scratch = stackalloc byte[16];
-        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
-        {
-            return FromInlineUtf8(DataKind.JsonValue, scratch[..written], value.Length);
-        }
-        throw new InvalidOperationException(
-            "FromJsonValue(value) without a store only supports values whose UTF-8 form fits in 16 bytes. " +
-            "Use FromJsonValue(value, store) for longer values.");
-    }
-
-    /// <summary>
-    /// Creates a value from a raw JSON string using an explicit <see cref="IValueStore"/>.
-    /// Values whose UTF-8 form fits in 16 bytes are stored inline; longer values are
-    /// written to <paramref name="store"/>.
-    /// </summary>
-    public static DataValue FromJsonValue(string value, IValueStore store)
-    {
-        Span<byte> scratch = stackalloc byte[16];
-        if (System.Text.Encoding.UTF8.TryGetBytes(value, scratch, out int written))
-        {
-            return FromInlineUtf8(DataKind.JsonValue, scratch[..written], value.Length);
-        }
-
-        var (p0, p1) = store.StoreString(value);
-        var (hashLo, hashHi) = HashString(value.AsSpan());
-        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.JsonValue, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
-    }
-
-    /// <summary>
     /// Computes XxHash64 over the UTF-8 encoding of a char span and splits into two int32 halves.
     /// Always hashes UTF-8 bytes for consistency with <see cref="HashUtf8"/>.
     /// </summary>
@@ -964,7 +921,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         return _kind switch
         {
             DataKind.String => FromString(arena.GetString(_p0, _p1), store),
-            DataKind.JsonValue => FromJsonValue(arena.GetString(_p0, _p1), store),
             _ => this,
         };
     }
@@ -1789,7 +1745,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Per-kind layout:
     /// </para>
     /// <list type="bullet">
-    ///   <item><see cref="DataKind.String"/>, <see cref="DataKind.JsonValue"/>:
+    ///   <item><see cref="DataKind.String"/>:
     ///     UTF-8 byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
     ///   <item>Byte arrays (UInt8 + IsArray), <see cref="DataKind.Image"/>:
     ///     byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
@@ -1807,7 +1763,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             if (IsInline)
             {
                 if (IsInlineArray) return InlineArrayElementCount * ElementByteSize(_kind);
-                if (_kind is DataKind.String or DataKind.JsonValue) return InlineByteLength;
+                if (_kind == DataKind.String) return InlineByteLength;
                 return 0;
             }
 
@@ -1815,7 +1771,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             if (IsByteArrayKind || _kind == DataKind.Image) return _p1;
             return _kind switch
             {
-                DataKind.String or DataKind.JsonValue => _p1,
+                DataKind.String => _p1,
                 DataKind.Vector => _p1 * 4,
                 _ => 0,
             };
@@ -1890,13 +1846,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public ReadOnlySpan<byte> AsUtf8Span(IValueStore store)
     {
-        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
-            ThrowIfNullOrWrongKind(DataKind.String);
+        ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return InlineUtf8Span;
         if (IsInSidecar)
         {
             throw new InvalidOperationException(
-                "AsUtf8Span(store) cannot resolve a sidecar-backed String / JsonValue. Use the " +
+                "AsUtf8Span(store) cannot resolve a sidecar-backed String. Use the " +
                 "AsUtf8Span(store, registry) overload that routes through the SidecarRegistry.");
         }
         return store.RetrieveUtf8Span(_p0, _p1);
@@ -1910,8 +1865,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public ReadOnlySpan<byte> AsUtf8Span(IValueStore store, SidecarRegistry? registry)
     {
-        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
-            ThrowIfNullOrWrongKind(DataKind.String);
+        ThrowIfNullOrWrongKind(DataKind.String);
         if (IsInline) return InlineUtf8Span;
         if (IsInSidecar) return ReadSidecarBytes(registry);
         return store.RetrieveUtf8Span(_p0, _p1);
@@ -1931,8 +1885,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public ReadOnlySpan<char> AsStringSpan(IValueStore store, out char[] rentedBuffer)
     {
-        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
-            ThrowIfNullOrWrongKind(DataKind.String);
+        ThrowIfNullOrWrongKind(DataKind.String);
         ReadOnlySpan<byte> utf8 = AsUtf8Span(store);
         int maxChars = System.Text.Encoding.UTF8.GetMaxCharCount(utf8.Length);
         rentedBuffer = System.Buffers.ArrayPool<char>.Shared.Rent(maxChars);
@@ -2025,46 +1978,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.DateTime);
         return new DateTimeOffset(ReadLong(), new TimeSpan((long)_p2 * TimeSpan.TicksPerMinute));
-    }
-
-    /// <summary>Returns the raw JSON string payload.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsJsonValue(IValueStore)"/> instead.</remarks>
-    public string AsJsonValue()
-    {
-        ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        throw new InvalidOperationException("Use AsJsonValue(store). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>Returns the raw JSON string payload from an explicit <see cref="IValueStore"/>.</summary>
-    /// <remarks>
-    /// Does not handle sidecar-backed values — for those use the
-    /// <see cref="AsJsonValue(IValueStore, SidecarRegistry)"/> overload.
-    /// </remarks>
-    public string AsJsonValue(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
-        if (IsInSidecar)
-        {
-            throw new InvalidOperationException(
-                "AsJsonValue(store) cannot resolve a sidecar-backed JsonValue. Use the " +
-                "AsJsonValue(store, registry) overload that routes through the SidecarRegistry.");
-        }
-        return store.RetrieveString(_p0, _p1);
-    }
-
-    /// <summary>
-    /// Returns the raw JSON string payload, resolving inline / arena /
-    /// sidecar storage tiers uniformly via <paramref name="store"/> and
-    /// <paramref name="registry"/>.
-    /// </summary>
-    public string AsJsonValue(IValueStore store, SidecarRegistry? registry)
-    {
-        ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        if (IsInline) return System.Text.Encoding.UTF8.GetString(InlineUtf8Span);
-        if (IsInSidecar) return System.Text.Encoding.UTF8.GetString(ReadSidecarBytes(registry));
-        return store.RetrieveString(_p0, _p1);
     }
 
     /// <summary>Returns the UUID payload.</summary>
@@ -2231,7 +2144,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
 
             // Reference types:
-            DataKind.String or DataKind.JsonValue
+            DataKind.String
                 => CompareStrings(in this, in other),
             DataKind.Uuid
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
@@ -2295,7 +2208,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             // RawContentHash returns XxHash64-over-UTF-8 for both inline and cached-hash
             // values, so equal-content strings across the two modes hash to the same code —
             // matching CompareStrings' mixed-mode hash match.
-            DataKind.String or DataKind.JsonValue
+            DataKind.String
                 => RawContentHash != 0
                     ? HashCode.Combine(_kind, RawContentHash)
                     : ComputeStringHashCode(),
@@ -2480,9 +2393,6 @@ public readonly struct DataValue : IEquatable<DataValue>
                 : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
-            DataKind.JsonValue => IsInline
-                ? $"JsonValue[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
-                : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),

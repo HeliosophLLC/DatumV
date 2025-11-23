@@ -181,12 +181,6 @@ public readonly struct ValueRef
         new(DataValue.Null(DataKind.String), value);
 
     /// <summary>
-    /// JSON value carried as a managed string payload.
-    /// </summary>
-    public static ValueRef FromJsonValue(string value) =>
-        new(DataValue.Null(DataKind.JsonValue), value);
-
-    /// <summary>
     /// Byte-array payload. Pass <see cref="DataKind.Image"/> for image bytes,
     /// or <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set
     /// to <c>true</c> for generic byte arrays. The DataValue tag carries the
@@ -219,7 +213,7 @@ public readonly struct ValueRef
         {
             return materialized;
         }
-        if (_inline.IsInline && (_inline.Kind == DataKind.String || _inline.Kind == DataKind.JsonValue))
+        if (_inline.IsInline && _inline.Kind == DataKind.String)
         {
             return _inline.AsString();
         }

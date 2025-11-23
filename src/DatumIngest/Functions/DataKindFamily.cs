@@ -43,8 +43,7 @@ public enum DataKindFamily : ulong
 
     /// <summary>Text-like kinds.</summary>
     TextLike =
-        (1UL << (int)DataKind.String) |
-        (1UL << (int)DataKind.JsonValue),
+        (1UL << (int)DataKind.String),
 
     /// <summary>Sentinel matching every kind.</summary>
     AnyKind = ulong.MaxValue,

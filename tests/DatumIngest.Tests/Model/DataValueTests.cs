@@ -238,16 +238,6 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void JsonValueStoresString()
-    {
-        string json = "{\"key\": \"value\"}";
-        DataValue value = DataValue.FromJsonValue(json);
-
-        Assert.Equal(DataKind.JsonValue, value.Kind);
-        Assert.Equal(json, value.AsJsonValue());
-    }
-
-    [Fact]
     public void NullValueIsSupported()
     {
         DataValue value = DataValue.Null(DataKind.String);

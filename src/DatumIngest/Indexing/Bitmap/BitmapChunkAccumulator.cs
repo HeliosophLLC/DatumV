@@ -114,9 +114,9 @@ internal sealed class BitmapChunkAccumulator
             return;
         }
 
-        // Non-inline String/JsonValue can't be retained as a dictionary key without arena
+        // Non-inline String can't be retained as a dictionary key without arena
         // plumbing. Drop the column from the bitmap index the first time we see one.
-        if ((value.Kind is DataKind.String or DataKind.JsonValue) && !value.IsInline)
+        if (value.Kind == DataKind.String && !value.IsInline)
         {
             Abandon();
             return;

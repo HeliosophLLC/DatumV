@@ -103,7 +103,7 @@ internal static class KeywordRegistry
         "Int8", "Int16", "Int32", "Int64",
         "Float32", "Float64",
         "Date", "Time", "DateTime", "Duration",
-        "String", "JsonValue", "Uuid",
+        "String", "Uuid",
         "UInt8Array", "Image",
         "Vector", "Matrix", "Tensor", "Array", "Struct",
     ];

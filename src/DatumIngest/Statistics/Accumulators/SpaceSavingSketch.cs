@@ -58,7 +58,7 @@ internal sealed class SpaceSavingSketch
     {
         _capacity = capacity;
         _kind = kind;
-        _isStringLike = kind is DataKind.String or DataKind.JsonValue;
+        _isStringLike = kind == DataKind.String;
         _isLocal = isLocal;
 
         _hashToSlot = new Dictionary<long, int>(capacity);

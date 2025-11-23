@@ -85,20 +85,6 @@ public sealed class StringLengthAccumulatorTests : ServiceTestBase
     }
 
     [Fact]
-    public void Add_JsonValues_TracksLength()
-    {
-        StringLengthAccumulator accumulator = new();
-
-        accumulator.Add(DataValue.FromJsonValue("{\"a\":1}", _arena), _arena);
-        accumulator.Add(DataValue.FromJsonValue("[1,2,3,4,5]", _arena), _arena);
-
-        StringLengthResult result = (StringLengthResult)accumulator.GetResults().Single().Value!;
-        Assert.Equal(2, result.Count);
-        Assert.Equal(7, result.MinLength);
-        Assert.Equal(11, result.MaxLength);
-    }
-
-    [Fact]
     public void Add_NoValues_ReturnsZero()
     {
         StringLengthAccumulator accumulator = new();

@@ -20,7 +20,7 @@ public static class StatisticsPredicateEvaluator
     /// <summary>
     /// Compares two non-null values for ordering. Delegates to
     /// <see cref="DataValueComparer.Compare(DataValue, DataValue)"/>; see that method's
-    /// remarks for constraints on non-inline String/JsonValue values.
+    /// remarks for constraints on non-inline String values.
     /// </summary>
     /// <remarks>
     /// Kept for call-site compatibility with existing index navigation code. New callers

@@ -380,7 +380,6 @@ static string FormatSample(DataValue value)
     return value.Kind switch
     {
         DataKind.String => FormatString(value),
-        DataKind.JsonValue => FormatString(value),
         DataKind.Float32 => value.AsFloat32().ToString("G"),
         DataKind.Float64 => value.AsFloat64().ToString("G"),
         DataKind.Int32 => value.AsInt32().ToString(),

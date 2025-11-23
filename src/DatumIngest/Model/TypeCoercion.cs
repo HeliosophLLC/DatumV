@@ -178,7 +178,7 @@ public static class TypeCoercion
             DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64 or
             DataKind.Boolean or
             DataKind.Date or DataKind.DateTime or DataKind.Time or
-            DataKind.Duration or DataKind.Uuid or DataKind.JsonValue;
+            DataKind.Duration or DataKind.Uuid;
     }
 
     /// <summary>

@@ -174,9 +174,9 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 List<ValueIndexEntry>? entries = spillEntries[ordinal];
                 if (entries is not null)
                 {
-                    // Non-inline String/JsonValue can't be retained in the sorted index without
+                    // Non-inline String can't be retained in the sorted index without
                     // arena plumbing. Drop the column on first sight — "indexable = self-contained."
-                    if (value.Kind is DataKind.String or DataKind.JsonValue && !value.IsInline)
+                    if (value.Kind == DataKind.String && !value.IsInline)
                     {
                         string droppedName = _resolvedColumnNames![ordinal];
                         _spillWriter!.DropColumn(droppedName);

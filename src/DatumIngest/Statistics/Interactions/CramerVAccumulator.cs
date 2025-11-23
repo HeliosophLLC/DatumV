@@ -19,7 +19,7 @@ public sealed class CramerVAccumulator
     private long _totalCount;
 
     /// <summary>
-    /// Adds a pair of categorical values. Both must be String, JsonValue, Date, or DateTime.
+    /// Adds a pair of categorical values. Both must be String, Date, or DateTime.
     /// </summary>
     public void Add(DataValue valueA, DataValue valueB)
     {

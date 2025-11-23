@@ -142,7 +142,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Time     => DataValue.FromTime(new TimeOnly(14, 30, 59, 123)),
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
-        DataKind.JsonValue => DataValue.FromJsonValue("{\"key\":\"value\"}"),
         DataKind.Vector   => DataValue.FromVector([1.0f, 2.0f, 3.0f]),
         DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
         DataKind.Array    => DataValue.FromArray(
@@ -211,9 +210,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 break;
             case DataKind.Uuid:
                 Assert.Equal(expected.AsUuid(), actual.AsUuid());
-                break;
-            case DataKind.JsonValue:
-                Assert.Equal(expected.AsJsonValue(), actual.AsJsonValue());
                 break;
             case DataKind.Vector:
                 Assert.Equal(expected.AsVector(), actual.AsVector());

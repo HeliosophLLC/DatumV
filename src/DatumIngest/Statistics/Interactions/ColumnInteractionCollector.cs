@@ -136,7 +136,7 @@ public sealed class ColumnInteractionCollector
 
     private static bool IsCategoricalKind(DataKind kind)
     {
-        return kind is DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime;
+        return kind is DataKind.String or DataKind.Date or DataKind.DateTime;
     }
 
     private static double? NanToNull(double? value)

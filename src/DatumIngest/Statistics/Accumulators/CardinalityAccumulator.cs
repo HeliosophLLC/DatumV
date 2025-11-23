@@ -67,7 +67,6 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
                 _estimator.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
             case DataKind.String:
-            case DataKind.JsonValue:
                 // Feed HLL the cached 64-bit XxHash of the UTF-8 bytes instead of
                 // materializing a managed string. HLL is hash-agnostic — distinct
                 // hashes still produce distinct bucket positions. Arena-slice values

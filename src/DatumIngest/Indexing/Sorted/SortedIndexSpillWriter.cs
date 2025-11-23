@@ -60,7 +60,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// </summary>
     /// <returns>
     /// <c>true</c> on success; <c>false</c> when <paramref name="kind"/> cannot be encoded
-    /// as a ulong (Uuid, String, JsonValue, Array, Struct, etc). Callers fall back to the
+    /// as a ulong (Uuid, String, Array, Struct, etc). Callers fall back to the
     /// generic <see cref="EntryKeyComparison"/> path.
     /// </returns>
     private static bool TrySortByUlongKey(List<ValueIndexEntry> entries, DataKind kind)
@@ -261,7 +261,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
-    /// Checks whether an auto-indexed String/JsonValue column should be dropped because
+    /// Checks whether an auto-indexed String column should be dropped because
     /// the observed value is not self-contained in the <see cref="DataValue"/> struct
     /// (i.e. its UTF-8 form exceeds the inline capacity of 16 bytes). Call this for
     /// string values before or after <see cref="AddEntry"/>; if it returns <c>true</c>,
@@ -277,7 +277,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             return true;
         }
 
-        if (value.Kind is not (DataKind.String or DataKind.JsonValue) || value.IsNull)
+        if (value.Kind != DataKind.String || value.IsNull)
         {
             return false;
         }

@@ -11,8 +11,8 @@ public abstract record IndexColumnSelection
 
     /// <summary>
     /// Index the columns the builder considers cheap and useful: primitives, dates, UUIDs,
-    /// booleans, and short strings. Wide reference types (Image, Vector, Matrix, Tensor,
-    /// Array, Struct, JsonValue, UInt8Array) are skipped. This is the default.
+    /// booleans, and short strings. Wide reference types (Image, Vector, Array,
+    /// Struct, byte arrays) are skipped. This is the default.
     /// </summary>
     public sealed record Auto : IndexColumnSelection;
 

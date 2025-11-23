@@ -130,7 +130,7 @@ public sealed class SpaceSavingAccumulator : IStatisticAccumulator
             for (int i = 0; i < take; i++)
             {
                 int slot = sorted[i];
-                string key = _kind is DataKind.String or DataKind.JsonValue
+                string key = _kind == DataKind.String
                     ? _global.GlobalStringAt(slot)
                     : _global.KeyDisplayAt(slot);
                 entries.Add(new KeyValuePair<string, long>(key, _global.CountAt(slot)));

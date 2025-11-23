@@ -141,8 +141,8 @@ public enum EncoderKind : byte
     BitPackedBoolean = 1,
 
     /// <summary>
-    /// Variable-length kinds: String, JsonValue, Array, UInt8Array,
-    /// Image, Vector, Matrix, Tensor, Struct. Each row gets a fixed
+    /// Variable-length kinds: String, Array, Image, Vector, Struct,
+    /// byte arrays, typed arrays. Each row gets a fixed
     /// 16-byte slot in the page; an inline-vs-pointer bitmap (one bit
     /// per row) tells the decoder whether the slot bytes ARE the
     /// payload (DataValue's inline tier) or a sidecar pointer

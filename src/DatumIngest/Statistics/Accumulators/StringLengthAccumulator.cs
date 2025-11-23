@@ -24,7 +24,7 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
     public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull) return;
-        if (value.Kind is not DataKind.String and not DataKind.JsonValue) return;
+        if (value.Kind != DataKind.String) return;
 
         // Cached char count read directly from the DataValue — no UTF-8 decode, no allocation.
         // Strings >= 65535 chars saturate to ushort.MaxValue; that's the right signal for any

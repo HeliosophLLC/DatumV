@@ -5,7 +5,7 @@ namespace DatumIngest.Tests.Model;
 
 /// <summary>
 /// Tests for inline UTF-8 storage in <see cref="DataValue"/> for
-/// <see cref="DataKind.String"/> and <see cref="DataKind.JsonValue"/> values
+/// <see cref="DataKind.String"/> values
 /// whose UTF-8 form fits in 16 bytes.
 /// </summary>
 public sealed class DataValueInlineStringTests : ServiceTestBase
@@ -185,26 +185,6 @@ public sealed class DataValueInlineStringTests : ServiceTestBase
         DataValue dv = DataValue.FromStringSlice(offset: 0, length: 5);
         Assert.False(dv.IsInline);
         Assert.True(dv.IsArenaBacked);
-    }
-
-    // ───────────────────── JsonValue parallel path ─────────────────────
-
-    [Fact]
-    public void FromJsonValue_ShortValue_IsInline()
-    {
-        DataValue dv = DataValue.FromJsonValue("{\"x\":1}", Store);
-        Assert.True(dv.IsInline);
-        Assert.Equal(DataKind.JsonValue, dv.Kind);
-        Assert.Equal("{\"x\":1}", dv.AsJsonValue(Store));
-    }
-
-    [Fact]
-    public void FromJsonValue_LongValue_UsesStore()
-    {
-        string json = "{\"name\":\"this is longer than sixteen bytes\"}";
-        DataValue dv = DataValue.FromJsonValue(json, Store);
-        Assert.False(dv.IsInline);
-        Assert.Equal(json, dv.AsJsonValue(Store));
     }
 
     // ───────────────────── Size invariant ─────────────────────

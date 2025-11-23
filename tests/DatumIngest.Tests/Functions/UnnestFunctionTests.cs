@@ -34,40 +34,6 @@ public class UnnestFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Unnest_JsonArray_ScalarValues()
-    {
-        DataValue json = DataValue.FromJsonValue("[\"a\", \"b\", \"c\"]");
-        List<Row> rows = await CollectRows([json]);
-
-        Assert.Equal(3, rows.Count);
-        Assert.Equal("a", rows[0]["value"].AsString());
-        Assert.Equal("b", rows[1]["value"].AsString());
-        Assert.Equal("c", rows[2]["value"].AsString());
-    }
-
-    [Fact]
-    public async Task Unnest_JsonArrayOfObjects_ExpandsProperties()
-    {
-        DataValue json = DataValue.FromJsonValue(
-            "[{\"item1\": 1, \"item2\": \"a\"}, {\"item1\": 2, \"item2\": \"b\"}]");
-        List<Row> rows = await CollectRows([json]);
-
-        Assert.Equal(2, rows.Count);
-        Assert.Equal(1.0, rows[0]["item1"].AsFloat64());
-        Assert.Equal("a", rows[0]["item2"].AsString());
-        Assert.Equal(2.0, rows[1]["item1"].AsFloat64());
-        Assert.Equal("b", rows[1]["item2"].AsString());
-    }
-
-    [Fact]
-    public async Task Unnest_EmptyArray_YieldsNoRows()
-    {
-        DataValue json = DataValue.FromJsonValue("[]");
-        List<Row> rows = await CollectRows([json]);
-        Assert.Empty(rows);
-    }
-
-    [Fact]
     public async Task Unnest_EmptyVector_YieldsNoRows()
     {
         DataValue vector = DataValue.FromVector([]);
@@ -84,13 +50,6 @@ public class UnnestFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Unnest_NotAnArray_Throws()
-    {
-        DataValue json = DataValue.FromJsonValue("{\"key\": 1}");
-        await Assert.ThrowsAsync<ArgumentException>(async () => await CollectRows([json]));
-    }
-
-    [Fact]
     public async Task Unnest_WrongArgCount_Throws()
     {
         await Assert.ThrowsAsync<ArgumentException>(async () => await CollectRows([]));
@@ -101,29 +60,6 @@ public class UnnestFunctionTests : ServiceTestBase
     {
         DataValue scalar = DataValue.FromFloat32(42);
         await Assert.ThrowsAsync<ArgumentException>(async () => await CollectRows([scalar]));
-    }
-
-    [Fact]
-    public async Task Unnest_JsonNumericArray()
-    {
-        DataValue json = DataValue.FromJsonValue("[1.5, 2.5, 3.5]");
-        List<Row> rows = await CollectRows([json]);
-
-        Assert.Equal(3, rows.Count);
-        Assert.Equal(1.5, rows[0]["value"].AsFloat64(), 0.001);
-        Assert.Equal(2.5, rows[1]["value"].AsFloat64(), 0.001);
-        Assert.Equal(3.5, rows[2]["value"].AsFloat64(), 0.001);
-    }
-
-    [Fact]
-    public async Task Unnest_JsonBooleanValues()
-    {
-        DataValue json = DataValue.FromJsonValue("[true, false]");
-        List<Row> rows = await CollectRows([json]);
-
-        Assert.Equal(2, rows.Count);
-        Assert.True(rows[0]["value"].AsBoolean());
-        Assert.False(rows[1]["value"].AsBoolean());
     }
 
     [Fact]
