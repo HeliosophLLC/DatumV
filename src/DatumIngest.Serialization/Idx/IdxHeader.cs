@@ -54,24 +54,24 @@ internal sealed class IdxHeader
         ? "image"
         : ItemDimensionCount == 0 ? "value" : "data";
 
-    public DataKind InferDataKind()
+    public (DataKind Kind, bool IsArray) InferDataKind()
     {
         if (IsUInt8)
         {
             return ItemDimensionCount switch
             {
-                0 => DataKind.UInt8,
-                1 => DataKind.UInt8Array,
-                _ => DataKind.Image,
+                0 => (DataKind.UInt8, false),
+                1 => (DataKind.UInt8, true),
+                _ => (DataKind.Image, false),
             };
         }
 
         return ItemDimensionCount switch
         {
-            0 => DataKind.Float32,
-            1 => DataKind.Vector,
-            2 => DataKind.Matrix,
-            _ => DataKind.Tensor,
+            0 => (DataKind.Float32, false),
+            1 => (DataKind.Vector, false),
+            2 => (DataKind.Matrix, false),
+            _ => (DataKind.Tensor, false),
         };
     }
 

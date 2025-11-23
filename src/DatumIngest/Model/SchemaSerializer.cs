@@ -99,6 +99,7 @@ internal sealed class SchemaDocument
                     Name = column.Name,
                     Kind = column.Kind,
                     Nullable = column.Nullable,
+                    IsArray = column.IsArray,
                 });
             }
 
@@ -121,7 +122,10 @@ internal sealed class SchemaDocument
 
             foreach (SchemaColumnEntry columnEntry in entry.Value)
             {
-                columns.Add(new ColumnInfo(columnEntry.Name, columnEntry.Kind, columnEntry.Nullable));
+                columns.Add(new ColumnInfo(columnEntry.Name, columnEntry.Kind, columnEntry.Nullable)
+                {
+                    IsArray = columnEntry.IsArray,
+                });
             }
 
             tables[entry.Key] = new Schema(columns);
@@ -144,6 +148,13 @@ internal sealed class SchemaColumnEntry
 
     /// <summary>Whether the column may contain null values.</summary>
     public bool Nullable { get; set; }
+
+    /// <summary>
+    /// True when this column holds typed arrays of <see cref="Kind"/> elements
+    /// (byte arrays, integer arrays, etc.). Defaults to <c>false</c>; absent in
+    /// JSON when the column is scalar. Mirrors <see cref="ColumnInfo.IsArray"/>.
+    /// </summary>
+    public bool IsArray { get; set; }
 }
 
 /// <summary>

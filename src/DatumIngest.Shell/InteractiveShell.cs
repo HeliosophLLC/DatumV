@@ -416,7 +416,7 @@ internal sealed class InteractiveShell
             ColumnInfo column = schema.Columns[i];
             DataValue value = row[i];
 
-            bool isImageKind = column.Kind is DataKind.Image or DataKind.UInt8Array;
+            bool isImageKind = column.Kind == DataKind.Image || column.IsByteArrayColumn;
             string label = column.Name.PadRight(nameWidth);
 
             if (isImageKind && !value.IsNull)

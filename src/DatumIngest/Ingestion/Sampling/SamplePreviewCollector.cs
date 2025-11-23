@@ -15,9 +15,9 @@ namespace DatumIngest.Ingestion.Sampling;
 /// <para>
 /// Image values are resized to fit within <see cref="MaxThumbnailDimension"/>×<see cref="MaxThumbnailDimension"/>
 /// (preserving aspect ratio), re-encoded as PNG, and stored as <c>"base64://…"</c> strings.
-/// Binary (<see cref="DataKind.UInt8Array"/>) columns are represented as the sentinel
-/// string <c>"[binary data]"</c>. Vectors, matrices, and tensors are represented as
-/// nested numeric arrays.
+/// Byte-array columns (<see cref="DataKind.UInt8"/> + <c>IsArray</c>) are represented
+/// as the sentinel string <c>"[binary data]"</c>. Vectors, matrices, and tensors are
+/// represented as nested numeric arrays.
 /// </para>
 /// </remarks>
 internal sealed class SamplePreviewCollector
@@ -184,6 +184,13 @@ internal sealed class SamplePreviewCollector
             return null;
         }
 
+        // Byte arrays (UInt8 + IsArray) take the binary sentinel before the kind
+        // switch so they don't fall into the scalar UInt8 default arm.
+        if (value.IsByteArrayKind)
+        {
+            return BinarySentinel;
+        }
+
         return value.Kind switch
         {
             // Composite types need recursive conversion for JSON nesting.
@@ -191,7 +198,6 @@ internal sealed class SamplePreviewCollector
             DataKind.Matrix => ConvertMatrix(value, store),
             DataKind.Tensor => ConvertTensor(value, store),
             DataKind.Image => ConvertImage(value, store),
-            DataKind.UInt8Array => BinarySentinel,
             DataKind.Array => ConvertArray(value, store),
             DataKind.Struct => ConvertStruct(value, store),
             // Strings need the store to resolve arena- or handle-backed content.

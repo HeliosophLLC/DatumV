@@ -120,9 +120,12 @@ public sealed class ManifestBuilderTests : ServiceTestBase
         collector.AddRow(MakeRow(columnLookup, DataValue.FromByteArray([10, 20], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["raw"] = DataKind.UInt8Array };
+        Dictionary<string, ColumnInfo> columns = new()
+        {
+            ["raw"] = new ColumnInfo("raw", DataKind.UInt8, nullable: true) { IsArray = true },
+        };
 
-        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, columns, 2);
 
         BinaryFeatureManifest feature = Assert.IsType<BinaryFeatureManifest>(manifest.Features[0]);
         Assert.Equal(2.0, feature.SizeStats.Min);

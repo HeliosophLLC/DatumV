@@ -102,8 +102,9 @@ public enum DataKind : byte
 
     // ───────────────────────── Binary / blob (56–63) ─────────────────────────
 
-    /// <summary>A byte array containing raw binary data.</summary>
-    UInt8Array = 56,
+    // 56 = retired UInt8Array enum value. Byte arrays now use Kind=UInt8 + IsArray
+    // flag at both the DataValue and schema layers. The byte 56 is preserved as a
+    // wire-format constant in DataValueWriter.WireKindByteArray; do not reuse here.
 
     /// <summary>A byte array containing encoded image data.</summary>
     Image = 57,

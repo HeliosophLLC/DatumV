@@ -10,7 +10,7 @@ internal static class DataValueWriter
 {
     /// <summary>
     /// Wire-format byte for a byte-array payload (was the value of the
-    /// retired <c>DataKind.UInt8Array</c> enum entry). Lives here as a
+    /// retired UInt8Array enum entry, value 56). Lives here as a
     /// pure wire constant so the in-memory <see cref="DataKind"/> type
     /// system can express byte arrays as <see cref="DataKind.UInt8"/> +
     /// <c>DataValueFlags.IsArray</c> without a dedicated enum slot.

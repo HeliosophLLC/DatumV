@@ -71,9 +71,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// This value is a typed array of <see cref="DataValue.Kind"/> elements rather
         /// than a scalar. Storage flag (<see cref="InArena"/> / <see cref="InSidecar"/> /
         /// inline) tells where the bytes live; this flag tells how to interpret them.
-        /// New typed-array kinds (Int32[], Float64[], Date[], …) come into existence via
-        /// <c>Kind + IsArray</c>. The legacy array kinds (<see cref="DataKind.UInt8Array"/>,
-        /// <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
+        /// New typed-array kinds (UInt8[], Int32[], Float64[], Date[], …) all come into
+        /// existence via <c>Kind + IsArray</c>. Legacy multi-dimensional array kinds
+        /// (<see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
         /// <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/>) predate this flag
         /// and don't set it; <see cref="DataValue.IsArray"/> reports <c>true</c> for both.
         /// </summary>
@@ -182,7 +182,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     ///     arbitrary element kinds: Int32[], Float64[], Date[], …)
     ///   </description></item>
     ///   <item><description>
-    ///     <see cref="Kind"/> is one of the legacy array kinds — <see cref="DataKind.UInt8Array"/>,
+    ///     <see cref="Kind"/> is one of the legacy multi-dimensional array kinds —
     ///     <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>,
     ///     <see cref="DataKind.Tensor"/>, <see cref="DataKind.Array"/> — which predate
     ///     the flag and don't set it. Treated as arrays so callers don't need to know
@@ -555,10 +555,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// hold the 64-bit offset, <c>_p2</c> + low byte of <c>_p3</c> hold the 40-bit
     /// length, the high 24 bits of <c>_p3</c> are reserved (zero in v1), and the
     /// low byte of <c>_charCount</c> holds the registry <c>storeId</c>. Pass
-    /// <paramref name="isArray"/> = <c>true</c> when authoring via the new
-    /// <c>IsArray</c>-flag model (e.g. <c>FromByteArrayInSidecar</c>); legacy
-    /// kinds like <see cref="DataKind.Image"/> and <see cref="DataKind.UInt8Array"/>
-    /// leave it <c>false</c>.
+    /// <paramref name="isArray"/> = <c>true</c> when authoring a typed-array
+    /// payload via the IsArray-flag model (e.g. <c>FromByteArrayInSidecar</c>);
+    /// scalar / single-blob kinds like <see cref="DataKind.Image"/> leave it
+    /// <c>false</c>.
     /// </summary>
     internal static DataValue BuildSidecar(
         DataKind kind, long offset, long length, byte storeId, bool isArray = false)
@@ -1586,7 +1586,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         _kind == DataKind.UInt8 && (_flags & DataValueFlags.IsArray) != 0;
 
     /// <summary>
-    /// Returns the byte payload for a <see cref="DataKind.UInt8Array"/> or
+    /// Returns the byte payload for a byte-array (UInt8 + IsArray) or
     /// <see cref="DataKind.Image"/> value as a <see cref="ReadOnlySpan{T}"/>, without
     /// materializing a managed <c>byte[]</c>. Zero-allocation hot-path reader.
     /// </summary>
@@ -1744,7 +1744,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <list type="bullet">
     ///   <item><see cref="DataKind.String"/>, <see cref="DataKind.JsonValue"/>:
     ///     UTF-8 byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
-    ///   <item><see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>:
+    ///   <item>Byte arrays (UInt8 + IsArray), <see cref="DataKind.Image"/>:
     ///     byte length (<see cref="InlineByteLength"/> when inline; <c>_p1</c> when arena-backed).</item>
     ///   <item><see cref="DataKind.Vector"/>: float count × 4 (<c>_p1 * 4</c>, arena-only).</item>
     ///   <item><see cref="DataKind.Matrix"/>: rows × columns × 4 (<c>_p1 * _p2 * 4</c>, arena-only).</item>

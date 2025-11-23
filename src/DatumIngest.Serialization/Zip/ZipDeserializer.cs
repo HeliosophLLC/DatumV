@@ -326,7 +326,8 @@ internal static class DataValueHelpers
         => kind switch
         {
             DataKind.Image => DataValue.FromImageAtOffset(offset, length),
-            DataKind.UInt8Array => DataValue.FromByteArrayAtOffset(offset, length),
+            // Byte-array slices use FromByteArrayAtOffset; callers can call that
+            // factory directly since byte arrays don't have a single DataKind here.
             _ => throw new NotSupportedException($"FromArenaSlice does not support DataKind.{kind}."),
         };
 }

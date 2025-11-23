@@ -150,12 +150,8 @@ public sealed class StatisticsCollector
         // if the first non-null value is sidecar-backed, every value is.
         bool sidecarBacked = firstValue.IsInSidecar;
 
-        // Two ways a column can carry byte arrays:
-        //   - Schema-level marker: DataKind.UInt8Array (kept until the
-        //     parallel IsArray-on-ColumnInfo memo lands).
-        //   - DataValue-level: Kind=UInt8 + IsArray flag set on values.
-        // Both yield byte content; recognise either for stats purposes.
-        bool isByteArray = kind == DataKind.UInt8Array || firstValue.IsByteArrayKind;
+        // Byte-array columns (Kind=UInt8 + IsArray flag set on values).
+        bool isByteArray = firstValue.IsByteArrayKind;
 
         List<IStatisticAccumulator> accumulators =
         [

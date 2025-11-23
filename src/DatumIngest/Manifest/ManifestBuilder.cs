@@ -22,9 +22,38 @@ public static class ManifestBuilder
     /// <param name="rowCount">Total number of rows in the result set.</param>
     /// <param name="interactions">Optional pairwise column interaction results.</param>
     /// <param name="insightThresholds">Optional thresholds for the insight analysis engine. Pass null to disable insights.</param>
+    /// <summary>
+    /// Backward-compat overload. Accepts a <see cref="DataKind"/> map and synthesizes
+    /// scalar (<see cref="ColumnInfo.IsArray"/>=false) <see cref="ColumnInfo"/>s for each
+    /// entry. For byte-array columns (or other typed-array columns) where IsArray must
+    /// be set, use the <see cref="ColumnInfo"/> overload directly.
+    /// </summary>
     public static QueryResultsManifest Build(
         IReadOnlyDictionary<string, ColumnStatistics> statistics,
         IReadOnlyDictionary<string, DataKind> columnKinds,
+        long rowCount,
+        IReadOnlyList<ColumnInteractionResult>? interactions = null,
+        InsightThresholds? insightThresholds = null)
+    {
+        Dictionary<string, ColumnInfo> columns = new(columnKinds.Count);
+        foreach (KeyValuePair<string, DataKind> entry in columnKinds)
+        {
+            columns[entry.Key] = new ColumnInfo(entry.Key, entry.Value, nullable: true);
+        }
+        return Build(statistics, columns, rowCount, interactions, insightThresholds);
+    }
+
+    /// <summary>
+    /// Builds a manifest from per-column statistics and full column descriptors.
+    /// </summary>
+    /// <param name="statistics">Per-column statistics from <see cref="StatisticsCollector"/>.</param>
+    /// <param name="columns">Map of column name to <see cref="ColumnInfo"/>; carries <see cref="DataKind"/> + <see cref="ColumnInfo.IsArray"/> for byte-array / typed-array dispatch.</param>
+    /// <param name="rowCount">Total number of rows in the result set.</param>
+    /// <param name="interactions">Optional pairwise column interaction results.</param>
+    /// <param name="insightThresholds">Optional thresholds for the insight analysis engine. Pass null to disable insights.</param>
+    public static QueryResultsManifest Build(
+        IReadOnlyDictionary<string, ColumnStatistics> statistics,
+        IReadOnlyDictionary<string, ColumnInfo> columns,
         long rowCount,
         IReadOnlyList<ColumnInteractionResult>? interactions = null,
         InsightThresholds? insightThresholds = null)
@@ -33,8 +62,10 @@ public static class ManifestBuilder
 
         foreach (KeyValuePair<string, ColumnStatistics> entry in statistics)
         {
-            DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
-            FeatureManifest featureManifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
+            ColumnInfo column = columns.TryGetValue(entry.Key, out ColumnInfo? c)
+                ? c
+                : new ColumnInfo(entry.Key, DataKind.String, nullable: true);
+            FeatureManifest featureManifest = BuildFeature(column, entry.Value, rowCount);
             featureManifest = WithRole(featureManifest, rowCount);
             features.Add(featureManifest);
         }
@@ -69,7 +100,7 @@ public static class ManifestBuilder
             GeneratedAtUtc = DateTime.UtcNow,
             Features = features,
             Interactions = mappedInteractions,
-            IndexHints = GenerateIndexHints(features, columnKinds)
+            IndexHints = GenerateIndexHints(features, columns)
         };
 
         if (insightThresholds is not null)
@@ -114,8 +145,12 @@ public static class ManifestBuilder
     }
 
 
-    private static FeatureManifest BuildFeature(string name, DataKind kind, ColumnStatistics stats, long rowCount)
+    private static FeatureManifest BuildFeature(ColumnInfo column, ColumnStatistics stats, long rowCount)
     {
+        string name = column.Name;
+        DataKind kind = column.Kind;
+        bool isArray = column.IsArray;
+
         // Extract common fields
         CountResult? countResult = GetResultValue<CountResult>(stats, "count");
         CardinalityResult? cardinalityResult = GetResultValue<CardinalityResult>(stats, "cardinality");
@@ -131,6 +166,13 @@ public static class ManifestBuilder
         double? dominantValueRatio = rowCount > 0 && topK.Count > 0 ? (double)topK[0].Frequency / rowCount : null;
         EntropyResult? entropyResult = GetResultValue<EntropyResult>(stats, "entropy");
 
+        // Byte arrays (UInt8 + IsArray) take the binary-manifest path; route here
+        // before the scalar arms below so they don't fall into the numeric branch.
+        if (column.IsByteArrayColumn)
+        {
+            return BuildBinaryManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats);
+        }
+
         return kind switch
         {
             DataKind.Float32 or DataKind.UInt8
@@ -142,7 +184,6 @@ public static class ManifestBuilder
             DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.UInt8Array => BuildBinaryManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
             _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK)
@@ -240,6 +281,7 @@ public static class ManifestBuilder
         {
             Name = name,
             Kind = kind,
+            IsArray = true,
             Count = count,
             NullCount = nullCount,
             ValidCount = count,
@@ -270,6 +312,7 @@ public static class ManifestBuilder
         {
             Name = name,
             Kind = kind,
+            IsArray = true,
             Count = count,
             NullCount = nullCount,
             ValidCount = count,
@@ -303,6 +346,7 @@ public static class ManifestBuilder
         {
             Name = name,
             Kind = kind,
+            IsArray = true,
             Count = count,
             NullCount = nullCount,
             ValidCount = count,
@@ -347,6 +391,7 @@ public static class ManifestBuilder
         {
             Name = name,
             Kind = kind,
+            IsArray = true,
             Count = count,
             NullCount = nullCount,
             ValidCount = count,
@@ -561,15 +606,17 @@ public static class ManifestBuilder
     /// </summary>
     private static IReadOnlyList<ColumnIndexHint>? GenerateIndexHints(
         IReadOnlyList<FeatureManifest> features,
-        IReadOnlyDictionary<string, DataKind> columnKinds)
+        IReadOnlyDictionary<string, ColumnInfo> columns)
     {
         List<ColumnIndexHint>? hints = null;
 
         foreach (FeatureManifest feature in features)
         {
-            DataKind kind = columnKinds.TryGetValue(feature.Name, out DataKind k) ? k : DataKind.String;
+            ColumnInfo? column = columns.TryGetValue(feature.Name, out ColumnInfo? c) ? c : null;
+            DataKind kind = column?.Kind ?? DataKind.String;
 
-            if (!SourceIndexBuilder.IsAutoIndexableKind(kind))
+            // Don't auto-index typed-array columns — array values aren't a useful key.
+            if (column?.IsArray == true || !SourceIndexBuilder.IsAutoIndexableKind(kind))
             {
                 continue;
             }

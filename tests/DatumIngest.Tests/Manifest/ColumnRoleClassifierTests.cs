@@ -402,10 +402,10 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     }
 
     [Fact]
-    public void Classify_UInt8Array_ReturnsBinary()
+    public void Classify_ByteArray_ReturnsBinary()
     {
         FeatureManifest manifest = MakeFallbackManifest(
-            DataKind.UInt8Array, estimatedDistinctCount: 1000, nullRatio: 0.0);
+            DataKind.UInt8, estimatedDistinctCount: 1000, nullRatio: 0.0, isArray: true);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000);
 
@@ -582,12 +582,14 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     private static FeatureManifest MakeFallbackManifest(
         DataKind kind,
         long estimatedDistinctCount,
-        double nullRatio)
+        double nullRatio,
+        bool isArray = false)
     {
         return new TemporalFeatureManifest
         {
             Name = "test_column",
             Kind = kind,
+            IsArray = isArray,
             Count = 10000,
             NullCount = (long)(10000 * nullRatio),
             ValidCount = 10000 - (long)(10000 * nullRatio),

@@ -30,7 +30,6 @@ public class DataKindTests : ServiceTestBase
             DataKind.String,
             DataKind.JsonValue,
             DataKind.Uuid,
-            DataKind.UInt8Array,
             DataKind.Image,
             DataKind.Vector,
             DataKind.Matrix,
@@ -56,10 +55,12 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsTwentySeven()
+    public void TotalEnumMemberCountIsTwentySix()
     {
+        // Was 27 before the UInt8Array enum entry was retired in favour of
+        // Kind=UInt8 + IsArray flag for byte-array columns.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(27, allValues.Length);
+        Assert.Equal(26, allValues.Length);
     }
 
     [Fact]

@@ -33,6 +33,13 @@ public abstract class FeatureManifest
     [JsonConverter(typeof(JsonStringEnumConverter<DataKind>))]
     public required DataKind Kind { get; init; }
 
+    /// <summary>
+    /// True when this column holds typed arrays of <see cref="Kind"/> elements
+    /// (byte arrays, vectors, etc.). Defaults to <c>false</c>; absent in JSON
+    /// when the column is scalar. Mirrors <see cref="ColumnInfo.IsArray"/>.
+    /// </summary>
+    public bool IsArray { get; init; }
+
     /// <summary>Gets the total number of non-null values.</summary>
     public required long Count { get; init; }
 
@@ -335,7 +342,8 @@ public sealed class ImageFeatureManifest : FeatureManifest
 }
 
 /// <summary>
-/// Feature manifest for raw binary columns (<see cref="DataKind.UInt8Array"/>).
+/// Feature manifest for raw byte-array columns
+/// (<see cref="DataKind.UInt8"/> + <see cref="FeatureManifest.IsArray"/>).
 /// </summary>
 public sealed class BinaryFeatureManifest : FeatureManifest
 {

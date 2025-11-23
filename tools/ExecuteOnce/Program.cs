@@ -203,7 +203,8 @@ static string FormatValue(DataValue value, Arena arena, SidecarRegistry? registr
         DataKind.Uuid => value.AsUuid().ToString(),
         DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena),
         DataKind.JsonValue => value.IsInline ? value.AsString() : value.AsString(arena),
-        DataKind.Image or DataKind.UInt8Array => FormatBlobPreview(value, arena, registry),
+        _ when value.IsByteArrayKind => FormatBlobPreview(value, arena, registry),
+        DataKind.Image => FormatBlobPreview(value, arena, registry),
         _ => $"<{value.Kind}>",
     };
 }

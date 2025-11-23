@@ -76,4 +76,22 @@ public sealed record ColumnInfo
     /// Shared across all rows — field metadata is never allocated per-value.
     /// </summary>
     public IReadOnlyList<ColumnInfo>? Fields { get; }
+
+    /// <summary>
+    /// True when this column holds typed arrays of <see cref="Kind"/> elements
+    /// (e.g. byte arrays as <see cref="DataKind.UInt8"/> + <see cref="IsArray"/>=true,
+    /// integer arrays as <see cref="DataKind.Int32"/> + <see cref="IsArray"/>=true).
+    /// Defaults to <c>false</c>; set with object-initializer syntax:
+    /// <c>new ColumnInfo(name, DataKind.UInt8, nullable) { IsArray = true }</c>.
+    /// Independent of <see cref="ArrayElementKind"/>, which only applies to
+    /// heterogeneous <see cref="DataKind.Array"/> columns.
+    /// </summary>
+    public bool IsArray { get; init; }
+
+    /// <summary>
+    /// Convenience: true when this column is a byte-array column —
+    /// <see cref="Kind"/> is <see cref="DataKind.UInt8"/> and
+    /// <see cref="IsArray"/> is set. Mirrors <see cref="DataValue.IsByteArrayKind"/>.
+    /// </summary>
+    public bool IsByteArrayColumn => Kind == DataKind.UInt8 && IsArray;
 }

@@ -74,8 +74,9 @@ public static class ColumnRoleClassifier
             return ColumnRole.Structural;
         }
 
-        // Binary kinds: UInt8Array, Image.
-        if (manifest.Kind is DataKind.UInt8Array or DataKind.Image)
+        // Binary kinds: byte arrays (UInt8 + IsArray), Image.
+        if (manifest.Kind == DataKind.Image
+            || (manifest.Kind == DataKind.UInt8 && manifest.IsArray))
         {
             return ColumnRole.Binary;
         }

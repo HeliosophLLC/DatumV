@@ -4,9 +4,8 @@ namespace DatumIngest.Tests.Model;
 
 /// <summary>
 /// Round-trip tests for byte-array DataValues. After the UInt8Array migration,
-/// byte arrays at the DataValue level use <see cref="DataKind.UInt8"/> with the
-/// <c>IsArray</c> flag set. The schema layer keeps <c>DataKind.UInt8Array</c> as
-/// a column-level marker; that marker is independent of these tests.
+/// byte arrays use <see cref="DataKind.UInt8"/> with the <c>IsArray</c> flag set
+/// at both the DataValue and schema layers (<see cref="ColumnInfo.IsArray"/>).
 /// </summary>
 public sealed class ByteArrayScaffoldingTests : ServiceTestBase
 {

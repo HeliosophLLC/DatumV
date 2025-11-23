@@ -212,13 +212,13 @@ public class Ingester(
         Schema finalSchema = schemaDetector.IsDetected ? schemaDetector.Schema : new Schema([]);
         IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
 
-        Dictionary<string, DataKind> columnKinds = new(finalSchema.Columns.Count);
+        Dictionary<string, ColumnInfo> columnInfos = new(finalSchema.Columns.Count);
         foreach (ColumnInfo column in finalSchema.Columns)
         {
-            columnKinds[column.Name] = column.Kind;
+            columnInfos[column.Name] = column;
         }
 
-        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnInfos, rowCount);
 
         // Sidecar-backed image cells in the reservoir hold (storeId, offset, length)
         // placeholders; the sample collector resolves them via a tiny ad-hoc registry

@@ -164,7 +164,7 @@ public sealed class SchemaSerializerTests : ServiceTestBase
         Schema schema = new([
             new ColumnInfo("float32", DataKind.Float32, nullable: false),
             new ColumnInfo("text", DataKind.String, nullable: false),
-            new ColumnInfo("blob", DataKind.UInt8Array, nullable: false),
+            new ColumnInfo("blob", DataKind.UInt8, nullable: false) { IsArray = true },
         ]);
 
         SourceSchema original = SourceSchema.Create("data", schema);
@@ -175,6 +175,8 @@ public sealed class SchemaSerializerTests : ServiceTestBase
         Schema roundTripped = deserialized.Tables["data"];
         Assert.Equal(DataKind.Float32, roundTripped.Columns[0].Kind);
         Assert.Equal(DataKind.String, roundTripped.Columns[1].Kind);
-        Assert.Equal(DataKind.UInt8Array, roundTripped.Columns[2].Kind);
+        Assert.Equal(DataKind.UInt8, roundTripped.Columns[2].Kind);
+        Assert.True(roundTripped.Columns[2].IsArray);
+        Assert.True(roundTripped.Columns[2].IsByteArrayColumn);
     }
 }

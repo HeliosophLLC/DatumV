@@ -452,14 +452,14 @@ public sealed class InMemoryTableProvider : ITableProvider
         ColumnInfo[] infos = new ColumnInfo[columns.Length];
         for (int i = 0; i < columns.Length; i++)
         {
-            DataKind kind = InferKind(rows, i);
-            infos[i] = new ColumnInfo(columns[i], kind, nullable: true);
+            (DataKind kind, bool isArray) = InferShape(rows, i);
+            infos[i] = new ColumnInfo(columns[i], kind, nullable: true) { IsArray = isArray };
         }
 
         return new Schema(infos);
     }
 
-    private static DataKind InferKind(object?[][] rows, int ordinal)
+    private static (DataKind Kind, bool IsArray) InferShape(object?[][] rows, int ordinal)
     {
         // Walk rows until a non-null cell is found; fall back to String for all-null columns.
         foreach (object?[] row in rows)
@@ -471,13 +471,20 @@ public sealed class InMemoryTableProvider : ITableProvider
             if (cell is DataValue dv)
             {
                 if (dv.IsNull) continue;
-                return dv.Kind;
+                return (dv.Kind, dv.IsArray);
             }
 
-            return InferKindFromClrType(cell);
+            return InferShapeFromClrType(cell);
         }
 
-        return DataKind.String;
+        return (DataKind.String, false);
+    }
+
+    private static (DataKind Kind, bool IsArray) InferShapeFromClrType(object value)
+    {
+        // byte[] is the only CLR type that maps to a typed-array column (UInt8 + IsArray).
+        if (value is byte[]) return (DataKind.UInt8, true);
+        return (InferKindFromClrType(value), false);
     }
 
     private static DataKind InferKindFromClrType(object value) => value switch
@@ -500,7 +507,9 @@ public sealed class InMemoryTableProvider : ITableProvider
         TimeOnly => DataKind.Time,
         TimeSpan => DataKind.Duration,
         Guid => DataKind.Uuid,
-        byte[] => DataKind.UInt8Array,
+        // byte[] is special-cased upstream by InferShapeFromClrType which returns
+        // (UInt8, IsArray=true). It shouldn't reach this kind-only mapping; falls
+        // through to String here as a defensive default.
         _ => DataKind.String,
     };
 
