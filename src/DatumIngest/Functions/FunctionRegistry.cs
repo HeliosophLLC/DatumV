@@ -228,7 +228,8 @@ public sealed class FunctionRegistry
         // (Re-enabled per-image-function once those are migrated.)
 
         // ── Table-valued ──────────────────────────────────────────────────
-        registry.RegisterTableValued(new TableValued.UnnestFunction());
+        // UNNEST retired pending the reference-type-array consolidation; will be
+        // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued(new TableValued.RangeFunction());
 
         // ── Aggregate ─────────────────────────────────────────────────────

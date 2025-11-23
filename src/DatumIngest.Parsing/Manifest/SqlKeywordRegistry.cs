@@ -113,10 +113,11 @@ public static class SqlKeywordRegistry
     /// (<c>project_function_rebuild.md</c>) it is intentionally narrow:
     /// the six rebuilt scalar functions (<c>concat</c>, <c>upper</c>,
     /// <c>lower</c>, <c>try_cast</c>, <c>typeof</c>; <c>cast</c> excluded as
-    /// a keyword overlap), all aggregate functions, all window functions, and
-    /// <c>UNNEST</c> (the only TVF that's not a keyword overlap with
-    /// <c>RANGE</c>). Update this list in lockstep when registering new
-    /// functions; a lint test asserts the registered set agrees.
+    /// a keyword overlap), all aggregate functions, and all window functions.
+    /// (<c>UNNEST</c> was retired pending the reference-type-array consolidation;
+    /// will return as a recognised TVF when rebuilt.) Update this list in
+    /// lockstep when registering new functions; a lint test asserts the
+    /// registered set agrees.
     /// </para>
     /// </remarks>
     public static IReadOnlyList<string> BuiltinFunctions { get; } =
@@ -134,8 +135,8 @@ public static class SqlKeywordRegistry
         "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
         "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
 
-        // Table-valued functions
-        "UNNEST",
+        // Table-valued functions: UNNEST retired (see remarks above); RANGE is a
+        // SQL keyword and not registered here.
 
         // Scalar functions (rebuilt set; cast excluded as keyword overlap)
         "concat", "upper", "lower", "try_cast", "typeof",

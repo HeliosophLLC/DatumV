@@ -4,7 +4,7 @@ namespace DatumIngest.Functions;
 
 /// <summary>
 /// Interface for table-valued functions that produce a stream of rows
-/// (e.g. JSON_PATH, unnest).
+/// (e.g. <c>RANGE</c>).
 /// </summary>
 public interface ITableValuedFunction
 {

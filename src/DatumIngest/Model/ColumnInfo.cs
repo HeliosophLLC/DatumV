@@ -65,7 +65,7 @@ public sealed record ColumnInfo
     /// <c>null</c> when the element kind is unknown at plan time or when
     /// <see cref="Kind"/> is not <see cref="DataKind.Array"/>.
     /// Enables element-kind-aware function type inference (e.g. <c>ARRAY_GET</c>,
-    /// <c>ARRAY_MIN</c>, <c>ARRAY_MAX</c>) and correct <c>UNNEST</c> output schemas.
+    /// <c>ARRAY_MIN</c>, <c>ARRAY_MAX</c>).
     /// </summary>
     public DataKind? ArrayElementKind { get; }
 

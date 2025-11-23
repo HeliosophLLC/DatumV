@@ -11,105 +11,10 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public sealed class LateralJoinTests : ServiceTestBase
 {
-    /// <summary>
-    /// CROSS JOIN LATERAL UNNEST expands a vector column per row, producing
-    /// one output row per element. Rows with no elements are excluded.
-    /// </summary>
-    [Fact]
-    public async Task CrossJoinLateral_Unnest_ExpandsVectorPerRow()
-    {
-        TableCatalog catalog = CreateCatalog("data",
-            columns: ["name", "scores"],
-            ["alice", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)],
-            ["bob", DataValue.FromInlineArray<float>([10f, 20f], DataKind.Float32)]);
-        List<Row> results = await ExecuteQueryAsync(
-            "SELECT data.name, s.value FROM data CROSS JOIN LATERAL UNNEST(data.scores) AS s",
-            catalog);
-
-        Assert.Equal(5, results.Count);
-        Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsFloat32());
-        Assert.Equal("alice", results[1]["name"].AsString());
-        Assert.Equal(2f, results[1]["value"].AsFloat32());
-        Assert.Equal("alice", results[2]["name"].AsString());
-        Assert.Equal(3f, results[2]["value"].AsFloat32());
-        Assert.Equal("bob", results[3]["name"].AsString());
-        Assert.Equal(10f, results[3]["value"].AsFloat32());
-        Assert.Equal("bob", results[4]["name"].AsString());
-        Assert.Equal(20f, results[4]["value"].AsFloat32());
-    }
-
-    /// <summary>
-    /// CROSS APPLY is a T-SQL alias for CROSS JOIN LATERAL.
-    /// </summary>
-    [Fact]
-    public async Task CrossApply_BehavesAsCrossJoinLateral()
-    {
-        TableCatalog catalog = CreateCatalog("data",
-            columns: ["name", "scores"],
-            ["alice", DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)]);
-        List<Row> results = await ExecuteQueryAsync(
-            "SELECT data.name, s.value FROM data CROSS APPLY UNNEST(data.scores) AS s",
-            catalog);
-
-        Assert.Equal(2, results.Count);
-        Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsFloat32());
-    }
-
-    // ───────────────── LEFT JOIN LATERAL ─────────────────
-
-    /// <summary>
-    /// LEFT JOIN LATERAL preserves outer rows that produce no inner rows,
-    /// padding the right side with NULLs.
-    /// </summary>
-    [Fact]
-    public async Task LeftJoinLateral_PreservesUnmatchedOuterRows()
-    {
-        TableCatalog catalog = CreateCatalog("data",
-            columns: ["name", "scores"],
-            ["alice", DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)],
-            ["bob", DataValue.FromInlineArray<float>([], DataKind.Float32)],
-            ["carol", DataValue.FromInlineArray<float>([5f], DataKind.Float32)]);
-        List<Row> results = await ExecuteQueryAsync(
-            "SELECT data.name, s.value FROM data LEFT JOIN LATERAL UNNEST(data.scores) AS s",
-            catalog);
-
-        // alice: 2 rows, bob: 1 null-padded row, carol: 1 row → 4 total.
-        Assert.Equal(4, results.Count);
-        Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsFloat32());
-        Assert.Equal("alice", results[1]["name"].AsString());
-        Assert.Equal(2f, results[1]["value"].AsFloat32());
-
-        // Bob has empty vector → LEFT preserves with NULL value.
-        Assert.Equal("bob", results[2]["name"].AsString());
-        Assert.True(results[2]["value"].IsNull);
-
-        Assert.Equal("carol", results[3]["name"].AsString());
-        Assert.Equal(5f, results[3]["value"].AsFloat32());
-    }
-
-    /// <summary>
-    /// OUTER APPLY is a T-SQL alias for LEFT JOIN LATERAL.
-    /// </summary>
-    [Fact]
-    public async Task OuterApply_BehavesAsLeftJoinLateral()
-    {
-        TableCatalog catalog = CreateCatalog("data",
-            columns: ["name", "scores"],
-            ["alice", DataValue.FromInlineArray<float>([1f], DataKind.Float32)],
-            ["bob", DataValue.FromInlineArray<float>([], DataKind.Float32)]);
-        List<Row> results = await ExecuteQueryAsync(
-            "SELECT data.name, s.value FROM data OUTER APPLY UNNEST(data.scores) AS s",
-            catalog);
-
-        Assert.Equal(2, results.Count);
-        Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsFloat32());
-        Assert.Equal("bob", results[1]["name"].AsString());
-        Assert.True(results[1]["value"].IsNull);
-    }
+    // The four CROSS/LEFT/CROSS-APPLY/OUTER-APPLY × UNNEST tests retired with
+    // UnnestFunction. LATERAL JOIN with a TVF source has no remaining built-in
+    // exerciser; restore equivalent tests with the new typed-array TVF when one
+    // ships post-reference-array consolidation.
 
     // ───────────────── LATERAL with subquery source ─────────────────
 
