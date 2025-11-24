@@ -9,12 +9,6 @@ using DatumIngest.Model;
 /// </summary>
 public sealed class SamplePreviewCollectorTests : ServiceTestBase
 {
-    private static readonly string[] SingleColumnNames = ["value"];
-    private static readonly Dictionary<string, int> SingleColumnIndex = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["value"] = 0,
-    };
-
     /// <summary>
     /// A fresh arena per test method, used as the <see cref="IValueStore"/> for
     /// reference-type payloads (strings, vectors, images, arrays, structs). Disposed
@@ -22,22 +16,19 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     /// </summary>
     private readonly Arena _arena = new();
 
-    private static Row SingleValueRow(DataValue value)
-    {
-        return new Row(SingleColumnNames, [value], SingleColumnIndex);
-    }
 
     // ──────────────────── Reservoir sizing ────────────────────
 
     [Fact]
     public void Build_FewerRowsThanSampleSize_RetainsAllRows()
     {
+        ColumnLookup lookup = new(["value"]);
         Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: false)]);
         SamplePreviewCollector collector = new(sampleSize: 25);
 
         for (int i = 0; i < 10; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)), _arena);
+            collector.Consider(MakeRow(lookup, DataValue.FromFloat32(i)), _arena);
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -51,12 +42,13 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     [Fact]
     public void Build_MoreRowsThanSampleSize_RetainsExactlySampleSize()
     {
+        ColumnLookup lookup = new(["value"]);
         Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: false)]);
         SamplePreviewCollector collector = new(sampleSize: 5);
 
         for (int i = 0; i < 100; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)), _arena);
+            collector.Consider(MakeRow(lookup, DataValue.FromFloat32(i)), _arena);
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -179,20 +171,14 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
             new ColumnInfo("flag", DataKind.Boolean, nullable: true),
         ]);
 
-        string[] names = ["name", "score", "flag"];
-        Dictionary<string, int> index = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["name"] = 0,
-            ["score"] = 1,
-            ["flag"] = 2,
-        };
+        ColumnLookup lookup = new(["name", "score", "flag"]);
 
         SamplePreviewCollector collector = new(sampleSize: 25);
-        collector.Consider(new Row(names, [
+        collector.Consider(MakeRow(lookup,
             DataValue.FromString("Alice", _arena),
             DataValue.FromFloat32(95.5f),
-            DataValue.FromBoolean(true),
-        ], index), _arena);
+            DataValue.FromBoolean(true)
+        ), _arena);
 
         SamplePreview preview = collector.Build(schema);
 
@@ -221,25 +207,19 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
             new ColumnInfo("active", DataKind.Boolean, nullable: true),
         ]);
 
-        string[] names = ["label", "score", "active"];
-        Dictionary<string, int> index = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["label"] = 0,
-            ["score"] = 1,
-            ["active"] = 2,
-        };
+        ColumnLookup lookup = new(["label", "score", "active"]);
 
         SamplePreviewCollector collector = new(sampleSize: 25);
-        collector.Consider(new Row(names, [
+        collector.Consider(MakeRow(lookup, 
             DataValue.FromString("test", _arena),
             DataValue.FromFloat32(1.5f),
-            DataValue.FromBoolean(true),
-        ], index), _arena);
-        collector.Consider(new Row(names, [
+            DataValue.FromBoolean(true)
+        ), _arena));), _arena);
+        collector.Consider(MakeRow(lookup,
             DataValue.FromString("other", _arena),
             DataValue.FromFloat32(2.0f),
-            DataValue.Null(DataKind.Boolean),
-        ], index), _arena);
+            DataValue.Null(DataKind.Boolean)
+        ), _arena);
 
         SamplePreview original = collector.Build(schema);
         string json = SamplePreviewSerializer.Serialize(original);
@@ -267,10 +247,11 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     [Fact]
     public void Serialize_Deserialize_Vector_PreservesStructure()
     {
+        ColumnLookup lookup = new(["embedding"]);
         Schema schema = new([new ColumnInfo("embedding", DataKind.Float32, nullable: false) { IsArray = true }]);
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(
-            SingleValueRow(DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, _arena)),
+            MakeRow(lookup, DataValue.FromArenaArray<float>([1.0f, 2.0f, 3.0f], DataKind.Float32, _arena)),
             _arena);
 
         SamplePreview original = collector.Build(schema);
