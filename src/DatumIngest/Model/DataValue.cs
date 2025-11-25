@@ -1007,7 +1007,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Creates an inline typed-array value from raw bytes, deriving the element count
-    /// from <paramref name="bytes"/>.Length and <see cref="ElementByteSize"/>(<paramref name="elementKind"/>).
+    /// from <paramref name="bytes"/>.Length and <see cref="ScalarByteSize"/>(<paramref name="elementKind"/>).
     /// Used by the v2 decoder and any caller that already has the byte payload — the
     /// <see cref="FromInlineArray{T}"/> overload is a typed wrapper for callers with
     /// element-typed spans.
@@ -1016,11 +1016,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// The flag layout, payload packing, and 16-byte cap are identical to
     /// <see cref="FromInlineArray{T}"/>; this is the single packing implementation both
     /// factories share. Callers must ensure <paramref name="bytes"/>.Length is a
-    /// multiple of <see cref="ElementByteSize"/>(<paramref name="elementKind"/>).
+    /// multiple of <see cref="ScalarByteSize"/>(<paramref name="elementKind"/>).
     /// </remarks>
     public static DataValue FromInlineArrayBytes(ReadOnlySpan<byte> bytes, DataKind elementKind)
     {
-        int elementSize = ElementByteSize(elementKind);
+        int elementSize = ScalarByteSize(elementKind);
         if (bytes.Length % elementSize != 0)
         {
             throw new ArgumentException(
@@ -1089,6 +1089,27 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Byte-level entry point for arena-backed typed arrays. The caller has
+    /// already packed the element bytes contiguously (matching the per-element
+    /// <see cref="ScalarByteSize"/> for <paramref name="elementKind"/>); this
+    /// stores them and stamps the IsArray DataValue. Mirrors
+    /// <see cref="FromArenaArray{T}"/> for callers without a typed span in
+    /// hand (e.g. ValueRef materialisation that walks heterogeneous primitives
+    /// via <see cref="CopyInlineScalarBytes"/>).
+    /// </summary>
+    public static DataValue FromArenaArrayBytes(
+        ReadOnlySpan<byte> bytes,
+        DataKind elementKind,
+        IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(bytes);
+        return new(
+            elementKind,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray,
+            p0: p0, p1: p1);
+    }
+
+    /// <summary>
     /// Returns the inline-array elements as a typed read-only span. The span points
     /// directly into the struct's payload region via a managed reference, so it is
     /// valid for the lifetime of <c>this</c> (or any copy — <see cref="DataValue"/>
@@ -1132,7 +1153,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 throw new InvalidOperationException(
                     "InlineArrayBytes accessed on a non-inline value. Check IsInlineArray first.");
             }
-            int byteCount = InlineArrayElementCount * ElementByteSize(_kind);
+            int byteCount = InlineArrayElementCount * ScalarByteSize(_kind);
             ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
             return MemoryMarshal.CreateReadOnlySpan(ref head, byteCount);
         }
@@ -1141,9 +1162,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>
     /// Byte size of a single element of the given primitive <see cref="DataKind"/>.
     /// Used by <see cref="InlineArrayBytes"/> to compute the active byte count from
-    /// the stored element count. Throws for kinds without a fixed element size.
+    /// the stored element count, and by external callers (e.g.
+    /// <c>ValueRef.BuildFixedWidthArray</c>) packing primitives into typed arrays.
+    /// Throws for kinds without a fixed element size.
     /// </summary>
-    private static int ElementByteSize(DataKind kind) => kind switch
+    /// <remarks>
+    /// Note that <see cref="DataKind.DateTime"/> is reported as 8 bytes — the
+    /// in-memory <see cref="DataValue"/> representation is 12 bytes (8-byte
+    /// ticks + 4-byte UTC offset minutes), but the array-element convention
+    /// keeps only the ticks, dropping the offset. Callers wanting to preserve
+    /// offset should array-aggregate into a struct of (ticks, offset).
+    /// </remarks>
+    internal static int ScalarByteSize(DataKind kind) => kind switch
     {
         DataKind.UInt8 or DataKind.Int8 or DataKind.Boolean => 1,
         DataKind.UInt16 or DataKind.Int16 or DataKind.Float16 => 2,
@@ -1154,6 +1184,30 @@ public readonly struct DataValue : IEquatable<DataValue>
         _ => throw new InvalidOperationException(
             $"DataKind.{kind} has no fixed element byte size — inline arrays of this kind are not supported."),
     };
+
+    /// <summary>
+    /// Copies the inline scalar bytes of this value (a fixed-width primitive)
+    /// into <paramref name="dest"/>. The number of bytes written is
+    /// <see cref="ScalarByteSize"/>(<see cref="Kind"/>); the caller must
+    /// supply at least that many bytes. Used by typed-array builders that
+    /// need to pack heterogeneous-kind primitives without a typed span.
+    /// </summary>
+    /// <remarks>
+    /// Reads directly from the union payload words <c>_p0..._p3</c>. Does
+    /// not check <see cref="IsNull"/> or storage flags — callers must pass
+    /// non-null inline scalar values. For <see cref="DataKind.DateTime"/>
+    /// this writes the ticks only; the offset (held in <c>_p2</c>) is
+    /// dropped to match the array-element convention.
+    /// </remarks>
+    internal void CopyInlineScalarBytes(Span<byte> dest)
+    {
+        int byteCount = ScalarByteSize(_kind);
+        // Reinterpret the four payload int fields as a contiguous 16-byte block
+        // and copy the leading byteCount bytes. Same idiom as AsInlineArraySpan.
+        ref byte head = ref Unsafe.As<int, byte>(ref Unsafe.AsRef(in _p0));
+        ReadOnlySpan<byte> source = MemoryMarshal.CreateReadOnlySpan(ref head, byteCount);
+        source.CopyTo(dest);
+    }
 
     /// <summary>
     /// Universal typed-array reader: dispatches across inline, sidecar, and arena
@@ -1415,6 +1469,17 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="elementKind">The element kind of the null array.</param>
     public static DataValue NullArray(DataKind elementKind) =>
         new(DataKind.Array, DataValueFlags.IsNull, referenceIndex: 0, meta: (short)elementKind);
+
+    /// <summary>
+    /// Creates a typed null typed-array value: <c>Kind=elementKind</c> with the
+    /// <see cref="DataValueFlags.IsArray"/> and <see cref="DataValueFlags.IsNull"/>
+    /// flags set. Mirrors <see cref="NullByteArray"/> generalised to any element
+    /// kind, and is the typed-array counterpart to the legacy
+    /// <see cref="NullArray(DataKind)"/> (which uses the heterogeneous
+    /// <see cref="DataKind.Array"/> kind).
+    /// </summary>
+    public static DataValue NullArrayOf(DataKind elementKind) =>
+        new(elementKind, flags: DataValueFlags.IsNull | DataValueFlags.IsArray, p0: 0);
 
     /// <summary>Creates a struct value from a positional array of field values.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromStruct(short, DataValue[], IValueStore)"/> instead.</remarks>
@@ -2222,7 +2287,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             if (IsInline)
             {
-                if (IsInlineArray) return InlineArrayElementCount * ElementByteSize(_kind);
+                if (IsInlineArray) return InlineArrayElementCount * ScalarByteSize(_kind);
                 if (_kind == DataKind.String) return InlineByteLength;
                 return 0;
             }
@@ -2277,7 +2342,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the element count for arena-backed typed-array values without
     /// allocating. Returns the byte count for byte arrays (1 element = 1 byte) and
     /// derives element count from byte count for wider element kinds via
-    /// <see cref="ElementByteSize"/>.
+    /// <see cref="ScalarByteSize"/>.
     /// </summary>
     /// <returns>The element count, or -1 when not derivable inline (non-array, sidecar, etc.).</returns>
     public int ElementCount
@@ -2287,7 +2352,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             if (IsByteArrayKind) return _p1;
             if (IsArray && (_flags & DataValueFlags.InArena) != 0)
             {
-                int elementSize = ElementByteSize(_kind);
+                int elementSize = ScalarByteSize(_kind);
                 return elementSize > 0 ? _p1 / elementSize : -1;
             }
             return -1;
@@ -2481,7 +2546,19 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Returns the element <see cref="DataKind"/> for an <see cref="DataKind.Array"/> value.
+    /// Returns the element <see cref="DataKind"/> for an array value. Handles
+    /// both shapes:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     Typed arrays (<see cref="DataValueFlags.IsArray"/> flag set with a
+    ///     concrete element kind): the element kind <em>is</em> <see cref="Kind"/>.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Legacy heterogeneous <see cref="DataKind.Array"/> values: the element
+    ///     kind lives in <c>_meta</c> for typed nulls (from <see cref="NullArray"/>)
+    ///     and <c>_p2</c> for non-null arrays (from <see cref="FromArray(DataKind, DataValue[], IValueStore)"/>).
+    ///   </description></item>
+    /// </list>
     /// Available on both null and non-null array values.
     /// </summary>
     /// <exception cref="InvalidOperationException">Called on a non-array value.</exception>
@@ -2489,15 +2566,23 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         get
         {
+            // Typed-array shape (Kind=elementKind + IsArray flag): the kind itself
+            // is the element kind. Distinct from the legacy DataKind.Array slot.
+            if (_kind != DataKind.Array && IsArray)
+            {
+                return _kind;
+            }
+
             if (_kind != DataKind.Array)
             {
                 throw new InvalidOperationException(
                     $"Cannot read ArrayElementKind on a {_kind} value.");
             }
 
-            // Layout split: typed nulls (NullArray) store the element kind in _meta
-            // because _p1 isn't carrying a length; non-null arrays (FromArray) store
-            // it in _p2 because _meta would alias _p1's length low bytes.
+            // Legacy heterogeneous-Array layout split: typed nulls (NullArray) store
+            // the element kind in _meta because _p1 isn't carrying a length; non-null
+            // arrays (FromArray) store it in _p2 because _meta would alias _p1's
+            // length low bytes.
             return IsNull ? (DataKind)_meta : (DataKind)_p2;
         }
     }

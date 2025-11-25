@@ -70,7 +70,10 @@ public sealed class YoloModel : OnnxModel
             name,
             modelFilePath,
             inputKinds: [DataKind.Image],
-            outputKind: DataKind.Array,
+            // YOLO emits a typed array of detection structs (Kind=Struct + IsArray).
+            // The IModel interface currently advertises only the kind; the IsArray
+            // bit will land alongside the schema-layer collapse in the next PR.
+            outputKind: DataKind.Struct,
             isDeterministic: true)
     {
         IReadOnlyList<string> resolvedLabels = labels ?? CocoLabels.Names;

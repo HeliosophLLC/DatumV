@@ -41,7 +41,9 @@ public sealed class YoloModelTests : ServiceTestBase
 
         Assert.Equal("detect", model.Name);
         Assert.True(model.IsDeterministic);
-        Assert.Equal(DataKind.Array, model.OutputKind);
+        // OutputKind currently advertises only the per-element kind (Struct);
+        // the IsArray bit will join the IModel surface in the schema-layer PR.
+        Assert.Equal(DataKind.Struct, model.OutputKind);
         Assert.Single(model.InputKinds);
         Assert.Equal(DataKind.Image, model.InputKinds[0]);
     }
@@ -49,8 +51,8 @@ public sealed class YoloModelTests : ServiceTestBase
     /// <summary>
     /// End-to-end: feed a solid colour PNG through the model. Detection
     /// count is unpredictable (the model doesn't expect uniform-colour
-    /// inputs) but the output should still be a well-formed
-    /// <see cref="DataKind.Array"/> DataValue and not throw.
+    /// inputs) but the output should still be a well-formed typed
+    /// Array&lt;Struct&gt; ValueRef and not throw.
     /// </summary>
     [Fact]
     public async Task InferBatch_SolidImage_ReturnsArrayOfStructs()
@@ -77,7 +79,9 @@ public sealed class YoloModelTests : ServiceTestBase
 
             DatumIngest.Functions.ValueRef result = Assert.Single(outputs);
             Assert.False(result.IsNull);
-            Assert.Equal(DataKind.Array, result.Kind);
+            // Typed Array<Struct> output: Kind=Struct, IsArray flag set.
+            Assert.Equal(DataKind.Struct, result.Kind);
+            Assert.True(result.IsArray);
         }
         finally
         {
@@ -106,7 +110,7 @@ public sealed class YoloModelTests : ServiceTestBase
         using ModelLease lease = catalog.ResolveLeaseSynchronously("detect");
         IModel model = lease.Model;
         Assert.IsType<YoloModel>(model);
-        Assert.Equal(DataKind.Array, model.OutputKind);
+        Assert.Equal(DataKind.Struct, model.OutputKind);
         Assert.Single(model.InputKinds);
         Assert.Equal(DataKind.Image, model.InputKinds[0]);
     }

@@ -232,9 +232,31 @@ public readonly struct ValueRef
     /// Array value carried as a recursive <see cref="ValueRef"/>[] payload.
     /// Same deferred-materialisation contract as <see cref="FromStruct"/>:
     /// nested non-inline elements stay managed until the boundary recurses.
+    /// The inline carrier uses the typed-array shape (<see cref="DataValue.Kind"/> =
+    /// <paramref name="elementKind"/>, <see cref="DataValue.IsArray"/> = true) —
+    /// <see cref="DataKind.Array"/> is no longer used at this boundary.
     /// </summary>
-    public static ValueRef FromArray(DataKind elementKind, ValueRef[] elements) =>
-        new(DataValue.NullArray(elementKind), elements);
+    /// <remarks>
+    /// Nested arrays (an element that is itself an array carrier) are rejected
+    /// at construction. The carrier encodes only the leaf element kind, not
+    /// nesting, so <c>Array&lt;Array&lt;X&gt;&gt;</c> can't round-trip through
+    /// <see cref="ToDataValue"/>. Models needing an outer-of-inner shape
+    /// should flatten or wrap the inner array in a <see cref="DataKind.Struct"/>.
+    /// </remarks>
+    public static ValueRef FromArray(DataKind elementKind, ValueRef[] elements)
+    {
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (elements[i].IsArray)
+            {
+                throw new NotSupportedException(
+                    $"ValueRef.FromArray element [{i}] is itself an array (Kind={elements[i].Kind}, IsArray=true). "
+                    + "Nested arrays (Array<Array<X>>) are not supported; the typed-array carrier encodes only "
+                    + "the leaf element kind. Wrap the inner array in a Struct field instead.");
+            }
+        }
+        return new(DataValue.NullArrayOf(elementKind), elements);
+    }
 
     /// <summary>
     /// Typed null struct with the given <paramref name="fieldCount"/>. No
@@ -245,10 +267,13 @@ public readonly struct ValueRef
 
     /// <summary>
     /// Typed null array of the given element kind. No payload — boundary
-    /// materialisation produces <see cref="DataValue.NullArray"/>.
+    /// materialisation passes the typed-null carrier through unchanged.
+    /// The carrier uses the typed-array shape (<see cref="DataValue.Kind"/> =
+    /// <paramref name="elementKind"/> with <see cref="DataValue.IsArray"/> and
+    /// <see cref="DataValue.IsNull"/> both set).
     /// </summary>
     public static ValueRef NullArray(DataKind elementKind) =>
-        new(DataValue.NullArray(elementKind), null);
+        new(DataValue.NullArrayOf(elementKind), null);
 
     /// <summary>
     /// Reads the value as a <see cref="string"/>. For inline strings this
@@ -319,10 +344,10 @@ public readonly struct ValueRef
     /// </exception>
     public ReadOnlySpan<ValueRef> GetArrayElements()
     {
-        if (_inline.Kind != DataKind.Array)
+        if (!_inline.IsArray)
         {
             throw new InvalidOperationException(
-                $"GetArrayElements called on a {_inline.Kind} value (expected Array).");
+                $"GetArrayElements called on a {_inline.Kind} value (expected an array).");
         }
         if (_materialized is ValueRef[] elements)
         {
@@ -338,12 +363,23 @@ public readonly struct ValueRef
     }
 
     /// <summary>
-    /// The element kind for an array value. Reads directly off the inline
-    /// DataValue tag (which carries the element kind in <c>_meta</c> for
-    /// typed nulls and <c>_p2</c> for non-null arrays).
+    /// The element kind for an array value. With the typed-array carrier
+    /// (<see cref="Kind"/> = <c>elementKind</c>, <see cref="IsArray"/> = true),
+    /// the element kind is simply <see cref="Kind"/>.
     /// </summary>
     /// <exception cref="InvalidOperationException">The value is not an array.</exception>
-    public DataKind ArrayElementKind => _inline.ArrayElementKind;
+    public DataKind ArrayElementKind
+    {
+        get
+        {
+            if (!_inline.IsArray)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot read ArrayElementKind on a {_inline.Kind} value (expected an array).");
+            }
+            return _inline.Kind;
+        }
+    }
 
     /// <summary>Boolean accessor (inline only).</summary>
     public bool AsBoolean() => _inline.AsBoolean();
@@ -457,13 +493,15 @@ public readonly struct ValueRef
 
         return _materialized switch
         {
-            string s when _inline.Kind == DataKind.String => DataValue.FromString(s, targetStore),
+            string s when _inline.Kind == DataKind.String && !_inline.IsArray =>
+                DataValue.FromString(s, targetStore),
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),
-            byte[] bytes when _inline.Kind == DataKind.Image => DataValue.FromImage(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Image && !_inline.IsArray =>
+                DataValue.FromImage(bytes, targetStore),
+            ValueRef[] elements when _inline.IsArray =>
+                BuildTypedArray(_inline.Kind, elements, targetStore),
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
                 DataValue.FromStruct((short)fields.Length, MaterialiseEach(fields, targetStore), targetStore),
-            ValueRef[] elements when _inline.Kind == DataKind.Array =>
-                DataValue.FromArray(_inline.ArrayElementKind, MaterialiseEach(elements, targetStore), targetStore),
             _ => throw new InvalidOperationException(
                 $"Cannot lower ValueRef with managed payload of type {_materialized.GetType().Name} "
                 + $"and kind {Kind} into a DataValue. Add a ToDataValue arm for this combination."),
@@ -473,8 +511,8 @@ public readonly struct ValueRef
     /// <summary>
     /// Recursively materialises an array of child <see cref="ValueRef"/>s into
     /// a <see cref="DataValue"/>[] against <paramref name="target"/>. Used by
-    /// <see cref="ToDataValue"/> for the struct and array recursive arms;
-    /// each leaf's arena write happens exactly once during the descent.
+    /// <see cref="ToDataValue"/> for the struct recursive arm; each leaf's
+    /// arena write happens exactly once during the descent.
     /// </summary>
     private static DataValue[] MaterialiseEach(ValueRef[] children, IValueStore target)
     {
@@ -484,5 +522,145 @@ public readonly struct ValueRef
             resolved[i] = children[i].ToDataValue(target);
         }
         return resolved;
+    }
+
+    /// <summary>
+    /// Materialises an array <see cref="ValueRef"/> into a typed-array
+    /// <see cref="DataValue"/> of the appropriate per-element-kind layout.
+    /// Dispatches by element kind: reference kinds (String, Image, Struct)
+    /// route to their slot-block factories; fixed-width primitives pack their
+    /// inline payload bytes contiguously via <see cref="BuildFixedWidthArray"/>.
+    /// </summary>
+    private static DataValue BuildTypedArray(
+        DataKind elementKind,
+        ValueRef[] elements,
+        IValueStore target)
+    {
+        return elementKind switch
+        {
+            DataKind.String => BuildStringArray(elements, target),
+            DataKind.Image => BuildImageArray(elements, target),
+            DataKind.Struct => BuildStructArray(elements, target),
+            // DateTime is intentionally not supported here: the per-element
+            // byte-size convention used by typed arrays elsewhere in the
+            // engine treats DateTime as 8 bytes (ticks only) and silently
+            // drops the timezone offset. Until we settle on a packed
+            // (ticks, offset) layout, callers must aggregate into a struct
+            // of the two parts instead.
+            DataKind.DateTime => throw new NotSupportedException(
+                "Array<DateTime> is not yet supported via ValueRef.FromArray. "
+                + "The fixed-width array convention drops the timezone offset; "
+                + "aggregate into Struct{ticks: Int64, offset_minutes: Int32} until "
+                + "an offset-preserving layout is settled."),
+            _ => BuildFixedWidthArray(elementKind, elements, target),
+        };
+    }
+
+    private static DataValue BuildStringArray(ValueRef[] elements, IValueStore target)
+    {
+        string[] strings = new string[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullElement(elements[i], i, DataKind.String);
+            strings[i] = elements[i].AsString();
+        }
+        return DataValue.FromStringArray(strings, target);
+    }
+
+    private static DataValue BuildImageArray(ValueRef[] elements, IValueStore target)
+    {
+        byte[][] images = new byte[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullElement(elements[i], i, DataKind.Image);
+            images[i] = elements[i].AsBytes();
+        }
+        return DataValue.FromImageArray(images, target);
+    }
+
+    private static DataValue BuildStructArray(ValueRef[] elements, IValueStore target)
+    {
+        DataValue[][] rows = new DataValue[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullElement(elements[i], i, DataKind.Struct);
+            ReadOnlySpan<ValueRef> fields = elements[i].GetStructFields();
+            DataValue[] row = new DataValue[fields.Length];
+            for (int j = 0; j < fields.Length; j++)
+            {
+                row[j] = fields[j].ToDataValue(target);
+            }
+            rows[i] = row;
+        }
+        return DataValue.FromStructArray(rows, target);
+    }
+
+    /// <summary>
+    /// Guard for inner-element nulls inside an array. Whole-array nulls are
+    /// handled at the carrier level by <see cref="ToDataValue"/>; per-element
+    /// nulls would need either a per-element null bitmap (none yet) or a
+    /// sentinel encoding per kind (none yet either). Until that lands,
+    /// fail loudly rather than corrupt the slot block / silently zero-fill.
+    /// </summary>
+    private static void ThrowIfNullElement(ValueRef element, int index, DataKind elementKind)
+    {
+        if (element.IsNull)
+        {
+            throw new NotSupportedException(
+                $"Array<{elementKind}> element [{index}] is null; per-element nulls inside an array are "
+                + "not yet supported. Wrap into Struct{{value, is_null}} or filter nulls before aggregating.");
+        }
+    }
+
+    /// <summary>
+    /// Packs a fixed-width primitive array's element bytes contiguously and
+    /// hands the buffer to the typed-array factory. Each element's inline
+    /// payload bytes are copied via <see cref="DataValue.CopyInlineScalarBytes"/>
+    /// using the per-kind <see cref="DataValue.ScalarByteSize"/> convention.
+    /// Routes through the inline-array factory when the total fits in the
+    /// 16-byte struct payload, otherwise through the arena-byte factory.
+    /// </summary>
+    /// <remarks>
+    /// Each element ValueRef must be inline-or-null and of <paramref name="elementKind"/>.
+    /// Null elements pack as zeroed bytes (no per-element null bitmap yet) —
+    /// matches the existing fixed-width array convention; callers wanting null
+    /// preservation must wrap into a Struct with a separate null flag.
+    /// </remarks>
+    private static DataValue BuildFixedWidthArray(
+        DataKind elementKind,
+        ValueRef[] elements,
+        IValueStore target)
+    {
+        int elementSize = DataValue.ScalarByteSize(elementKind);
+        int totalBytes = elements.Length * elementSize;
+
+        // Empty arrays match the inline N=0 convention used by reference
+        // typed-array factories. The factory itself enforces the byte cap.
+        if (totalBytes == 0)
+        {
+            return DataValue.FromInlineArrayBytes(ReadOnlySpan<byte>.Empty, elementKind);
+        }
+
+        byte[] buffer = new byte[totalBytes];
+        Span<byte> span = buffer;
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullElement(elements[i], i, elementKind);
+            DataValue inline = elements[i].InlineDataValue;
+            if (inline.Kind != elementKind)
+            {
+                throw new InvalidOperationException(
+                    $"Array element [{i}] has kind {inline.Kind}; expected {elementKind}.");
+            }
+            inline.CopyInlineScalarBytes(span.Slice(i * elementSize, elementSize));
+        }
+
+        // Inline if it fits; otherwise arena. The 16-byte cap matches
+        // FromInlineArrayBytes' InlineArrayMaxBytes contract.
+        if (totalBytes <= 16)
+        {
+            return DataValue.FromInlineArrayBytes(span, elementKind);
+        }
+        return DataValue.FromArenaArrayBytes(span, elementKind, target);
     }
 }

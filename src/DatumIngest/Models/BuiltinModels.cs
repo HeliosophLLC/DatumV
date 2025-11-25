@@ -211,7 +211,9 @@ public static class BuiltinModels
             Backend: "onnx",
             RelativePath: modelFilename,
             InputKinds: [DataKind.Image],
-            OutputKind: DataKind.Array,
+            // Detection array of structs — per-element kind is Struct; the IsArray
+            // bit will join the catalog surface alongside the schema-layer collapse.
+            OutputKind: DataKind.Struct,
             IsDeterministic: true,
             Loader: ctx =>
             {
