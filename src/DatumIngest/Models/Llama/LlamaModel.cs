@@ -1,6 +1,6 @@
 using System.Text;
 
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using LLama;
@@ -243,11 +243,9 @@ public sealed class LlamaModel : IModel, IDisposable
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<DataValue>> InferBatchAsync(
-        IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry,
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         IValueStore targetStore,
-        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -262,14 +260,14 @@ public sealed class LlamaModel : IModel, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IReadOnlyList<DataValue> rowInputs = inputs[row];
+            IReadOnlyList<ValueRef> rowInputs = inputs[row];
             if (rowInputs.Count != 1)
             {
                 throw new InvalidOperationException(
                     $"LlamaModel expects exactly one input column per row but row {row} has {rowInputs.Count}.");
             }
 
-            DataValue prompt = rowInputs[0];
+            ValueRef prompt = rowInputs[0];
             if (prompt.IsNull)
             {
                 throw new InvalidOperationException(
@@ -282,7 +280,7 @@ public sealed class LlamaModel : IModel, IDisposable
             //   [1] = max_tokens   (Int32)
             // Missing or null entries fall back to construction-time defaults.
             // Cheap when overrides is empty (common case for the scalar form).
-            IReadOnlyList<DataValue> rowOverrides = overrides.Count > row
+            IReadOnlyList<ValueRef> rowOverrides = overrides.Count > row
                 ? overrides[row]
                 : [];
             float temperature = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
@@ -292,7 +290,7 @@ public sealed class LlamaModel : IModel, IDisposable
                 ? rowOverrides[1].ToInt32()
                 : _maxTokens;
 
-            string promptText = prompt.AsString(inputStore, sidecarRegistry);
+            string promptText = prompt.AsString();
             string templated = _template.Format(promptText);
 
             string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);

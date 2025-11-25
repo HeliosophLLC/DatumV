@@ -1,4 +1,4 @@
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using Microsoft.ML.OnnxRuntime;
@@ -115,13 +115,12 @@ public sealed class YoloModel : OnnxModel
 
     /// <inheritdoc />
     public override async Task<IReadOnlyList<DataValue>> InferBatchAsync(
-        IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry,
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         IValueStore targetStore,
-        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
+        _ = overrides;
         cancellationToken.ThrowIfCancellationRequested();
         if (inputs.Count == 0) return [];
 
@@ -137,13 +136,13 @@ public sealed class YoloModel : OnnxModel
 
         for (int row = 0; row < batchSize; row++)
         {
-            DataValue image = inputs[row][0];
+            ValueRef image = inputs[row][0];
             if (image.IsNull)
             {
                 throw new InvalidOperationException(
                     $"YoloModel received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
-            byte[] bytes = image.AsImage(inputStore, sidecarRegistry);
+            byte[] bytes = image.AsBytes();
             DecodeAndPack(bytes, tensorData.AsSpan(row * perImageFloats, perImageFloats), out int origW, out int origH);
             scaleX[row] = origW / (float)InputSize;
             scaleY[row] = origH / (float)InputSize;
@@ -223,9 +222,7 @@ public sealed class YoloModel : OnnxModel
 
     /// <inheritdoc />
     protected override IReadOnlyCollection<NamedOnnxValue> BuildBatchInputs(
-        IReadOnlyList<IReadOnlyList<DataValue>> rows,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry)
+        IReadOnlyList<IReadOnlyList<ValueRef>> rows)
         => throw new InvalidOperationException(
             "YoloModel overrides InferBatchAsync directly to thread per-row scale factors " +
             "from preprocessing into postprocessing. BuildBatchInputs is not used.");

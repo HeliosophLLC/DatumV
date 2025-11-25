@@ -210,19 +210,19 @@ public sealed class ModelInvocationTests : ServiceTestBase
         public DataKind OutputKind => DataKind.String;
 
         public Task<IReadOnlyList<DataValue>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-            DatumIngest.Model.IValueStore inputStore,
-            DatumIngest.DatumFile.Sidecar.SidecarRegistry? sidecarRegistry,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
             DatumIngest.Model.IValueStore targetStore,
-            IReadOnlyList<IReadOnlyList<DataValue>> overrides,
             CancellationToken cancellationToken)
         {
+            _ = overrides;
             DataValue[] outputs = new DataValue[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
-                string text = inputs[row][0].AsString(inputStore);
+                DatumIngest.Functions.ValueRef value = inputs[row][0];
+                string text = value.AsString();
                 SeenInputs.Add(text);
-                outputs[row] = inputs[row][0];
+                outputs[row] = DataValue.FromString(text, targetStore);
             }
             return Task.FromResult<IReadOnlyList<DataValue>>(outputs);
         }

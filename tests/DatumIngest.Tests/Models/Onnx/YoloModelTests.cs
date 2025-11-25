@@ -66,16 +66,14 @@ public sealed class YoloModelTests : ServiceTestBase
             using YoloModel model = new(name: "detect", modelFilePath: ModelPath);
 
             byte[] png = MakeSolidPng(640, 480, SKColors.SteelBlue);
-            DataValue imageValue = DataValue.FromImage(png, inputArena);
 
-            DataValue[][] inputs = [[imageValue]];
-            DataValue[][] overrides = [[]];
+            DatumIngest.Functions.ValueRef[][] inputs =
+                [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
+            DatumIngest.Functions.ValueRef[][] overrides = [[]];
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
+                overrides,
                 targetStore: targetArena,
-                overrides: overrides,
                 cancellationToken: CancellationToken.None);
 
             DataValue result = Assert.Single(outputs);

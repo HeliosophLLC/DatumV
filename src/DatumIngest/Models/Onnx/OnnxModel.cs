@@ -1,4 +1,4 @@
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using Microsoft.ML.OnnxRuntime;
@@ -74,27 +74,19 @@ public abstract class OnnxModel : IModel, IDisposable
 
     /// <summary>
     /// Builds the input tensors for a whole row batch. Concrete models pack
-    /// per-row <see cref="DataValue"/>s into one tensor per ONNX input, with
+    /// per-row <see cref="ValueRef"/>s into one tensor per ONNX input, with
     /// the leading dimension equal to <paramref name="rows"/>.<c>Count</c>.
+    /// Inputs arrive pre-resolved (arena/sidecar payloads already materialised
+    /// as managed strings / byte arrays) — implementations call
+    /// <c>value.AsString()</c> / <c>value.AsBytes()</c> directly.
     /// </summary>
     /// <param name="rows">Per-row input columns (row-major: outer = row, inner = column/arity).</param>
-    /// <param name="inputStore">
-    /// Where arena-backed input payloads (image bytes, strings) resolve. The
-    /// operator passes the source batch's arena.
-    /// </param>
-    /// <param name="sidecarRegistry">
-    /// Registry for sidecar-backed inputs (e.g. images stored in
-    /// <c>.datum-blob</c> files). <see langword="null"/> when no sidecar sources
-    /// are in play.
-    /// </param>
     /// <returns>
     /// The list of named tensors fed to <see cref="InferenceSession.Run(IReadOnlyCollection{NamedOnnxValue})"/>.
     /// Names must match the ONNX graph's input names.
     /// </returns>
     protected abstract IReadOnlyCollection<NamedOnnxValue> BuildBatchInputs(
-        IReadOnlyList<IReadOnlyList<DataValue>> rows,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry);
+        IReadOnlyList<IReadOnlyList<ValueRef>> rows);
 
     /// <summary>
     /// Reads the output tensors and produces one <see cref="DataValue"/> per
@@ -113,11 +105,9 @@ public abstract class OnnxModel : IModel, IDisposable
 
     /// <inheritdoc />
     public virtual Task<IReadOnlyList<DataValue>> InferBatchAsync(
-        IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry,
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         IValueStore targetStore,
-        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
         // The base ONNX session has no per-call hyperparameters in this design.
@@ -139,7 +129,7 @@ public abstract class OnnxModel : IModel, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IReadOnlyCollection<NamedOnnxValue> batchInputs = BuildBatchInputs(inputs, inputStore, sidecarRegistry);
+            IReadOnlyCollection<NamedOnnxValue> batchInputs = BuildBatchInputs(inputs);
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = Session.Run(batchInputs);
 
             cancellationToken.ThrowIfCancellationRequested();

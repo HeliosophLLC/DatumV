@@ -1,4 +1,4 @@
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Models;
@@ -62,21 +62,27 @@ public interface IModel
     /// Implementations should dispatch in one or a small number of GPU calls —
     /// never one per row.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ValueRef inputs.</strong> Inputs and overrides arrive as
+    /// <see cref="ValueRef"/>s — already-resolved managed payloads (strings,
+    /// byte arrays, inline numerics). The evaluator handled all arena and
+    /// sidecar resolution at the operator boundary, so implementations call
+    /// <c>value.AsString()</c> / <c>value.AsBytes()</c> / <c>value.ToFloat()</c>
+    /// directly without threading a store or sidecar registry. The function
+    /// chain feeding the model never wrote its output to the arena.
+    /// </para>
+    /// <para>
+    /// <strong>DataValue outputs.</strong> The result list is still
+    /// <see cref="DataValue"/> — that's the shape the pipeline emits. The
+    /// implementation materialises non-inline result payloads (strings,
+    /// vectors, byte arrays, structs, arrays) into <paramref name="targetStore"/>
+    /// so they survive past the call. Migrating outputs to <see cref="ValueRef"/>
+    /// is a follow-up; held for after the <c>DataKind.Array</c> elimination
+    /// settles.
+    /// </para>
+    /// </remarks>
     /// <param name="inputs">Per-row input columns. Outer length = row count; inner length = arity.</param>
-    /// <param name="inputStore">
-    /// The <see cref="IValueStore"/> against which arena-backed input DataValue
-    /// payloads (image bytes, strings, vectors) resolve. Sidecar-backed values
-    /// resolve through <paramref name="sidecarRegistry"/> instead.
-    /// </param>
-    /// <param name="sidecarRegistry">
-    /// Registry used to resolve sidecar-backed input values (e.g. <c>.datum-blob</c>
-    /// images). <see langword="null"/> when the query has no sidecar sources active.
-    /// </param>
-    /// <param name="targetStore">
-    /// Where the implementation should materialise non-inline result payloads
-    /// (strings, vectors, byte arrays). The pipeline runtime supplies the output
-    /// batch's arena so results land where the caller expects to read them from.
-    /// </param>
     /// <param name="overrides">
     /// Per-row hyperparameter overrides. Outer length matches
     /// <paramref name="inputs"/>.Count (one entry per row). Each inner list is
@@ -87,13 +93,17 @@ public interface IModel
     /// outer list) means "use defaults for everything." Implementations that
     /// don't accept any optional args may ignore this parameter.
     /// </param>
+    /// <param name="targetStore">
+    /// Where the implementation should materialise non-inline result payloads
+    /// (strings, vectors, byte arrays, struct/array DataValues). The pipeline
+    /// runtime supplies the output batch's arena so results land where the
+    /// caller expects to read them from.
+    /// </param>
     /// <param name="cancellationToken">Honoured between sub-batches at minimum.</param>
     /// <returns>One <see cref="DataValue"/> per input row, in the same order.</returns>
     Task<IReadOnlyList<DataValue>> InferBatchAsync(
-        IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry,
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         IValueStore targetStore,
-        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken);
 }

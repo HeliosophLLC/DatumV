@@ -580,7 +580,7 @@ public sealed class ExpressionEvaluator
     /// Earlier intermediates become unreachable as soon as the next stage's
     /// result is constructed and are reclaimed by the GC.
     /// </remarks>
-    private ValueRef EvaluateAsValueRef(Expression expression, in EvaluationFrame frame)
+    public ValueRef EvaluateAsValueRef(Expression expression, in EvaluationFrame frame)
     {
         // Predicate-relevant expression types route through ValueRef-native
         // handlers so no intermediate result writes to the arena. Anything else

@@ -1,4 +1,4 @@
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 using Microsoft.ML.OnnxRuntime;
@@ -85,9 +85,7 @@ public sealed class MobileNetV2Model : OnnxModel
 
     /// <inheritdoc />
     protected override IReadOnlyCollection<NamedOnnxValue> BuildBatchInputs(
-        IReadOnlyList<IReadOnlyList<DataValue>> rows,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry)
+        IReadOnlyList<IReadOnlyList<ValueRef>> rows)
     {
         int batchSize = rows.Count;
         int planeSize = InputHeight * InputWidth;
@@ -96,21 +94,21 @@ public sealed class MobileNetV2Model : OnnxModel
 
         for (int row = 0; row < batchSize; row++)
         {
-            IReadOnlyList<DataValue> rowInputs = rows[row];
+            IReadOnlyList<ValueRef> rowInputs = rows[row];
             if (rowInputs.Count != 1)
             {
                 throw new InvalidOperationException(
                     $"MobileNetV2 expects a single input column per row but row {row} has {rowInputs.Count}.");
             }
 
-            DataValue image = rowInputs[0];
+            ValueRef image = rowInputs[0];
             if (image.IsNull)
             {
                 throw new InvalidOperationException(
                     $"MobileNetV2 received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
 
-            byte[] imageBytes = image.AsImage(inputStore, sidecarRegistry);
+            byte[] imageBytes = image.AsBytes();
             int destOffset = row * perImageFloats;
             DecodeAndPackImage(imageBytes, tensorData.AsSpan(destOffset, perImageFloats));
         }

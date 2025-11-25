@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
@@ -234,37 +235,27 @@ public sealed class ModelInvocationOperator : IQueryOperator
             // the operator chain. No cross-arena routing needed.
             RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
 
-            // Step 2: evaluate the input expressions against every source row, then
-            // stabilise each non-inline value into outputBatch.Arena so the model
-            // gets a single coherent inputStore. Inputs come from one of three
-            // arenas depending on the expression type:
-            //   - column reference  → sourceBatch.Arena
-            //   - LiteralExpression → frame.Target (= sourceBatch.Arena, since we
-            //     set it that way below; the evaluator writes here on the fly)
-            //   - LiteralValueExpression (hoisted literal) → context.Store
-            //     (LiteralHoister runs at plan time and writes payloads into the
-            //     plan-scoped hoist store, which QueryPlan plumbs as context.Store)
-            // StabilizeInput tries each candidate arena until it finds one whose
-            // capacity covers the value's offsets, then copies the bytes into
-            // outputBatch.Arena.
-            // Evaluate inputs and per-row hyperparameter overrides together so
-            // each row sees its own EvaluationFrame and overrides can vary by
-            // column reference (e.g. a `temp` column drives temperature). When
-            // there are no optional expressions, overrideValues stays a shared
-            // empty array — no per-row allocation cost in the common case.
-            DataValue[][] inputs = new DataValue[rowsThisBatch][];
-            DataValue[][] overrideValues = new DataValue[rowsThisBatch][];
-            DataValue[] emptyOverrideRow = [];
+            // Step 2: evaluate input expressions and per-row hyperparameter
+            // overrides as ValueRefs. The evaluator's ToValueRef handles arena
+            // and sidecar resolution at the boundary, so the function chain
+            // feeding the model never writes its result to the arena —
+            // inputs[r][c] holds a managed payload (string / byte[] / inline
+            // numeric) ready for direct consumption by the model. When there
+            // are no optional expressions, overrideValues stays a shared empty
+            // array — no per-row allocation cost in the common case.
+            ValueRef[][] inputs = new ValueRef[rowsThisBatch][];
+            ValueRef[][] overrideValues = new ValueRef[rowsThisBatch][];
+            ValueRef[] emptyOverrideRow = [];
 
             for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
             {
                 Row row = sourceBatch[rowIdx];
                 EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry);
 
-                DataValue[] rowInputs = new DataValue[_inputExpressions.Count];
+                ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
                 for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                 {
-                    rowInputs[argIdx] = evaluator.Evaluate(_inputExpressions[argIdx], frame);
+                    rowInputs[argIdx] = evaluator.EvaluateAsValueRef(_inputExpressions[argIdx], frame);
                 }
                 inputs[rowIdx] = rowInputs;
 
@@ -274,26 +265,22 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
                 else
                 {
-                    DataValue[] rowOverrides = new DataValue[_optionalExpressions.Count];
+                    ValueRef[] rowOverrides = new ValueRef[_optionalExpressions.Count];
                     for (int i = 0; i < _optionalExpressions.Count; i++)
                     {
-                        rowOverrides[i] = evaluator.Evaluate(_optionalExpressions[i], frame);
+                        rowOverrides[i] = evaluator.EvaluateAsValueRef(_optionalExpressions[i], frame);
                     }
                     overrideValues[rowIdx] = rowOverrides;
                 }
             }
 
-            // Step 3: dispatch the whole batch in one async call. All input
-            // DataValue payloads now live in outputBatch.Arena, so we pass it as
-            // the inputStore. The model materialises non-inline outputs into the
-            // same arena.
+            // Step 3: dispatch the whole batch in one async call. The model
+            // materialises non-inline outputs into outputBatch.Arena.
             IReadOnlyList<DataValue> modelOutputs = await model
                 .InferBatchAsync(
                     inputs,
-                    outputBatch.Arena,
-                    context.SidecarRegistry,
-                    outputBatch.Arena,
                     overrideValues,
+                    outputBatch.Arena,
                     cancellationToken)
                 .ConfigureAwait(false);
 

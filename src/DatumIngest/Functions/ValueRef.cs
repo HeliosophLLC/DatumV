@@ -286,6 +286,31 @@ public readonly struct ValueRef
     /// Mirrors <see cref="DataValue.TryToDouble"/>.
     /// </summary>
     public bool TryToDouble(out double result) => _inline.TryToDouble(out result);
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="float"/>. Throws for null or
+    /// non-numeric kinds. Mirrors <see cref="DataValue.ToFloat"/>.
+    /// </summary>
+    public float ToFloat() => _inline.ToFloat();
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="double"/>. Throws for null or
+    /// non-numeric kinds. Mirrors <see cref="DataValue.ToDouble"/>.
+    /// </summary>
+    public double ToDouble() => _inline.ToDouble();
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="int"/>. Throws for null or
+    /// non-numeric kinds; floats truncate. Mirrors <see cref="DataValue.ToInt32"/>.
+    /// </summary>
+    public int ToInt32() => _inline.ToInt32();
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="long"/>. Throws for null or
+    /// non-numeric kinds; floats truncate. Mirrors <see cref="DataValue.ToInt64"/>.
+    /// </summary>
+    public long ToInt64() => _inline.ToInt64();
+
     /// <summary>Date accessor (inline only).</summary>
     public DateOnly AsDate() => _inline.AsDate();
     /// <summary>DateTime accessor (inline only).</summary>

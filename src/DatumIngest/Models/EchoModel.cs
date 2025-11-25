@@ -1,4 +1,4 @@
-using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Models;
@@ -39,23 +39,25 @@ public sealed class EchoModel : IModel
 
     /// <inheritdoc />
     public Task<IReadOnlyList<DataValue>> InferBatchAsync(
-        IReadOnlyList<IReadOnlyList<DataValue>> inputs,
-        IValueStore inputStore,
-        SidecarRegistry? sidecarRegistry,
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         IValueStore targetStore,
-        IReadOnlyList<IReadOnlyList<DataValue>> overrides,
         CancellationToken cancellationToken)
     {
+        _ = overrides;
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Pass-through. ModelInvocationOperator stabilises returned values into the
-        // output batch's arena when scattering, so the model itself doesn't need to
-        // worry about arena routing — it just produces values with whatever payloads
-        // they came in with.
+        // Pass-through: read the input string out of the ValueRef and re-materialise
+        // as a DataValue in the target arena. Inputs arrived already-resolved
+        // (the evaluator's ToValueRef did the arena/sidecar lift), so AsString()
+        // is a direct managed-memory read.
         DataValue[] outputs = new DataValue[inputs.Count];
         for (int row = 0; row < inputs.Count; row++)
         {
-            outputs[row] = inputs[row][0];
+            ValueRef value = inputs[row][0];
+            outputs[row] = value.IsNull
+                ? DataValue.Null(DataKind.String)
+                : DataValue.FromString(value.AsString(), targetStore);
         }
 
         return Task.FromResult<IReadOnlyList<DataValue>>(outputs);

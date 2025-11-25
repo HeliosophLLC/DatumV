@@ -81,17 +81,15 @@ public sealed class LlamaModelTests : ServiceTestBase
         {
             using LlamaModel model = new(name: "llm", modelFilePath: ModelPath, maxTokens: 32);
 
-            DataValue[][] inputs =
+            DatumIngest.Functions.ValueRef[][] inputs =
             [
-                [DataValue.FromString("What is 2 + 2? Reply with just the number.", inputArena)],
+                [DatumIngest.Functions.ValueRef.FromString("What is 2 + 2? Reply with just the number.")],
             ];
 
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
-                targetStore: targetArena,
                 overrides: [],
+                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             DataValue response = Assert.Single(outputs);
@@ -129,19 +127,17 @@ public sealed class LlamaModelTests : ServiceTestBase
         {
             using LlamaModel model = new(name: "llm", modelFilePath: ModelPath, maxTokens: 24);
 
-            DataValue[][] inputs =
+            DatumIngest.Functions.ValueRef[][] inputs =
             [
-                [DataValue.FromString("Reply with only the word 'apple'.", inputArena)],
-                [DataValue.FromString("Reply with only the word 'banana'.", inputArena)],
-                [DataValue.FromString("Reply with only the word 'cherry'.", inputArena)],
+                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'apple'.")],
+                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'banana'.")],
+                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'cherry'.")],
             ];
 
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
-                targetStore: targetArena,
                 overrides: [],
+                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);

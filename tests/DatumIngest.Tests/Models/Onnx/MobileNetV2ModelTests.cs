@@ -86,15 +86,13 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
             using MobileNetV2Model model = new(name: "classify", modelFilePath: ModelPath, labels: null);
 
             byte[] png = MakeSolidPng(64, 64, SKColors.Red);
-            DataValue imageValue = DataValue.FromImage(png, inputArena);
 
-            DataValue[][] inputs = [[imageValue]];
+            DatumIngest.Functions.ValueRef[][] inputs =
+                [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
-                targetStore: targetArena,
                 overrides: [],
+                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Single(outputs);
@@ -134,19 +132,17 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
         {
             using MobileNetV2Model model = new(name: "classify", modelFilePath: ModelPath, labels: null);
 
-            DataValue[][] inputs =
+            DatumIngest.Functions.ValueRef[][] inputs =
             [
-                [DataValue.FromImage(MakeSolidPng(64, 64, SKColors.Red), inputArena)],
-                [DataValue.FromImage(MakeSolidPng(64, 64, SKColors.Green), inputArena)],
-                [DataValue.FromImage(MakeSolidPng(64, 64, SKColors.Blue), inputArena)],
+                [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Red))],
+                [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Green))],
+                [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Blue))],
             ];
 
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
-                targetStore: targetArena,
                 overrides: [],
+                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);
@@ -202,17 +198,15 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         try
         {
-            DataValue[][] inputs =
+            DatumIngest.Functions.ValueRef[][] inputs =
             [
-                [DataValue.FromImage(MakeSolidPng(64, 64, SKColors.Red), inputArena)],
+                [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Red))],
             ];
 
             IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
                 inputs,
-                inputStore: inputArena,
-                sidecarRegistry: null,
-                targetStore: targetArena,
                 overrides: [],
+                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             DataValue label = Assert.Single(outputs);
