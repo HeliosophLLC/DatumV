@@ -89,25 +89,24 @@ public abstract class OnnxModel : IModel, IDisposable
         IReadOnlyList<IReadOnlyList<ValueRef>> rows);
 
     /// <summary>
-    /// Reads the output tensors and produces one <see cref="DataValue"/> per
-    /// row. Implementations should materialise non-inline payloads (strings,
-    /// vectors, byte arrays) into <paramref name="targetStore"/> so the
-    /// returned values resolve against the operator's output arena.
+    /// Reads the output tensors and produces one <see cref="ValueRef"/> per
+    /// row. Implementations construct results in managed memory via
+    /// <see cref="ValueRef.FromString"/>, <see cref="ValueRef.FromStruct"/>,
+    /// <see cref="ValueRef.FromArray"/>, etc. — the model never touches an
+    /// arena. The operator's scatter step calls <see cref="ValueRef.ToDataValue"/>
+    /// to materialise into the output batch's arena in one recursive pass.
     /// </summary>
     /// <param name="outputs">The named output tensors returned by ONNX Runtime.</param>
     /// <param name="batchSize">The expected row count (leading dim of every output tensor).</param>
-    /// <param name="targetStore">Where to materialise non-inline result payloads.</param>
-    /// <returns>One <see cref="DataValue"/> per row, in input order.</returns>
-    protected abstract IReadOnlyList<DataValue> ParseBatchOutputs(
+    /// <returns>One <see cref="ValueRef"/> per row, in input order.</returns>
+    protected abstract IReadOnlyList<ValueRef> ParseBatchOutputs(
         IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs,
-        int batchSize,
-        IValueStore targetStore);
+        int batchSize);
 
     /// <inheritdoc />
-    public virtual Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    public virtual Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
-        IValueStore targetStore,
         CancellationToken cancellationToken)
     {
         // The base ONNX session has no per-call hyperparameters in this design.
@@ -119,13 +118,13 @@ public abstract class OnnxModel : IModel, IDisposable
 
         if (inputs.Count == 0)
         {
-            return Task.FromResult<IReadOnlyList<DataValue>>([]);
+            return Task.FromResult<IReadOnlyList<ValueRef>>([]);
         }
 
         // session.Run is synchronous and CPU/GPU bound. Wrap in Task.Run so the
         // operator's async loop doesn't block the calling thread for the whole
         // dispatch — which matters when several queries share a worker.
-        return Task.Run<IReadOnlyList<DataValue>>(() =>
+        return Task.Run<IReadOnlyList<ValueRef>>(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -134,7 +133,7 @@ public abstract class OnnxModel : IModel, IDisposable
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            return ParseBatchOutputs(outputs, inputs.Count, targetStore);
+            return ParseBatchOutputs(outputs, inputs.Count);
         }, cancellationToken);
     }
 

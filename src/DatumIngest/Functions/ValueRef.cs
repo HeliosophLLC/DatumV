@@ -219,6 +219,38 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Struct value carried as a recursive <see cref="ValueRef"/>[] payload —
+    /// each field is itself a deferred-materialisation wrapper, so non-inline
+    /// fields (long strings, nested arrays/structs, byte arrays) stay in
+    /// managed memory until the outermost <see cref="ToDataValue"/> recurses
+    /// through and writes everything to the target arena in one pass.
+    /// </summary>
+    public static ValueRef FromStruct(ValueRef[] fields) =>
+        new(DataValue.NullStruct((short)fields.Length), fields);
+
+    /// <summary>
+    /// Array value carried as a recursive <see cref="ValueRef"/>[] payload.
+    /// Same deferred-materialisation contract as <see cref="FromStruct"/>:
+    /// nested non-inline elements stay managed until the boundary recurses.
+    /// </summary>
+    public static ValueRef FromArray(DataKind elementKind, ValueRef[] elements) =>
+        new(DataValue.NullArray(elementKind), elements);
+
+    /// <summary>
+    /// Typed null struct with the given <paramref name="fieldCount"/>. No
+    /// payload — boundary materialisation produces <see cref="DataValue.NullStruct"/>.
+    /// </summary>
+    public static ValueRef NullStruct(short fieldCount) =>
+        new(DataValue.NullStruct(fieldCount), null);
+
+    /// <summary>
+    /// Typed null array of the given element kind. No payload — boundary
+    /// materialisation produces <see cref="DataValue.NullArray"/>.
+    /// </summary>
+    public static ValueRef NullArray(DataKind elementKind) =>
+        new(DataValue.NullArray(elementKind), null);
+
+    /// <summary>
     /// Reads the value as a <see cref="string"/>. For inline strings this
     /// reads the UTF-8 payload from the carrier; for materialized strings
     /// this returns the managed payload directly.
@@ -248,6 +280,70 @@ public readonly struct ValueRef
         throw new InvalidOperationException(
             $"ValueRef of kind {Kind} does not carry a byte payload.");
     }
+
+    /// <summary>
+    /// Returns the field <see cref="ValueRef"/>s of a struct value without
+    /// materialising into the arena. Each element is itself a ValueRef so
+    /// callers can recurse into nested structures (or read leaf values via
+    /// the inline accessors) without ever invoking <see cref="ToDataValue"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The value is not a struct, or it is a struct null with no payload.
+    /// </exception>
+    public ReadOnlySpan<ValueRef> GetStructFields()
+    {
+        if (_inline.Kind != DataKind.Struct)
+        {
+            throw new InvalidOperationException(
+                $"GetStructFields called on a {_inline.Kind} value (expected Struct).");
+        }
+        if (_materialized is ValueRef[] fields)
+        {
+            return fields;
+        }
+        if (IsNull)
+        {
+            throw new InvalidOperationException(
+                "GetStructFields called on a null struct; check IsNull first.");
+        }
+        throw new InvalidOperationException(
+            "Struct ValueRef does not carry a ValueRef[] payload.");
+    }
+
+    /// <summary>
+    /// Returns the element <see cref="ValueRef"/>s of an array value without
+    /// materialising into the arena. Same contract as <see cref="GetStructFields"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The value is not an array, or it is an array null with no payload.
+    /// </exception>
+    public ReadOnlySpan<ValueRef> GetArrayElements()
+    {
+        if (_inline.Kind != DataKind.Array)
+        {
+            throw new InvalidOperationException(
+                $"GetArrayElements called on a {_inline.Kind} value (expected Array).");
+        }
+        if (_materialized is ValueRef[] elements)
+        {
+            return elements;
+        }
+        if (IsNull)
+        {
+            throw new InvalidOperationException(
+                "GetArrayElements called on a null array; check IsNull first.");
+        }
+        throw new InvalidOperationException(
+            "Array ValueRef does not carry a ValueRef[] payload.");
+    }
+
+    /// <summary>
+    /// The element kind for an array value. Reads directly off the inline
+    /// DataValue tag (which carries the element kind in <c>_meta</c> for
+    /// typed nulls and <c>_p2</c> for non-null arrays).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is not an array.</exception>
+    public DataKind ArrayElementKind => _inline.ArrayElementKind;
 
     /// <summary>Boolean accessor (inline only).</summary>
     public bool AsBoolean() => _inline.AsBoolean();
@@ -323,4 +419,70 @@ public readonly struct ValueRef
     public Guid AsUuid() => _inline.AsUuid();
     /// <summary>DataKind tag accessor (inline only).</summary>
     public DataKind AsType() => _inline.AsType();
+
+    /// <summary>
+    /// Materialises this <see cref="ValueRef"/> back into a <see cref="DataValue"/>
+    /// against <paramref name="targetStore"/>. Inline and null values pass
+    /// through unchanged; managed payloads (strings, byte arrays, recursive
+    /// struct/array trees) are written to the target arena. The recursion
+    /// for struct/array values is single-pass — every nested non-inline leaf
+    /// writes exactly once at the boundary.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the universal "ValueRef → DataValue" boundary used by the
+    /// expression evaluator at expression-result emission and by the model
+    /// invocation operator at model-output scatter. Lifting it onto
+    /// <see cref="ValueRef"/> means any consumer that has a ValueRef in hand
+    /// can materialise without dragging an evaluator dependency.
+    /// </para>
+    /// <para>
+    /// For terminal sinks that don't need a <see cref="DataValue"/> — display,
+    /// hash-based caching, export — recurse via
+    /// <see cref="GetStructFields"/> / <see cref="GetArrayElements"/> directly
+    /// and skip this method entirely. The arena stays cold.
+    /// </para>
+    /// </remarks>
+    public DataValue ToDataValue(IValueStore targetStore)
+    {
+        if (IsNull)
+        {
+            return _inline;
+        }
+
+        if (_materialized is null)
+        {
+            return _inline;
+        }
+
+        return _materialized switch
+        {
+            string s when _inline.Kind == DataKind.String => DataValue.FromString(s, targetStore),
+            byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Image => DataValue.FromImage(bytes, targetStore),
+            ValueRef[] fields when _inline.Kind == DataKind.Struct =>
+                DataValue.FromStruct((short)fields.Length, MaterialiseEach(fields, targetStore), targetStore),
+            ValueRef[] elements when _inline.Kind == DataKind.Array =>
+                DataValue.FromArray(_inline.ArrayElementKind, MaterialiseEach(elements, targetStore), targetStore),
+            _ => throw new InvalidOperationException(
+                $"Cannot lower ValueRef with managed payload of type {_materialized.GetType().Name} "
+                + $"and kind {Kind} into a DataValue. Add a ToDataValue arm for this combination."),
+        };
+    }
+
+    /// <summary>
+    /// Recursively materialises an array of child <see cref="ValueRef"/>s into
+    /// a <see cref="DataValue"/>[] against <paramref name="target"/>. Used by
+    /// <see cref="ToDataValue"/> for the struct and array recursive arms;
+    /// each leaf's arena write happens exactly once during the descent.
+    /// </summary>
+    private static DataValue[] MaterialiseEach(ValueRef[] children, IValueStore target)
+    {
+        DataValue[] resolved = new DataValue[children.Length];
+        for (int i = 0; i < children.Length; i++)
+        {
+            resolved[i] = children[i].ToDataValue(target);
+        }
+        return resolved;
+    }
 }

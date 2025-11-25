@@ -242,10 +242,9 @@ public sealed class LlamaModel : IModel, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    public async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
-        IValueStore targetStore,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -255,7 +254,7 @@ public sealed class LlamaModel : IModel, IDisposable
             return [];
         }
 
-        DataValue[] outputs = new DataValue[inputs.Count];
+        ValueRef[] outputs = new ValueRef[inputs.Count];
         for (int row = 0; row < inputs.Count; row++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -294,7 +293,7 @@ public sealed class LlamaModel : IModel, IDisposable
             string templated = _template.Format(promptText);
 
             string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);
-            outputs[row] = DataValue.FromString(response, targetStore);
+            outputs[row] = ValueRef.FromString(response);
         }
 
         return outputs;

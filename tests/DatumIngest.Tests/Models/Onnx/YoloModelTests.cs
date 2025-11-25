@@ -70,13 +70,12 @@ public sealed class YoloModelTests : ServiceTestBase
             DatumIngest.Functions.ValueRef[][] inputs =
                 [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
             DatumIngest.Functions.ValueRef[][] overrides = [[]];
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides,
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
-            DataValue result = Assert.Single(outputs);
+            DatumIngest.Functions.ValueRef result = Assert.Single(outputs);
             Assert.False(result.IsNull);
             Assert.Equal(DataKind.Array, result.Kind);
         }

@@ -89,16 +89,15 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
             DatumIngest.Functions.ValueRef[][] inputs =
                 [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Single(outputs);
-            DataValue label = outputs[0];
+            DatumIngest.Functions.ValueRef label = outputs[0];
             Assert.False(label.IsNull);
-            string text = label.AsString(targetArena);
+            string text = label.AsString();
             Assert.StartsWith("class_", text);
             int idx = int.Parse(text["class_".Length..]);
             Assert.InRange(idx, 0, 999);
@@ -139,18 +138,17 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Blue))],
             ];
 
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);
             for (int i = 0; i < outputs.Count; i++)
             {
-                DataValue label = outputs[i];
+                DatumIngest.Functions.ValueRef label = outputs[i];
                 Assert.False(label.IsNull, $"row {i} returned a null label");
-                string text = label.AsString(targetArena);
+                string text = label.AsString();
                 Assert.StartsWith("class_", text);
                 int idx = int.Parse(text["class_".Length..]);
                 Assert.InRange(idx, 0, 999);
@@ -203,15 +201,14 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 [DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, MakeSolidPng(64, 64, SKColors.Red))],
             ];
 
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
-            DataValue label = Assert.Single(outputs);
+            DatumIngest.Functions.ValueRef label = Assert.Single(outputs);
             Assert.False(label.IsNull);
-            string text = label.AsString(targetArena);
+            string text = label.AsString();
             Assert.False(string.IsNullOrEmpty(text));
             Assert.DoesNotContain("class_", text);
         }

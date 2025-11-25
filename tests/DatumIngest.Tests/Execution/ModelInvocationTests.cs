@@ -209,22 +209,21 @@ public sealed class ModelInvocationTests : ServiceTestBase
         public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
         public DataKind OutputKind => DataKind.String;
 
-        public Task<IReadOnlyList<DataValue>> InferBatchAsync(
+        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
             IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
             IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
-            DatumIngest.Model.IValueStore targetStore,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DataValue[] outputs = new DataValue[inputs.Count];
+            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
                 DatumIngest.Functions.ValueRef value = inputs[row][0];
                 string text = value.AsString();
                 SeenInputs.Add(text);
-                outputs[row] = DataValue.FromString(text, targetStore);
+                outputs[row] = DatumIngest.Functions.ValueRef.FromString(text);
             }
-            return Task.FromResult<IReadOnlyList<DataValue>>(outputs);
+            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
         }
     }
 

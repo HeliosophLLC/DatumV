@@ -121,10 +121,9 @@ public sealed class MobileNetV2Model : OnnxModel
     }
 
     /// <inheritdoc />
-    protected override IReadOnlyList<DataValue> ParseBatchOutputs(
+    protected override IReadOnlyList<ValueRef> ParseBatchOutputs(
         IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs,
-        int batchSize,
-        IValueStore targetStore)
+        int batchSize)
     {
         DisposableNamedOnnxValue first = outputs.FirstOrDefault()
             ?? throw new InvalidOperationException("MobileNetV2 ONNX session returned no outputs.");
@@ -139,7 +138,7 @@ public sealed class MobileNetV2Model : OnnxModel
                 $"(batchSize={batchSize}, classes={ClassCount}) but got {flat.Length}.");
         }
 
-        DataValue[] results = new DataValue[batchSize];
+        ValueRef[] results = new ValueRef[batchSize];
         for (int row = 0; row < batchSize; row++)
         {
             ReadOnlySpan<float> rowLogits = flat.Slice(row * ClassCount, ClassCount);
@@ -147,7 +146,7 @@ public sealed class MobileNetV2Model : OnnxModel
             string label = _labels is not null
                 ? _labels[bestIdx]
                 : $"class_{bestIdx}";
-            results[row] = DataValue.FromString(label, targetStore);
+            results[row] = ValueRef.FromString(label);
         }
 
         return results;

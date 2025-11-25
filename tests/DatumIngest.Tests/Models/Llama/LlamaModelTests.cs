@@ -86,15 +86,14 @@ public sealed class LlamaModelTests : ServiceTestBase
                 [DatumIngest.Functions.ValueRef.FromString("What is 2 + 2? Reply with just the number.")],
             ];
 
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
-            DataValue response = Assert.Single(outputs);
+            DatumIngest.Functions.ValueRef response = Assert.Single(outputs);
             Assert.False(response.IsNull);
-            string text = response.AsString(targetArena);
+            string text = response.AsString();
             Assert.False(string.IsNullOrWhiteSpace(text), "LLM returned empty response");
             // Stop-token leak is the most common failure mode — explicitly catch it.
             Assert.DoesNotContain("<|eot_id|>", text);
@@ -134,18 +133,17 @@ public sealed class LlamaModelTests : ServiceTestBase
                 [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'cherry'.")],
             ];
 
-            IReadOnlyList<DataValue> outputs = await model.InferBatchAsync(
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
-                targetStore: targetArena,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(3, outputs.Count);
             for (int i = 0; i < outputs.Count; i++)
             {
-                DataValue response = outputs[i];
+                DatumIngest.Functions.ValueRef response = outputs[i];
                 Assert.False(response.IsNull, $"row {i} returned a null response");
-                string text = response.AsString(targetArena);
+                string text = response.AsString();
                 Assert.False(string.IsNullOrWhiteSpace(text), $"row {i} returned empty");
                 Assert.DoesNotContain("<|eot_id|>", text);
             }

@@ -275,12 +275,13 @@ public sealed class ModelInvocationOperator : IQueryOperator
             }
 
             // Step 3: dispatch the whole batch in one async call. The model
-            // materialises non-inline outputs into outputBatch.Arena.
-            IReadOnlyList<DataValue> modelOutputs = await model
+            // returns ValueRefs — managed payloads — and the scatter step
+            // below materialises them into outputBatch.Arena via
+            // ValueRef.ToDataValue. Nothing in the model body touches an arena.
+            IReadOnlyList<ValueRef> modelOutputs = await model
                 .InferBatchAsync(
                     inputs,
                     overrideValues,
-                    outputBatch.Arena,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -295,7 +296,9 @@ public sealed class ModelInvocationOperator : IQueryOperator
             // Step 4: scatter — for each source row, copy source columns and append the
             // model output. Source values stabilise from the source batch's arena into
             // the output batch's arena so they survive the source batch returning to the
-            // pool below.
+            // pool below. The model output's ValueRef is materialised via
+            // ToDataValue against outputBatch.Arena — the single boundary write
+            // for any nested struct/array payload.
             for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
             {
                 Row sourceRow = sourceBatch[rowIdx];
@@ -305,8 +308,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     outValues[slot] = DataValueRetention.Stabilize(
                         sourceRow[sourceCopySlots[slot]], sourceBatch.Arena, outputBatch.Arena);
                 }
-                outValues[^1] = DataValueRetention.Stabilize(
-                    modelOutputs[rowIdx], outputBatch.Arena, outputBatch.Arena);
+                outValues[^1] = modelOutputs[rowIdx].ToDataValue(outputBatch.Arena);
                 outputBatch.Add(outValues);
             }
 

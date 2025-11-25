@@ -642,32 +642,13 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Lowers a function-result <see cref="ValueRef"/> back into a
-    /// <see cref="DataValue"/>: short strings inline, longer strings write to
-    /// the target arena, byte payloads land in the target arena.
+    /// <see cref="DataValue"/> against <paramref name="frame"/>'s target arena.
+    /// Thin wrapper around <see cref="ValueRef.ToDataValue"/> that picks the
+    /// frame's target store; the recursion for struct/array values is
+    /// handled by ValueRef itself.
     /// </summary>
-    private static DataValue ToDataValue(ValueRef value, in EvaluationFrame frame)
-    {
-        if (value.IsNull)
-        {
-            return DataValue.Null(value.Kind);
-        }
-
-        // Inline-or-precomputed: ValueRef carries a self-sufficient DataValue.
-        if (value.Materialized is null)
-        {
-            return value.InlineDataValue;
-        }
-
-        return value.Materialized switch
-        {
-            string s when value.Kind == DataKind.String => DataValue.FromString(s, frame.Target),
-            byte[] bytes when value.IsByteArrayKind => DataValue.FromByteArray(bytes, frame.Target),
-            byte[] bytes when value.Kind == DataKind.Image => DataValue.FromImage(bytes, frame.Target),
-            _ => throw new InvalidOperationException(
-                $"Cannot lower ValueRef with managed payload of type {value.Materialized.GetType().Name} "
-                + $"and kind {value.Kind} into a DataValue. Add support to ExpressionEvaluator.ToDataValue."),
-        };
-    }
+    private static DataValue ToDataValue(ValueRef value, in EvaluationFrame frame) =>
+        value.ToDataValue(frame.Target);
 
     private DataValue EvaluateIn(InExpression inExpr, in EvaluationFrame frame)
     {

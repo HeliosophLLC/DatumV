@@ -64,22 +64,21 @@ public interface IModel
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>ValueRef inputs.</strong> Inputs and overrides arrive as
-    /// <see cref="ValueRef"/>s — already-resolved managed payloads (strings,
-    /// byte arrays, inline numerics). The evaluator handled all arena and
-    /// sidecar resolution at the operator boundary, so implementations call
-    /// <c>value.AsString()</c> / <c>value.AsBytes()</c> / <c>value.ToFloat()</c>
-    /// directly without threading a store or sidecar registry. The function
-    /// chain feeding the model never wrote its output to the arena.
+    /// <strong>ValueRef in, ValueRef out.</strong> Inputs and overrides arrive
+    /// as already-resolved managed payloads (strings, byte arrays, inline
+    /// numerics) — the evaluator handled arena and sidecar resolution at the
+    /// operator boundary. Implementations call <c>value.AsString()</c> /
+    /// <c>value.AsBytes()</c> / <c>value.ToFloat()</c> directly without
+    /// threading a store or sidecar registry.
     /// </para>
     /// <para>
-    /// <strong>DataValue outputs.</strong> The result list is still
-    /// <see cref="DataValue"/> — that's the shape the pipeline emits. The
-    /// implementation materialises non-inline result payloads (strings,
-    /// vectors, byte arrays, structs, arrays) into <paramref name="targetStore"/>
-    /// so they survive past the call. Migrating outputs to <see cref="ValueRef"/>
-    /// is a follow-up; held for after the <c>DataKind.Array</c> elimination
-    /// settles.
+    /// Outputs are constructed in managed memory via <see cref="ValueRef.FromString"/>,
+    /// <see cref="ValueRef.FromStruct"/>, <see cref="ValueRef.FromArray"/>,
+    /// etc. — the model never touches an arena. The operator's scatter step
+    /// calls <see cref="ValueRef.ToDataValue"/> to materialise into the
+    /// output batch's arena in one recursive pass. Nested structures (e.g.
+    /// <c>Array&lt;Struct&gt;</c> for object-detector outputs) defer all the
+    /// way through; the arena writes happen exactly once at the boundary.
     /// </para>
     /// </remarks>
     /// <param name="inputs">Per-row input columns. Outer length = row count; inner length = arity.</param>
@@ -93,17 +92,10 @@ public interface IModel
     /// outer list) means "use defaults for everything." Implementations that
     /// don't accept any optional args may ignore this parameter.
     /// </param>
-    /// <param name="targetStore">
-    /// Where the implementation should materialise non-inline result payloads
-    /// (strings, vectors, byte arrays, struct/array DataValues). The pipeline
-    /// runtime supplies the output batch's arena so results land where the
-    /// caller expects to read them from.
-    /// </param>
     /// <param name="cancellationToken">Honoured between sub-batches at minimum.</param>
-    /// <returns>One <see cref="DataValue"/> per input row, in the same order.</returns>
-    Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    /// <returns>One <see cref="ValueRef"/> per input row, in the same order.</returns>
+    Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
-        IValueStore targetStore,
         CancellationToken cancellationToken);
 }

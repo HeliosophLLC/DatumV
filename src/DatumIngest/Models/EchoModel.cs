@@ -38,28 +38,23 @@ public sealed class EchoModel : IModel
     public DataKind OutputKind => DataKind.String;
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    public Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
-        IValueStore targetStore,
         CancellationToken cancellationToken)
     {
         _ = overrides;
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Pass-through: read the input string out of the ValueRef and re-materialise
-        // as a DataValue in the target arena. Inputs arrived already-resolved
-        // (the evaluator's ToValueRef did the arena/sidecar lift), so AsString()
-        // is a direct managed-memory read.
-        DataValue[] outputs = new DataValue[inputs.Count];
+        // Pass-through: hand the input ValueRef back out unchanged. No arena
+        // contact — the operator's scatter step calls ToDataValue with the
+        // output batch's arena.
+        ValueRef[] outputs = new ValueRef[inputs.Count];
         for (int row = 0; row < inputs.Count; row++)
         {
-            ValueRef value = inputs[row][0];
-            outputs[row] = value.IsNull
-                ? DataValue.Null(DataKind.String)
-                : DataValue.FromString(value.AsString(), targetStore);
+            outputs[row] = inputs[row][0];
         }
 
-        return Task.FromResult<IReadOnlyList<DataValue>>(outputs);
+        return Task.FromResult<IReadOnlyList<ValueRef>>(outputs);
     }
 }

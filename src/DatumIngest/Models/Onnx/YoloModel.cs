@@ -114,10 +114,9 @@ public sealed class YoloModel : OnnxModel
     public bool SupportsBatching => _supportsBatching;
 
     /// <inheritdoc />
-    public override async Task<IReadOnlyList<DataValue>> InferBatchAsync(
+    public override async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
-        IValueStore targetStore,
         CancellationToken cancellationToken)
     {
         _ = overrides;
@@ -148,11 +147,11 @@ public sealed class YoloModel : OnnxModel
             scaleY[row] = origH / (float)InputSize;
         }
 
-        return await Task.Run<IReadOnlyList<DataValue>>(() =>
+        return await Task.Run<IReadOnlyList<ValueRef>>(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             int perImageValues = ValuesPerPrediction * NumAnchors;
-            DataValue[] results = new DataValue[batchSize];
+            ValueRef[] results = new ValueRef[batchSize];
 
             if (_supportsBatching && batchSize > 1)
             {
@@ -181,7 +180,7 @@ public sealed class YoloModel : OnnxModel
                 {
                     ReadOnlySpan<float> rowSlice = flat.Slice(row * perImageValues, perImageValues);
                     List<Detection> detections = DecodeRowAndNms(rowSlice, scaleX[row], scaleY[row]);
-                    results[row] = BuildDetectionArray(detections, targetStore);
+                    results[row] = BuildDetectionArray(detections);
                 }
             }
             else
@@ -212,7 +211,7 @@ public sealed class YoloModel : OnnxModel
                     }
 
                     List<Detection> detections = DecodeRowAndNms(flat, scaleX[row], scaleY[row]);
-                    results[row] = BuildDetectionArray(detections, targetStore);
+                    results[row] = BuildDetectionArray(detections);
                 }
             }
 
@@ -228,10 +227,9 @@ public sealed class YoloModel : OnnxModel
             "from preprocessing into postprocessing. BuildBatchInputs is not used.");
 
     /// <inheritdoc />
-    protected override IReadOnlyList<DataValue> ParseBatchOutputs(
+    protected override IReadOnlyList<ValueRef> ParseBatchOutputs(
         IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs,
-        int batchSize,
-        IValueStore targetStore)
+        int batchSize)
         => throw new InvalidOperationException(
             "YoloModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
@@ -359,29 +357,28 @@ public sealed class YoloModel : OnnxModel
         return union <= 0 ? 0 : intersection / union;
     }
 
-    private DataValue BuildDetectionArray(List<Detection> detections, IValueStore targetStore)
+    private ValueRef BuildDetectionArray(List<Detection> detections)
     {
         if (detections.Count == 0)
         {
-            return DataValue.FromArray(DataKind.Struct, Array.Empty<DataValue>(), targetStore);
+            return ValueRef.FromArray(DataKind.Struct, Array.Empty<ValueRef>());
         }
 
-        DataValue[] elements = new DataValue[detections.Count];
+        ValueRef[] elements = new ValueRef[detections.Count];
         for (int i = 0; i < detections.Count; i++)
         {
             Detection d = detections[i];
-            DataValue[] fields =
+            elements[i] = ValueRef.FromStruct(
             [
-                DataValue.FromString(_labels[d.ClassId], targetStore),
-                DataValue.FromFloat32(d.Score),
-                DataValue.FromFloat32(d.X),
-                DataValue.FromFloat32(d.Y),
-                DataValue.FromFloat32(d.W),
-                DataValue.FromFloat32(d.H),
-            ];
-            elements[i] = DataValue.FromStruct((short)fields.Length, fields, targetStore);
+                ValueRef.FromString(_labels[d.ClassId]),
+                ValueRef.FromFloat32(d.Score),
+                ValueRef.FromFloat32(d.X),
+                ValueRef.FromFloat32(d.Y),
+                ValueRef.FromFloat32(d.W),
+                ValueRef.FromFloat32(d.H),
+            ]);
         }
-        return DataValue.FromArray(DataKind.Struct, elements, targetStore);
+        return ValueRef.FromArray(DataKind.Struct, elements);
     }
 
     private readonly record struct Detection(int ClassId, float Score, float X, float Y, float W, float H);
