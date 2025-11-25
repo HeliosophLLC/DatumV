@@ -518,6 +518,166 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStringSlice(int offset, int length) =>
         new(DataKind.String, flags: DataValueFlags.InArena, p0: offset, p1: length);
 
+    // ───────────────────────── Reference-type arrays ─────────────────────────
+    //
+    // Layout (per project_reference_type_arrays.md):
+    //   N=0:  IsArray | IsInline, _charCount=0, payload bytes zero
+    //   N=1:  IsArray | IsInline, _charCount=1, _p0–_p3 hold one 16-byte ArraySlot
+    //   N≥2:  IsArray | InArena,  (_p0, _p1) = (offset, length) of slot block in store
+    //
+    // Each slot's offset/length references the element's bytes in the array's
+    // single backing store. Cross-store combination requires a deep copy.
+
+    /// <summary>
+    /// Creates an <c>Array&lt;String&gt;</c> value. Element UTF-8 bytes are written
+    /// to <paramref name="store"/>; for N≥2 a slot block (<c>N × 16 bytes</c>) is
+    /// also written to <paramref name="store"/>. Use <see cref="AsStringArray"/> to
+    /// read back.
+    /// </summary>
+    public static DataValue FromStringArray(ReadOnlySpan<string> elements, IValueStore store)
+    {
+        if (elements.Length == 0)
+        {
+            // Inline = absence of storage flags; only IsArray is set.
+            return new(
+                DataKind.String,
+                flags: DataValueFlags.IsArray,
+                p0: 0,
+                charCount: 0);
+        }
+
+        if (elements.Length == 1)
+        {
+            (int elementP0, int elementP1) = store.StoreString(elements[0]);
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
+            int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
+            int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
+            int p3 = MemoryMarshal.Read<int>(slotBytes[12..16]);
+            return new(
+                DataKind.String,
+                flags: DataValueFlags.IsArray,
+                p0: p0, p1: p1, p2: p2, p3: p3,
+                charCount: 1);
+        }
+
+        // N ≥ 2: write each element, then write the slot block.
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            (int elementP0, int elementP1) = store.StoreString(elements[i]);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0,
+                elementP1);
+        }
+        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        return new(
+            DataKind.String,
+            flags: DataValueFlags.IsArray | DataValueFlags.InArena,
+            p0: blockP0,
+            p1: blockP1);
+    }
+
+    /// <summary>
+    /// Reads an <c>Array&lt;String&gt;</c> value. <paramref name="store"/> resolves
+    /// arena-backed slot blocks and element bytes; <paramref name="registry"/>
+    /// resolves sidecar-backed arrays. Materialises into a <see cref="string"/>[]
+    /// — for very large arrays prefer streaming once a streaming accessor lands.
+    /// </summary>
+    public string[] AsStringArray(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNotReferenceArray(DataKind.String);
+
+        // Sidecar-backed: read slot block AND per-element bytes through the
+        // registry's IBlobSource. No per-query arena copy at access time —
+        // sidecar arrays stay sidecar-resident until a caller explicitly
+        // Stabilizes them.
+        if (IsInSidecar)
+        {
+            IBlobSource src = ResolveSidecarSource(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
+            string[] result = new string[elementCount];
+            for (int i = 0; i < elementCount; i++)
+            {
+                ArraySlot.Read(
+                    blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                    out long elementOffset,
+                    out long elementLength,
+                    out _);
+                ReadOnlySpan<byte> utf8 = src.Read(elementOffset, elementLength);
+                result[i] = System.Text.Encoding.UTF8.GetString(utf8);
+            }
+            return result;
+        }
+
+        // N = 0 / N = 1 inline path (in-memory only — sidecar-backed arrays are
+        // never inline). _charCount = element count (0 or 1).
+        if (IsInline)
+        {
+            if (_charCount == 0) return [];
+
+            // _charCount == 1 — parse the one inline slot from _p0–_p3.
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            MemoryMarshal.Write(slotBytes[..4], _p0);
+            MemoryMarshal.Write(slotBytes[4..8], _p1);
+            MemoryMarshal.Write(slotBytes[8..12], _p2);
+            MemoryMarshal.Write(slotBytes[12..16], _p3);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
+            return [store.RetrieveString((int)elementOffset, (int)elementLength)];
+        }
+
+        // N ≥ 2 arena-backed — slot block lives at (_p0, _p1) in the array's store.
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        int n = arenaBlock.Length / ArraySlot.SizeBytes;
+        string[] arenaResult = new string[n];
+        for (int i = 0; i < n; i++)
+        {
+            ArraySlot.Read(
+                arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                out long elementOffset,
+                out long elementLength,
+                out _);
+            arenaResult[i] = store.RetrieveString((int)elementOffset, (int)elementLength);
+        }
+        return arenaResult;
+    }
+
+    /// <summary>
+    /// Asserts that this value is a reference-array of <paramref name="elementKind"/>.
+    /// Centralises the predicate so per-kind accessors share the same error shape.
+    /// </summary>
+    private void ThrowIfNotReferenceArray(DataKind elementKind)
+    {
+        if (!IsArray || _kind != elementKind || IsNull)
+        {
+            throw new InvalidOperationException(
+                $"Expected an Array<{elementKind}> value (Kind={elementKind}, IsArray=true, non-null); " +
+                $"got Kind={_kind}, IsArray={IsArray}, IsNull={IsNull}.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="IBlobSource"/> backing a sidecar-resident reference
+    /// array via the <see cref="SidecarStoreId"/> stored on this DataValue. Throws
+    /// when no registry is supplied or the storeId isn't registered. Caller must
+    /// have already verified <see cref="IsInSidecar"/>.
+    /// </summary>
+    private IBlobSource ResolveSidecarSource(SidecarRegistry? registry)
+    {
+        if (registry is null)
+        {
+            throw new InvalidOperationException(
+                $"Reading a sidecar-backed Array<{_kind}> value requires a SidecarRegistry; got null.");
+        }
+        return registry.Resolve(SidecarStoreId)
+            ?? throw new InvalidOperationException(
+                $"Sidecar storeId {SidecarStoreId} from a sidecar-backed Array<{_kind}> value is " +
+                "not registered in the supplied SidecarRegistry.");
+    }
+
     /// <summary>Creates a value from encoded image bytes.</summary>
     /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImage(byte[], IValueStore)"/> instead.</remarks>
     public static DataValue FromImage(byte[] value) =>
@@ -542,6 +702,240 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="storeId">Registry storeId byte (defaults to 0 for single-sidecar / first-registered).</param>
     public static DataValue FromImageInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Image, offset, length, storeId);
+
+    /// <summary>
+    /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are
+    /// written to <paramref name="store"/>; for N≥2 a slot block is also written.
+    /// Layout matches <see cref="FromStringArray"/> — see
+    /// <c>project_reference_type_arrays.md</c>.
+    /// </summary>
+    public static DataValue FromImageArray(ReadOnlySpan<byte[]> elements, IValueStore store)
+    {
+        if (elements.Length == 0)
+        {
+            return new(
+                DataKind.Image,
+                flags: DataValueFlags.IsArray,
+                p0: 0,
+                charCount: 0);
+        }
+
+        if (elements.Length == 1)
+        {
+            (int elementP0, int elementP1) = store.StoreBytes(elements[0]);
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
+            int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
+            int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
+            int p3 = MemoryMarshal.Read<int>(slotBytes[12..16]);
+            return new(
+                DataKind.Image,
+                flags: DataValueFlags.IsArray,
+                p0: p0, p1: p1, p2: p2, p3: p3,
+                charCount: 1);
+        }
+
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            (int elementP0, int elementP1) = store.StoreBytes(elements[i]);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0,
+                elementP1);
+        }
+        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        return new(
+            DataKind.Image,
+            flags: DataValueFlags.IsArray | DataValueFlags.InArena,
+            p0: blockP0,
+            p1: blockP1);
+    }
+
+    /// <summary>
+    /// Reads an <c>Array&lt;Image&gt;</c> value as a <see cref="byte"/>[][].
+    /// </summary>
+    public byte[][] AsImageArray(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNotReferenceArray(DataKind.Image);
+
+        if (IsInSidecar)
+        {
+            IBlobSource src = ResolveSidecarSource(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
+            byte[][] result = new byte[elementCount][];
+            for (int i = 0; i < elementCount; i++)
+            {
+                ArraySlot.Read(
+                    blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                    out long elementOffset,
+                    out long elementLength,
+                    out _);
+                result[i] = src.Read(elementOffset, elementLength).ToArray();
+            }
+            return result;
+        }
+
+        if (IsInline)
+        {
+            if (_charCount == 0) return [];
+
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            MemoryMarshal.Write(slotBytes[..4], _p0);
+            MemoryMarshal.Write(slotBytes[4..8], _p1);
+            MemoryMarshal.Write(slotBytes[8..12], _p2);
+            MemoryMarshal.Write(slotBytes[12..16], _p3);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
+            return [store.RetrieveBytes((int)elementOffset, (int)elementLength)];
+        }
+
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        int n = arenaBlock.Length / ArraySlot.SizeBytes;
+        byte[][] arenaResult = new byte[n][];
+        for (int i = 0; i < n; i++)
+        {
+            ArraySlot.Read(
+                arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                out long elementOffset,
+                out long elementLength,
+                out _);
+            arenaResult[i] = store.RetrieveBytes((int)elementOffset, (int)elementLength);
+        }
+        return arenaResult;
+    }
+
+    /// <summary>
+    /// Creates an <c>Array&lt;Struct&gt;</c> value. Each element is a struct's
+    /// <see cref="DataValue"/>[] of fields; each is stored via
+    /// <see cref="IValueStore.StoreDataValues"/> and referenced from a slot. For
+    /// N≥2 a slot block is also written. Field count per struct is implicit in
+    /// the stored field-array length — the slot itself carries no field-count
+    /// metadata, so heterogeneous-field-count elements are allowed at the value
+    /// layer (the schema layer enforces uniformity when configured).
+    /// </summary>
+    public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store)
+    {
+        if (elements.Length == 0)
+        {
+            return new(
+                DataKind.Struct,
+                flags: DataValueFlags.IsArray,
+                p0: 0,
+                charCount: 0);
+        }
+
+        if (elements.Length == 1)
+        {
+            (int elementP0, int elementP1) = store.StoreDataValues(elements[0]);
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
+            int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
+            int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
+            int p3 = MemoryMarshal.Read<int>(slotBytes[12..16]);
+            return new(
+                DataKind.Struct,
+                flags: DataValueFlags.IsArray,
+                p0: p0, p1: p1, p2: p2, p3: p3,
+                charCount: 1);
+        }
+
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            (int elementP0, int elementP1) = store.StoreDataValues(elements[i]);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0,
+                elementP1);
+        }
+        (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
+        return new(
+            DataKind.Struct,
+            flags: DataValueFlags.IsArray | DataValueFlags.InArena,
+            p0: blockP0,
+            p1: blockP1);
+    }
+
+    /// <summary>
+    /// Reads an <c>Array&lt;Struct&gt;</c> value as a jagged
+    /// <see cref="DataValue"/>[][] — outer index is element, inner is struct field.
+    /// For sidecar-backed arrays, struct fields are deserialised on the fly from
+    /// their sidecar bytes; reference-typed fields (strings, etc.) materialise
+    /// into <paramref name="store"/> since they need a value-store target.
+    /// </summary>
+    public DataValue[][] AsStructArray(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNotReferenceArray(DataKind.Struct);
+
+        if (IsInSidecar)
+        {
+            IBlobSource src = ResolveSidecarSource(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
+            DataValue[][] result = new DataValue[elementCount][];
+            for (int i = 0; i < elementCount; i++)
+            {
+                ArraySlot.Read(
+                    blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                    out long elementOffset,
+                    out long elementLength,
+                    out _);
+                ReadOnlySpan<byte> structBytes = src.Read(elementOffset, elementLength);
+                result[i] = DeserializeStructFields(structBytes, store);
+            }
+            return result;
+        }
+
+        if (IsInline)
+        {
+            if (_charCount == 0) return [];
+
+            Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
+            MemoryMarshal.Write(slotBytes[..4], _p0);
+            MemoryMarshal.Write(slotBytes[4..8], _p1);
+            MemoryMarshal.Write(slotBytes[8..12], _p2);
+            MemoryMarshal.Write(slotBytes[12..16], _p3);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
+            return [store.RetrieveDataValues((int)elementOffset, (int)elementLength)];
+        }
+
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
+        int n = arenaBlock.Length / ArraySlot.SizeBytes;
+        DataValue[][] arenaResult = new DataValue[n][];
+        for (int i = 0; i < n; i++)
+        {
+            ArraySlot.Read(
+                arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                out long elementOffset,
+                out long elementLength,
+                out _);
+            arenaResult[i] = store.RetrieveDataValues((int)elementOffset, (int)elementLength);
+        }
+        return arenaResult;
+    }
+
+    /// <summary>
+    /// Deserialises a single struct's field bytes (uint16 fieldCount + N
+    /// self-describing records) — the inverse of the encoder's
+    /// <c>SerializeStructFieldArray</c>. Reference-typed fields are written
+    /// into <paramref name="store"/> as part of deserialisation.
+    /// </summary>
+    private static DataValue[] DeserializeStructFields(ReadOnlySpan<byte> bytes, IValueStore store)
+    {
+        byte[] copy = bytes.ToArray();
+        using MemoryStream ms = new(copy, writable: false);
+        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: false);
+        ushort fieldCount = br.ReadUInt16();
+        DataValue[] fields = new DataValue[fieldCount];
+        for (int j = 0; j < fieldCount; j++)
+        {
+            fields[j] = IO.DataValueReader.ReadDataValue(br, store);
+        }
+        return fields;
+    }
 
     /// <summary>
     /// Packs a sidecar coordinate into the DataValue payload. <c>_p0</c>+<c>_p1</c>

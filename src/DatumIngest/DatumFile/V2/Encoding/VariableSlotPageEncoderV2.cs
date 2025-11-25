@@ -94,6 +94,32 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             // Slot left zero; null bitmap is authoritative.
             _zoneMap.RecordNull();
         }
+        else if (IsReferenceTypeArray(value))
+        {
+            // Reference-type arrays (Array<String|Image|Struct>) ALWAYS take the
+            // sidecar path on encode — even N=0 / N=1 inline forms whose slot
+            // offsets reference a transient source store. Multi-step encode:
+            // each element's bytes are appended individually, the slot block is
+            // built with sidecar offsets, then the slot block is appended.
+            // Returns the (offset, length) of the slot block, which becomes the
+            // page-level pointer slot.
+            if (sidecar is null)
+            {
+                throw new InvalidOperationException(
+                    $"Column kind {_column.Kind} produced a reference-type array DataValue but no IBlobSink " +
+                    "was supplied. Reference arrays cannot be encoded inline.");
+            }
+            if (store is null)
+            {
+                throw new InvalidOperationException(
+                    $"Column kind {_column.Kind} produced a reference-type array DataValue but no IValueStore " +
+                    "was supplied. The encoder needs the store to read element bytes before sidecaring them.");
+            }
+
+            (long blockOffset, long blockLength) = EncodeReferenceArrayToSidecar(value, store, sidecar);
+            EncodePointerSlot(slot, blockOffset, blockLength, codec: SidecarBlobCodec.Raw);
+            _zoneMap.Record(value, store);
+        }
         else if (value.IsInline)
         {
             // Inline path — copy the inline payload bytes into the slot.
@@ -289,7 +315,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         bw.Write((ushort)fields.Length);
         foreach (DataValue field in fields)
         {
-            DatumIngest.IO.DataValueWriter.WriteDataValue(bw, field, store);
+            IO.DataValueWriter.WriteDataValue(bw, field, store);
         }
         bw.Flush();
         return ms.ToArray();
@@ -351,5 +377,121 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         slot[14] = 0;
 
         slot[15] = (byte)codec;
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="value"/> is a reference-type array — one
+    /// whose <see cref="DataKind"/> indicates per-element variable-length payloads
+    /// referenced by slot pointers (<see cref="DataKind.String"/>,
+    /// <see cref="DataKind.Image"/>, <see cref="DataKind.Struct"/> — each plus
+    /// <see cref="DataValue.IsArray"/>). Distinct from fixed-width typed arrays
+    /// (UInt8 / Int32 / Float32 / etc. + IsArray) where slot bytes are the
+    /// element bytes directly.
+    /// </summary>
+    private static bool IsReferenceTypeArray(DataValue value)
+    {
+        if (!value.IsArray) return false;
+        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct;
+    }
+
+    /// <summary>
+    /// Multi-step encoder for reference-type arrays: appends each element's bytes
+    /// to <paramref name="sidecar"/> individually, builds a slot block with the
+    /// resulting sidecar offsets, and appends the slot block. Returns the slot
+    /// block's (offset, length) which becomes the page-level pointer slot.
+    /// </summary>
+    /// <remarks>
+    /// Per <c>project_reference_type_arrays.md</c>: an array's slots all resolve
+    /// against its single backing store. After this encode, that store is the
+    /// sidecar — every element's bytes and the slot block itself are sidecar-
+    /// resident.
+    /// </remarks>
+    private static (long offset, long length) EncodeReferenceArrayToSidecar(
+        DataValue value,
+        IValueStore store,
+        IBlobSink sidecar)
+    {
+        return value.Kind switch
+        {
+            DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), sidecar),
+            DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), sidecar),
+            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar),
+            _ => throw new NotSupportedException(
+                $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
+        };
+    }
+
+    private static (long offset, long length) EncodeStringArrayToSidecar(
+        string[] elements,
+        IBlobSink sidecar)
+    {
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(elements[i]);
+            (long elementOffset, long elementLength) = sidecar.Append(utf8);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementOffset,
+                elementLength);
+        }
+        return sidecar.Append(slotBlock);
+    }
+
+    private static (long offset, long length) EncodeImageArrayToSidecar(
+        byte[][] elements,
+        IBlobSink sidecar)
+    {
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            (long elementOffset, long elementLength) = sidecar.Append(elements[i]);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementOffset,
+                elementLength);
+        }
+        return sidecar.Append(slotBlock);
+    }
+
+    private static (long offset, long length) EncodeStructArrayToSidecar(
+        DataValue[][] elements,
+        IValueStore store,
+        IBlobSink sidecar)
+    {
+        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            // Reuse the existing self-describing struct serialisation
+            // (uint16 fieldCount + N records). Each struct element ends up as
+            // its own opaque byte payload in the sidecar.
+            byte[] structBytes = SerializeStructFieldArray(elements[i], store);
+            (long elementOffset, long elementLength) = sidecar.Append(structBytes);
+            ArraySlot.Write(
+                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementOffset,
+                elementLength);
+        }
+        return sidecar.Append(slotBlock);
+    }
+
+    /// <summary>
+    /// Serialises a struct's <see cref="DataValue"/>[] fields to the same
+    /// uint16-fieldCount + per-field self-describing format used by
+    /// <see cref="SerializeStructFields(DataValue, IValueStore)"/>. Split out so
+    /// reference-array encode paths can call it directly without round-tripping
+    /// through a synthetic struct DataValue.
+    /// </summary>
+    private static byte[] SerializeStructFieldArray(DataValue[] fields, IValueStore store)
+    {
+        using MemoryStream ms = new();
+        using BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: false);
+        bw.Write((ushort)fields.Length);
+        foreach (DataValue field in fields)
+        {
+            IO.DataValueWriter.WriteDataValue(bw, field, store);
+        }
+        bw.Flush();
+        return ms.ToArray();
     }
 }

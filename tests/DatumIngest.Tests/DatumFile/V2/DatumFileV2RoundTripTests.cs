@@ -419,6 +419,201 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         Assert.Equal(3.14, g2[0].AsFloat64());
     }
 
+    [Fact]
+    public void RoundTrip_StringArray_Sidecar()
+    {
+        // Array<String> column. Each row's array can have any length; the
+        // encoder writes per-element strings and a slot block to the sidecar,
+        // the decoder eagerly materialises into the read arena.
+        ColumnDescriptorV2 column = new(
+            Name: "tags",
+            Kind: DataKind.String,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: true,
+            IsArray: true);
+
+        Pool pool = new(new PoolBacking());
+        ColumnLookup lookup = new(["tags"]);
+        Arena writeArena = new();
+        RowBatch batch = pool.RentRowBatch(lookup, capacity: 4, arena: writeArena);
+
+        // Row 0: empty array
+        DataValue[] r0 = pool.RentDataValues(1);
+        r0[0] = DataValue.FromStringArray([], writeArena);
+        batch.Add(r0);
+
+        // Row 1: one-element array with a long string (forces non-trivial slot offsets).
+        DataValue[] r1 = pool.RentDataValues(1);
+        r1[0] = DataValue.FromStringArray(["a single tag value, longer than sixteen bytes"], writeArena);
+        batch.Add(r1);
+
+        // Row 2: multi-element array
+        DataValue[] r2 = pool.RentDataValues(1);
+        r2[0] = DataValue.FromStringArray(["alpha", "beta", "gamma"], writeArena);
+        batch.Add(r2);
+
+        // Row 3: null array
+        DataValue[] r3 = pool.RentDataValues(1);
+        r3[0] = DataValue.Null(DataKind.String);
+        batch.Add(r3);
+
+        WriteAndReadArrayBatch("string_array.datum", column, batch, (decoder, readArena, registry) =>
+        {
+            DataValue v0 = decoder.ReadValue(0);
+            Assert.False(v0.IsNull);
+            // Decoded reference arrays stay sidecar-resident — proves the
+            // decoder didn't eagerly copy bytes into the read arena.
+            Assert.True(v0.IsInSidecar);
+            Assert.True(v0.IsArray);
+            Assert.Empty(v0.AsStringArray(readArena, registry));
+
+            DataValue v1 = decoder.ReadValue(1);
+            Assert.False(v1.IsNull);
+            Assert.True(v1.IsInSidecar);
+            Assert.Equal(["a single tag value, longer than sixteen bytes"], v1.AsStringArray(readArena, registry));
+
+            DataValue v2 = decoder.ReadValue(2);
+            Assert.False(v2.IsNull);
+            Assert.True(v2.IsInSidecar);
+            Assert.Equal(["alpha", "beta", "gamma"], v2.AsStringArray(readArena, registry));
+
+            DataValue v3 = decoder.ReadValue(3);
+            Assert.True(v3.IsNull);
+        });
+    }
+
+    [Fact]
+    public void RoundTrip_ImageArray_Sidecar()
+    {
+        ColumnDescriptorV2 column = new(
+            Name: "thumbs",
+            Kind: DataKind.Image,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: false,
+            IsArray: true);
+
+        Pool pool = new(new PoolBacking());
+        ColumnLookup lookup = new(["thumbs"]);
+        Arena writeArena = new();
+        RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
+
+        DataValue[] r0 = pool.RentDataValues(1);
+        r0[0] = DataValue.FromImageArray(
+            [
+                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+                [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00],
+            ],
+            writeArena);
+        batch.Add(r0);
+
+        DataValue[] r1 = pool.RentDataValues(1);
+        r1[0] = DataValue.FromImageArray([[0x47, 0x49, 0x46, 0x38]], writeArena);
+        batch.Add(r1);
+
+        WriteAndReadArrayBatch("image_array.datum", column, batch, (decoder, readArena, registry) =>
+        {
+            DataValue v0 = decoder.ReadValue(0);
+            Assert.True(v0.IsInSidecar);
+            byte[][] images0 = v0.AsImageArray(readArena, registry);
+            Assert.Equal(2, images0.Length);
+            Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }, images0[0]);
+            Assert.Equal(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00 }, images0[1]);
+
+            DataValue v1 = decoder.ReadValue(1);
+            Assert.True(v1.IsInSidecar);
+            byte[][] images1 = v1.AsImageArray(readArena, registry);
+            Assert.Single(images1);
+            Assert.Equal(new byte[] { 0x47, 0x49, 0x46, 0x38 }, images1[0]);
+        });
+    }
+
+    [Fact]
+    public void RoundTrip_StructArray_Sidecar()
+    {
+        ColumnDescriptorV2 column = new(
+            Name: "boxes",
+            Kind: DataKind.Struct,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: false,
+            IsArray: true);
+
+        Pool pool = new(new PoolBacking());
+        ColumnLookup lookup = new(["boxes"]);
+        Arena writeArena = new();
+        RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
+
+        // Row 0: array of two struct elements, each with (label: String, score: Float32) fields.
+        DataValue[] r0 = pool.RentDataValues(1);
+        DataValue[] s0 = [DataValue.FromString("cat", writeArena), DataValue.FromFloat32(0.95f)];
+        DataValue[] s1 = [DataValue.FromString("dog with a longer label here", writeArena), DataValue.FromFloat32(0.78f)];
+        r0[0] = DataValue.FromStructArray([s0, s1], writeArena);
+        batch.Add(r0);
+
+        // Row 1: empty array
+        DataValue[] r1 = pool.RentDataValues(1);
+        r1[0] = DataValue.FromStructArray(ReadOnlySpan<DataValue[]>.Empty, writeArena);
+        batch.Add(r1);
+
+        WriteAndReadArrayBatch("struct_array.datum", column, batch, (decoder, readArena, registry) =>
+        {
+            DataValue v0 = decoder.ReadValue(0);
+            Assert.True(v0.IsInSidecar);
+            DataValue[][] structs0 = v0.AsStructArray(readArena, registry);
+            Assert.Equal(2, structs0.Length);
+            Assert.Equal("cat", structs0[0][0].AsString(readArena));
+            Assert.Equal(0.95f, structs0[0][1].AsFloat32());
+            Assert.Equal("dog with a longer label here", structs0[1][0].AsString(readArena));
+            Assert.Equal(0.78f, structs0[1][1].AsFloat32());
+
+            DataValue v1 = decoder.ReadValue(1);
+            Assert.True(v1.IsInSidecar);
+            Assert.Empty(v1.AsStructArray(readArena, registry));
+        });
+    }
+
+    /// <summary>
+    /// Multi-row write + read for a single reference-array column. Hands the
+    /// caller a page decoder + read arena via <paramref name="assertions"/>; all
+    /// disposables (writer file handle, sidecar write/read stores, reader) are
+    /// scoped via using-blocks so the temp directory cleans up cleanly.
+    /// </summary>
+    private void WriteAndReadArrayBatch(
+        string fileName,
+        ColumnDescriptorV2 column,
+        RowBatch batch,
+        Action<IPageDecoderV2, Arena, DatumIngest.DatumFile.Sidecar.SidecarRegistry> assertions)
+    {
+        string datumPath = Path.Combine(_tempDir, fileName);
+        string sidecarPath = datumPath + "-blob";
+
+        ulong fingerprint;
+        using (DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
+        {
+            fingerprint = sidecar.Fingerprint;
+            using FileStream fs = new(datumPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+            using DatumFileWriterV2 writer = new(fs, sidecar);
+            writer.Initialize([column]);
+            writer.WriteRowBatch(batch);
+            writer.FinalizeWriter();
+        }
+
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
+        using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
+        DatumIngest.DatumFile.Sidecar.SidecarRegistry registry = new();
+        // Register returns the assigned storeId; first registration gets 0,
+        // matching the sidecarStoreId we pass to OpenPageDecoder below.
+        registry.Register(sidecarSource);
+        Arena readArena = new();
+        IPageDecoderV2 decoder = reader.OpenPageDecoder(
+            columnIndex: 0,
+            pageIndex: 0,
+            sidecarStoreId: 0,
+            sidecarSource: sidecarSource,
+            eagerStore: readArena);
+
+        assertions(decoder, readArena, registry);
+    }
+
     // ──────────────────── Test helper ────────────────────
 
     /// <summary>

@@ -142,11 +142,13 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         // Per-kind sidecar DataValue construction. Kinds without a sidecar
         // factory throw — adding one is a small DataValue.cs change when the
         // first scenario lands.
-        // Any fixed-width typed-array column (Kind + IsArray) routes through the
-        // generic sidecar factory: the bytes already live at (offset, length) in the
-        // sidecar, regardless of element kind. Must come before the per-kind arms so
-        // that, e.g., UInt8 + IsArray hits the array path rather than a hypothetical
-        // scalar UInt8 sidecar arm.
+        // Any typed-array column (Kind + IsArray) — fixed-width OR reference-type —
+        // routes through the generic sidecar factory: the bytes (or slot block) live
+        // at (offset, length) in the sidecar. Reference-type accessors
+        // (AsStringArray / AsImageArray / AsStructArray) resolve per-element bytes
+        // through the SidecarRegistry on demand, so no eager copy into an arena is
+        // needed at decode time. Pass-through queries that don't materialise the
+        // array stay zero-copy.
         if (_column.IsArray)
         {
             return DataValue.FromArrayInSidecar(_column.Kind, offset, length, _sidecarStoreId);
@@ -228,4 +230,5 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         }
         return DataValue.FromArray(elementKind, elements, _eagerStore);
     }
+
 }

@@ -35,9 +35,8 @@ public static class DataValueRetention
     /// </exception>
     public static DataValue Stabilize(DataValue value, IValueStore sourceStore, IValueStore retentionStore)
     {
-        // Null and inline values carry no external payload — nothing to copy.
+        // Null values carry no payload — nothing to copy.
         if (value.IsNull) return value;
-        if (value.IsInline) return value;
 
         // Sidecar-backed values reference absolute (offset, length) coordinates in a
         // long-lived .datum-blob mmap. The payload's lifetime is the IBlobSource, not
@@ -47,24 +46,38 @@ public static class DataValueRetention
         // the sidecar's is 64-bit.
         if (value.IsInSidecar) return value;
 
-        // Inline arrays carry their elements in the struct's _p0-_p3 payload region.
-        // The bytes follow the value through any copy — no external store backs them,
-        // so stabilisation across arena boundaries is a pass-through.
+        // Inline arrays (IsInlineArray flag) carry their elements packed in the
+        // struct's _p0-_p3 region — fully self-contained, pass through.
         if (value.IsInlineArray) return value;
 
         // Same-store fast path. With the one-arena-per-query model
         // (`project_one_arena_per_query.md`) most Stabilize calls have
-        // source == target — the bytes are already in the right place,
-        // so the per-kind copy switch below would just allocate a duplicate
-        // copy of the same payload. Short-circuit. This is also what makes
-        // Array<Struct> outputs from YOLO work without needing an explicit
-        // Struct retention path: nobody actually copies them across stores.
+        // source == target — the bytes are already in the right place. Apply this
+        // before the inline check so an inline N=1 reference array (whose slot
+        // points into sourceStore) also short-circuits when no cross-store copy
+        // is needed.
         if (ReferenceEquals(sourceStore, retentionStore)) return value;
 
-        // Any arena-backed typed array (Kind + IsArray) — bytes live contiguously at
-        // (_p0, _p1) in sourceStore, regardless of element kind. Copy bytes verbatim
-        // into retentionStore and rebuild the DataValue with the same kind tag.
-        // Must come before the scalar arms below so e.g. UInt8 + IsArray matches first.
+        // Reference-type arrays (Kind ∈ {String, Image, Struct} + IsArray) need
+        // per-element deep copy: each slot's (offset, length) references payload
+        // bytes in sourceStore. A naïve byte-block copy of the slot table alone
+        // would leave slots dangling against the old store. Handle this BEFORE
+        // the generic inline pass-through so inline N=1 reference arrays (whose
+        // _p0–_p3 hold a slot pointing into sourceStore) get deep-copied too.
+        if (value.IsArray && IsReferenceElementKind(value.Kind))
+        {
+            return StabilizeReferenceArray(value, sourceStore, retentionStore);
+        }
+
+        // Other inline values (scalars, inline strings, inline N=0 reference arrays)
+        // are self-contained — no external bytes to copy.
+        if (value.IsInline) return value;
+
+        // Any arena-backed typed array (fixed-width Kind + IsArray) — bytes live
+        // contiguously at (_p0, _p1) in sourceStore, regardless of element kind.
+        // Copy bytes verbatim into retentionStore and rebuild the DataValue with
+        // the same kind tag. Must come before the scalar arms below so e.g.
+        // UInt8 + IsArray matches first.
         if (value.IsArray)
         {
             ReadOnlySpan<byte> bytes = value.AsArraySpan<byte>(sourceStore);
@@ -126,5 +139,63 @@ public static class DataValueRetention
         }
 
         return DataValue.FromArray(value.ArrayElementKind, stabilized, retentionStore);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="kind"/> is a reference-type element kind
+    /// — i.e. one whose <c>Array&lt;Kind&gt;</c> uses the slot-block layout where
+    /// each slot points to per-element payload bytes (vs. fixed-width arrays
+    /// where slot bytes ARE the element bytes).
+    /// </summary>
+    private static bool IsReferenceElementKind(DataKind kind) =>
+        kind is DataKind.String or DataKind.Image or DataKind.Struct;
+
+    /// <summary>
+    /// Deep-copies a reference-type array (Array&lt;String&gt;, Array&lt;Image&gt;,
+    /// Array&lt;Struct&gt;) from <paramref name="sourceStore"/> into
+    /// <paramref name="retentionStore"/>. Walks each element via the kind-typed
+    /// accessor, then re-builds the array via the kind-typed factory targeting
+    /// the retention store. Cost is linear in total payload bytes — see
+    /// <c>project_reference_type_arrays.md</c> for the architectural rationale.
+    /// </summary>
+    private static DataValue StabilizeReferenceArray(
+        DataValue value,
+        IValueStore sourceStore,
+        IValueStore retentionStore)
+    {
+        return value.Kind switch
+        {
+            DataKind.String => DataValue.FromStringArray(value.AsStringArray(sourceStore), retentionStore),
+            DataKind.Image => DataValue.FromImageArray(value.AsImageArray(sourceStore), retentionStore),
+            DataKind.Struct => StabilizeStructArray(value, sourceStore, retentionStore),
+            _ => throw new NotSupportedException(
+                $"Stabilize does not yet handle Array<{value.Kind}>. Add a case " +
+                "to DataValueRetention.StabilizeReferenceArray when needed."),
+        };
+    }
+
+    /// <summary>
+    /// Deep-copies an Array&lt;Struct&gt;: each element's field <see cref="DataValue"/>[]
+    /// is itself recursively stabilised (since fields can be reference-type) before
+    /// the result array is rebuilt against <paramref name="retentionStore"/>.
+    /// </summary>
+    private static DataValue StabilizeStructArray(
+        DataValue value,
+        IValueStore sourceStore,
+        IValueStore retentionStore)
+    {
+        DataValue[][] elements = value.AsStructArray(sourceStore);
+        DataValue[][] stabilizedElements = new DataValue[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            DataValue[] sourceFields = elements[i];
+            DataValue[] retentionFields = new DataValue[sourceFields.Length];
+            for (int j = 0; j < sourceFields.Length; j++)
+            {
+                retentionFields[j] = Stabilize(sourceFields[j], sourceStore, retentionStore);
+            }
+            stabilizedElements[i] = retentionFields;
+        }
+        return DataValue.FromStructArray(stabilizedElements, retentionStore);
     }
 }

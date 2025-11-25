@@ -210,11 +210,11 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
         ColumnLookup lookup = new(["label", "score", "active"]);
 
         SamplePreviewCollector collector = new(sampleSize: 25);
-        collector.Consider(MakeRow(lookup, 
+        collector.Consider(MakeRow(lookup,
             DataValue.FromString("test", _arena),
             DataValue.FromFloat32(1.5f),
             DataValue.FromBoolean(true)
-        ), _arena));), _arena);
+        ), _arena);
         collector.Consider(MakeRow(lookup,
             DataValue.FromString("other", _arena),
             DataValue.FromFloat32(2.0f),
