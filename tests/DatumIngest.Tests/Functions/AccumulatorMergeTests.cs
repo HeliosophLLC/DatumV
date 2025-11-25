@@ -407,9 +407,13 @@ public class AccumulatorMergeTests : ServiceTestBase
         left.Merge(right, in _testFrame);
 
         DataValue result = left.Result(in _testFrame);
-        Assert.Equal(DataKind.Array, result.Kind);
-        ReadOnlySpan<DataValue> elements = result.AsArray(_testFrame.Target);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.True(result.IsArray);
+        ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
         Assert.Equal(3, elements.Length);
+        Assert.Equal(1f, elements[0]);
+        Assert.Equal(2f, elements[1]);
+        Assert.Equal(3f, elements[2]);
     }
 
     // ─────────────── STRING_AGG ───────────────

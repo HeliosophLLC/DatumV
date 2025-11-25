@@ -860,6 +860,140 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Polymorphic typed-array factory. Accepts a span of element <see cref="DataValue"/>s
+    /// and dispatches to the appropriate per-kind factory based on
+    /// <paramref name="elementKind"/>:
+    /// <list type="bullet">
+    ///   <item><description><see cref="DataKind.String"/> → <see cref="FromStringArray"/></description></item>
+    ///   <item><description><see cref="DataKind.Image"/> → <see cref="FromImageArray"/></description></item>
+    ///   <item><description><see cref="DataKind.Struct"/> → <see cref="FromStructArray"/></description></item>
+    ///   <item><description>Fixed-width primitives → <see cref="FromArenaArrayBytes"/> (or inline when ≤16 bytes)</description></item>
+    /// </list>
+    /// Used by aggregate functions (<c>ARRAY_AGG</c>) and by any caller that
+    /// has accumulated <see cref="DataValue"/> elements row-by-row and wants
+    /// to materialise them as a typed array. The resulting value has
+    /// <see cref="Kind"/> = <paramref name="elementKind"/> and
+    /// <see cref="DataValueFlags.IsArray"/> set.
+    /// </summary>
+    /// <param name="elementKind">Per-element kind. All elements must match.</param>
+    /// <param name="elements">
+    /// Row-by-row accumulated values. For reference kinds (String/Image/Struct)
+    /// elements may be inline-or-arena-backed in <paramref name="source"/>;
+    /// payload bytes are re-stored into <paramref name="target"/>. For fixed-
+    /// width primitives elements are read inline from each <see cref="DataValue"/>'s
+    /// payload via <see cref="CopyInlineScalarBytes"/>.
+    /// </param>
+    /// <param name="source">
+    /// Resolves arena-backed input element payloads. With one-arena-per-query,
+    /// this is typically the same store as <paramref name="target"/>.
+    /// </param>
+    /// <param name="target">Where the resulting array's payload bytes land.</param>
+    /// <param name="registry">Resolves sidecar-backed input element payloads.</param>
+    /// <exception cref="NotSupportedException">
+    /// <paramref name="elementKind"/> is <see cref="DataKind.DateTime"/> (offset
+    /// loss in the fixed-width array convention) or has no per-element
+    /// representation.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">An element is null (per-element nulls inside arrays not yet supported).</exception>
+    public static DataValue FromTypedArray(
+        DataKind elementKind,
+        ReadOnlySpan<DataValue> elements,
+        IValueStore source,
+        IValueStore target,
+        SidecarRegistry? registry = null)
+    {
+        return elementKind switch
+        {
+            DataKind.String => BuildStringArrayFromDataValues(elements, source, target, registry),
+            DataKind.Image => BuildImageArrayFromDataValues(elements, source, target, registry),
+            DataKind.Struct => BuildStructArrayFromDataValues(elements, source, target, registry),
+            DataKind.DateTime => throw new NotSupportedException(
+                "Array<DateTime> is not supported via FromTypedArray. The fixed-width array convention "
+                + "drops the timezone offset; aggregate into Struct{ticks: Int64, offset_minutes: Int32} "
+                + "until an offset-preserving layout is settled."),
+            _ => BuildFixedWidthArrayFromDataValues(elementKind, elements, target),
+        };
+    }
+
+    private static DataValue BuildStringArrayFromDataValues(
+        ReadOnlySpan<DataValue> elements, IValueStore source, IValueStore target, SidecarRegistry? registry)
+    {
+        string[] strings = new string[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullArrayElement(elements[i], i, DataKind.String);
+            strings[i] = elements[i].AsString(source, registry);
+        }
+        return FromStringArray(strings, target);
+    }
+
+    private static DataValue BuildImageArrayFromDataValues(
+        ReadOnlySpan<DataValue> elements, IValueStore source, IValueStore target, SidecarRegistry? registry)
+    {
+        byte[][] images = new byte[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullArrayElement(elements[i], i, DataKind.Image);
+            images[i] = elements[i].AsByteSpan(source, registry).ToArray();
+        }
+        return FromImageArray(images, target);
+    }
+
+    private static DataValue BuildStructArrayFromDataValues(
+        ReadOnlySpan<DataValue> elements, IValueStore source, IValueStore target, SidecarRegistry? registry)
+    {
+        _ = registry;
+        DataValue[][] rows = new DataValue[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullArrayElement(elements[i], i, DataKind.Struct);
+            rows[i] = elements[i].AsStruct(source);
+        }
+        return FromStructArray(rows, target);
+    }
+
+    private static DataValue BuildFixedWidthArrayFromDataValues(
+        DataKind elementKind, ReadOnlySpan<DataValue> elements, IValueStore target)
+    {
+        int elementSize = ScalarByteSize(elementKind);
+        int totalBytes = elements.Length * elementSize;
+
+        if (totalBytes == 0)
+        {
+            return FromInlineArrayBytes(ReadOnlySpan<byte>.Empty, elementKind);
+        }
+
+        byte[] buffer = new byte[totalBytes];
+        Span<byte> span = buffer;
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullArrayElement(elements[i], i, elementKind);
+            if (elements[i]._kind != elementKind)
+            {
+                throw new InvalidOperationException(
+                    $"Array element [{i}] has kind {elements[i]._kind}; expected {elementKind}.");
+            }
+            elements[i].CopyInlineScalarBytes(span.Slice(i * elementSize, elementSize));
+        }
+
+        if (totalBytes <= InlineArrayMaxBytes)
+        {
+            return FromInlineArrayBytes(span, elementKind);
+        }
+        return FromArenaArrayBytes(span, elementKind, target);
+    }
+
+    private static void ThrowIfNullArrayElement(DataValue element, int index, DataKind elementKind)
+    {
+        if (element.IsNull)
+        {
+            throw new InvalidOperationException(
+                $"Array<{elementKind}> element [{index}] is null; per-element nulls inside an array are "
+                + "not yet supported. Filter nulls before aggregating, or wrap into Struct{value, is_null}.");
+        }
+    }
+
+    /// <summary>
     /// Reads an <c>Array&lt;Struct&gt;</c> value as a jagged
     /// <see cref="DataValue"/>[][] — outer index is element, inner is struct field.
     /// For sidecar-backed arrays, struct fields are deserialised on the fly from

@@ -962,12 +962,14 @@ public class AdvancedAggregateTests : ServiceTestBase
 
         Assert.Single(results);
         DataValue result = results[0]["result"];
-        Assert.Equal(DataKind.Array, result.Kind);
-        DataValue[] elements = result.AsArray(ctx.Store);
+        // Typed array: Kind = element kind, IsArray flag set.
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.True(result.IsArray);
+        ReadOnlySpan<float> elements = result.AsArraySpan<float>(ctx.Store);
         Assert.Equal(3, elements.Length);
-        Assert.Equal(1f, elements[0].AsFloat32());
-        Assert.Equal(2f, elements[1].AsFloat32());
-        Assert.Equal(3f, elements[2].AsFloat32());
+        Assert.Equal(1f, elements[0]);
+        Assert.Equal(2f, elements[1]);
+        Assert.Equal(3f, elements[2]);
     }
 
     [Fact]
@@ -1017,10 +1019,10 @@ public class AdvancedAggregateTests : ServiceTestBase
         List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
+        string[] elements = results[0]["result"].AsStringArray(ctx.Store);
         Assert.Equal(2, elements.Length);
-        Assert.Equal("a", elements[0].AsString(ctx.Store));
-        Assert.Equal("c", elements[1].AsString(ctx.Store));
+        Assert.Equal("a", elements[0]);
+        Assert.Equal("c", elements[1]);
     }
 
     [Fact]
@@ -1051,15 +1053,15 @@ public class AdvancedAggregateTests : ServiceTestBase
         Row groupA = results.First(row => row["cat"].AsString(ctx.Store) == "A");
         Row groupB = results.First(row => row["cat"].AsString(ctx.Store) == "B");
 
-        DataValue[] elementsA = groupA["result"].AsArray(ctx.Store);
+        ReadOnlySpan<float> elementsA = groupA["result"].AsArraySpan<float>(ctx.Store);
         Assert.Equal(2, elementsA.Length);
-        Assert.Equal(1f, elementsA[0].AsFloat32());
-        Assert.Equal(2f, elementsA[1].AsFloat32());
+        Assert.Equal(1f, elementsA[0]);
+        Assert.Equal(2f, elementsA[1]);
 
-        DataValue[] elementsB = groupB["result"].AsArray(ctx.Store);
+        ReadOnlySpan<float> elementsB = groupB["result"].AsArraySpan<float>(ctx.Store);
         Assert.Equal(2, elementsB.Length);
-        Assert.Equal(10f, elementsB[0].AsFloat32());
-        Assert.Equal(20f, elementsB[1].AsFloat32());
+        Assert.Equal(10f, elementsB[0]);
+        Assert.Equal(20f, elementsB[1]);
     }
 
     [Fact]
@@ -1086,10 +1088,10 @@ public class AdvancedAggregateTests : ServiceTestBase
         List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
-        Assert.Equal(1f, elements[0].AsFloat32());
-        Assert.Equal(2f, elements[1].AsFloat32());
-        Assert.Equal(3f, elements[2].AsFloat32());
+        ReadOnlySpan<float> elements = results[0]["result"].AsArraySpan<float>(ctx.Store);
+        Assert.Equal(1f, elements[0]);
+        Assert.Equal(2f, elements[1]);
+        Assert.Equal(3f, elements[2]);
     }
 
     [Fact]
@@ -1116,10 +1118,10 @@ public class AdvancedAggregateTests : ServiceTestBase
         List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
-        Assert.Equal(3f, elements[0].AsFloat32());
-        Assert.Equal(2f, elements[1].AsFloat32());
-        Assert.Equal(1f, elements[2].AsFloat32());
+        ReadOnlySpan<float> elements = results[0]["result"].AsArraySpan<float>(ctx.Store);
+        Assert.Equal(3f, elements[0]);
+        Assert.Equal(2f, elements[1]);
+        Assert.Equal(1f, elements[2]);
     }
 
     [Fact]
@@ -1148,11 +1150,11 @@ public class AdvancedAggregateTests : ServiceTestBase
         List<Row> results = await CollectAsync(groupBy, ctx);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray(ctx.Store);
+        string[] elements = results[0]["result"].AsStringArray(ctx.Store);
         Assert.Equal(3, elements.Length);
 
         // DISTINCT should yield exactly {"a", "b", "c"} in some order
-        string[] values = elements.Select(e => e.AsString(ctx.Store)).Order().ToArray();
+        string[] values = elements.Order().ToArray();
         Assert.Equal(["a", "b", "c"], values);
     }
 

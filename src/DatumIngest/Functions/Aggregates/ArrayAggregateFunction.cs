@@ -47,8 +47,9 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     public IAggregateAccumulator CreateAccumulator() => new ArrayAggregateAccumulator();
 
     /// <summary>
-    /// Collects non-null values into a list, capturing the element kind from the
-    /// first non-null value. Returns a typed <see cref="DataKind.Array"/> on finalization.
+    /// Collects non-null values into a list, capturing the element kind from
+    /// the first non-null value. Returns a typed array (<see cref="DataValue.Kind"/>
+    /// = element kind, <see cref="DataValue.IsArray"/> = true) on finalization.
     /// </summary>
     private sealed class ArrayAggregateAccumulator : IAggregateAccumulator
     {
@@ -75,10 +76,17 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
         {
             if (_elements.Count == 0)
             {
-                return DataValue.NullArray(_elementKind ?? DataKind.Float32);
+                // Typed null array: Kind = element kind, IsNull + IsArray flags
+                // set. Falls back to Float32 when no values were ever observed.
+                return DataValue.NullArrayOf(_elementKind ?? DataKind.Float32);
             }
 
-            return DataValue.FromArray(_elementKind!.Value, _elements, frame.Target);
+            return DataValue.FromTypedArray(
+                _elementKind!.Value,
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_elements),
+                frame.Source,
+                frame.Target,
+                frame.SidecarRegistry);
         }
 
         /// <inheritdoc />

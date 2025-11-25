@@ -88,14 +88,16 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromFloat32(30f)], in _testFrame);
 
         DataValue result = accumulator.Result(in _testFrame);
-        Assert.Equal(DataKind.Array, result.Kind);
+        // Typed-array shape: Kind = element kind, IsArray flag set.
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.True(result.IsArray);
         Assert.Equal(DataKind.Float32, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray(_testFrame.Target);
+        ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
         Assert.Equal(3, elements.Length);
-        Assert.Equal(10f, elements[0].AsFloat32());
-        Assert.Equal(20f, elements[1].AsFloat32());
-        Assert.Equal(30f, elements[2].AsFloat32());
+        Assert.Equal(10f, elements[0]);
+        Assert.Equal(20f, elements[1]);
+        Assert.Equal(30f, elements[2]);
     }
 
     // ─────────────── STRING VALUES ───────────────
@@ -111,14 +113,15 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromString("cherry")], in _testFrame);
 
         DataValue result = accumulator.Result(in _testFrame);
-        Assert.Equal(DataKind.Array, result.Kind);
+        Assert.Equal(DataKind.String, result.Kind);
+        Assert.True(result.IsArray);
         Assert.Equal(DataKind.String, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray(_testFrame.Target);
+        string[] elements = result.AsStringArray(_testFrame.Target);
         Assert.Equal(3, elements.Length);
-        Assert.Equal("apple", elements[0].AsString(_testFrame.Target));
-        Assert.Equal("banana", elements[1].AsString(_testFrame.Target));
-        Assert.Equal("cherry", elements[2].AsString(_testFrame.Target));
+        Assert.Equal("apple", elements[0]);
+        Assert.Equal("banana", elements[1]);
+        Assert.Equal("cherry", elements[2]);
     }
 
     // ─────────────── DATE VALUES ───────────────
@@ -136,12 +139,15 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromDate(date2)], in _testFrame);
 
         DataValue result = accumulator.Result(in _testFrame);
+        Assert.Equal(DataKind.Date, result.Kind);
+        Assert.True(result.IsArray);
         Assert.Equal(DataKind.Date, result.ArrayElementKind);
 
-        DataValue[] elements = result.AsArray(_testFrame.Target);
+        // Date is stored as int32 day-number in the typed-array packing.
+        ReadOnlySpan<int> elements = result.AsArraySpan<int>(_testFrame.Target);
         Assert.Equal(2, elements.Length);
-        Assert.Equal(date1, elements[0].AsDate());
-        Assert.Equal(date2, elements[1].AsDate());
+        Assert.Equal(date1, DateOnly.FromDayNumber(elements[0]));
+        Assert.Equal(date2, DateOnly.FromDayNumber(elements[1]));
     }
 
     // ─────────────── NULL HANDLING ───────────────
@@ -157,10 +163,10 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromFloat32(3f)], in _testFrame);
 
         DataValue result = accumulator.Result(in _testFrame);
-        DataValue[] elements = result.AsArray(_testFrame.Target);
+        ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
         Assert.Equal(2, elements.Length);
-        Assert.Equal(1f, elements[0].AsFloat32());
-        Assert.Equal(3f, elements[1].AsFloat32());
+        Assert.Equal(1f, elements[0]);
+        Assert.Equal(3f, elements[1]);
     }
 
     [Fact]
@@ -174,7 +180,9 @@ public class ArrayAggregateTests : ServiceTestBase
 
         DataValue result = accumulator.Result(in _testFrame);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Array, result.Kind);
+        // Typed null array: Kind = element kind, IsArray flag set.
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.True(result.IsArray);
     }
 
     [Fact]
@@ -185,7 +193,9 @@ public class ArrayAggregateTests : ServiceTestBase
 
         DataValue result = accumulator.Result(in _testFrame);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Array, result.Kind);
+        // Empty fallback element kind is Float32 (per ARRAY_AGG convention).
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.True(result.IsArray);
     }
 
     // ─────────────── SINGLE ELEMENT ───────────────
@@ -199,9 +209,9 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromFloat32(42f)], in _testFrame);
 
         DataValue result = accumulator.Result(in _testFrame);
-        DataValue[] elements = result.AsArray(_testFrame.Target);
-        Assert.Single(elements);
-        Assert.Equal(42f, elements[0].AsFloat32());
+        ReadOnlySpan<float> elements = result.AsArraySpan<float>(_testFrame.Target);
+        Assert.Equal(1, elements.Length);
+        Assert.Equal(42f, elements[0]);
     }
 
     // ─────────────── PRESERVES INSERTION ORDER ───────────────
@@ -216,9 +226,9 @@ public class ArrayAggregateTests : ServiceTestBase
         accumulator.Accumulate([DataValue.FromString("a")], in _testFrame);
         accumulator.Accumulate([DataValue.FromString("b")], in _testFrame);
 
-        DataValue[] elements = accumulator.Result(in _testFrame).AsArray(_testFrame.Target);
-        Assert.Equal("c", elements[0].AsString(_testFrame.Target));
-        Assert.Equal("a", elements[1].AsString(_testFrame.Target));
-        Assert.Equal("b", elements[2].AsString(_testFrame.Target));
+        string[] elements = accumulator.Result(in _testFrame).AsStringArray(_testFrame.Target);
+        Assert.Equal("c", elements[0]);
+        Assert.Equal("a", elements[1]);
+        Assert.Equal("b", elements[2]);
     }
 }

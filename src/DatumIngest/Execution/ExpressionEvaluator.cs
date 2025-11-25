@@ -1238,6 +1238,8 @@ public sealed class ExpressionEvaluator
 
         if (source.Kind == DataKind.Array)
         {
+            // Legacy heterogeneous-element array (DataValue[]-backed). Kept for
+            // values still flowing through the pre-typed-array path.
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
@@ -1247,7 +1249,6 @@ public sealed class ExpressionEvaluator
 
             DataValue[] elements = source.AsArray();
 
-            // Use 0-based integer index.
             int position = (int)ToFloat(index);
             if (position < 0 || position >= elements.Length)
             {
@@ -1257,29 +1258,18 @@ public sealed class ExpressionEvaluator
             return elements[position];
         }
 
-        // Float32 + IsArray (formerly DataKind.Vector). Generalises to any typed
-        // numeric array: Float64 + IsArray, Int32 + IsArray, etc. — but the existing
-        // index-access semantics returned a Float32 scalar specifically for vectors,
-        // so we keep that arm and let other typed-array kinds error out for now.
-        if (source.Kind == DataKind.Float32 && source.IsArray)
+        if (source.IsArray)
         {
+            // Typed array (Kind=elementKind + IsArray). Element kind is source.Kind.
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{Str(index, frame)}') is not supported on Float32[] — " +
+                    $"Named field access ('{Str(index, frame)}') is not supported on Array<{source.Kind}> — " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
-            ReadOnlySpan<float> vector = source.AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-
-            // Use 0-based integer index.
             int position = (int)ToFloat(index);
-            if (position < 0 || position >= vector.Length)
-            {
-                return DataValue.Null(DataKind.Float32);
-            }
-
-            return DataValue.FromFloat32(vector[position]);
+            return ReadTypedArrayElement(source, position, frame);
         }
 
         if (source.Kind == DataKind.Struct)
@@ -1302,6 +1292,117 @@ public sealed class ExpressionEvaluator
 
         throw new InvalidOperationException(
             $"Index access is not supported on {source.Kind} values.");
+    }
+
+    /// <summary>
+    /// Reads a single element from a typed array (<c>Kind=elementKind + IsArray</c>)
+    /// at <paramref name="position"/> and returns it as a freshly-built scalar
+    /// <see cref="DataValue"/>. Dispatches by element kind across the typed-
+    /// array accessors (<see cref="DataValue.AsStringArray"/> /
+    /// <see cref="DataValue.AsImageArray"/> / <see cref="DataValue.AsStructArray"/>
+    /// for reference kinds, <see cref="DataValue.AsArraySpan{T}"/> for
+    /// fixed-width primitives). Out-of-range returns a typed null of the
+    /// element kind.
+    /// </summary>
+    /// <remarks>
+    /// Reading the i-th element via the bulk accessor (e.g. AsStringArray
+    /// reads all elements) is wasteful for single-index access. Future
+    /// optimisation: per-kind GetArrayElementAt(position) accessors that read
+    /// one slot's bytes via the slot block. Punted because there are no
+    /// repeated-index-access hotspots today.
+    /// </remarks>
+    private DataValue ReadTypedArrayElement(DataValue source, int position, in EvaluationFrame frame)
+    {
+        DataKind elementKind = source.Kind;
+        switch (elementKind)
+        {
+            case DataKind.String:
+            {
+                string[] elements = source.AsStringArray(frame.Source, frame.SidecarRegistry);
+                if (position < 0 || position >= elements.Length)
+                {
+                    return DataValue.Null(DataKind.String);
+                }
+                return DataValue.FromString(elements[position], frame.Target);
+            }
+            case DataKind.Image:
+            {
+                byte[][] elements = source.AsImageArray(frame.Source, frame.SidecarRegistry);
+                if (position < 0 || position >= elements.Length)
+                {
+                    return DataValue.Null(DataKind.Image);
+                }
+                return DataValue.FromImage(elements[position], frame.Target);
+            }
+            case DataKind.Struct:
+            {
+                DataValue[][] elements = source.AsStructArray(frame.Source, frame.SidecarRegistry);
+                if (position < 0 || position >= elements.Length)
+                {
+                    return DataValue.NullStruct(0);
+                }
+                DataValue[] fields = elements[position];
+                return DataValue.FromStruct((short)fields.Length, fields, frame.Target);
+            }
+        }
+
+        // Fixed-width primitives. The single-element read goes through
+        // AsArraySpan<T>; we wrap the resulting scalar back as a DataValue.
+        return ReadFixedWidthArrayElement(source, position, frame);
+    }
+
+    private static DataValue ReadFixedWidthArrayElement(DataValue source, int position, in EvaluationFrame frame)
+    {
+        DataKind elementKind = source.Kind;
+        return elementKind switch
+        {
+            DataKind.Boolean => ReadBooleanElement(source, position, frame),
+            DataKind.Int8 => ReadElement<sbyte>(source, position, frame, DataValue.FromInt8, DataValue.Null(DataKind.Int8)),
+            DataKind.UInt8 => ReadElement<byte>(source, position, frame, DataValue.FromUInt8, DataValue.Null(DataKind.UInt8)),
+            DataKind.Int16 => ReadElement<short>(source, position, frame, DataValue.FromInt16, DataValue.Null(DataKind.Int16)),
+            DataKind.UInt16 => ReadElement<ushort>(source, position, frame, DataValue.FromUInt16, DataValue.Null(DataKind.UInt16)),
+            DataKind.Float16 => ReadElement<Half>(source, position, frame, DataValue.FromFloat16, DataValue.Null(DataKind.Float16)),
+            DataKind.Int32 => ReadElement<int>(source, position, frame, DataValue.FromInt32, DataValue.Null(DataKind.Int32)),
+            DataKind.UInt32 => ReadElement<uint>(source, position, frame, DataValue.FromUInt32, DataValue.Null(DataKind.UInt32)),
+            DataKind.Float32 => ReadElement<float>(source, position, frame, DataValue.FromFloat32, DataValue.Null(DataKind.Float32)),
+            DataKind.Date => ReadElement<int>(source, position, frame,
+                dayNumber => DataValue.FromDate(DateOnly.FromDayNumber(dayNumber)), DataValue.Null(DataKind.Date)),
+            DataKind.Int64 => ReadElement<long>(source, position, frame, DataValue.FromInt64, DataValue.Null(DataKind.Int64)),
+            DataKind.UInt64 => ReadElement<ulong>(source, position, frame, DataValue.FromUInt64, DataValue.Null(DataKind.UInt64)),
+            DataKind.Float64 => ReadElement<double>(source, position, frame, DataValue.FromFloat64, DataValue.Null(DataKind.Float64)),
+            DataKind.Time => ReadElement<long>(source, position, frame,
+                ticks => DataValue.FromTime(new TimeOnly(ticks)), DataValue.Null(DataKind.Time)),
+            DataKind.Duration => ReadElement<long>(source, position, frame,
+                ticks => DataValue.FromDuration(new TimeSpan(ticks)), DataValue.Null(DataKind.Duration)),
+            DataKind.Decimal => ReadElement<decimal>(source, position, frame, DataValue.FromDecimal, DataValue.Null(DataKind.Decimal)),
+            DataKind.Int128 => ReadElement<Int128>(source, position, frame, DataValue.FromInt128, DataValue.Null(DataKind.Int128)),
+            DataKind.UInt128 => ReadElement<UInt128>(source, position, frame, DataValue.FromUInt128, DataValue.Null(DataKind.UInt128)),
+            DataKind.Uuid => ReadElement<Guid>(source, position, frame, DataValue.FromUuid, DataValue.Null(DataKind.Uuid)),
+            _ => throw new InvalidOperationException(
+                $"Index access on Array<{elementKind}> is not yet wired through ReadFixedWidthArrayElement."),
+        };
+    }
+
+    private static DataValue ReadBooleanElement(DataValue source, int position, in EvaluationFrame frame)
+    {
+        ReadOnlySpan<byte> elements = source.AsArraySpan<byte>(frame.Source, frame.SidecarRegistry);
+        if (position < 0 || position >= elements.Length)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+        return DataValue.FromBoolean(elements[position] != 0);
+    }
+
+    private static DataValue ReadElement<T>(
+        DataValue source, int position, in EvaluationFrame frame,
+        Func<T, DataValue> wrap, DataValue outOfRangeNull) where T : unmanaged
+    {
+        ReadOnlySpan<T> elements = source.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
+        if (position < 0 || position >= elements.Length)
+        {
+            return outOfRangeNull;
+        }
+        return wrap(elements[position]);
     }
 
     private DataValue EvaluateStructFieldAccess(
