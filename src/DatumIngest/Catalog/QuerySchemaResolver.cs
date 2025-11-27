@@ -401,7 +401,7 @@ public sealed class QuerySchemaResolver
                 column.Kind,
                 column.Nullable,
                 sourceIdentifier,
-                column.ArrayElementKind);
+                IsArray: column.IsArray);
         }
 
         return columns;
@@ -425,14 +425,14 @@ public sealed class QuerySchemaResolver
                 string qualifiedName = $"{resolved.SourceTableOrAlias}.{resolved.ColumnName}";
                 if (seen.Add(qualifiedName))
                 {
-                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable, resolved.ArrayElementKind));
+                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable) { IsArray = resolved.IsArray });
                 }
             }
 
             // Add unqualified name (first occurrence wins).
             if (seen.Add(resolved.ColumnName))
             {
-                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable, resolved.ArrayElementKind));
+                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable) { IsArray = resolved.IsArray });
             }
         }
 

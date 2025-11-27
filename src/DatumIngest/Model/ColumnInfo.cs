@@ -9,30 +9,17 @@ public sealed record ColumnInfo
 {
     /// <summary>Creates a column descriptor.</summary>
     /// <param name="name">The column name as it appears in query expressions.</param>
-    /// <param name="kind">The data kind carried by values in this column.</param>
+    /// <param name="kind">
+    /// The data kind carried by values in this column. For typed-array columns
+    /// this is the per-element kind; combine with the <see cref="IsArray"/>
+    /// init flag (e.g. <c>new ColumnInfo(name, DataKind.Float32, nullable) { IsArray = true }</c>).
+    /// </param>
     /// <param name="nullable">Whether the column may contain null values.</param>
     public ColumnInfo(string name, DataKind kind, bool nullable)
     {
         Name = name;
         Kind = kind;
         Nullable = nullable;
-    }
-
-    /// <summary>
-    /// Creates a column descriptor with array element kind metadata.
-    /// Used for <see cref="DataKind.Array"/> columns where the element kind is
-    /// known at plan time, enabling element-kind-aware function type inference.
-    /// </summary>
-    /// <param name="name">The column name as it appears in query expressions.</param>
-    /// <param name="kind">The data kind carried by values in this column.</param>
-    /// <param name="nullable">Whether the column may contain null values.</param>
-    /// <param name="arrayElementKind">The element kind for <see cref="DataKind.Array"/> columns, or <c>null</c> for all other kinds.</param>
-    public ColumnInfo(string name, DataKind kind, bool nullable, DataKind? arrayElementKind)
-    {
-        Name = name;
-        Kind = kind;
-        Nullable = nullable;
-        ArrayElementKind = arrayElementKind;
     }
 
     /// <summary>
@@ -61,15 +48,6 @@ public sealed record ColumnInfo
     public bool Nullable { get; }
 
     /// <summary>
-    /// For <see cref="DataKind.Array"/> columns, the element kind of the array.
-    /// <c>null</c> when the element kind is unknown at plan time or when
-    /// <see cref="Kind"/> is not <see cref="DataKind.Array"/>.
-    /// Enables element-kind-aware function type inference (e.g. <c>ARRAY_GET</c>,
-    /// <c>ARRAY_MIN</c>, <c>ARRAY_MAX</c>).
-    /// </summary>
-    public DataKind? ArrayElementKind { get; }
-
-    /// <summary>
     /// For <see cref="DataKind.Struct"/> columns, the ordered list of named field descriptors.
     /// <c>null</c> when <see cref="Kind"/> is not <see cref="DataKind.Struct"/> or when
     /// the struct schema is not known at plan time.
@@ -83,8 +61,8 @@ public sealed record ColumnInfo
     /// integer arrays as <see cref="DataKind.Int32"/> + <see cref="IsArray"/>=true).
     /// Defaults to <c>false</c>; set with object-initializer syntax:
     /// <c>new ColumnInfo(name, DataKind.UInt8, nullable) { IsArray = true }</c>.
-    /// Independent of <see cref="ArrayElementKind"/>, which only applies to
-    /// heterogeneous <see cref="DataKind.Array"/> columns.
+    /// Per-element kind is <see cref="Kind"/> directly — there is no separate
+    /// element-kind field, the <c>IsArray</c> flag is the only array marker.
     /// </summary>
     public bool IsArray { get; init; }
 

@@ -7,23 +7,28 @@ namespace DatumIngest.Catalog;
 /// enriched with the originating table name or alias for qualified access.
 /// </summary>
 /// <param name="ColumnName">The column name as it appears in the source schema.</param>
-/// <param name="Kind">The data kind of the column.</param>
+/// <param name="Kind">
+/// The data kind of the column. For typed-array columns this is the
+/// per-element kind; combine with <paramref name="IsArray"/>=true to
+/// recognise the array shape.
+/// </param>
 /// <param name="Nullable">Whether the column may contain null values.</param>
 /// <param name="SourceTableOrAlias">
 /// The table name or alias this column originates from,
 /// or <c>null</c> for computed columns without a clear source.
 /// </param>
-/// <param name="ArrayElementKind">
-/// For <see cref="DataKind.Array"/> columns, the element kind of the array.
-/// <c>null</c> when the element kind is unknown at plan time or when
-/// <see cref="Kind"/> is not <see cref="DataKind.Array"/>.
+/// <param name="IsArray">
+/// True when this column carries the <c>IsArray</c> flag — i.e. each value
+/// is a typed array of <see cref="Kind"/> elements rather than a single
+/// scalar. Replaces the prior <c>ArrayElementKind</c> nullable, which
+/// keyed array-ness off the now-retiring <see cref="DataKind.Array"/>.
 /// </param>
 public sealed record ResolvedColumn(
     string ColumnName,
     DataKind Kind,
     bool Nullable,
     string? SourceTableOrAlias,
-    DataKind? ArrayElementKind = null);
+    bool IsArray = false);
 
 /// <summary>
 /// The combined column schema resolved from all table sources in a query's

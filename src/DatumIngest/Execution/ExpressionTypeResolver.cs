@@ -224,14 +224,10 @@ public static class ExpressionTypeResolver
                 return new ColumnInfo(outputName, nullable, source.Fields);
             }
 
-            if (source?.ArrayElementKind is not null)
-            {
-                return new ColumnInfo(outputName, source.Kind, nullable, source.ArrayElementKind);
-            }
-
             if (source is not null)
             {
-                return new ColumnInfo(outputName, source.Kind, nullable);
+                // Preserves IsArray when present (typed-array column → typed-array output).
+                return new ColumnInfo(outputName, source.Kind, nullable) { IsArray = source.IsArray };
             }
         }
 
@@ -268,8 +264,9 @@ public static class ExpressionTypeResolver
     /// Resolves the array element kind for an expression when its resolved kind
     /// is <see cref="DataKind.Array"/>. Returns <c>null</c> when the element kind
     /// is not statically known (e.g. a computed expression or unknown column).
-    /// Handles both direct column references (via <see cref="ColumnInfo.ArrayElementKind"/>)
-    /// and aggregate function calls (via <see cref="IAggregateFunction.ProducesArray"/>
+    /// Handles both direct column references (via the column's <see cref="ColumnInfo.IsArray"/>
+    /// flag — the per-element kind is then <see cref="ColumnInfo.Kind"/>) and
+    /// aggregate function calls (via <see cref="IAggregateFunction.ProducesArray"/>
     /// + <see cref="IAggregateFunction.ValidateArguments"/>).
     /// </summary>
     internal static DataKind? ResolveArrayElementKindFromExpression(Expression expression, Schema sourceSchema, FunctionRegistry functions)
@@ -285,7 +282,13 @@ public static class ExpressionTypeResolver
             }
 
             info ??= sourceSchema.FindColumn(column.ColumnName);
-            return info?.ArrayElementKind;
+            if (info is null) return null;
+            // Typed-array column: kind is the element kind. Legacy DataKind.Array
+            // columns have IsArray=true via the kind-based fallback in the getter
+            // — but their element kind is no longer recoverable from ColumnInfo
+            // alone (the legacy ArrayElementKind property is gone). Callers that
+            // still hit such columns will get null and fall back to Float32.
+            return info.IsArray ? info.Kind : null;
         }
 
         // Aggregate function call — for array-producing aggregates the element

@@ -264,12 +264,8 @@ public class Ingester(
     /// <summary>
     /// Converts a <see cref="Schema"/> to the v2 column-descriptor list.
     /// Encoder kind is picked by <see cref="ColumnDescriptorV2.EncoderFor"/>;
-    /// nullability comes from <see cref="ColumnInfo.Nullable"/>; array kind
-    /// is inferred from <see cref="ColumnInfo.ArrayElementKind"/>. Fixed
-    /// shape isn't carried on <see cref="ColumnInfo"/> today, so it is
-    /// always <see langword="null"/> here — Vector / Matrix / Tensor
-    /// columns will get their shape populated by a later schema-enrichment
-    /// pass when one lands.
+    /// nullability comes from <see cref="ColumnInfo.Nullable"/>; array shape
+    /// rides through directly via <see cref="ColumnInfo.IsArray"/>.
     /// </summary>
     private static ColumnDescriptorV2[] ToV2Descriptors(Schema schema)
     {
@@ -277,13 +273,12 @@ public class Ingester(
         for (int i = 0; i < schema.Columns.Count; i++)
         {
             ColumnInfo col = schema.Columns[i];
-            bool isArray = col.Kind == DataKind.Array || col.ArrayElementKind is not null;
             descriptors[i] = new ColumnDescriptorV2(
                 Name: col.Name,
                 Kind: col.Kind,
-                Encoder: ColumnDescriptorV2.EncoderFor(col.Kind, isArray),
+                Encoder: ColumnDescriptorV2.EncoderFor(col.Kind, col.IsArray),
                 IsNullable: col.Nullable,
-                IsArray: isArray);
+                IsArray: col.IsArray);
         }
         return descriptors;
     }

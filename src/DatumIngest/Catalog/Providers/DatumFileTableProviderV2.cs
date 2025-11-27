@@ -396,9 +396,10 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     /// <summary>
     /// Builds an engine-facing <see cref="Schema"/> from the v2 footer's
-    /// column descriptors. <see cref="ColumnInfo.ArrayElementKind"/> is
-    /// populated for typed-array columns so downstream type inference
-    /// stays accurate.
+    /// column descriptors. The descriptor's <c>IsArray</c> flag rides through
+    /// to <see cref="ColumnInfo.IsArray"/>; per-element kind is the descriptor's
+    /// <c>Kind</c> directly (typed-array convention — no separate
+    /// <c>ArrayElementKind</c> wrapper).
     /// </summary>
     private static Schema BuildSchema(FooterV2 footer)
     {
@@ -406,8 +407,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         for (int i = 0; i < footer.Columns.Count; i++)
         {
             ColumnDescriptorV2 d = footer.Columns[i].Descriptor;
-            DataKind? arrayElementKind = d.IsArray ? d.Kind : null;
-            columns[i] = new ColumnInfo(d.Name, d.Kind, d.IsNullable, arrayElementKind);
+            columns[i] = new ColumnInfo(d.Name, d.Kind, d.IsNullable) { IsArray = d.IsArray };
         }
         return new Schema(columns);
     }
