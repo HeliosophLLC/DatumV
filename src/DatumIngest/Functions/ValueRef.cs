@@ -233,8 +233,7 @@ public readonly struct ValueRef
     /// Same deferred-materialisation contract as <see cref="FromStruct"/>:
     /// nested non-inline elements stay managed until the boundary recurses.
     /// The inline carrier uses the typed-array shape (<see cref="DataValue.Kind"/> =
-    /// <paramref name="elementKind"/>, <see cref="DataValue.IsArray"/> = true) —
-    /// <see cref="DataKind.Array"/> is no longer used at this boundary.
+    /// <paramref name="elementKind"/>, <see cref="DataValue.IsArray"/> = true).
     /// </summary>
     /// <remarks>
     /// Nested arrays (an element that is itself an array carrier) are rejected

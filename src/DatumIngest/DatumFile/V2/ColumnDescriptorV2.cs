@@ -71,7 +71,7 @@ public sealed record ColumnDescriptorV2(
             // the IsArray short-circuit at the top of this method.
             DataKind.String
                 or DataKind.Image
-                or DataKind.Array or DataKind.Struct
+                or DataKind.Struct
                 => EncoderKind.VariableSlot,
 
             _ => throw new NotSupportedException(

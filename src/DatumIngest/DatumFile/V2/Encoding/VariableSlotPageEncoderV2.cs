@@ -289,11 +289,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Struct
                 => SerializeStructFields(value, store!),
 
-            // Legacy heterogeneous-element DataKind.Array follows the same
-            // packed-fields encoding as Struct.
-            DataKind.Array
-                => SerializeArrayFields(value, store!),
-
             _ => throw new NotSupportedException(
                 $"VariableSlot non-inline payload extraction not implemented for DataKind.{value.Kind}. " +
                 "Add a case when a column of this kind needs sidecar storage."),
@@ -316,27 +311,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         foreach (DataValue field in fields)
         {
             IO.DataValueWriter.WriteDataValue(bw, field, store);
-        }
-        bw.Flush();
-        return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Serializes a typed array's elements to a byte buffer. Layout:
-    /// byte elementKind + uint32 elementCount + N records. Mirrors the
-    /// Struct encoding above but tags the homogeneous element kind so the
-    /// decoder can reconstruct the array's element-kind field.
-    /// </summary>
-    private static byte[] SerializeArrayFields(DataValue value, IValueStore store)
-    {
-        DataValue[] elements = value.AsArray(store);
-        using MemoryStream ms = new();
-        using BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: false);
-        bw.Write((byte)value.ArrayElementKind);
-        bw.Write((uint)elements.Length);
-        foreach (DataValue element in elements)
-        {
-            DatumIngest.IO.DataValueWriter.WriteDataValue(bw, element, store);
         }
         bw.Flush();
         return ms.ToArray();

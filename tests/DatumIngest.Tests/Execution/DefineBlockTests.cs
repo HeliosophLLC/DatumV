@@ -299,10 +299,8 @@ public sealed class DefineBlockTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr"],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)])],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])]);
+            [DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)],
+            [DataValue.FromInlineArray<float>([3f, 4f], DataKind.Float32)]);
 
         List<Row> rows = await ExecuteQueryAsync(
             "SELECT DEFINE { LET (x, y) = arr; } x AS x_out, y AS y_out FROM t",
@@ -345,10 +343,8 @@ public sealed class DefineBlockTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr"],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(5f), DataValue.FromFloat32(10f)])],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(-1f), DataValue.FromFloat32(10f)])]);
+            [DataValue.FromInlineArray<float>([5f, 10f], DataKind.Float32)],
+            [DataValue.FromInlineArray<float>([-1f, 10f], DataKind.Float32)]);
 
         AssertionDiagnostics diagnostics = new();
         List<Row> rows = await ExecuteQueryAsync(
@@ -370,8 +366,7 @@ public sealed class DefineBlockTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr", "scale"],
             [
-                DataValue.FromArray(DataKind.Float32,
-                    [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)]),
+                DataValue.FromInlineArray<float>([3f, 4f], DataKind.Float32),
                 10f,
             ]);
 

@@ -166,11 +166,11 @@ public sealed class StatisticsCollector
 
         // Cardinality and top-K are skipped for binary/multi-dim kinds that have no
         // useful distinct-value or frequency semantics. Images, byte blobs, typed
-        // arrays, structs, and heterogeneous arrays are treated as opaque payloads —
-        // HLL on their arena offsets would just return the row count. Perceptual-hash
-        // cardinality is available on demand via the phash() SQL function.
+        // arrays, and structs are treated as opaque payloads — HLL on their arena
+        // offsets would just return the row count. Perceptual-hash cardinality is
+        // available on demand via the phash() SQL function.
         if (!isArrayValue
-            && kind is not (DataKind.Image or DataKind.Array or DataKind.Struct))
+            && kind is not (DataKind.Image or DataKind.Struct))
         {
             accumulators.Add(new CardinalityAccumulator());
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));

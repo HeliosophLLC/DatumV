@@ -1236,28 +1236,6 @@ public sealed class ExpressionEvaluator
 
         DataValue index = Evaluate(indexAccess.Index, frame);
 
-        if (source.Kind == DataKind.Array)
-        {
-            // Legacy heterogeneous-element array (DataValue[]-backed). Kept for
-            // values still flowing through the pre-typed-array path.
-            if (index.Kind == DataKind.String)
-            {
-                throw new InvalidOperationException(
-                    $"Named field access ('{Str(index, frame)}') is not supported on Array: " +
-                    $"use positional destructuring: LET (a, b, ...) = expr.");
-            }
-
-            DataValue[] elements = source.AsArray();
-
-            int position = (int)ToFloat(index);
-            if (position < 0 || position >= elements.Length)
-            {
-                return DataValue.NullArray(source.ArrayElementKind);
-            }
-
-            return elements[position];
-        }
-
         if (source.IsArray)
         {
             // Typed array (Kind=elementKind + IsArray). Element kind is source.Kind.

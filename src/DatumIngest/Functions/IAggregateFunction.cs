@@ -15,9 +15,8 @@ public interface IAggregateFunction
     /// Validates the argument types and returns the result kind. For aggregates
     /// that produce a typed array (those whose <see cref="ProducesArray"/> is
     /// <see langword="true"/>), this returns the <em>element</em> kind — the
-    /// array-ness is communicated via the <see cref="ProducesArray"/> flag,
-    /// not via a <see cref="DataKind.Array"/> wrapper kind. Scalar aggregates
-    /// return their result kind directly.
+    /// array-ness is communicated via the <see cref="ProducesArray"/> flag.
+    /// Scalar aggregates return their result kind directly.
     /// </summary>
     /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
     /// <returns>
@@ -39,9 +38,7 @@ public interface IAggregateFunction
     /// Whether this aggregate's result is an array of <see cref="ValidateArguments"/>'s
     /// returned element kind (rather than a scalar of that kind). Defaults to
     /// <see langword="false"/>; aggregates such as <c>ARRAY_AGG</c> override
-    /// to <see langword="true"/>. Replaces the old <c>GetResultArrayElementKind</c>
-    /// mechanism, which keyed array-ness off the now-retiring
-    /// <see cref="DataKind.Array"/> kind.
+    /// to <see langword="true"/>.
     /// </summary>
     bool ProducesArray => false;
 

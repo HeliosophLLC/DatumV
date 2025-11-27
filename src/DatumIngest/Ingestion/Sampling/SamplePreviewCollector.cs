@@ -250,7 +250,6 @@ internal sealed class SamplePreviewCollector
         {
             // Composite types need recursive conversion for JSON nesting.
             DataKind.Image => ConvertImage(value, store),
-            DataKind.Array => ConvertArray(value, store),
             DataKind.Struct => ConvertStruct(value, store),
             // Strings need the store to resolve arena- or handle-backed content.
             DataKind.String => value.AsString(store),
@@ -375,16 +374,4 @@ internal sealed class SamplePreviewCollector
         return result;
     }
 
-    /// <summary>Converts a typed array into a JSON-serialisable array.</summary>
-    private static object?[] ConvertArray(DataValue value, IValueStore store)
-    {
-        DataValue[] elements = value.AsArray(store);
-        object?[] result = new object?[elements.Length];
-        for (int i = 0; i < elements.Length; i++)
-        {
-            result[i] = ConvertValue(elements[i], store);
-        }
-
-        return result;
-    }
 }

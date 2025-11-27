@@ -122,12 +122,6 @@ public static class ColumnRoleClassifier
             return ClassifyStringColumn(manifest, distinctRatio);
         }
 
-        // Array kind — treat as structural.
-        if (manifest.Kind is DataKind.Array)
-        {
-            return ColumnRole.Structural;
-        }
-
         // Fallback — treat unknown kinds as categorical.
         return ColumnRole.Categorical;
     }

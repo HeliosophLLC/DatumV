@@ -162,8 +162,6 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 => DataValue.FromImageInSidecar(offset, length, _sidecarStoreId),
             DataKind.Struct
                 => DecodeStructEagerly(offset, length),
-            DataKind.Array
-                => DecodeArrayEagerly(offset, length),
             _ => throw new InvalidDataException(
                 $"VariableSlot pointer decode not implemented for column '{_column.Name}' " +
                 $"(kind={_column.Kind}, isArray={_column.IsArray}). Add a sidecar DataValue factory for this kind."),
@@ -200,35 +198,6 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
             fields[i] = DataValueReader.ReadDataValue(br, _eagerStore);
         }
         return DataValue.FromStruct((short)fieldCount, fields, _eagerStore);
-    }
-
-    /// <summary>
-    /// Mirror of <see cref="DecodeStructEagerly"/> for legacy
-    /// <see cref="DataKind.Array"/>: reads element kind + count, then N
-    /// elements via the <see cref="DataValueReader"/>, lands them in the
-    /// eager store via <see cref="DataValue.FromArray(DataKind, DataValue[], IValueStore)"/>.
-    /// </summary>
-    private DataValue DecodeArrayEagerly(long offset, long length)
-    {
-        if (_sidecarSource is null || _eagerStore is null)
-        {
-            throw new InvalidOperationException(
-                "Decoding a sidecar-backed Array requires both an IBlobSource and an " +
-                "IValueStore at decoder construction.");
-        }
-
-        ReadOnlySpan<byte> bytes = _sidecarSource.Read(offset, length);
-        byte[] copy = bytes.ToArray();
-        using MemoryStream ms = new(copy, writable: false);
-        using BinaryReader br = new(ms, System.Text.Encoding.UTF8, leaveOpen: false);
-        DataKind elementKind = (DataKind)br.ReadByte();
-        uint elementCount = br.ReadUInt32();
-        DataValue[] elements = new DataValue[elementCount];
-        for (int i = 0; i < elementCount; i++)
-        {
-            elements[i] = DataValueReader.ReadDataValue(br, _eagerStore);
-        }
-        return DataValue.FromArray(elementKind, elements, _eagerStore);
     }
 
 }

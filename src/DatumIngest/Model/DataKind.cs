@@ -115,12 +115,6 @@ public enum DataKind : byte
     // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
     /// <summary>
-    /// A typed array of <see cref="DataValue"/> elements sharing a common element kind.
-    /// The element kind is stored in the shape metadata of the owning <see cref="DataValue"/>.
-    /// </summary>
-    Array = 67,
-
-    /// <summary>
     /// A named-field composite value. Field names and kinds are stored once in the
     /// enclosing <see cref="ColumnInfo.Fields"/> descriptor; each value holds a
     /// positional <see cref="DataValue"/>[] in the value store.

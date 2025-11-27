@@ -135,13 +135,6 @@ public static class ExpressionTypeResolver
     {
         DataKind? sourceKind = ResolveType(indexAccess.Source, sourceSchema, functions);
 
-        if (sourceKind == DataKind.Array)
-        {
-            // Legacy heterogeneous-element array source. Element kind via metadata.
-            return ResolveArrayElementKindFromExpression(indexAccess.Source, sourceSchema, functions)
-                ?? DataKind.Float32;
-        }
-
         // Typed-array source via an aggregate that ProducesArray. The aggregate's
         // ValidateArguments returns the per-element kind directly, which is what
         // ResolveType already gave us via ResolveAggregate. Indexing yields a
@@ -152,10 +145,16 @@ public static class ExpressionTypeResolver
             return sourceKind;
         }
 
-        // Vector (Float32 + IsArray) indexing returned Float32 scalars. With Vector
-        // retired, indexing a "Float32 array" column needs the IsArray flag plumbed
-        // through this resolver's signature — deferred to the broader typed-array
-        // schema-resolution work.
+        // Typed-array column source: ColumnInfo carries IsArray + Kind=elementKind.
+        // Indexing yields a scalar of the element kind.
+        if (indexAccess.Source is ColumnReference arrayColRef)
+        {
+            ColumnInfo? info = ResolveColumnInfo(arrayColRef, sourceSchema);
+            if (info is { IsArray: true })
+            {
+                return info.Kind;
+            }
+        }
 
         if (sourceKind == DataKind.Struct
             && indexAccess.Index is LiteralExpression { Value: string fieldName })
@@ -258,59 +257,6 @@ public static class ExpressionTypeResolver
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Resolves the array element kind for an expression when its resolved kind
-    /// is <see cref="DataKind.Array"/>. Returns <c>null</c> when the element kind
-    /// is not statically known (e.g. a computed expression or unknown column).
-    /// Handles both direct column references (via the column's <see cref="ColumnInfo.IsArray"/>
-    /// flag — the per-element kind is then <see cref="ColumnInfo.Kind"/>) and
-    /// aggregate function calls (via <see cref="IAggregateFunction.ProducesArray"/>
-    /// + <see cref="IAggregateFunction.ValidateArguments"/>).
-    /// </summary>
-    internal static DataKind? ResolveArrayElementKindFromExpression(Expression expression, Schema sourceSchema, FunctionRegistry functions)
-    {
-        if (expression is ColumnReference column)
-        {
-            ColumnInfo? info = null;
-
-            if (column.TableName is not null)
-            {
-                string qualifiedName = $"{column.TableName}.{column.ColumnName}";
-                info = sourceSchema.FindColumn(qualifiedName);
-            }
-
-            info ??= sourceSchema.FindColumn(column.ColumnName);
-            if (info is null) return null;
-            // Typed-array column: kind is the element kind. Legacy DataKind.Array
-            // columns have IsArray=true via the kind-based fallback in the getter
-            // — but their element kind is no longer recoverable from ColumnInfo
-            // alone (the legacy ArrayElementKind property is gone). Callers that
-            // still hit such columns will get null and fall back to Float32.
-            return info.IsArray ? info.Kind : null;
-        }
-
-        // Aggregate function call — for array-producing aggregates the element
-        // kind is what ValidateArguments returns (post-IAggregateFunction
-        // migration: array-ness is the ProducesArray flag, the kind is the leaf).
-        if (expression is FunctionCallExpression func)
-        {
-            IAggregateFunction? aggregateFunction = functions.TryGetAggregate(func.FunctionName);
-            if (aggregateFunction is { ProducesArray: true })
-            {
-                DataKind[] argKinds = new DataKind[func.Arguments.Count];
-                for (int index = 0; index < func.Arguments.Count; index++)
-                {
-                    DataKind? kind = ResolveType(func.Arguments[index], sourceSchema, functions);
-                    if (kind is null) return null;
-                    argKinds[index] = kind.Value;
-                }
-                return aggregateFunction.ValidateArguments(argKinds);
-            }
-        }
-
-        return null;
     }
 
     private static DataKind? ResolveBinary(BinaryExpression binary, Schema sourceSchema, FunctionRegistry functions)

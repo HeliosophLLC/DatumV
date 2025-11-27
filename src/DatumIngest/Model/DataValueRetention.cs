@@ -111,34 +111,12 @@ public static class DataValueRetention
                 value.AsImage(sourceStore),
                 retentionStore),
 
-            // Recursively stabilise each element into the retention store, then store the
-            // result array there. Element kinds that themselves throw from Stabilize bubble
-            // up — e.g. an array of vectors would still be unsupported.
-            DataKind.Array => StabilizeArray(value, sourceStore, retentionStore),
-
             // Struct retention path isn't implemented yet because no current retention
             // site uses it as a key. Add a case when needed.
             _ => throw new NotSupportedException(
                 $"Retention of {value.Kind} is not implemented. Add a case to " +
                 "DataValueRetention.Stabilize when a retention site needs it."),
         };
-    }
-
-    private static DataValue StabilizeArray(DataValue value, IValueStore sourceStore, IValueStore retentionStore)
-    {
-        DataValue[] elements = value.AsArray(sourceStore);
-        if (elements.Length == 0)
-        {
-            return DataValue.FromArray(value.ArrayElementKind, elements, retentionStore);
-        }
-
-        DataValue[] stabilized = new DataValue[elements.Length];
-        for (int i = 0; i < elements.Length; i++)
-        {
-            stabilized[i] = Stabilize(elements[i], sourceStore, retentionStore);
-        }
-
-        return DataValue.FromArray(value.ArrayElementKind, stabilized, retentionStore);
     }
 
     /// <summary>

@@ -10,8 +10,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests that <see cref="ExpressionEvaluator"/>'s index-access path can read
 /// elements out of typed arrays (<c>Kind=elementKind + IsArray</c>) — the
 /// shape <c>ARRAY_AGG</c>, <c>ValueRef.FromArray</c>, and the YOLO output
-/// path now produce. The legacy <see cref="DataKind.Array"/> path keeps its
-/// existing tests; these cover the new shape end-to-end.
+/// path produce.
 /// </summary>
 public class TypedArrayIndexAccessTests : ServiceTestBase
 {

@@ -34,7 +34,6 @@ public class DataKindTests : ServiceTestBase
             DataKind.String,
             DataKind.Uuid,
             DataKind.Image,
-            DataKind.Array,
             DataKind.Struct,
         ];
 

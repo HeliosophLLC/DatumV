@@ -4,8 +4,9 @@ namespace DatumIngest.Functions.Aggregates;
 
 /// <summary>
 /// Implements <c>ARRAY_AGG(expression)</c>. Collects all non-null values in the
-/// group into a typed <see cref="DataKind.Array"/>. Accepts any single argument
-/// of any <see cref="DataKind"/>. The resulting array's element kind matches the
+/// group into a typed array (<see cref="DataValue.Kind"/> = element kind,
+/// <see cref="DataValue.IsArray"/> = true). Accepts any single argument of any
+/// <see cref="DataKind"/>. The resulting array's element kind matches the
 /// argument kind.
 /// <para>
 /// Supports intra-aggregate <c>ORDER BY</c> to control element order:

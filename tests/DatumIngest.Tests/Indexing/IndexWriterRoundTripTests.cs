@@ -19,7 +19,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
     private static readonly HashSet<DataKind> UnsupportedKinds =
     [
         DataKind.Unknown,
-        DataKind.Array,
         DataKind.Struct,
     ];
 
@@ -143,8 +142,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
         DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
-        DataKind.Array    => DataValue.FromArray(
-            DataKind.Float32, [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
         DataKind.Struct   => DataValue.FromStruct(2, [DataValue.FromString("a"), DataValue.FromInt32(1)]),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,

@@ -205,8 +205,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr"],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(10f), DataValue.FromFloat32(20f), DataValue.FromFloat32(30f)])]);
+            [DataValue.FromInlineArray<float>([10f, 20f, 30f], DataKind.Float32)]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (first, second, third) = arr, first AS a, second AS b, third AS c FROM t",
@@ -315,8 +314,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr"],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])]);
+            [DataValue.FromInlineArray<float>([3f, 4f], DataKind.Float32)]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET (a, b) = arr, LET hyp = a * a + b * b, hyp AS result FROM t",
@@ -426,8 +424,7 @@ public sealed class LetBindingTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog("t",
             columns: ["arr"],
-            [DataValue.FromArray(DataKind.Float32,
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)])]);
+            [DataValue.FromInlineArray<float>([1f, 2f], DataKind.Float32)]);
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteQueryAsync("SELECT LET {a, b} = arr, a AS x, b AS y FROM t", catalog));

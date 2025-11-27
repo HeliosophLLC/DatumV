@@ -150,8 +150,9 @@ public sealed class SamplePreviewCollectorTests : ServiceTestBase
     [Fact]
     public void ConvertValue_Array_ReturnsConvertedElements()
     {
-        DataValue[] elements = [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)];
-        DataValue array = DataValue.FromArray(DataKind.Float32, elements, _arena);
+        // Post-PR2: typed Float32 array goes through the AsArraySpan<float>
+        // path in SamplePreviewCollector, which returns a boxed float[].
+        DataValue array = DataValue.FromArenaArray<float>([1.0f, 2.0f], DataKind.Float32, _arena);
         object? result = SamplePreviewCollector.ConvertValue(array, _arena);
 
         object?[] converted = Assert.IsType<object?[]>(result);

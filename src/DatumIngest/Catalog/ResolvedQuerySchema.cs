@@ -20,8 +20,7 @@ namespace DatumIngest.Catalog;
 /// <param name="IsArray">
 /// True when this column carries the <c>IsArray</c> flag — i.e. each value
 /// is a typed array of <see cref="Kind"/> elements rather than a single
-/// scalar. Replaces the prior <c>ArrayElementKind</c> nullable, which
-/// keyed array-ness off the now-retiring <see cref="DataKind.Array"/>.
+/// scalar.
 /// </param>
 public sealed record ResolvedColumn(
     string ColumnName,

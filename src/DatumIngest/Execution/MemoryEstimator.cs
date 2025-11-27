@@ -176,27 +176,10 @@ internal sealed class MemoryEstimator
             // byte length for arena-backed strings, byte arrays, vectors, matrices,
             // tensors, and images.
             bytes += value.ContentByteLength;
-
-            if (value.Kind == DataKind.Array)
-            {
-                bytes += EstimateArrayBytes(value);
-            }
         }
 
         bytes += DictionaryEntryOverheadBytes;
 
         return bytes;
-    }
-
-    private static long EstimateArrayBytes(DataValue value)
-    {
-        DataValue[] elements = value.AsArray();
-        long total = 16; // Array object overhead + length.
-        foreach (DataValue element in elements)
-        {
-            total += DataValueOverheadBytes + 8; // Conservative per-element estimate.
-        }
-
-        return total;
     }
 }

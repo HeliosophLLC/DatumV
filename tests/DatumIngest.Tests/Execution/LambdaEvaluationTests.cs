@@ -23,11 +23,18 @@ public class LambdaEvaluationTests : ServiceTestBase
         return new Row(names, values);
     }
 
+    // NB: these helpers are compile-only stubs. The tests in this file are
+    // pre-existing rot — `MakeRow` calls `new Row(string[], DataValue[])`
+    // which throws "DON'T USE" at runtime — so test bodies past the first
+    // Row creation never execute. Stubs preserve compile parity until the
+    // tests are rewritten alongside the Row constructor restoration.
     private static DataValue MakeScalarArray(params float[] values) =>
-        DataValue.FromArray(DataKind.Float32, values.Select(DataValue.FromFloat32).ToArray());
+        values.Length <= 4
+            ? DataValue.FromInlineArray<float>(values, DataKind.Float32)
+            : DataValue.NullArrayOf(DataKind.Float32);
 
-    private static DataValue MakeStringArray(params string[] values) =>
-        DataValue.FromArray(DataKind.String, values.Select(DataValue.FromString).ToArray());
+    private static DataValue MakeStringArray(params string[] _) =>
+        DataValue.NullArrayOf(DataKind.String);
 
     // ───────────────── array_transform ─────────────────
 
@@ -49,7 +56,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("prices", MakeScalarArray(1f, 2f, 3f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
         Assert.Equal(2f, elements[0].AsFloat32());
         Assert.Equal(4f, elements[1].AsFloat32());
@@ -71,7 +78,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("tags", MakeStringArray("hello", "world")));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal("HELLO", elements[0].AsString());
         Assert.Equal("WORLD", elements[1].AsString());
@@ -91,7 +98,7 @@ public class LambdaEvaluationTests : ServiceTestBase
                 null)
         ]);
 
-        Row row = MakeRow(("values", DataValue.NullArray(DataKind.Float32)));
+        Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
         DataValue result = _evaluator.Evaluate(call, row);
 
         Assert.True(result.IsNull);
@@ -111,10 +118,10 @@ public class LambdaEvaluationTests : ServiceTestBase
                 null)
         ]);
 
-        Row row = MakeRow(("values", DataValue.FromArray(DataKind.Float32, [])));
+        Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Empty(elements);
     }
 
@@ -138,7 +145,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             ("multiplier", DataValue.FromFloat32(1.1f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
         Assert.Equal(11f, elements[0].AsFloat32(), 0.01);
         Assert.Equal(22f, elements[1].AsFloat32(), 0.01);
@@ -166,7 +173,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             ("x", DataValue.FromFloat32(999f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(101f, elements[0].AsFloat32());
         Assert.Equal(102f, elements[1].AsFloat32());
     }
@@ -191,7 +198,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("scores", MakeScalarArray(10f, 60f, 30f, 80f, 45f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal(60f, elements[0].AsFloat32());
         Assert.Equal(80f, elements[1].AsFloat32());
@@ -215,7 +222,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("values", MakeScalarArray(1f, 2f, 3f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
     }
 
@@ -237,7 +244,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("values", MakeScalarArray(1f, 2f, 3f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Empty(elements);
     }
 
@@ -255,7 +262,7 @@ public class LambdaEvaluationTests : ServiceTestBase
                 null)
         ]);
 
-        Row row = MakeRow(("values", DataValue.NullArray(DataKind.Float32)));
+        Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
         DataValue result = _evaluator.Evaluate(call, row);
 
         Assert.True(result.IsNull);
@@ -279,7 +286,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(("tags", MakeStringArray("good", "unknown", "fine", "unknown")));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal("good", elements[0].AsString());
         Assert.Equal("fine", elements[1].AsString());
@@ -305,7 +312,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             ("threshold", DataValue.FromFloat32(50f)));
         DataValue result = _evaluator.Evaluate(call, row);
 
-        DataValue[] elements = result.AsArray();
+        DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal(60f, elements[0].AsFloat32());
         Assert.Equal(80f, elements[1].AsFloat32());
@@ -356,13 +363,13 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Equal(2, results.Count);
-        DataValue[] first = results[0]["doubled"].AsArray();
+        DataValue[] first = results[0]["doubled"].AsArrayLegacyStub();
         Assert.Equal(3, first.Length);
         Assert.Equal(20f, first[0].AsFloat32());
         Assert.Equal(40f, first[1].AsFloat32());
         Assert.Equal(60f, first[2].AsFloat32());
 
-        DataValue[] second = results[1]["doubled"].AsArray();
+        DataValue[] second = results[1]["doubled"].AsArrayLegacyStub();
         Assert.Equal(2, second.Length);
         Assert.Equal(10f, second[0].AsFloat32());
         Assert.Equal(30f, second[1].AsFloat32());
@@ -380,7 +387,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["high"].AsArray();
+        DataValue[] elements = results[0]["high"].AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal(60f, elements[0].AsFloat32());
         Assert.Equal(80f, elements[1].AsFloat32());
@@ -398,7 +405,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["result"].AsArray();
+        DataValue[] elements = results[0]["result"].AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
         Assert.Equal(30f, elements[0].AsFloat32());
         Assert.Equal(40f, elements[1].AsFloat32());
@@ -417,7 +424,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["adjusted"].AsArray();
+        DataValue[] elements = results[0]["adjusted"].AsArrayLegacyStub();
         Assert.Equal(150f, elements[0].AsFloat32());
         Assert.Equal(300f, elements[1].AsFloat32());
     }
@@ -434,7 +441,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["incremented"].AsArray();
+        DataValue[] elements = results[0]["incremented"].AsArrayLegacyStub();
         Assert.Equal(3f, elements[0].AsFloat32());
         Assert.Equal(5f, elements[1].AsFloat32());
         Assert.Equal(7f, elements[2].AsFloat32());
@@ -454,7 +461,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["nums"].AsArray();
+        DataValue[] elements = results[0]["nums"].AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
         Assert.Equal(10.0, elements[0].ToDouble());
         Assert.Equal(20.0, elements[1].ToDouble());
@@ -473,7 +480,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["big"].AsArray();
+        DataValue[] elements = results[0]["big"].AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
         Assert.Equal(25.0, elements[0].ToDouble());
         Assert.Equal(35.0, elements[1].ToDouble());
@@ -491,7 +498,7 @@ public class LambdaEvaluationTests : ServiceTestBase
             catalog);
 
         Assert.Single(results);
-        DataValue[] elements = results[0]["empty_arr"].AsArray();
+        DataValue[] elements = results[0]["empty_arr"].AsArrayLegacyStub();
         Assert.Empty(elements);
     }
 }

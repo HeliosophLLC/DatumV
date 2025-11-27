@@ -71,11 +71,8 @@ public readonly struct DataValue : IEquatable<DataValue>
         /// This value is a typed array of <see cref="DataValue.Kind"/> elements rather
         /// than a scalar. Storage flag (<see cref="InArena"/> / <see cref="InSidecar"/> /
         /// inline) tells where the bytes live; this flag tells how to interpret them.
-        /// New typed-array kinds (UInt8[], Int32[], Float64[], Date[], …) all come into
-        /// existence via <c>Kind + IsArray</c>. The legacy heterogeneous-element
-        /// <see cref="DataKind.Array"/> kind predates this flag and doesn't set it;
-        /// <see cref="DataValue.IsArray"/> reports <c>true</c> for it via a kind-based
-        /// fallback so callers don't need to know the migration history.
+        /// All typed-array kinds (UInt8[], Int32[], Float64[], Date[], String[],
+        /// Image[], Struct[], …) come into existence via <c>Kind + IsArray</c>.
         /// </summary>
         IsArray = 0x08,
 
@@ -174,26 +171,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     public bool IsInSidecar => (_flags & DataValueFlags.InSidecar) != 0;
 
     /// <summary>
-    /// Whether this value is a typed array of <see cref="Kind"/> elements (rather than
-    /// a scalar). Returns <c>true</c> when either:
-    /// <list type="bullet">
-    ///   <item><description>
-    ///     The new <c>IsArray</c> flag is set on the value (used by typed arrays of
-    ///     arbitrary element kinds: Int32[], Float64[], Date[], …)
-    ///   </description></item>
-    ///   <item><description>
-    ///     <see cref="Kind"/> is the legacy heterogeneous-element
-    ///     <see cref="DataKind.Array"/> kind — which predates the flag and doesn't
-    ///     set it. Treated as an array so callers don't need to know the migration
-    ///     history.
-    ///   </description></item>
-    /// </list>
-    /// Switch dispatch can use <c>case DataKind.UInt8 when value.IsArray:</c> to handle
-    /// new-style byte arrays without relying on a separate kind enum value.
+    /// Whether this value is a typed array of <see cref="Kind"/> elements (rather
+    /// than a scalar). Returns <c>true</c> when the <c>IsArray</c> flag is set —
+    /// used by typed arrays of arbitrary element kinds (<c>Int32[]</c>,
+    /// <c>Float64[]</c>, <c>String[]</c>, <c>Struct[]</c>, …). Switch dispatch
+    /// can use <c>case DataKind.UInt8 when value.IsArray:</c> to handle byte
+    /// arrays without relying on a separate kind enum value.
     /// </summary>
-    public bool IsArray =>
-        (_flags & DataValueFlags.IsArray) != 0
-        || _kind == DataKind.Array;
+    public bool IsArray => (_flags & DataValueFlags.IsArray) != 0;
 
     /// <summary>
     /// Whether this value's array payload is packed inline into <c>_p0</c>-<c>_p3</c>
@@ -1369,19 +1354,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <list type="bullet">
     ///   <item><description>Inline arrays (<see cref="IsInlineArray"/>): zero-allocation, no parameters needed.</description></item>
     ///   <item><description>Sidecar-backed arrays (<see cref="IsInSidecar"/>): byte-level read from the registry.</description></item>
-    ///   <item><description>Arena-backed values produced via the new <c>IsArray</c> flag model: byte-level read from <paramref name="store"/>.</description></item>
+    ///   <item><description>Arena-backed values produced via the <c>IsArray</c> flag model: byte-level read from <paramref name="store"/>.</description></item>
     /// </list>
-    /// <para>
-    /// The legacy <see cref="DataKind.Array"/> kind (heterogeneous-element array
-    /// stored as <c>DataValue[]</c>) does not route through this auto-router and
-    /// must use <c>AsArray(store)</c>. Folding it in is deferred to the composite
-    /// reference-array design.
-    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the value isn't an array, when a required parameter is missing for
-    /// the resolved storage path, or when the value uses the legacy
-    /// <see cref="DataKind.Array"/> kind.
+    /// Thrown when the value isn't an array, or when a required parameter is missing
+    /// for the resolved storage path.
     /// </exception>
     public ReadOnlySpan<T> AsArraySpan<T>(IValueStore? store = null, SidecarRegistry? registry = null)
         where T : unmanaged
@@ -1404,27 +1382,16 @@ public readonly struct DataValue : IEquatable<DataValue>
             return MemoryMarshal.Cast<byte, T>(sidecarBytes);
         }
 
-        // Arena-backed via the new IsArray flag model: bytes live at (_p0, _p1) in
+        // Arena-backed via the IsArray flag model: bytes live at (_p0, _p1) in
         // the store. Reinterpret the byte span as ReadOnlySpan<T>.
-        if ((_flags & DataValueFlags.IsArray) != 0 && (_flags & DataValueFlags.InArena) != 0)
+        if (store is null)
         {
-            if (store is null)
-            {
-                throw new InvalidOperationException(
-                    "AsArraySpan: arena-backed array requires an IValueStore. " +
-                    "Pass the frame's Source arena.");
-            }
-            ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(_p0, _p1);
-            return MemoryMarshal.Cast<byte, T>(arenaBytes);
+            throw new InvalidOperationException(
+                "AsArraySpan: arena-backed array requires an IValueStore. " +
+                "Pass the frame's Source arena.");
         }
-
-        // Legacy DataKind.Array reaches IsArray=true via the kind-based fallback in
-        // the IsArray getter, but its DataValue[]-backed payload is managed by its
-        // dedicated AsArray(store) accessor. Folding it in is deferred to the
-        // composite reference-array design.
-        throw new InvalidOperationException(
-            $"AsArraySpan does not yet route DataKind.{_kind} arrays. " +
-            "Use AsArray(store) for the legacy heterogeneous-element array kind.");
+        ReadOnlySpan<byte> arenaBytes = store.RetrieveUtf8Span(_p0, _p1);
+        return MemoryMarshal.Cast<byte, T>(arenaBytes);
     }
 
     /// <summary>
@@ -1580,37 +1547,14 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new DataValue(_kind, flags: _flags, p0: _p0 + delta, p1: _p1, p2: _p2, p3: _p3, charCount: _charCount);
     }
 
-    /// <summary>Creates a typed array value from an element kind and an array of elements.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromArray(DataKind, DataValue[], IValueStore)"/> instead.</remarks>
-    public static DataValue FromArray(DataKind elementKind, DataValue[] elements) =>
-        throw new InvalidOperationException("Use FromArray(elementKind, elements, store). ReferenceStore is no longer available.");
-
-    /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromArray(DataKind elementKind, DataValue[] elements, IValueStore store)
-    {
-        var (p0, p1) = store.StoreDataValues(elements);
-        return new(DataKind.Array, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: (int)elementKind);
-    }
-
-    /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromArray(DataKind elementKind, List<DataValue> elements, IValueStore store)
-    {
-        var (p0, p1) = store.StoreDataValues(CollectionsMarshal.AsSpan(elements));
-        return new(DataKind.Array, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: (int)elementKind);
-    }
-
-    /// <summary>Creates a typed null array with the given element kind.</summary>
-    /// <param name="elementKind">The element kind of the null array.</param>
-    public static DataValue NullArray(DataKind elementKind) =>
-        new(DataKind.Array, DataValueFlags.IsNull, referenceIndex: 0, meta: (short)elementKind);
-
     /// <summary>
-    /// Creates a typed null typed-array value: <c>Kind=elementKind</c> with the
+    /// Creates a typed null array value: <c>Kind=elementKind</c> with the
     /// <see cref="DataValueFlags.IsArray"/> and <see cref="DataValueFlags.IsNull"/>
-    /// flags set. Mirrors <see cref="NullByteArray"/> generalised to any element
-    /// kind, and is the typed-array counterpart to the legacy
-    /// <see cref="NullArray(DataKind)"/> (which uses the heterogeneous
-    /// <see cref="DataKind.Array"/> kind).
+    /// flags set. Mirrors <see cref="NullByteArray"/> generalised to any
+    /// element kind. Combined with <see cref="FromStringArray"/> /
+    /// <see cref="FromImageArray"/> / <see cref="FromStructArray"/> /
+    /// <see cref="FromArenaArray{T}"/> / <see cref="FromArenaArrayBytes"/>,
+    /// this is the canonical null carrier for typed arrays.
     /// </summary>
     public static DataValue NullArrayOf(DataKind elementKind) =>
         new(elementKind, flags: DataValueFlags.IsNull | DataValueFlags.IsArray, p0: 0);
@@ -2121,7 +2065,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// The boxed primitive (<see cref="float"/>, <see cref="int"/>, <see cref="bool"/>, etc.),
     /// the reference-type payload (<see cref="string"/>, <c>float[]</c>, <c>byte[]</c>, etc.),
     /// or <see langword="null"/> when <see cref="IsNull"/> is true.
-    /// Composite types (<see cref="DataKind.Array"/>, <see cref="DataKind.Struct"/>) return
+    /// Composite types (<see cref="DataKind.Struct"/> and any typed array) return
     /// the raw <c>DataValue[]</c> — callers that need recursive conversion should handle
     /// those kinds explicitly.
     /// </returns>
@@ -2663,36 +2607,10 @@ public readonly struct DataValue : IEquatable<DataValue>
         return (DataKind)(byte)_p0;
     }
 
-    /// <summary>Returns the typed array payload.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsArray(IValueStore)"/> instead.</remarks>
-    public DataValue[] AsArray()
-    {
-        ThrowIfNullOrWrongKind(DataKind.Array);
-        throw new InvalidOperationException("Use AsArray(store). ReferenceStore is no longer available.");
-    }
-
-    /// <summary>Returns the typed array payload from an explicit <see cref="IValueStore"/>.</summary>
-    public DataValue[] AsArray(IValueStore store)
-    {
-        ThrowIfNullOrWrongKind(DataKind.Array);
-        return store.RetrieveDataValues(_p0, _p1);
-    }
-
     /// <summary>
-    /// Returns the element <see cref="DataKind"/> for an array value. Handles
-    /// both shapes:
-    /// <list type="bullet">
-    ///   <item><description>
-    ///     Typed arrays (<see cref="DataValueFlags.IsArray"/> flag set with a
-    ///     concrete element kind): the element kind <em>is</em> <see cref="Kind"/>.
-    ///   </description></item>
-    ///   <item><description>
-    ///     Legacy heterogeneous <see cref="DataKind.Array"/> values: the element
-    ///     kind lives in <c>_meta</c> for typed nulls (from <see cref="NullArray"/>)
-    ///     and <c>_p2</c> for non-null arrays (from <see cref="FromArray(DataKind, DataValue[], IValueStore)"/>).
-    ///   </description></item>
-    /// </list>
+    /// Returns the element <see cref="DataKind"/> for an array value. With the
+    /// typed-array shape (<see cref="DataValueFlags.IsArray"/> flag set with a
+    /// concrete element kind), the element kind <em>is</em> <see cref="Kind"/>.
     /// Available on both null and non-null array values.
     /// </summary>
     /// <exception cref="InvalidOperationException">Called on a non-array value.</exception>
@@ -2700,24 +2618,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         get
         {
-            // Typed-array shape (Kind=elementKind + IsArray flag): the kind itself
-            // is the element kind. Distinct from the legacy DataKind.Array slot.
-            if (_kind != DataKind.Array && IsArray)
-            {
-                return _kind;
-            }
-
-            if (_kind != DataKind.Array)
+            if (!IsArray)
             {
                 throw new InvalidOperationException(
-                    $"Cannot read ArrayElementKind on a {_kind} value.");
+                    $"Cannot read ArrayElementKind on a {_kind} value (IsArray=false).");
             }
-
-            // Legacy heterogeneous-Array layout split: typed nulls (NullArray) store
-            // the element kind in _meta because _p1 isn't carrying a length; non-null
-            // arrays (FromArray) store it in _p2 because _meta would alias _p1's
-            // length low bytes.
-            return IsNull ? (DataKind)_meta : (DataKind)_p2;
+            return _kind;
         }
     }
 
@@ -2817,8 +2723,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             // same store means identical content. Different offsets → unknown, return false.
             DataKind.Image
                 => _p0 == other._p0 && _p1 == other._p1,
-            DataKind.Array
-                => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
                 => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
             _ => false,
@@ -2880,8 +2784,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Offset-based hashing: consistent with offset-equality in Equals.
             DataKind.Image
                 => HashCode.Combine(_kind, _p0, _p1),
-            DataKind.Array
-                => HashCode.Combine(_kind, _p0, _p1, _meta),
             DataKind.Struct
                 => HashCode.Combine(_kind, _p0, _p1, _meta),
             _ => HashCode.Combine(_kind),
@@ -3057,7 +2959,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
-            DataKind.Array => $"Array<{(DataKind)_meta}>",
             DataKind.Struct => $"Struct({_meta} fields)",
             _ => _kind.ToString(),
         };
