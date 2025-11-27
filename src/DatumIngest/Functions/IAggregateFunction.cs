@@ -12,10 +12,17 @@ public interface IAggregateFunction
     string Name { get; }
 
     /// <summary>
-    /// Validates the argument types and returns the result <see cref="DataKind"/>.
+    /// Validates the argument types and returns the result kind. For aggregates
+    /// that produce a typed array (those whose <see cref="ProducesArray"/> is
+    /// <see langword="true"/>), this returns the <em>element</em> kind — the
+    /// array-ness is communicated via the <see cref="ProducesArray"/> flag,
+    /// not via a <see cref="DataKind.Array"/> wrapper kind. Scalar aggregates
+    /// return their result kind directly.
     /// </summary>
     /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
-    /// <returns>The kind of the result value.</returns>
+    /// <returns>
+    /// The kind of the (per-element, when array-producing) result value.
+    /// </returns>
     /// <exception cref="ArgumentException">The argument types are not valid for this function.</exception>
     DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds);
 
@@ -29,16 +36,14 @@ public interface IAggregateFunction
     IAggregateAccumulator CreateAccumulator();
 
     /// <summary>
-    /// Returns the element kind of the result array when this aggregate produces a
-    /// <see cref="DataKind.Array"/>, given the argument types at plan time.
+    /// Whether this aggregate's result is an array of <see cref="ValidateArguments"/>'s
+    /// returned element kind (rather than a scalar of that kind). Defaults to
+    /// <see langword="false"/>; aggregates such as <c>ARRAY_AGG</c> override
+    /// to <see langword="true"/>. Replaces the old <c>GetResultArrayElementKind</c>
+    /// mechanism, which keyed array-ness off the now-retiring
+    /// <see cref="DataKind.Array"/> kind.
     /// </summary>
-    /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
-    /// <returns>
-    /// The array element kind, or <c>null</c> when this function does not return
-    /// a <see cref="DataKind.Array"/> or when the element kind cannot be
-    /// determined statically.
-    /// </returns>
-    DataKind? GetResultArrayElementKind(ReadOnlySpan<DataKind> argumentKinds) => null;
+    bool ProducesArray => false;
 
     /// <summary>
     /// The cost weight of a single invocation of this function, measured in Query Units (QU).

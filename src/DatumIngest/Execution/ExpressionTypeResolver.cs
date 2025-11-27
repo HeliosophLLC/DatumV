@@ -137,9 +137,19 @@ public static class ExpressionTypeResolver
 
         if (sourceKind == DataKind.Array)
         {
-            // Array element access: return the element kind.
+            // Legacy heterogeneous-element array source. Element kind via metadata.
             return ResolveArrayElementKindFromExpression(indexAccess.Source, sourceSchema, functions)
                 ?? DataKind.Float32;
+        }
+
+        // Typed-array source via an aggregate that ProducesArray. The aggregate's
+        // ValidateArguments returns the per-element kind directly, which is what
+        // ResolveType already gave us via ResolveAggregate. Indexing yields a
+        // scalar of that element kind.
+        if (indexAccess.Source is FunctionCallExpression aggSource
+            && functions.TryGetAggregate(aggSource.FunctionName) is { ProducesArray: true })
+        {
+            return sourceKind;
         }
 
         // Vector (Float32 + IsArray) indexing returned Float32 scalars. With Vector
@@ -259,7 +269,8 @@ public static class ExpressionTypeResolver
     /// is <see cref="DataKind.Array"/>. Returns <c>null</c> when the element kind
     /// is not statically known (e.g. a computed expression or unknown column).
     /// Handles both direct column references (via <see cref="ColumnInfo.ArrayElementKind"/>)
-    /// and aggregate function calls (via <see cref="IAggregateFunction.GetResultArrayElementKind"/>).
+    /// and aggregate function calls (via <see cref="IAggregateFunction.ProducesArray"/>
+    /// + <see cref="IAggregateFunction.ValidateArguments"/>).
     /// </summary>
     internal static DataKind? ResolveArrayElementKindFromExpression(Expression expression, Schema sourceSchema, FunctionRegistry functions)
     {
@@ -277,33 +288,22 @@ public static class ExpressionTypeResolver
             return info?.ArrayElementKind;
         }
 
-        // Aggregate function call — determine element kind using
-        // GetResultArrayElementKind if provided by the aggregate.
+        // Aggregate function call — for array-producing aggregates the element
+        // kind is what ValidateArguments returns (post-IAggregateFunction
+        // migration: array-ness is the ProducesArray flag, the kind is the leaf).
         if (expression is FunctionCallExpression func)
         {
             IAggregateFunction? aggregateFunction = functions.TryGetAggregate(func.FunctionName);
-            if (aggregateFunction is not null)
+            if (aggregateFunction is { ProducesArray: true })
             {
-                DataKind?[] argKindBuffer = new DataKind?[func.Arguments.Count];
-                bool allResolved = true;
-
+                DataKind[] argKinds = new DataKind[func.Arguments.Count];
                 for (int index = 0; index < func.Arguments.Count; index++)
                 {
                     DataKind? kind = ResolveType(func.Arguments[index], sourceSchema, functions);
-                    if (kind is null) { allResolved = false; break; }
-                    argKindBuffer[index] = kind.Value;
+                    if (kind is null) return null;
+                    argKinds[index] = kind.Value;
                 }
-
-                if (allResolved)
-                {
-                    DataKind[] argKinds = new DataKind[func.Arguments.Count];
-                    for (int i = 0; i < argKindBuffer.Length; i++)
-                    {
-                        argKinds[i] = argKindBuffer[i]!.Value;
-                    }
-
-                    return aggregateFunction.GetResultArrayElementKind(argKinds);
-                }
+                return aggregateFunction.ValidateArguments(argKinds);
             }
         }
 

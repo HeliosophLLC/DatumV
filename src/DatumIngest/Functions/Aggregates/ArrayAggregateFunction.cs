@@ -24,6 +24,11 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     public string Name => "ARRAY_AGG";
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// ARRAY_AGG produces <c>Array&lt;Scalar&gt;</c>, so the per-element kind
+    /// equals the argument kind. Array-ness is signalled via
+    /// <see cref="ProducesArray"/>; this method returns the leaf element kind.
+    /// </remarks>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -32,16 +37,11 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
                 "ARRAY_AGG() requires exactly one argument.");
         }
 
-        return DataKind.Array;
+        return argumentKinds[0];
     }
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// Returns the argument kind directly: <c>ARRAY_AGG(scalar_col)</c> produces
-    /// <c>Array&lt;Scalar&gt;</c>, so the element kind equals the argument kind.
-    /// </remarks>
-    public DataKind? GetResultArrayElementKind(ReadOnlySpan<DataKind> argumentKinds) =>
-        argumentKinds.Length == 1 ? argumentKinds[0] : null;
+    public bool ProducesArray => true;
 
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new ArrayAggregateAccumulator();

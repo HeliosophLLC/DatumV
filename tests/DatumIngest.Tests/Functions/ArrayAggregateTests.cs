@@ -14,25 +14,32 @@ public class ArrayAggregateTests : ServiceTestBase
     // ─────────────── VALIDATION ───────────────
 
     [Fact]
-    public void ValidateArguments_SingleArgument_ReturnsArray()
+    public void ValidateArguments_SingleArgument_ReturnsElementKind()
     {
         ArrayAggregateFunction function = new();
 
+        // Post-IAggregateFunction migration: ValidateArguments returns the
+        // per-element kind. Array-ness is signalled via ProducesArray.
         DataKind result = function.ValidateArguments([DataKind.Float32]);
 
-        Assert.Equal(DataKind.Array, result);
+        Assert.Equal(DataKind.Float32, result);
+        Assert.True(function.ProducesArray);
     }
 
     [Fact]
-    public void ValidateArguments_AcceptsAnyKind()
+    public void ValidateArguments_AcceptsAnyKind_PerElementKindEqualsArgumentKind()
     {
         ArrayAggregateFunction function = new();
 
         foreach (DataKind kind in Enum.GetValues<DataKind>())
         {
             DataKind result = function.ValidateArguments([kind]);
-            Assert.Equal(DataKind.Array, result);
+            // Element kind echoes the argument kind across the board — ARRAY_AGG
+            // doesn't promote or coerce.
+            Assert.Equal(kind, result);
         }
+
+        Assert.True(function.ProducesArray);
     }
 
     [Fact]
