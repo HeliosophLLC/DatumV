@@ -48,7 +48,7 @@ public sealed class SpillReaderWriterTests : ServiceTestBase
                 }
                 rows.Add(copy);
             }
-            context.Pool.ReturnRowBatch(batch);
+            context.ReturnRowBatch(batch);
         }
         return rows;
     }

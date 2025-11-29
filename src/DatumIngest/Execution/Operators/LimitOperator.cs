@@ -98,7 +98,7 @@ public sealed class LimitOperator : IQueryOperator
                 if (skipped + inputBatch.Count <= Offset)
                 {
                     skipped += inputBatch.Count;
-                    context.Pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                     continue;
                 }
 
@@ -127,7 +127,7 @@ public sealed class LimitOperator : IQueryOperator
                     int end = startIndex + take;
                     for (int index = startIndex; index < end; index++)
                     {
-                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 
                         context.Pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
 
@@ -143,7 +143,7 @@ public sealed class LimitOperator : IQueryOperator
                 }
                 finally
                 {
-                    context.Pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
 
                 if (emitted >= Limit)
@@ -169,7 +169,7 @@ public sealed class LimitOperator : IQueryOperator
         {
             if (outputBatch is not null)
             {
-                context.Pool.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(outputBatch);
             }
         }
     }

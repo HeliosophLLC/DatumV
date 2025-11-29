@@ -134,7 +134,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             {
                 for (int i = 0; i < cached.Count; i++)
                 {
-                    outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
+                    outputBatch ??= context.RentRowBatch(outputLookup);
                     pool.RentAndCopyToOutput(cached, i, outputBatch);
                     if (outputBatch.IsFull)
                     {
@@ -154,7 +154,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         }
         finally
         {
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
         }
     }
 
@@ -181,7 +181,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             context.QueryMeter?.ThrowIfExceeded();
 
             _materializedSchema ??= input.ColumnLookup;
-            if (input.Count == 0) { pool.ReturnRowBatch(input); continue; }
+            if (input.Count == 0) { context.ReturnRowBatch(input); continue; }
 
             CaptureBatch(pool, input, _materializedSchema!);
         }
@@ -219,7 +219,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 context.CancellationToken.ThrowIfCancellationRequested();
                 context.QueryMeter?.ThrowIfExceeded();
 
-                if (input.Count == 0) { pool.ReturnRowBatch(input); continue; }
+                if (input.Count == 0) { context.ReturnRowBatch(input); continue; }
                 CaptureBatch(pool, input, _materializedSchema!);
             }
 
@@ -395,7 +395,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 {
                     for (int i = 0; i < cached.Count; i++)
                     {
-                        outputBatch ??= context.RentRowBatch(schema, context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(schema);
                         pool.RentAndCopyToOutput(cached, i, outputBatch);
                         if (outputBatch.IsFull)
                         {
@@ -415,7 +415,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             }
             finally
             {
-                if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+                if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             }
             await Task.CompletedTask;
         }

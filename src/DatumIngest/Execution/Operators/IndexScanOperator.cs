@@ -230,7 +230,7 @@ public sealed class IndexScanOperator : IQueryOperator
                     yield return inputBatch[i];
                 }
 
-                context.Pool.ReturnRowBatch(inputBatch);
+                context.ReturnRowBatch(inputBatch);
             }
 
             yield break;
@@ -261,7 +261,7 @@ public sealed class IndexScanOperator : IQueryOperator
                 totalFetched++;
             }
 
-            context.Pool.ReturnRowBatch(inputBatch);
+            context.ReturnRowBatch(inputBatch);
         }
 
         // Yield rows in index order (the batch order from the traversal).

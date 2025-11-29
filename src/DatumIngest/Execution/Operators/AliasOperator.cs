@@ -55,7 +55,7 @@ public sealed class AliasOperator : IQueryOperator
         {
             if (inputBatch.Count == 0)
             {
-                pool.ReturnRowBatch(inputBatch);
+                context.ReturnRowBatch(inputBatch);
                 continue;
             }
             
@@ -69,12 +69,12 @@ public sealed class AliasOperator : IQueryOperator
             {
                 if (outputBatch != null)
                 {
-                    pool.ReturnRowBatch(outputBatch);
+                    context.ReturnRowBatch(outputBatch);
                 }
 
                 if (!inputBatch.Disposed)
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
 
                 throw;

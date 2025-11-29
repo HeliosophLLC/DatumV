@@ -228,7 +228,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                                 }
                             }
 
-                            outputBatch ??= context.RentRowBatch(schema!, context.BatchSize);
+                            outputBatch ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -242,7 +242,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -314,7 +314,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                                 if (isNew)
                                 {
-                                    outputBatch ??= context.RentRowBatch(schema!, context.BatchSize);
+                                    outputBatch ??= context.RentRowBatch(schema!);
                                     pool.RentAndCopyToOutput(spilledBatch, i, outputBatch);
                                     DrainEmittedRowCount++;
 
@@ -329,7 +329,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledBatch);
+                            context.ReturnRowBatch(spilledBatch);
                         }
                     }
 
@@ -356,13 +356,13 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                 {
                     if (partitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(partitionBuffers[p]!);
+                        context.ReturnRowBatch(partitionBuffers[p]!);
                         partitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             if (compositeComparer is not null && compositeKeySet is not null)
             {

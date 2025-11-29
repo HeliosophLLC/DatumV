@@ -343,7 +343,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -444,7 +444,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledBatch);
+                            context.ReturnRowBatch(spilledBatch);
                         }
                     }
                 }
@@ -469,13 +469,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (partitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(partitionBuffers[p]!);
+                        context.ReturnRowBatch(partitionBuffers[p]!);
                         partitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             spiller?.Dispose();
             if (hashSetArena is not null) pool.ReturnArena(hashSetArena);
@@ -650,7 +650,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(rightBatch);
+                    context.ReturnRowBatch(rightBatch);
                 }
             }
 
@@ -759,7 +759,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(leftBatch);
+                    context.ReturnRowBatch(leftBatch);
                 }
             }
 
@@ -840,7 +840,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledRightBatch);
+                            context.ReturnRowBatch(spilledRightBatch);
                         }
                     }
 
@@ -896,7 +896,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledLeftBatch);
+                            context.ReturnRowBatch(spilledLeftBatch);
                         }
                     }
 
@@ -924,7 +924,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (rightPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(rightPartitionBuffers[p]!);
+                        context.ReturnRowBatch(rightPartitionBuffers[p]!);
                         rightPartitionBuffers[p] = null;
                     }
                 }
@@ -936,13 +936,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (leftPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(leftPartitionBuffers[p]!);
+                        context.ReturnRowBatch(leftPartitionBuffers[p]!);
                         leftPartitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             if (compositeComparer is not null)
             {
@@ -1087,7 +1087,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(rightBatch);
+                    context.ReturnRowBatch(rightBatch);
                 }
             }
 
@@ -1177,7 +1177,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(leftBatch);
+                    context.ReturnRowBatch(leftBatch);
                 }
             }
 
@@ -1222,7 +1222,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledRightBatch);
+                            context.ReturnRowBatch(spilledRightBatch);
                         }
                     }
 
@@ -1258,7 +1258,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledLeftBatch);
+                            context.ReturnRowBatch(spilledLeftBatch);
                         }
                     }
 
@@ -1284,7 +1284,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (rightPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(rightPartitionBuffers[p]!);
+                        context.ReturnRowBatch(rightPartitionBuffers[p]!);
                         rightPartitionBuffers[p] = null;
                     }
                 }
@@ -1296,13 +1296,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (leftPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(leftPartitionBuffers[p]!);
+                        context.ReturnRowBatch(leftPartitionBuffers[p]!);
                         leftPartitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             if (compositeComparer is not null && rightCompositeCounts is not null)
             {
@@ -1455,7 +1455,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(rightBatch);
+                    context.ReturnRowBatch(rightBatch);
                 }
             }
 
@@ -1577,7 +1577,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(leftBatch);
+                    context.ReturnRowBatch(leftBatch);
                 }
             }
 
@@ -1645,7 +1645,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledRightBatch);
+                            context.ReturnRowBatch(spilledRightBatch);
                         }
                     }
 
@@ -1698,7 +1698,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledLeftBatch);
+                            context.ReturnRowBatch(spilledLeftBatch);
                         }
                     }
 
@@ -1726,7 +1726,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (rightPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(rightPartitionBuffers[p]!);
+                        context.ReturnRowBatch(rightPartitionBuffers[p]!);
                         rightPartitionBuffers[p] = null;
                     }
                 }
@@ -1738,13 +1738,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (leftPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(leftPartitionBuffers[p]!);
+                        context.ReturnRowBatch(leftPartitionBuffers[p]!);
                         leftPartitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             if (compositeComparer is not null)
             {
@@ -1917,7 +1917,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(rightBatch);
+                    context.ReturnRowBatch(rightBatch);
                 }
             }
 
@@ -2019,7 +2019,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(leftBatch);
+                    context.ReturnRowBatch(leftBatch);
                 }
             }
 
@@ -2061,7 +2061,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledRightBatch);
+                            context.ReturnRowBatch(spilledRightBatch);
                         }
                     }
 
@@ -2095,7 +2095,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spilledLeftBatch);
+                            context.ReturnRowBatch(spilledLeftBatch);
                         }
                     }
 
@@ -2121,7 +2121,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (rightPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(rightPartitionBuffers[p]!);
+                        context.ReturnRowBatch(rightPartitionBuffers[p]!);
                         rightPartitionBuffers[p] = null;
                     }
                 }
@@ -2133,13 +2133,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 {
                     if (leftPartitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(leftPartitionBuffers[p]!);
+                        context.ReturnRowBatch(leftPartitionBuffers[p]!);
                         leftPartitionBuffers[p] = null;
                     }
                 }
             }
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (compositeKeyScratch is not null) pool.ReturnDataValues(compositeKeyScratch);
             if (compositeComparer is not null && rightCompositeCounts is not null)
             {

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Execution;
+using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Pooling;

@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.DatumFile.V2;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
@@ -132,15 +133,32 @@ public sealed class ExecutionContext
     public Arena Store { get; }
 
     /// <summary>
-    /// Rents a <see cref="RowBatch"/> bound to <see cref="Store"/> as its arena —
-    /// the canonical way for operators to allocate output batches in the
-    /// one-arena-per-query model. Equivalent to
-    /// <c>Pool.RentRowBatch(lookup, capacity, Store)</c> but spelled at the
-    /// context level so call sites read as "rent me a batch in this query's
-    /// arena" without restating the arena every time.
+    /// Rents a <see cref="RowBatch"/> bound to <see cref="Store"/> as its arena
+    /// and sized to <see cref="BatchSize"/> — the canonical operator-output
+    /// rental in the one-arena-per-query model. Operators that don't have a
+    /// row-count reason to rent a smaller batch should use this overload.
+    /// </summary>
+    public RowBatch RentRowBatch(ColumnLookup columnLookup)
+        => Pool.RentRowBatch(columnLookup, BatchSize, Store);
+
+    /// <summary>
+    /// Rents a <see cref="RowBatch"/> with an explicit capacity. Use only when
+    /// the batch is intentionally smaller than <see cref="BatchSize"/> — e.g.
+    /// <see cref="Operators.SingleEmptyRowOperator"/> needs a 1-row batch, and
+    /// <see cref="Operators.ModelInvocationOperator"/> sizes to the
+    /// <see cref="RowLimit"/>-capped row count when LIMIT propagates a
+    /// smaller window.
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity)
         => Pool.RentRowBatch(columnLookup, capacity, Store);
+
+    /// <summary>
+    /// Returns a <see cref="RowBatch"/> rented via this context. Symmetric
+    /// counterpart of <see cref="RentRowBatch(ColumnLookup)"/>. Equivalent to
+    /// <c>Pool.ReturnRowBatch(batch)</c>; spelled on the context so operator
+    /// call sites read as a rent/return pair against the same handle.
+    /// </summary>
+    public void ReturnRowBatch(RowBatch batch) => Pool.ReturnRowBatch(batch);
 
     /// <summary>
     /// Optional meter for accumulating Query Unit costs during execution.
@@ -211,9 +229,13 @@ public sealed class ExecutionContext
 
     /// <summary>
     /// Maximum number of rows per <see cref="Model.RowBatch"/>. Operators fill
-    /// batches up to this size before yielding. Defaults to <c>1024</c>.
+    /// batches up to this size before yielding. Defaults to
+    /// <see cref="DatumFormatV2.DefaultPageSize"/> so in-memory batches align
+    /// with on-disk page boundaries — one page = one batch = one operator
+    /// working unit. Tests may override via the <c>init</c> setter for
+    /// multi-batch stress, but production code should always use the default.
     /// </summary>
-    public int BatchSize { get; init; } = 1024;
+    public int BatchSize { get; init; } = DatumFormatV2.DefaultPageSize;
 
     /// <summary>
     /// Pool for reusing <see cref="Model.Row"/> objects and their backing

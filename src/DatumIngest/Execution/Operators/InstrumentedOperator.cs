@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using DatumIngest.Model;
 
-namespace DatumIngest.Execution;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// A decorator that wraps any <see cref="IQueryOperator"/> and collects

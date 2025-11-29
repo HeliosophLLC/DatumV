@@ -430,7 +430,7 @@ public sealed class JoinOperator : IQueryOperator
                 bucket.Add((buildIndex, buildRow));
             }
             }
-            context.Pool.ReturnRowBatch(buildBatch);
+            context.ReturnRowBatch(buildBatch);
         }
 
         ExecutionTracer.Write($"HASH BUILD done  rows={buildRows.Count}  keys={singleKeyTable?.Count ?? compositeKeyTable?.Count ?? 0}  elapsed={Stopwatch.GetElapsedTime(buildStartTicks).TotalMilliseconds:F0}ms");
@@ -637,7 +637,7 @@ public sealed class JoinOperator : IQueryOperator
                 }
             }
         }
-        context.Pool.ReturnRowBatch(probeBatch);
+        context.ReturnRowBatch(probeBatch);
         }
         }
         finally
@@ -753,7 +753,7 @@ public sealed class JoinOperator : IQueryOperator
                         {
                             await probeInput.Writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
                         }
-                        context.Pool.ReturnRowBatch(batch);
+                        context.ReturnRowBatch(batch);
                     }
                 }
                 finally
@@ -1001,7 +1001,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 buildRows.Add(buildBatch[batchIndex]);
             }
-            context.Pool.ReturnRowBatch(buildBatch);
+            context.ReturnRowBatch(buildBatch);
         }
 
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
@@ -1101,7 +1101,7 @@ public sealed class JoinOperator : IQueryOperator
                 }
             }
         }
-        context.Pool.ReturnRowBatch(probeBatch);
+        context.ReturnRowBatch(probeBatch);
         }
 
         // Emit unmatched build rows.
@@ -1152,7 +1152,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 rightRows.Add(rightBatch[batchIndex]);
             }
-            context.Pool.ReturnRowBatch(rightBatch);
+            context.ReturnRowBatch(rightBatch);
         }
 
         CombinedRowSchema? schema = null;
@@ -1172,7 +1172,7 @@ public sealed class JoinOperator : IQueryOperator
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
-            context.Pool.ReturnRowBatch(leftBatch);
+            context.ReturnRowBatch(leftBatch);
         }
 
         if (outputBatch is not null)

@@ -275,7 +275,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -303,7 +303,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         finally
         {
             if (currentGroup is not null) pool.Backing.Return(currentGroup);
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }
@@ -467,7 +467,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     .ConfigureAwait(false);
                             }
 
-                            pool.ReturnRowBatch(inputBatch);
+                            context.ReturnRowBatch(inputBatch);
                         }
                     }
                     finally
@@ -773,7 +773,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -919,7 +919,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
                         finally
                         {
-                            pool.ReturnRowBatch(spillBatch);
+                            context.ReturnRowBatch(spillBatch);
                         }
                     }
 
@@ -964,13 +964,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 {
                     if (partitionBuffers[p] is not null)
                     {
-                        pool.ReturnRowBatch(partitionBuffers[p]!);
+                        context.ReturnRowBatch(partitionBuffers[p]!);
                     }
                 }
             }
             spiller?.Dispose();
             if (bufferArena is not null) pool.ReturnArena(bufferArena);
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (operatorArena is not null) pool.ReturnArena(operatorArena);
         }
     }

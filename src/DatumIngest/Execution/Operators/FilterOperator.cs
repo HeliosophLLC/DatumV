@@ -85,7 +85,7 @@ public sealed class FilterOperator : IQueryOperator
 
                         if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
 
-                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 
                         pool.RentAndCopyToOutput(inputBatch, index, outputBatch);
 
@@ -99,7 +99,7 @@ public sealed class FilterOperator : IQueryOperator
                 }
                 finally
                 {
-                    context.Pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -114,7 +114,7 @@ public sealed class FilterOperator : IQueryOperator
         {
             if (outputBatch is not null)
             {
-                pool.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(outputBatch);
             }
         }
     }

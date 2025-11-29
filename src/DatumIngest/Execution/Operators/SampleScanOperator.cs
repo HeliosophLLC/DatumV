@@ -124,7 +124,7 @@ public sealed class SampleScanOperator : IQueryOperator
                 }
             }
 
-            context.Pool.ReturnRowBatch(inputBatch);
+            context.ReturnRowBatch(inputBatch);
         }
 
         if (outputBatch is not null)

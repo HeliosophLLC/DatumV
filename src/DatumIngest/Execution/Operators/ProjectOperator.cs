@@ -164,7 +164,7 @@ public sealed class ProjectOperator : IQueryOperator
                         Row row = inputBatch[index];
 
                         schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
-                        outputBatch ??= context.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema), context.BatchSize);
+                        outputBatch ??= context.RentRowBatch(ProjectionSchema.BuildColumnLookup(schema));
 
                         EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.OuterRow, context.SidecarRegistry);
 
@@ -191,7 +191,7 @@ public sealed class ProjectOperator : IQueryOperator
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -206,7 +206,7 @@ public sealed class ProjectOperator : IQueryOperator
         {
             if (outputBatch is not null)
             {
-                pool.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(outputBatch);
             }
         }
     }

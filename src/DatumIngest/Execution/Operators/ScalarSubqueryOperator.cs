@@ -89,7 +89,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
                         firstRow = innerRow;
                     }
 
-                    context.Pool.ReturnRowBatch(innerBatch);
+                    context.ReturnRowBatch(innerBatch);
 
                     if (hasMultipleRows)
                     {
@@ -159,7 +159,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
                 }
             }
 
-            context.Pool.ReturnRowBatch(inputBatch);
+            context.ReturnRowBatch(inputBatch);
         }
 
         if (outputBatch is not null)

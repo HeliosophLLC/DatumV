@@ -123,7 +123,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                             outputBatch = null;
                         }
                     }
-                    context.Pool.ReturnRowBatch(rightBatch);
+                    context.ReturnRowBatch(rightBatch);
                 }
 
                 // LEFT LATERAL: emit left + NULLs when no right rows matched.
@@ -150,7 +150,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                     }
                 }
             }
-            context.Pool.ReturnRowBatch(leftBatch);
+            context.ReturnRowBatch(leftBatch);
         }
 
         if (outputBatch is not null)

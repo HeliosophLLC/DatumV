@@ -187,13 +187,13 @@ public sealed class ModelInvocationOperator : IQueryOperator
 
             if (sourceBatch.Count == 0)
             {
-                pool.ReturnRowBatch(sourceBatch);
+                context.ReturnRowBatch(sourceBatch);
                 continue;
             }
 
             if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
             {
-                pool.ReturnRowBatch(sourceBatch);
+                context.ReturnRowBatch(sourceBatch);
                 yield break;
             }
 
@@ -287,8 +287,8 @@ public sealed class ModelInvocationOperator : IQueryOperator
 
             if (modelOutputs.Count != rowsThisBatch)
             {
-                pool.ReturnRowBatch(outputBatch);
-                pool.ReturnRowBatch(sourceBatch);
+                context.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(sourceBatch);
                 throw new InvalidOperationException(
                     $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {rowsThisBatch}-row input batch.");
             }
@@ -312,7 +312,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 outputBatch.Add(outValues);
             }
 
-            pool.ReturnRowBatch(sourceBatch);
+            context.ReturnRowBatch(sourceBatch);
             yieldedRows += rowsThisBatch;
             yield return outputBatch;
 

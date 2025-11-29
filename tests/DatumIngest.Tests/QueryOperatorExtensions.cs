@@ -32,7 +32,7 @@ internal static class QueryOperatorExtensions
                 rows.Add(batch[i].CloneForTest(batch.Arena, context.Store));
             }
 
-            context.Pool.ReturnRowBatch(batch);
+            context.ReturnRowBatch(batch);
         }
 
         return rows;

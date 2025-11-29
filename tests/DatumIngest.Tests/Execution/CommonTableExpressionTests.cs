@@ -556,7 +556,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         await foreach (RowBatch batch in plan.ExecuteAsync(context))
         {
             batchesReceived++;
-            context.Pool.ReturnRowBatch(batch);
+            context.ReturnRowBatch(batch);
             break;
         }
 

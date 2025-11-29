@@ -155,9 +155,9 @@ internal sealed class IndexNestedLoopJoinExecutor
                     // LIMIT short-circuit. Discard buffered output and signal
                     // the caller to fall back to hash join.
                     ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
-                    context.Pool.ReturnRowBatch(probeBatch);
-                    if (outputBatch is not null) context.Pool.ReturnRowBatch(outputBatch);
-                    foreach (RowBatch buffered in trialBuffer) { context.Pool.ReturnRowBatch(buffered); }
+                    context.ReturnRowBatch(probeBatch);
+                    if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
+                    foreach (RowBatch buffered in trialBuffer) { context.ReturnRowBatch(buffered); }
                     _circuitBreakerTripped = true;
                     yield break;
                 }
@@ -276,7 +276,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }
             }
-            context.Pool.ReturnRowBatch(probeBatch);
+            context.ReturnRowBatch(probeBatch);
         }
 
         ExecutionTracer.Write($"INLJ trial complete  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
@@ -317,7 +317,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 DataValue[] owned = bufferPool.Rent(src.FieldCount);
                 Array.Copy(src.RawValues, owned, src.FieldCount);
                 Row row = new(src.RawNames, owned, src.RawNameIndex);
-                context.Pool.ReturnRowBatch(batch);
+                context.ReturnRowBatch(batch);
                 return row;
             }
         }

@@ -1,6 +1,6 @@
 using DatumIngest.Model;
 
-namespace DatumIngest.Execution;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Wraps a child operator to skip the first N rows, then yields the rest.
@@ -46,35 +46,51 @@ public sealed class SkipOperator : IQueryOperator
     {
         long skipped = 0;
         RowBatch? outputBatch = null;
+        ColumnLookup? columnLookup = null;
 
-        await foreach (RowBatch inputBatch in _child.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            for (int i = 0; i < inputBatch.Count; i++)
+            await foreach (RowBatch inputBatch in _child.ExecuteAsync(context).ConfigureAwait(false))
             {
-                Row row = inputBatch[i];
-
-                if (skipped < _count)
+                for (int i = 0; i < inputBatch.Count; i++)
                 {
-                    skipped++;
-                    continue;
+                    Row row = inputBatch[i];
+
+                    if (skipped < _count)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    columnLookup ??= inputBatch.ColumnLookup;
+                    outputBatch ??= context.RentRowBatch(columnLookup);
+
+                    context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
+
+                    if (outputBatch.IsFull)
+                    {
+                        RowBatch toYield = outputBatch;
+                        outputBatch = null;
+                        yield return toYield;
+                    }
                 }
 
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(row);
-
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
-                }
+                context.ReturnRowBatch(inputBatch);
             }
 
-            context.Pool.ReturnRowBatch(inputBatch);
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
         }
     }
 }

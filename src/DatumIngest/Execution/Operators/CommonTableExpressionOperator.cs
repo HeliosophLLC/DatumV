@@ -167,7 +167,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
             {
                 for (int i = 0; i < cachedBatch.Count; i++)
                 {
-                    outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
+                    outputBatch ??= context.RentRowBatch(outputLookup);
                     pool.RentAndCopyToOutput(cachedBatch, i, outputBatch);
                     if (outputBatch.IsFull)
                     {
@@ -192,7 +192,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
             // cleanup. After a successful yield the local is null and this is a no-op.
             if (outputBatch is not null)
             {
-                pool.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(outputBatch);
             }
         }
     }
@@ -221,7 +221,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
 
             if (inputBatch.Count == 0)
             {
-                pool.ReturnRowBatch(inputBatch);
+                context.ReturnRowBatch(inputBatch);
                 continue;
             }
 

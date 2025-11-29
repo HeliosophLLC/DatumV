@@ -395,9 +395,7 @@ public sealed class ScanOperator : IQueryOperator
                         {
                             for (int i = 0; i < inputBatch.Count; i++)
                             {
-                                outputBatch ??= context.RentRowBatch(
-                                    inputBatch.ColumnLookup,
-                                    context.BatchSize);
+                                outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 
                                 context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
@@ -411,7 +409,7 @@ public sealed class ScanOperator : IQueryOperator
                         }
                         finally
                         {
-                            context.Pool.ReturnRowBatch(inputBatch);
+                            context.ReturnRowBatch(inputBatch);
                         }
                     }
                 }
@@ -440,7 +438,7 @@ public sealed class ScanOperator : IQueryOperator
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                            outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
                             context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
                             if (outputBatch.IsFull)
@@ -453,7 +451,7 @@ public sealed class ScanOperator : IQueryOperator
                     }
                     finally
                     {
-                        context.Pool.ReturnRowBatch(inputBatch);
+                        context.ReturnRowBatch(inputBatch);
                     }
                 }
 
@@ -488,7 +486,7 @@ public sealed class ScanOperator : IQueryOperator
                                 {
                                     if (IsBitmapBitSet(bitmapMask, rowInChunk))
                                     {
-                                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                        outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 
                                         context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
@@ -505,7 +503,7 @@ public sealed class ScanOperator : IQueryOperator
                             }
                             finally
                             {
-                                context.Pool.ReturnRowBatch(inputBatch);
+                                context.ReturnRowBatch(inputBatch);
                             }
                         }
                     }
@@ -517,7 +515,7 @@ public sealed class ScanOperator : IQueryOperator
                             {
                                 for (int i = 0; i < inputBatch.Count; i++)
                                 {
-                                    outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup, context.BatchSize);
+                                    outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 
                                     context.Pool.RentAndCopyToOutput(inputBatch, i, outputBatch);
 
@@ -531,7 +529,7 @@ public sealed class ScanOperator : IQueryOperator
                             }
                             finally
                             {
-                                context.Pool.ReturnRowBatch(inputBatch);
+                                context.ReturnRowBatch(inputBatch);
                             }
                         }
                     }
@@ -551,7 +549,7 @@ public sealed class ScanOperator : IQueryOperator
         {
             if (outputBatch is not null)
             {
-                context.Pool.ReturnRowBatch(outputBatch);
+                context.ReturnRowBatch(outputBatch);
             }
         }
     }

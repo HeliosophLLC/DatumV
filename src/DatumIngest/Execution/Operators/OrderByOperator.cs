@@ -186,7 +186,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -233,7 +233,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             {
                 pool.ReturnRow(heap.Dequeue());
             }
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             if (bufferArena is not null) pool.ReturnArena(bufferArena);
         }
     }
@@ -314,7 +314,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(inputBatch);
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
@@ -384,7 +384,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             }
             buffer.Clear();
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             foreach (SpillReaderWriter run in sortedRuns)
             {
                 run.Dispose();
@@ -494,7 +494,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         }
         finally
         {
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             foreach (RunReader r in readers)
             {
                 await r.DisposeAsync().ConfigureAwait(false);

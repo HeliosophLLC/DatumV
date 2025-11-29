@@ -1,4 +1,5 @@
 using DatumIngest.Execution;
+using DatumIngest.Execution.Operators;
 using DatumIngest.Model;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 

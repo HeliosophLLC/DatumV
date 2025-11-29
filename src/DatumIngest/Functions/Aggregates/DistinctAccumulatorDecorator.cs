@@ -459,7 +459,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
                 }
                 finally
                 {
-                    _context.Pool.ReturnRowBatch(batch);
+                    _context.ReturnRowBatch(batch);
                 }
             }
 
@@ -507,7 +507,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
             {
                 if (_partitionBuffers[p] is not null)
                 {
-                    _context.Pool.ReturnRowBatch(_partitionBuffers[p]!);
+                    _context.ReturnRowBatch(_partitionBuffers[p]!);
                     _partitionBuffers[p] = null;
                 }
             }

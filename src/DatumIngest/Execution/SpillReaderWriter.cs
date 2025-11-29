@@ -395,7 +395,7 @@ internal sealed class SpillReaderWriter : IDisposable
                 // the consumer doesn't know about it, so we own its cleanup.
                 if (outputBatch is not null)
                 {
-                    _pool.ReturnRowBatch(outputBatch);
+                    context.ReturnRowBatch(outputBatch);
                 }
             }
         }

@@ -213,7 +213,7 @@ internal sealed class GraceHashJoinExecutor
                         buildEstimator.EscalateToEveryRow();
                     }
                 }
-                context.Pool.ReturnRowBatch(buildBatch);
+                context.ReturnRowBatch(buildBatch);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -319,7 +319,7 @@ internal sealed class GraceHashJoinExecutor
                         }
                     }
                     }
-                    context.Pool.ReturnRowBatch(probeBatch);
+                    context.ReturnRowBatch(probeBatch);
                 }
 
                 if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
@@ -353,7 +353,7 @@ internal sealed class GraceHashJoinExecutor
                             partition.AddProbeRow(probeRow, probeBatch.Arena);
                         }
                     }
-                    context.Pool.ReturnRowBatch(probeBatch);
+                    context.ReturnRowBatch(probeBatch);
                 }
             }
 

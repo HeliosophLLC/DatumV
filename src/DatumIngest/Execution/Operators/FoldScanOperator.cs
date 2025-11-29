@@ -140,7 +140,7 @@ public sealed class FoldScanOperator : IQueryOperator
                 }
                 finally
                 {
-                    pool.ReturnRowBatch(batch);
+                    context.ReturnRowBatch(batch);
                 }
             }
 
@@ -219,7 +219,7 @@ public sealed class FoldScanOperator : IQueryOperator
                     values[inputFieldCount + j] = scanResults[rowIndex][j];
                 }
 
-                outputBatch ??= context.RentRowBatch(outputLookup, context.BatchSize);
+                outputBatch ??= context.RentRowBatch(outputLookup);
                 outputBatch.Add(values);
 
                 if (outputBatch.IsFull)
@@ -247,7 +247,7 @@ public sealed class FoldScanOperator : IQueryOperator
             }
             allRows.Clear();
 
-            if (outputBatch is not null) pool.ReturnRowBatch(outputBatch);
+            if (outputBatch is not null) context.ReturnRowBatch(outputBatch);
             // No private-arena return: materialisation lives in context.Store, owned by QueryPlan.
         }
     }
