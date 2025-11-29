@@ -46,13 +46,30 @@ public static class CommonSubexpressionEliminator
 
     /// <summary>
     /// Walks the operator tree rooted at <paramref name="op"/> and rewrites
-    /// it so duplicated pure subexpressions inside any <see cref="ProjectOperator"/>
-    /// are hoisted into a shared <see cref="RowEnricherOperator"/>. Returns the
-    /// rewritten root (which may differ from <paramref name="op"/> when an
-    /// enricher was inserted above some scan).
+    /// it so duplicated pure subexpressions are hoisted into shared
+    /// <see cref="RowEnricherOperator"/>s.
     /// </summary>
+    /// <remarks>
+    /// Two-stage pass:
+    /// <list type="number">
+    ///   <item><description>
+    ///     <strong>Cross-clause</strong> (<see cref="EliminateCrossClauseFirst"/>) —
+    ///     walks linear chains of {Project, Filter, OrderBy} and finds pure
+    ///     subexpressions appearing at sites in two or more different operators.
+    ///     Inserts one <see cref="RowEnricherOperator"/> at the deepest
+    ///     referencing operator's source, rewrites every reference site.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <strong>Within-Project</strong> (<see cref="EliminateRecursive"/>) —
+    ///     handles residual within-operator duplicates inside any one
+    ///     <see cref="ProjectOperator"/>, with LET-name unification when a
+    ///     duplicate matches the body of an existing LET binding.
+    ///   </description></item>
+    /// </list>
+    /// </remarks>
     public static IQueryOperator Eliminate(IQueryOperator op, FunctionRegistry functions)
     {
+        op = EliminateCrossClauseFirst(op, functions);
         return EliminateRecursive(op, functions);
     }
 
@@ -64,6 +81,265 @@ public static class CommonSubexpressionEliminator
             return EliminateInProject(project, newSource, functions);
         }
         return RewriteChildren(op, child => EliminateRecursive(child, functions));
+    }
+
+    /// <summary>
+    /// Stage-1 cross-clause CSE: walks linear chains of {Project, Filter,
+    /// OrderBy} and finds pure subexpressions appearing at sites in two or
+    /// more different operators. Inserts one <see cref="RowEnricherOperator"/>
+    /// upstream of the deepest referencing operator and rewrites every
+    /// occurrence (across every clause) to a <see cref="ColumnReference"/>
+    /// targeting the hidden column.
+    /// </summary>
+    private static IQueryOperator EliminateCrossClauseFirst(
+        IQueryOperator op, FunctionRegistry functions)
+    {
+        if (IsCrossClauseChainable(op))
+        {
+            List<IQueryOperator> chain = new();
+            IQueryOperator cursor = op;
+            while (IsCrossClauseChainable(cursor))
+            {
+                chain.Add(cursor);
+                cursor = GetChainSource(cursor);
+            }
+
+            IQueryOperator newSource = EliminateCrossClauseFirst(cursor, functions);
+            return ProcessChainCrossClause(chain, newSource, functions);
+        }
+
+        return RewriteChildren(op, child => EliminateCrossClauseFirst(child, functions));
+    }
+
+    private static bool IsCrossClauseChainable(IQueryOperator op) =>
+        op is ProjectOperator or FilterOperator or OrderByOperator;
+
+    private static IQueryOperator GetChainSource(IQueryOperator op) => op switch
+    {
+        ProjectOperator p => p.Source,
+        FilterOperator f => f.Source,
+        OrderByOperator ob => ob.Source,
+        _ => throw new InvalidOperationException(
+            $"GetChainSource called on non-chainable operator {op.GetType().Name}."),
+    };
+
+    private static IQueryOperator ProcessChainCrossClause(
+        List<IQueryOperator> chain, IQueryOperator source, FunctionRegistry functions)
+    {
+        if (chain.Count == 0) return source;
+        if (chain.Count == 1)
+        {
+            // Single chain operator — no cross-clause possible.
+            return RebuildChainOperator(chain[0], source, EmptyFingerprintMap);
+        }
+
+        // LET names from any Project in the chain, so candidates that reference
+        // them are excluded (placement upstream would precede the LET evaluation).
+        HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (IQueryOperator c in chain)
+        {
+            if (c is ProjectOperator p && p.LetBindings is not null)
+            {
+                foreach (LetBinding b in p.LetBindings)
+                {
+                    letNames.Add(b.Name);
+                }
+            }
+        }
+
+        // Per-operator candidate enumeration into a chain-wide entry map.
+        Dictionary<string, CrossClauseEntry> entries = new(StringComparer.Ordinal);
+        for (int i = 0; i < chain.Count; i++)
+        {
+            VisitChainOperatorSites(chain[i], i, entries, letNames, functions);
+        }
+
+        // Filter to fingerprints that appear in 2+ distinct operators.
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, int> fpToDeepest = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> fpToCanonical = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach ((string fp, CrossClauseEntry entry) in entries)
+        {
+            if (entry.OperatorIndices.Count < 2) continue;
+            fpToColumn[fp] = $"__cse_xc{counter++}";
+            fpToDeepest[fp] = entry.OperatorIndices.Max();
+            fpToCanonical[fp] = entry.Canonical;
+        }
+
+        if (fpToColumn.Count == 0)
+        {
+            // No cross-clause work needed. Rebuild chain unchanged with new source.
+            IQueryOperator unchanged = source;
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                unchanged = RebuildChainOperator(chain[i], unchanged, EmptyFingerprintMap);
+            }
+            return unchanged;
+        }
+
+        // Group hoists by their target index (the deepest referencing operator).
+        Dictionary<int, List<string>> hoistsByIndex = new();
+        foreach ((string fp, int idx) in fpToDeepest)
+        {
+            if (!hoistsByIndex.TryGetValue(idx, out List<string>? list))
+            {
+                list = new List<string>();
+                hoistsByIndex[idx] = list;
+            }
+            list.Add(fp);
+        }
+
+        // Rebuild bottom-up: at each chain position, insert the RowEnricher for
+        // hoists targeting that position before rebuilding the operator.
+        IQueryOperator aug = source;
+        for (int i = chain.Count - 1; i >= 0; i--)
+        {
+            if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
+            {
+                List<RowEnrichment> enrichments = new(fps.Count);
+                foreach (string fp in fps)
+                {
+                    // No subtree subsumption in this pass — each enrichment
+                    // expression stays as-is. If two hoists nest (f(g(x)) and
+                    // g(x) both cross-clause), the outer's enrichment will
+                    // recompute g(x) internally. Subsumption is a separate
+                    // optimisation that requires dependency-ordered enricher
+                    // stacking.
+                    enrichments.Add(new RowEnrichment(fpToColumn[fp], fpToCanonical[fp]));
+                }
+                aug = new RowEnricherOperator(aug, enrichments);
+            }
+            aug = RebuildChainOperator(chain[i], aug, fpToColumn);
+        }
+        return aug;
+    }
+
+    private static readonly Dictionary<string, string> EmptyFingerprintMap =
+        new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Per-operator visit that delegates expression collection to
+    /// <see cref="CollectCandidatesXC"/>, tagging each candidate with its
+    /// chain-operator index so cross-clause analysis knows which operators
+    /// reference which fingerprint.
+    /// </summary>
+    private static void VisitChainOperatorSites(
+        IQueryOperator op,
+        int operatorIndex,
+        Dictionary<string, CrossClauseEntry> entries,
+        HashSet<string> letNames,
+        FunctionRegistry functions)
+    {
+        switch (op)
+        {
+            case ProjectOperator p:
+                if (p.LetBindings is not null)
+                {
+                    foreach (LetBinding b in p.LetBindings)
+                    {
+                        CollectCandidatesXC(b.Expression, operatorIndex, entries, letNames, functions);
+                    }
+                }
+                foreach (SelectColumn c in p.Columns)
+                {
+                    CollectCandidatesXC(c.Expression, operatorIndex, entries, letNames, functions);
+                }
+                break;
+            case FilterOperator f:
+                CollectCandidatesXC(f.Predicate, operatorIndex, entries, letNames, functions);
+                break;
+            case OrderByOperator ob:
+                foreach (OrderByItem i in ob.OrderByItems)
+                {
+                    CollectCandidatesXC(i.Expression, operatorIndex, entries, letNames, functions);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Like <see cref="CollectCandidates"/> but tags each registered subtree
+    /// with the chain-operator index it appeared in. Same eligibility rules:
+    /// pure, non-trivial, no LET-name reference, no lambda.
+    /// </summary>
+    private static void CollectCandidatesXC(
+        Expression expression,
+        int operatorIndex,
+        Dictionary<string, CrossClauseEntry> entries,
+        HashSet<string> letNames,
+        FunctionRegistry functions)
+    {
+        VisitChildren(
+            expression,
+            child => CollectCandidatesXC(child, operatorIndex, entries, letNames, functions));
+
+        if (expression is ColumnReference or LiteralExpression or ParameterExpression
+            or TypeLiteralExpression or CurrentTimestampExpression)
+        {
+            return;
+        }
+
+        if (!IsCseEligible(expression, letNames, functions))
+        {
+            return;
+        }
+
+        string fp = QueryExplainer.FormatExpression(expression);
+        if (!entries.TryGetValue(fp, out CrossClauseEntry? entry))
+        {
+            entry = new CrossClauseEntry(expression);
+            entries[fp] = entry;
+        }
+        entry.OperatorIndices.Add(operatorIndex);
+    }
+
+    /// <summary>
+    /// Rebuilds a chainable operator with a new source and every CSE-hoisted
+    /// subtree replaced by a <see cref="ColumnReference"/>. Mirror of
+    /// <see cref="RewriteWithHoists"/> applied per expression site.
+    /// </summary>
+    private static IQueryOperator RebuildChainOperator(
+        IQueryOperator op,
+        IQueryOperator newSource,
+        IReadOnlyDictionary<string, string> hoists)
+    {
+        return op switch
+        {
+            ProjectOperator p => new ProjectOperator(
+                newSource,
+                p.Columns
+                    .Select(c => c with { Expression = RewriteWithHoists(c.Expression, hoists) })
+                    .ToArray(),
+                p.LetBindings?
+                    .Select(b => b with { Expression = RewriteWithHoists(b.Expression, hoists) })
+                    .ToArray(),
+                p.Assertions),
+            FilterOperator f => new FilterOperator(
+                newSource,
+                RewriteWithHoists(f.Predicate, hoists)),
+            OrderByOperator ob => new OrderByOperator(
+                newSource,
+                ob.OrderByItems
+                    .Select(i => i with { Expression = RewriteWithHoists(i.Expression, hoists) })
+                    .ToArray(),
+                ob.TopNRows),
+            _ => throw new InvalidOperationException(
+                $"RebuildChainOperator called on non-chainable {op.GetType().Name}."),
+        };
+    }
+
+    /// <summary>
+    /// One cross-clause fingerprint's tally: the canonical occurrence (the
+    /// first one seen during traversal) and the set of chain-operator indices
+    /// where it appeared. A fingerprint with two or more distinct indices is
+    /// a cross-clause candidate.
+    /// </summary>
+    private sealed class CrossClauseEntry
+    {
+        public Expression Canonical { get; }
+        public HashSet<int> OperatorIndices { get; } = new();
+        public CrossClauseEntry(Expression canonical) { Canonical = canonical; }
     }
 
     private static IQueryOperator EliminateInProject(
@@ -466,6 +742,8 @@ public static class CommonSubexpressionEliminator
             ProjectOperator p => new ProjectOperator(
                 childRewriter(p.Source), p.Columns, p.LetBindings, p.Assertions),
             FilterOperator f => new FilterOperator(childRewriter(f.Source), f.Predicate),
+            OrderByOperator ob => new OrderByOperator(
+                childRewriter(ob.Source), ob.OrderByItems, ob.TopNRows),
             LimitOperator l => RewriteLimit(l, childRewriter),
             ModelInvocationOperator m => new ModelInvocationOperator(
                 childRewriter(m.Source), m.ModelName, m.InputExpressions, m.OptionalExpressions, m.OutputColumnName),

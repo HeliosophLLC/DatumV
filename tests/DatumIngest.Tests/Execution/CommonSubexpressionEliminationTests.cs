@@ -183,6 +183,124 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         finally { catalog.Pool.Backing.TryReturn(scratch); }
     }
 
+    // ─────────────── Cross-clause CSE ───────────────
+
+    [Fact]
+    public void CrossClauseWhereSelect_HoistsUpstreamOfFilter()
+    {
+        // concat(a, b) appears in WHERE and in SELECT. Cross-clause stage
+        // hoists once into a RowEnricher placed upstream of the FilterOperator
+        // (the deepest reference), so both WHERE and SELECT see the hidden
+        // column.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT concat(a, b) FROM t WHERE concat(a, b) = 'alphabeta'",
+            catalog);
+
+        // Walk the plan, count RowEnricherOperators and their position.
+        int enricherCount = 0;
+        bool enricherIsUpstreamOfFilter = false;
+        IQueryOperator? cursor = plan;
+        IQueryOperator? prev = null;
+        while (cursor is not null)
+        {
+            if (cursor is RowEnricherOperator)
+            {
+                enricherCount++;
+                if (prev is FilterOperator) enricherIsUpstreamOfFilter = true;
+            }
+            prev = cursor;
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                RowEnricherOperator r => r.Source,
+                _ => null,
+            };
+        }
+
+        Assert.Equal(1, enricherCount);
+        Assert.True(enricherIsUpstreamOfFilter,
+            "Cross-clause hoist should land between Filter and its source.");
+    }
+
+    [Fact]
+    public void CrossClauseSelectOrderBy_HoistsOnce()
+    {
+        // concat(a, b) appears in SELECT and ORDER BY. One RowEnricher,
+        // placed upstream of the deepest reference (OrderBy).
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT concat(a, b) FROM t ORDER BY concat(a, b)",
+            catalog);
+
+        int enricherCount = 0;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is RowEnricherOperator) enricherCount++;
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                OrderByOperator ob => ob.Source,
+                RowEnricherOperator r => r.Source,
+                _ => null,
+            };
+        }
+
+        Assert.Equal(1, enricherCount);
+    }
+
+    [Fact]
+    public async Task EndToEnd_CrossClauseCSE_PreservesResults()
+    {
+        // The cross-clause rewrite must not change observable query semantics.
+        TableCatalog catalog = Catalog2Cols();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT concat(a, b) AS x FROM t WHERE concat(a, b) = 'alphabeta'",
+            catalog);
+
+        Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("alphabeta", rows[0]["x"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+    }
+
+    [Fact]
+    public void CrossClauseAndWithinProject_BothHoist()
+    {
+        // concat(a, b) appears in WHERE (1) and SELECT (2 sites). Cross-clause
+        // catches all three; one hoist column reused everywhere. (The within-
+        // Project pass would normally handle the SELECT-only duplicate, but
+        // cross-clause runs first and unifies it with the WHERE site.)
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT concat(a, b) AS first, concat(a, b) AS second " +
+            "FROM t WHERE concat(a, b) = 'alphabeta'",
+            catalog);
+
+        // Exactly one RowEnricher in the chain.
+        int enricherCount = 0;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is RowEnricherOperator) enricherCount++;
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                RowEnricherOperator r => r.Source,
+                _ => null,
+            };
+        }
+
+        Assert.Equal(1, enricherCount);
+    }
+
     [Fact]
     public void NestedDuplicate_HoistsLargestSubtree()
     {
