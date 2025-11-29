@@ -357,6 +357,199 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Model calls inside <c>LET</c> binding bodies hoist out of the project
+    /// just like calls in column expressions. Plan shape: Scan → MIO → Project,
+    /// where the LET binding's expression is rewritten to a ColumnReference
+    /// pointing at the MIO's hidden output.
+    /// </summary>
+    [Fact]
+    public void Planner_HoistsModelCallInLetBody()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT LET v = models.echo(name), v FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
+        Assert.Equal("echo", invocation.ModelName);
+
+        // LET body now references the MIO's hidden column.
+        Assert.NotNull(project.LetBindings);
+        Assert.Single(project.LetBindings);
+        ColumnReference letRef = Assert.IsType<ColumnReference>(project.LetBindings![0].Expression);
+        Assert.Equal(invocation.OutputColumnName, letRef.ColumnName);
+    }
+
+    /// <summary>
+    /// Model call inside a WHERE predicate hoists upstream of the filter.
+    /// Plan shape: Scan → MIO → Filter → Project. The filter's predicate
+    /// then operates on the hoisted column rather than re-invoking the model.
+    /// </summary>
+    [Fact]
+    public void Planner_HoistsModelCallInWhere()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT name FROM t WHERE upper(models.echo(name)) = 'ALICE'");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        // Find the FilterOperator in the chain.
+        FilterOperator? filter = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is FilterOperator f) { filter = f; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                ModelInvocationOperator m => m.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(filter);
+
+        // Filter's source is a ModelInvocationOperator (the hoisted echo call).
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(filter!.Source);
+        Assert.Equal("echo", invocation.ModelName);
+
+        // The WHERE predicate's deepest model call is gone — replaced with a
+        // ColumnReference. We don't pin the precise predicate shape (parser
+        // sugar is fragile), just that no models.* call survives in it.
+        Assert.DoesNotContain("models.echo", QueryExplainer.FormatExpression(filter.Predicate));
+    }
+
+    /// <summary>
+    /// Model call inside an ORDER BY item hoists upstream of the sort. Plan
+    /// shape: Scan → MIO → OrderBy → Project. The comparator works against
+    /// the pre-computed hoisted column.
+    /// </summary>
+    [Fact]
+    public void Planner_HoistsModelCallInOrderBy()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT name FROM t ORDER BY upper(models.echo(name))");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        // Walk the plan looking for the OrderByOperator.
+        OrderByOperator? orderBy = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is OrderByOperator ob) { orderBy = ob; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                ModelInvocationOperator m => m.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(orderBy);
+
+        // OrderBy's source is the hoisted MIO.
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(orderBy!.Source);
+        Assert.Equal("echo", invocation.ModelName);
+
+        // No models.* survives in the order-by item expressions.
+        foreach (OrderByItem item in orderBy.OrderByItems)
+        {
+            Assert.DoesNotContain("models.echo", QueryExplainer.FormatExpression(item.Expression));
+        }
+    }
+
+    /// <summary>
+    /// End-to-end: a model call in WHERE filters rows correctly. Echo returns
+    /// the input string; <c>upper()</c> upper-cases it; the filter keeps rows
+    /// matching the literal. The hoister places the MIO upstream of the
+    /// filter, so the WHERE evaluator sees a column reference rather than
+    /// a model call.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_ModelCallInWhere_FiltersByModelOutput()
+    {
+        CountingEchoModel counter = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "counting_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => counter));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" },
+            new object?[] { "carol" });
+        catalog.Models = modelCatalog;
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT name FROM t WHERE upper(models.counting_echo(name)) = 'ALICE'",
+            catalog);
+
+        Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("alice", rows[0]["name"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+
+        // Model invoked once per source row (3 rows = 3 invocations).
+        Assert.Equal(3, counter.SeenInputs.Count);
+    }
+
+    /// <summary>
+    /// End-to-end: model call in LET body works just like in projection. The
+    /// LET name resolves to the MIO's hidden column on every row.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_ModelCallInLetBody_RoundTrips()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET v = models.echo(name), v FROM t", catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("alice", rows[0]["v"].AsString(scratch));
+            Assert.Equal("bob", rows[1]["v"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+    }
+
+    /// <summary>
     /// End-to-end: <c>SELECT models.x(name), models.x(name) FROM t</c> invokes
     /// the model exactly once per row — verifies the structural dedup actually
     /// reaches the runtime, not just the plan shape.

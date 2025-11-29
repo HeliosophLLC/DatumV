@@ -58,14 +58,26 @@ public static class ModelInvocationHoister
 
     private static IQueryOperator HoistRecursive(IQueryOperator op, ModelCatalog catalog)
     {
-        // Only ProjectOperator carries expressions where models.* makes sense in
-        // Phase A. Other operators just recurse into their children. Specific
-        // operators (Filter, Join, OrderBy) get their own hoisting in follow-ups
-        // — the rewrite primitives are the same.
+        // Per-operator hoisters share the same collector + MIO-stacker primitives;
+        // they differ only in which expression sites they walk and how they
+        // reconstruct the operator. Each hoister handles same-operator dedup
+        // (textually-identical calls in one operator share an MIO). Cross-operator
+        // dedup — same call in WHERE and SELECT, for example — would need a
+        // unified pass; not done here.
         if (op is ProjectOperator project)
         {
             IQueryOperator hoistedSource = HoistRecursive(project.Source, catalog);
             return HoistProject(project, hoistedSource, catalog);
+        }
+        else if (op is FilterOperator filter)
+        {
+            IQueryOperator hoistedSource = HoistRecursive(filter.Source, catalog);
+            return HoistFilter(filter, hoistedSource, catalog);
+        }
+        else if (op is OrderByOperator orderBy)
+        {
+            IQueryOperator hoistedSource = HoistRecursive(orderBy.Source, catalog);
+            return HoistOrderBy(orderBy, hoistedSource, catalog);
         }
 
         return RewriteChildren(op, child => HoistRecursive(child, catalog));
@@ -74,48 +86,181 @@ public static class ModelInvocationHoister
     private static IQueryOperator HoistProject(
         ProjectOperator project, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
-        // Collect every distinct models.* call inside the project's expressions.
-        // Distinct = by structural fingerprint via QueryExplainer.FormatExpression,
-        // so two textually-identical call sites (different AST node instances
-        // produced by the parser, same canonical text) share one operator and
-        // one GPU dispatch per batch. Per the inference-integration convention:
-        // "same call site → one eval", regardless of model determinism.
-        // hoistedColumns is identity-keyed because the downstream rewrite step
-        // walks the AST and looks up each FunctionCallExpression node it finds;
-        // populating it for both canonical and duplicate occurrences lets that
-        // identity-based lookup produce the right shared column name.
-        Dictionary<string, string> fingerprintToColumn = new(StringComparer.Ordinal);
-        Dictionary<FunctionCallExpression, string> hoistedColumns = new(ReferenceEqualityComparer.Instance);
-        List<FunctionCallExpression> hoistedOrder = new();
+        ModelHoistCollector collector = new();
 
-        void Visit(Expression expr)
+        // Walk LET binding bodies first — they evaluate before projection columns,
+        // and a model call inside a LET body is just as valid a hoist target as
+        // one inside a column expression.
+        if (project.LetBindings is not null)
+        {
+            foreach (LetBinding binding in project.LetBindings)
+            {
+                collector.Visit(binding.Expression);
+            }
+        }
+        foreach (SelectColumn column in project.Columns)
+        {
+            collector.Visit(column.Expression);
+        }
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            // No model calls in this project — nothing to hoist. Pass the (possibly
+            // hoisted) source back, preserving structural sharing when nothing
+            // actually changed.
+            return ReferenceEquals(hoistedSource, project.Source)
+                ? project
+                : RewriteChildren(project, _ => hoistedSource);
+        }
+
+        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+
+        // Rewrite projection columns and LET binding bodies. Hoisted model-call
+        // nodes become ColumnReferences to their synthesised columns; the
+        // identity-keyed map ensures both canonical and duplicate occurrences
+        // resolve to the same column.
+        SelectColumn[] rewrittenColumns = new SelectColumn[project.Columns.Count];
+        for (int i = 0; i < project.Columns.Count; i++)
+        {
+            rewrittenColumns[i] = project.Columns[i] with
+            {
+                Expression = RewriteExpression(project.Columns[i].Expression, collector.HoistedColumns),
+            };
+        }
+
+        IReadOnlyList<LetBinding>? rewrittenLet = project.LetBindings;
+        if (project.LetBindings is not null)
+        {
+            LetBinding[] rebuilt = new LetBinding[project.LetBindings.Count];
+            for (int i = 0; i < project.LetBindings.Count; i++)
+            {
+                rebuilt[i] = project.LetBindings[i] with
+                {
+                    Expression = RewriteExpression(project.LetBindings[i].Expression, collector.HoistedColumns),
+                };
+            }
+            rewrittenLet = rebuilt;
+        }
+
+        return new ProjectOperator(
+            augmented,
+            rewrittenColumns,
+            rewrittenLet,
+            project.Assertions);
+    }
+
+    /// <summary>
+    /// Hoists model calls out of a <see cref="FilterOperator"/>'s predicate.
+    /// The MIO stack lands between the filter's source and the filter itself;
+    /// the predicate evaluates against rows that already carry the hoisted
+    /// column. Same-operator structural dedup applies — a predicate like
+    /// <c>LENGTH(models.x(name)) &gt; 5 AND models.x(name) IS NOT NULL</c>
+    /// hoists once, not twice.
+    /// </summary>
+    private static IQueryOperator HoistFilter(
+        FilterOperator filter, IQueryOperator hoistedSource, ModelCatalog catalog)
+    {
+        ModelHoistCollector collector = new();
+        collector.Visit(filter.Predicate);
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return ReferenceEquals(hoistedSource, filter.Source)
+                ? filter
+                : new FilterOperator(hoistedSource, filter.Predicate);
+        }
+
+        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        Expression rewrittenPredicate = RewriteExpression(filter.Predicate, collector.HoistedColumns);
+        return new FilterOperator(augmented, rewrittenPredicate);
+    }
+
+    /// <summary>
+    /// Hoists model calls out of <see cref="OrderByOperator.OrderByItems"/>.
+    /// The MIO stack lands between the sort's source and the sort itself, so
+    /// the comparator evaluates against rows that already carry the hoisted
+    /// column. Note: the model dispatches for every input row, including ones
+    /// that a downstream LIMIT will discard — sort fundamentally needs to
+    /// inspect every candidate to find the top-N.
+    /// </summary>
+    private static IQueryOperator HoistOrderBy(
+        OrderByOperator orderBy, IQueryOperator hoistedSource, ModelCatalog catalog)
+    {
+        ModelHoistCollector collector = new();
+        foreach (OrderByItem item in orderBy.OrderByItems)
+        {
+            collector.Visit(item.Expression);
+        }
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return ReferenceEquals(hoistedSource, orderBy.Source)
+                ? orderBy
+                : new OrderByOperator(hoistedSource, orderBy.OrderByItems, orderBy.TopNRows);
+        }
+
+        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        OrderByItem[] rewrittenItems = new OrderByItem[orderBy.OrderByItems.Count];
+        for (int i = 0; i < orderBy.OrderByItems.Count; i++)
+        {
+            rewrittenItems[i] = orderBy.OrderByItems[i] with
+            {
+                Expression = RewriteExpression(orderBy.OrderByItems[i].Expression, collector.HoistedColumns),
+            };
+        }
+        return new OrderByOperator(augmented, rewrittenItems, orderBy.TopNRows);
+    }
+
+    /// <summary>
+    /// Walks expressions and collects every distinct <c>models.*</c> call by
+    /// structural fingerprint. Two textually-identical call sites (different
+    /// AST node instances produced by the parser, same canonical text) share
+    /// one operator and one GPU dispatch per batch — per the inference-
+    /// integration convention "same call site → one eval", regardless of
+    /// model determinism. <see cref="HoistedColumns"/> is identity-keyed
+    /// because the downstream rewrite step walks the AST and looks up each
+    /// <see cref="FunctionCallExpression"/> node by reference; populating
+    /// it for both canonical and duplicate occurrences lets that lookup
+    /// produce the right shared column name.
+    /// </summary>
+    private sealed class ModelHoistCollector
+    {
+        private readonly Dictionary<string, string> _fingerprintToColumn =
+            new(StringComparer.Ordinal);
+
+        public Dictionary<FunctionCallExpression, string> HoistedColumns { get; } =
+            new(ReferenceEqualityComparer.Instance);
+
+        public List<FunctionCallExpression> HoistedOrder { get; } = new();
+
+        public void Visit(Expression expr)
         {
             switch (expr)
             {
                 case FunctionCallExpression fn when IsModelCall(fn):
                     // Post-order: visit children FIRST so any nested model calls
-                    // get appended to hoistedOrder before this one. The order in
-                    // hoistedOrder dictates operator stacking — the first entry
+                    // get appended to HoistedOrder before this one. The order in
+                    // HoistedOrder dictates operator stacking — the first entry
                     // becomes the innermost MIO (closest to the scan), so nested
-                    // models.mobilenetv2(file) inside models.llama31_8b(...) ends up below
-                    // models.llama31_8b in the plan and its output column is available
-                    // by the time llama31_8b runs.
+                    // models.mobilenetv2(file) inside models.llama31_8b(...) ends
+                    // up below models.llama31_8b in the plan and its output
+                    // column is available by the time llama31_8b runs.
                     foreach (Expression arg in fn.Arguments) Visit(arg);
-                    if (!hoistedColumns.ContainsKey(fn))
+                    if (!HoistedColumns.ContainsKey(fn))
                     {
                         string fingerprint = QueryExplainer.FormatExpression(fn);
-                        if (fingerprintToColumn.TryGetValue(fingerprint, out string? existingColumn))
+                        if (_fingerprintToColumn.TryGetValue(fingerprint, out string? existingColumn))
                         {
                             // Textual duplicate of an earlier canonical call —
                             // share its column. No new operator allocated.
-                            hoistedColumns[fn] = existingColumn;
+                            HoistedColumns[fn] = existingColumn;
                         }
                         else
                         {
-                            string synthName = $"__model_{StripNamespace(fn.FunctionName)}_{hoistedOrder.Count}";
-                            fingerprintToColumn[fingerprint] = synthName;
-                            hoistedColumns[fn] = synthName;
-                            hoistedOrder.Add(fn);
+                            string synthName = $"__model_{StripNamespace(fn.FunctionName)}_{HoistedOrder.Count}";
+                            _fingerprintToColumn[fingerprint] = synthName;
+                            HoistedColumns[fn] = synthName;
+                            HoistedOrder.Add(fn);
                         }
                     }
                     break;
@@ -145,25 +290,22 @@ public static class ModelInvocationHoister
                 default: break;
             }
         }
+    }
 
-        foreach (SelectColumn column in project.Columns) Visit(column.Expression);
-
-        if (hoistedOrder.Count == 0)
-        {
-            // No model calls in this project — nothing to hoist. Pass the (possibly
-            // hoisted) source back, preserving structural sharing when nothing
-            // actually changed.
-            return ReferenceEquals(hoistedSource, project.Source)
-                ? project
-                : RewriteChildren(project, _ => hoistedSource);
-        }
-
-        // Wrap the source with one ModelInvocationOperator per hoisted call site,
-        // in the order they appeared in the expression tree (so dependent calls
-        // see their dependency's output column already attached). Each operator
-        // adds exactly one column to the row schema.
-        IQueryOperator augmented = hoistedSource;
-        foreach (FunctionCallExpression fn in hoistedOrder)
+    /// <summary>
+    /// Builds the stack of <see cref="ModelInvocationOperator"/>s above
+    /// <paramref name="source"/>. One operator per canonical hoisted call,
+    /// in <see cref="ModelHoistCollector.HoistedOrder"/> order so nested
+    /// inner calls land closer to the scan than their parents — the parent's
+    /// arguments rewrite to <see cref="ColumnReference"/>s pointing at the
+    /// inner's output column, available on the row by the time the parent
+    /// operator runs.
+    /// </summary>
+    private static IQueryOperator BuildMioStack(
+        IQueryOperator source, ModelHoistCollector collector, ModelCatalog catalog)
+    {
+        IQueryOperator augmented = source;
+        foreach (FunctionCallExpression fn in collector.HoistedOrder)
         {
             string modelName = StripNamespace(fn.FunctionName);
             ModelCatalogEntry? entry = catalog.TryGetEntry(modelName);
@@ -174,10 +316,6 @@ public static class ModelInvocationHoister
                     $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
             }
 
-            // Required-arg arity must match exactly. Trailing args beyond the
-            // required count are interpreted as positional optional overrides
-            // (declared by the entry's OptionalArgKinds). The total count is
-            // bounded by required + optional declared.
             int requiredCount = entry.InputKinds.Count;
             int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
             int suppliedCount = fn.Arguments.Count;
@@ -196,52 +334,23 @@ public static class ModelInvocationHoister
                     $"'{fn.FunctionName}' supplies {suppliedCount}.");
             }
 
-            // Rewrite this call's argument expressions before stitching them
-            // into the new MIO. Any nested models.* call sites in the args have
-            // already been hoisted (post-order visit ensured they're earlier
-            // in hoistedOrder); RewriteExpression replaces those nested
-            // FunctionCallExpression nodes with ColumnReferences to their
-            // hoisted output columns. Without this rewrite the MIO's
-            // ExpressionEvaluator would see the inner models.mobilenetv2(...)
-            // node and fail with "Unknown function" because models.* isn't in
-            // the scalar function registry.
             Expression[] requiredArgs = new Expression[requiredCount];
             for (int i = 0; i < requiredCount; i++)
             {
-                requiredArgs[i] = RewriteExpression(fn.Arguments[i], hoistedColumns);
+                requiredArgs[i] = RewriteExpression(fn.Arguments[i], collector.HoistedColumns);
             }
 
             Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
             for (int i = 0; i < optionalArgs.Length; i++)
             {
-                optionalArgs[i] = RewriteExpression(fn.Arguments[requiredCount + i], hoistedColumns);
+                optionalArgs[i] = RewriteExpression(fn.Arguments[requiredCount + i], collector.HoistedColumns);
             }
 
-            string synthName = hoistedColumns[fn];
+            string synthName = collector.HoistedColumns[fn];
             augmented = new ModelInvocationOperator(
-                augmented,
-                modelName,
-                requiredArgs,
-                optionalArgs,
-                synthName);
+                augmented, modelName, requiredArgs, optionalArgs, synthName);
         }
-
-        // Rewrite project expressions: every hoisted FunctionCallExpression node
-        // becomes a ColumnReference to its synthesised column.
-        SelectColumn[] rewrittenColumns = new SelectColumn[project.Columns.Count];
-        for (int i = 0; i < project.Columns.Count; i++)
-        {
-            rewrittenColumns[i] = project.Columns[i] with
-            {
-                Expression = RewriteExpression(project.Columns[i].Expression, hoistedColumns),
-            };
-        }
-
-        return new ProjectOperator(
-            augmented,
-            rewrittenColumns,
-            project.LetBindings,
-            project.Assertions);
+        return augmented;
     }
 
     /// <summary>
@@ -355,12 +464,21 @@ public static class ModelInvocationHoister
             ProjectOperator p => new ProjectOperator(
                 childRewriter(p.Source), p.Columns, p.LetBindings, p.Assertions),
             FilterOperator f => new FilterOperator(childRewriter(f.Source), f.Predicate),
+            OrderByOperator ob => RewriteOrderBy(ob, childRewriter),
             LimitOperator l => RewriteLimit(l, childRewriter),
             // Default: leave the operator alone. Hoisting model calls inside
             // operators we don't recognise here would need their own rewrite
-            // — Phase A doesn't reach them.
+            // — extend the switch as new operators come into the hoisting picture.
             _ => op,
         };
+    }
+
+    private static IQueryOperator RewriteOrderBy(OrderByOperator orderBy, Func<IQueryOperator, IQueryOperator> childRewriter)
+    {
+        IQueryOperator newSource = childRewriter(orderBy.Source);
+        return ReferenceEquals(newSource, orderBy.Source)
+            ? orderBy
+            : new OrderByOperator(newSource, orderBy.OrderByItems, orderBy.TopNRows);
     }
 
     private static IQueryOperator RewriteLimit(LimitOperator limit, Func<IQueryOperator, IQueryOperator> childRewriter)
