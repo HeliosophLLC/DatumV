@@ -48,4 +48,21 @@ public interface IScalarFunction
     /// billing, governance budgets, and pre-execution cost estimation.
     /// </summary>
     int QueryUnitCost => 1;
+
+    /// <summary>
+    /// Whether this function is pure: same arguments always yield the same
+    /// result, with no observable side effects. Defaults to <see langword="true"/>;
+    /// functions whose output depends on time, randomness, or external state
+    /// (<c>now()</c>, <c>random()</c>, file/network IO) must override to
+    /// <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// Common-subexpression elimination uses this flag as the eligibility gate:
+    /// only subtrees whose every leaf function is pure can be hoisted into a
+    /// shared evaluation. Marking a function pure when it isn't produces silent
+    /// correctness bugs (two textual references collapse to one evaluation),
+    /// so the default-true posture demands deliberate review for any function
+    /// that touches external state.
+    /// </remarks>
+    bool IsPure => true;
 }

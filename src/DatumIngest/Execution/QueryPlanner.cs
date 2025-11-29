@@ -124,7 +124,8 @@ public sealed class QueryPlanner
     /// </remarks>
     private IQueryOperator Finalize(IQueryOperator op)
     {
-        return ModelInvocationHoister.Hoist(op, _catalog.Models);
+        IQueryOperator afterModelHoist = ModelInvocationHoister.Hoist(op, _catalog.Models);
+        return CommonSubexpressionEliminator.Eliminate(afterModelHoist, _functionRegistry);
     }
 
     /// <summary>
