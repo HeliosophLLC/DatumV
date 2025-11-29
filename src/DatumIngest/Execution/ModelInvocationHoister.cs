@@ -75,9 +75,16 @@ public static class ModelInvocationHoister
         ProjectOperator project, IQueryOperator hoistedSource, ModelCatalog catalog)
     {
         // Collect every distinct models.* call inside the project's expressions.
-        // Distinct = by AST node identity (ReferenceEquals), so a single call
-        // node referenced from multiple places hoists once and resolves via
-        // the same synthesised column.
+        // Distinct = by structural fingerprint via QueryExplainer.FormatExpression,
+        // so two textually-identical call sites (different AST node instances
+        // produced by the parser, same canonical text) share one operator and
+        // one GPU dispatch per batch. Per the inference-integration convention:
+        // "same call site → one eval", regardless of model determinism.
+        // hoistedColumns is identity-keyed because the downstream rewrite step
+        // walks the AST and looks up each FunctionCallExpression node it finds;
+        // populating it for both canonical and duplicate occurrences lets that
+        // identity-based lookup produce the right shared column name.
+        Dictionary<string, string> fingerprintToColumn = new(StringComparer.Ordinal);
         Dictionary<FunctionCallExpression, string> hoistedColumns = new(ReferenceEqualityComparer.Instance);
         List<FunctionCallExpression> hoistedOrder = new();
 
@@ -96,9 +103,20 @@ public static class ModelInvocationHoister
                     foreach (Expression arg in fn.Arguments) Visit(arg);
                     if (!hoistedColumns.ContainsKey(fn))
                     {
-                        string synthName = $"__model_{StripNamespace(fn.FunctionName)}_{hoistedOrder.Count}";
-                        hoistedColumns[fn] = synthName;
-                        hoistedOrder.Add(fn);
+                        string fingerprint = QueryExplainer.FormatExpression(fn);
+                        if (fingerprintToColumn.TryGetValue(fingerprint, out string? existingColumn))
+                        {
+                            // Textual duplicate of an earlier canonical call —
+                            // share its column. No new operator allocated.
+                            hoistedColumns[fn] = existingColumn;
+                        }
+                        else
+                        {
+                            string synthName = $"__model_{StripNamespace(fn.FunctionName)}_{hoistedOrder.Count}";
+                            fingerprintToColumn[fingerprint] = synthName;
+                            hoistedColumns[fn] = synthName;
+                            hoistedOrder.Add(fn);
+                        }
                     }
                     break;
 

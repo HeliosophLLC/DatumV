@@ -288,4 +288,119 @@ public sealed class ModelInvocationTests : ServiceTestBase
 
         Assert.Equal(2, rows.Count);
     }
+
+    /// <summary>
+    /// Two textually-identical <c>models.echo(...)</c> calls in the same SELECT
+    /// list dedupe by structural fingerprint into a single
+    /// <see cref="ModelInvocationOperator"/>. Both projection columns reference
+    /// the same hidden output column, so the model dispatches once per batch.
+    /// Per the inference-integration convention: same call site → one eval.
+    /// </summary>
+    [Fact]
+    public void Planner_TwoIdenticalModelCalls_HoistOnce()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT models.echo('test'), models.echo('test') FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
+
+        // Source of MIO is the scan itself — only ONE MIO in the chain.
+        Assert.IsNotType<ModelInvocationOperator>(invocation.Source);
+
+        // Both projection columns reference the same synthesised model output.
+        Assert.Equal(2, project.Columns.Count);
+        ColumnReference c0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);
+        ColumnReference c1 = Assert.IsType<ColumnReference>(project.Columns[1].Expression);
+        Assert.Equal(c0.ColumnName, c1.ColumnName);
+        Assert.Equal(invocation.OutputColumnName, c0.ColumnName);
+    }
+
+    /// <summary>
+    /// Different literal arguments produce different fingerprints — the hoister
+    /// keeps them as separate operators. Catches a false-positive dedup that
+    /// would conflate <c>models.echo('a')</c> with <c>models.echo('b')</c>.
+    /// </summary>
+    [Fact]
+    public void Planner_DifferentLiteralArgs_HoistSeparately()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT models.echo('a'), models.echo('b') FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+
+        // Two MIOs stacked above the scan — outermost first, then inner.
+        ModelInvocationOperator outer = Assert.IsType<ModelInvocationOperator>(project.Source);
+        ModelInvocationOperator inner = Assert.IsType<ModelInvocationOperator>(outer.Source);
+        Assert.NotEqual(outer.OutputColumnName, inner.OutputColumnName);
+
+        // Each projection column references one of the two distinct outputs.
+        ColumnReference c0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);
+        ColumnReference c1 = Assert.IsType<ColumnReference>(project.Columns[1].Expression);
+        Assert.NotEqual(c0.ColumnName, c1.ColumnName);
+    }
+
+    /// <summary>
+    /// End-to-end: <c>SELECT models.x(name), models.x(name) FROM t</c> invokes
+    /// the model exactly once per row — verifies the structural dedup actually
+    /// reaches the runtime, not just the plan shape.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_DuplicateModelCall_RunsModelOncePerRow()
+    {
+        CountingEchoModel counter = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "counting_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => counter));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" },
+            new object?[] { "carol" });
+        catalog.Models = modelCatalog;
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT models.counting_echo(name), models.counting_echo(name) FROM t",
+            catalog);
+
+        Assert.Equal(3, rows.Count);
+        // 3 source rows, two textual call sites — should still be 3 invocations,
+        // not 6. That's the property the structural dedup guarantees.
+        Assert.Equal(3, counter.SeenInputs.Count);
+
+        // Both columns hold the echoed value for each row.
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("alice", rows[0][0].AsString(scratch));
+            Assert.Equal("alice", rows[0][1].AsString(scratch));
+            Assert.Equal("bob", rows[1][0].AsString(scratch));
+            Assert.Equal("bob", rows[1][1].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+    }
 }
