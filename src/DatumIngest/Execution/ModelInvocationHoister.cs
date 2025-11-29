@@ -225,17 +225,32 @@ public static class ModelInvocationHoister
             list.Add(fp);
         }
 
-        // Rebuild bottom-up.
+        // Rebuild bottom-up. At each chain position, MIOs for hoists targeting
+        // that position are dependency-ordered so any inner cross-clause call
+        // (e.g. an inner models.y inside an outer models.x both being cross-
+        // clause hoists) ends up closer to the source than the outer call's
+        // MIO. Without this, the outer's argument-rewrite would reference a
+        // column not yet on the row.
         IQueryOperator aug = source;
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
             {
+                Dictionary<string, Expression> placementCanonicals = new(StringComparer.Ordinal);
                 foreach (string fp in fps)
                 {
-                    FunctionCallExpression canonical = fingerprintCanonical[fp];
-                    string column = fpToColumn[fp];
-                    aug = BuildSingleMio(aug, canonical, column, unifiedRewriteMap, catalog);
+                    placementCanonicals[fp] = fingerprintCanonical[fp];
+                }
+                List<List<string>> levels =
+                    HoistDependencyOrdering.OrderByDependency(placementCanonicals);
+                foreach (List<string> level in levels)
+                {
+                    foreach (string fp in level)
+                    {
+                        FunctionCallExpression canonical = fingerprintCanonical[fp];
+                        string column = fpToColumn[fp];
+                        aug = BuildSingleMio(aug, canonical, column, unifiedRewriteMap, catalog);
+                    }
                 }
             }
             aug = RebuildChainOperator(chain[i], aug, unifiedRewriteMap);

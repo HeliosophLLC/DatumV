@@ -190,27 +190,60 @@ public static class CommonSubexpressionEliminator
             list.Add(fp);
         }
 
-        // Rebuild bottom-up: at each chain position, insert the RowEnricher for
-        // hoists targeting that position before rebuilding the operator.
+        // Rebuild bottom-up: at each chain position, insert the RowEnricher
+        // stack for hoists targeting that position before rebuilding the
+        // operator. When multiple hoists at the same index have inner-subtree
+        // dependencies (subsumption), the inner one(s) land in a deeper
+        // RowEnricher so their hidden column is on the row before the outer
+        // one's enrichment evaluates.
         IQueryOperator aug = source;
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
             {
-                List<RowEnrichment> enrichments = new(fps.Count);
-                foreach (string fp in fps)
-                {
-                    // No subtree subsumption in this pass — each enrichment
-                    // expression stays as-is. If two hoists nest (f(g(x)) and
-                    // g(x) both cross-clause), the outer's enrichment will
-                    // recompute g(x) internally. Subsumption is a separate
-                    // optimisation that requires dependency-ordered enricher
-                    // stacking.
-                    enrichments.Add(new RowEnrichment(fpToColumn[fp], fpToCanonical[fp]));
-                }
-                aug = new RowEnricherOperator(aug, enrichments);
+                aug = BuildEnricherStack(aug, fps, fpToColumn, fpToCanonical);
             }
             aug = RebuildChainOperator(chain[i], aug, fpToColumn);
+        }
+        return aug;
+    }
+
+    /// <summary>
+    /// Builds a stack of <see cref="RowEnricherOperator"/>s above
+    /// <paramref name="source"/> for the given hoist fingerprints, dependency-
+    /// ordered so inner subtrees evaluate before the outer expressions that
+    /// reference them. Hoists at the same dependency level share one operator;
+    /// each successive level becomes its own operator stacked on top.
+    /// </summary>
+    private static IQueryOperator BuildEnricherStack(
+        IQueryOperator source,
+        IReadOnlyList<string> fingerprints,
+        IReadOnlyDictionary<string, string> fpToColumn,
+        IReadOnlyDictionary<string, Expression> fpToCanonical)
+    {
+        // Restrict the dependency map to just the fingerprints being placed at
+        // this position — outer-position hoists shouldn't influence the
+        // ordering here.
+        Dictionary<string, Expression> placementCanonicals = new(StringComparer.Ordinal);
+        foreach (string fp in fingerprints) placementCanonicals[fp] = fpToCanonical[fp];
+
+        List<List<string>> levels = HoistDependencyOrdering.OrderByDependency(placementCanonicals);
+
+        IQueryOperator aug = source;
+        foreach (List<string> level in levels)
+        {
+            List<RowEnrichment> enrichments = new(level.Count);
+            foreach (string fp in level)
+            {
+                // Rewrite this enrichment's expression using the column map,
+                // EXCLUDING self — so any inner subtree matching another
+                // (already-placed-deeper) hoist becomes a ColumnReference.
+                Dictionary<string, string> mapWithoutSelf = new(fpToColumn, StringComparer.Ordinal);
+                mapWithoutSelf.Remove(fp);
+                Expression rewritten = RewriteWithHoists(fpToCanonical[fp], mapWithoutSelf);
+                enrichments.Add(new RowEnrichment(fpToColumn[fp], rewritten));
+            }
+            aug = new RowEnricherOperator(aug, enrichments);
         }
         return aug;
     }
@@ -390,8 +423,19 @@ public static class CommonSubexpressionEliminator
         // Eligibility: appears ≥ 2 times AND (already names a LET OR is non-trivial CSE candidate).
         // The "appears ≥ 2 times" bar applies even when a LET names it — a LET
         // referenced exactly once needs no rewrite.
+        //
+        // Two parallel maps:
+        //   - fingerprintToColumn: every hoisted fp → the column name to rewrite
+        //     references to (LET name OR __cse_N synthetic).
+        //   - cseColumnsToCanonical: only synthetic-column hoists → their canonical
+        //     expressions, fed to BuildEnricherStack so inner-subtree subsumption
+        //     can stack dependent enrichers.
+        // LET-named hoists are excluded from the enricher stack because LETs
+        // evaluate inside ProjectOperator (downstream of the enricher), so an
+        // enrichment expression can't reference a LET name yet.
         Dictionary<string, string> fingerprintToColumn = new(StringComparer.Ordinal);
-        List<RowEnrichment> enrichments = new();
+        Dictionary<string, string> cseFingerprintToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> cseFingerprintToCanonical = new(StringComparer.Ordinal);
         int cseCounter = 0;
 
         foreach ((string fingerprint, FingerprintEntry entry) in entries)
@@ -408,7 +452,8 @@ public static class CommonSubexpressionEliminator
             {
                 string column = $"{CseColumnPrefix}{cseCounter++}";
                 fingerprintToColumn[fingerprint] = column;
-                enrichments.Add(new RowEnrichment(column, entry.Canonical));
+                cseFingerprintToColumn[fingerprint] = column;
+                cseFingerprintToCanonical[fingerprint] = entry.Canonical;
             }
         }
 
@@ -462,9 +507,17 @@ public static class CommonSubexpressionEliminator
             };
         }
 
-        IQueryOperator augmented = enrichments.Count == 0
+        // BuildEnricherStack handles subsumption: when a hoisted expression
+        // contains another hoisted expression as a subtree (e.g. f(g(x)) and
+        // g(x) both qualify), the inner one ends up in a deeper enricher so
+        // the outer's enrichment can reference its column.
+        IQueryOperator augmented = cseFingerprintToColumn.Count == 0
             ? source
-            : new RowEnricherOperator(source, enrichments);
+            : BuildEnricherStack(
+                source,
+                cseFingerprintToColumn.Keys.ToList(),
+                cseFingerprintToColumn,
+                cseFingerprintToCanonical);
 
         return new ProjectOperator(
             augmented,

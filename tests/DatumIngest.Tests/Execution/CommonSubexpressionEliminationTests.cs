@@ -323,11 +323,86 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         Assert.Equal(c0.ColumnName, c1.ColumnName);
 
         // The enrichment retains the upper(concat(...)) form — its inner concat
-        // is computed within this enrichment's evaluation, no separate __cse_1.
-        // (Subsumption: hoisting both upper(...) AND concat(...) is suboptimal
-        // and not done in this slice — the outer hoist already covers it.)
+        // appears only here. With no second standalone concat reference there's
+        // no subsumption work to do.
         FunctionCallExpression hoisted = Assert.IsType<FunctionCallExpression>(
             enricher.Enrichments.First(e => e.ColumnName == c0.ColumnName).Expression);
         Assert.Equal("upper", hoisted.FunctionName);
+    }
+
+    // ─────────────── Subtree subsumption ───────────────
+
+    [Fact]
+    public void NestedDuplicate_BothQualify_StackedEnrichersWithSubsumption()
+    {
+        // upper(concat(a, b)) appears twice; concat(a, b) ALSO appears as a
+        // standalone projection. Both hoist. Subsumption: the outer
+        // upper(__inner) enrichment references the inner concat enrichment's
+        // column, so concat is computed once per row, upper once per row.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT upper(concat(a, b)) AS x, upper(concat(a, b)) AS y, concat(a, b) AS z FROM t",
+            catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+
+        // Walk the chain of RowEnricherOperators. Expect TWO stacked enrichers:
+        // one for concat (closer to source), one for upper(concat) (above it).
+        // The upper enricher's expression must reference the concat column.
+        List<RowEnricherOperator> enrichers = new();
+        IQueryOperator? cursor = project.Source;
+        while (cursor is RowEnricherOperator e)
+        {
+            enrichers.Add(e);
+            cursor = e.Source;
+        }
+
+        Assert.Equal(2, enrichers.Count);
+
+        // The OUTERMOST enricher (first hit walking down) is the dependency-
+        // last level — i.e., upper(concat). Its enrichment expression should
+        // reference a ColumnReference (the inner concat column), not contain
+        // a nested concat call.
+        RowEnricherOperator outerEnricher = enrichers[0];
+        RowEnricherOperator innerEnricher = enrichers[1];
+
+        Assert.Single(outerEnricher.Enrichments);
+        Assert.Single(innerEnricher.Enrichments);
+
+        // Outer's enrichment is a function call (upper) whose argument is a
+        // ColumnReference — the inner enrichment's column.
+        FunctionCallExpression outerCall = Assert.IsType<FunctionCallExpression>(
+            outerEnricher.Enrichments[0].Expression);
+        Assert.Equal("upper", outerCall.FunctionName);
+        ColumnReference outerArgRef = Assert.IsType<ColumnReference>(outerCall.Arguments[0]);
+        Assert.Equal(innerEnricher.Enrichments[0].ColumnName, outerArgRef.ColumnName);
+
+        // Inner's enrichment is the concat call itself.
+        FunctionCallExpression innerCall = Assert.IsType<FunctionCallExpression>(
+            innerEnricher.Enrichments[0].Expression);
+        Assert.Equal("concat", innerCall.FunctionName);
+    }
+
+    [Fact]
+    public async Task EndToEnd_SubsumedNestedHoist_PreservesResults()
+    {
+        // Verify subsumption doesn't change observable semantics.
+        TableCatalog catalog = Catalog2Cols();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT upper(concat(a, b)) AS x, upper(concat(a, b)) AS y, concat(a, b) AS z FROM t",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("ALPHABETA", rows[0]["x"].AsString(scratch));
+            Assert.Equal("ALPHABETA", rows[0]["y"].AsString(scratch));
+            Assert.Equal("alphabeta", rows[0]["z"].AsString(scratch));
+            Assert.Equal("GAMMADELTA", rows[1]["x"].AsString(scratch));
+            Assert.Equal("GAMMADELTA", rows[1]["y"].AsString(scratch));
+            Assert.Equal("gammadelta", rows[1]["z"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
     }
 }
