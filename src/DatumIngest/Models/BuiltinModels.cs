@@ -63,7 +63,10 @@ public static class BuiltinModels
             Backend: "onnx",
             RelativePath: modelFilename,
             InputKinds: [DataKind.Image],
-            OutputKind: DataKind.String,
+            // Struct{label: String, score: Float32}. The catalog entry's
+            // OutputKind currently captures only the top-level kind; field
+            // names land alongside the schema-layer struct-field plumbing.
+            OutputKind: DataKind.Struct,
             IsDeterministic: true,
             Loader: ctx =>
             {

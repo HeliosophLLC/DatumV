@@ -58,7 +58,9 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         Assert.Equal("mobilenetv2", model.Name);
         Assert.True(model.IsDeterministic);
-        Assert.Equal(DataKind.String, model.OutputKind);
+        // Output is Struct{label: String, score: Float32}. The IModel surface
+        // currently advertises only the top-level kind.
+        Assert.Equal(DataKind.Struct, model.OutputKind);
         Assert.Single(model.InputKinds);
         Assert.Equal(DataKind.Image, model.InputKinds[0]);
     }
@@ -95,12 +97,13 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 cancellationToken: CancellationToken.None);
 
             Assert.Single(outputs);
-            DatumIngest.Functions.ValueRef label = outputs[0];
-            Assert.False(label.IsNull);
-            string text = label.AsString();
+            DatumIngest.Functions.ValueRef result = outputs[0];
+            Assert.False(result.IsNull);
+            (string text, float score) = ReadLabelScore(result);
             Assert.StartsWith("class_", text);
             int idx = int.Parse(text["class_".Length..]);
             Assert.InRange(idx, 0, 999);
+            Assert.InRange(score, 0f, 1f);
         }
         finally
         {
@@ -146,12 +149,13 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
             Assert.Equal(3, outputs.Count);
             for (int i = 0; i < outputs.Count; i++)
             {
-                DatumIngest.Functions.ValueRef label = outputs[i];
-                Assert.False(label.IsNull, $"row {i} returned a null label");
-                string text = label.AsString();
+                DatumIngest.Functions.ValueRef result = outputs[i];
+                Assert.False(result.IsNull, $"row {i} returned a null result");
+                (string text, float score) = ReadLabelScore(result);
                 Assert.StartsWith("class_", text);
                 int idx = int.Parse(text["class_".Length..]);
                 Assert.InRange(idx, 0, 999);
+                Assert.InRange(score, 0f, 1f);
             }
         }
         finally
@@ -206,11 +210,12 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
                 overrides: [],
                 cancellationToken: CancellationToken.None);
 
-            DatumIngest.Functions.ValueRef label = Assert.Single(outputs);
-            Assert.False(label.IsNull);
-            string text = label.AsString();
+            DatumIngest.Functions.ValueRef result = Assert.Single(outputs);
+            Assert.False(result.IsNull);
+            (string text, float score) = ReadLabelScore(result);
             Assert.False(string.IsNullOrEmpty(text));
             Assert.DoesNotContain("class_", text);
+            Assert.InRange(score, 0f, 1f);
         }
         finally
         {
@@ -243,8 +248,20 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
         using ModelLease lease = catalog.ResolveLeaseSynchronously("mobilenetv2");
         IModel model = lease.Model;
         Assert.IsType<MobileNetV2Model>(model);
-        Assert.Equal(DataKind.String, model.OutputKind);
+        Assert.Equal(DataKind.Struct, model.OutputKind);
         Assert.Single(model.InputKinds);
         Assert.Equal(DataKind.Image, model.InputKinds[0]);
+    }
+
+    /// <summary>
+    /// Pulls the (label, score) pair out of MobileNetV2's
+    /// <c>Struct{label: String, score: Float32}</c> ValueRef. Tests assert
+    /// the label and score independently; this keeps the unpacking in one place.
+    /// </summary>
+    private static (string Label, float Score) ReadLabelScore(DatumIngest.Functions.ValueRef result)
+    {
+        ReadOnlySpan<DatumIngest.Functions.ValueRef> fields = result.GetStructFields();
+        Assert.Equal(2, fields.Length);
+        return (fields[0].AsString(), fields[1].AsFloat32());
     }
 }

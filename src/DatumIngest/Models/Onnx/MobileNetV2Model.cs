@@ -10,8 +10,9 @@ namespace DatumIngest.Models.Onnx;
 
 /// <summary>
 /// MobileNetV2 ImageNet classifier wrapped as an <see cref="IModel"/> backend.
-/// Accepts a single <see cref="DataKind.Image"/> column per row, returns the
-/// predicted class label as <see cref="DataKind.String"/>.
+/// Accepts a single <see cref="DataKind.Image"/> column per row, returns
+/// <c>Struct{label: String, score: Float32}</c> — the top-1 predicted class
+/// plus the softmax probability assigned to it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,10 +25,12 @@ namespace DatumIngest.Models.Onnx;
 /// </para>
 /// <para>
 /// <strong>Output pipeline.</strong> The graph emits <c>[N, 1000]</c> float32
-/// logits; we argmax across the class dimension and look the index up in the
-/// supplied label list. When no labels file is available we fall back to
-/// <c>"class_&lt;index&gt;"</c> — handy for sanity checks before users drop the
-/// vocabulary file alongside the ONNX model.
+/// logits; we argmax across the class dimension and convert the winning
+/// logit to a softmax probability. The label looks up in the supplied
+/// vocabulary; with no labels file we fall back to <c>"class_&lt;index&gt;"</c>.
+/// Surfacing <c>score</c> alongside <c>label</c> is the prerequisite for the
+/// confidence-gated cascade (<c>tasks.classify</c>) — consumers can filter on
+/// <c>WHERE result.score &gt; 0.7</c> or feed the score into a router.
 /// </para>
 /// <para>
 /// Trained on the standard ImageNet-1k taxonomy. The model file is
@@ -62,7 +65,10 @@ public sealed class MobileNetV2Model : OnnxModel
             name,
             modelFilePath,
             inputKinds: [DataKind.Image],
-            outputKind: DataKind.String,
+            // Struct{label: String, score: Float32}. Field names live in the
+            // schema layer, not on the ValueRef carrier — the operator/shell
+            // pick them up from the model catalog's declared output schema.
+            outputKind: DataKind.Struct,
             isDeterministic: true)
     {
         if (labels is not null && labels.Count != ClassCount)
@@ -142,11 +148,15 @@ public sealed class MobileNetV2Model : OnnxModel
         for (int row = 0; row < batchSize; row++)
         {
             ReadOnlySpan<float> rowLogits = flat.Slice(row * ClassCount, ClassCount);
-            int bestIdx = ArgMax(rowLogits);
+            int bestIdx = ArgMaxAndSoftmax(rowLogits, out float bestScore);
             string label = _labels is not null
                 ? _labels[bestIdx]
                 : $"class_{bestIdx}";
-            results[row] = ValueRef.FromString(label);
+            results[row] = ValueRef.FromStruct(
+            [
+                ValueRef.FromString(label),
+                ValueRef.FromFloat32(bestScore),
+            ]);
         }
 
         return results;
@@ -191,18 +201,31 @@ public sealed class MobileNetV2Model : OnnxModel
         }
     }
 
-    private static int ArgMax(ReadOnlySpan<float> values)
+    /// <summary>
+    /// Finds the argmax over <paramref name="logits"/> and converts the winning
+    /// logit to its softmax probability. Numerically stable (subtracts the max
+    /// before exponentiating). Two passes over the input.
+    /// </summary>
+    private static int ArgMaxAndSoftmax(ReadOnlySpan<float> logits, out float bestProbability)
     {
         int bestIdx = 0;
-        float bestVal = values[0];
-        for (int i = 1; i < values.Length; i++)
+        float bestVal = logits[0];
+        for (int i = 1; i < logits.Length; i++)
         {
-            if (values[i] > bestVal)
+            if (logits[i] > bestVal)
             {
-                bestVal = values[i];
+                bestVal = logits[i];
                 bestIdx = i;
             }
         }
+
+        double sumExp = 0;
+        for (int i = 0; i < logits.Length; i++)
+        {
+            sumExp += Math.Exp(logits[i] - bestVal);
+        }
+
+        bestProbability = (float)(1.0 / sumExp);
         return bestIdx;
     }
 }
