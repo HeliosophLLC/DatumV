@@ -1,6 +1,6 @@
 # Architecture
 
-[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Value Representation](value-representation.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
