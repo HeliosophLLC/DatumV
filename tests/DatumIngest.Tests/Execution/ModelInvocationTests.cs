@@ -550,6 +550,173 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Cross-clause: same model call in WHERE and SELECT shares a single
+    /// <see cref="ModelInvocationOperator"/>, placed upstream of the filter so
+    /// both clauses see the hoisted column. The model dispatches once per row.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_CrossClause_WhereAndSelect_RunsModelOncePerRow()
+    {
+        CountingEchoModel counter = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "counting_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => counter));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" },
+            new object?[] { "carol" });
+        catalog.Models = modelCatalog;
+
+        // The same call appears in both clauses. Cross-clause stage hoists once;
+        // both references resolve to the shared hidden column.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT models.counting_echo(name) AS echoed FROM t WHERE upper(models.counting_echo(name)) = 'ALICE'",
+            catalog);
+
+        Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("alice", rows[0]["echoed"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+
+        // Three source rows × one cross-clause-deduped call = three invocations,
+        // not six. Without the cross-clause pass we'd see a separate MIO above
+        // FilterOperator and a second above ProjectOperator.
+        Assert.Equal(3, counter.SeenInputs.Count);
+    }
+
+    /// <summary>
+    /// Plan-shape check for cross-clause WHERE+SELECT: exactly one
+    /// <see cref="ModelInvocationOperator"/> in the chain, placed upstream of
+    /// FilterOperator (deepest referencing position). Filter and Project both
+    /// reference the same hidden column.
+    /// </summary>
+    [Fact]
+    public void Planner_CrossClauseWhereSelect_HoistsOnceUpstreamOfFilter()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT models.echo(name) FROM t WHERE upper(models.echo(name)) = 'ALICE'");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        // Walk the plan, count MIOs.
+        int mioCount = 0;
+        ModelInvocationOperator? deepestMio = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is ModelInvocationOperator m)
+            {
+                mioCount++;
+                deepestMio = m;
+            }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                ModelInvocationOperator mm => mm.Source,
+                _ => null,
+            };
+        }
+
+        // Exactly one MIO — the cross-clause hoist made the duplicate disappear.
+        Assert.Equal(1, mioCount);
+        Assert.NotNull(deepestMio);
+    }
+
+    /// <summary>
+    /// Cross-clause across SELECT and ORDER BY: model call appears in a
+    /// projected column AND in an ORDER BY item. Single MIO, placed
+    /// upstream of the OrderByOperator (the deepest reference).
+    /// </summary>
+    [Fact]
+    public void Planner_CrossClauseSelectOrderBy_HoistsOnce()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        QueryExpression query = SqlParser.Parse(
+            "SELECT models.echo(name) FROM t ORDER BY models.echo(name)");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = planner.Plan(query);
+
+        int mioCount = 0;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is ModelInvocationOperator) mioCount++;
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                OrderByOperator ob => ob.Source,
+                ModelInvocationOperator mm => mm.Source,
+                _ => null,
+            };
+        }
+
+        Assert.Equal(1, mioCount);
+    }
+
+    /// <summary>
+    /// Cross-clause sanity: when the same call appears in WHERE and SELECT
+    /// AND in a LET binding all together, all three sites unify into one MIO.
+    /// LET + projection-column + filter predicate, four textual occurrences,
+    /// one canonical operator.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_CrossClause_LetAndSelectAndWhere_RunsOnce()
+    {
+        CountingEchoModel counter = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "counting_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => counter));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = modelCatalog;
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET v = models.counting_echo(name), v AS via_let, models.counting_echo(name) AS direct " +
+            "FROM t WHERE upper(models.counting_echo(name)) IN ('ALICE', 'BOB')",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+
+        // Two source rows × one cross-clause hoist = two invocations.
+        Assert.Equal(2, counter.SeenInputs.Count);
+    }
+
+    /// <summary>
     /// End-to-end: <c>SELECT models.x(name), models.x(name) FROM t</c> invokes
     /// the model exactly once per row — verifies the structural dedup actually
     /// reaches the runtime, not just the plan shape.

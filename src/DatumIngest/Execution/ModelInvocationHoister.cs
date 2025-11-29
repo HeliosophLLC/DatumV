@@ -53,7 +53,314 @@ public static class ModelInvocationHoister
             return op;
         }
 
+        // Two-stage hoist:
+        //   1. Cross-clause pass — scans linear chains of {Project, Filter,
+        //      OrderBy} for the SAME model call appearing in two or more
+        //      different operators (WHERE+SELECT, ORDER BY+SELECT, …). When
+        //      found, it inserts ONE ModelInvocationOperator at the deepest
+        //      referencing operator's source position and rewrites every
+        //      occurrence in every clause to a ColumnReference. After this
+        //      pass, no fingerprint appears in 2+ different operators; the
+        //      remaining residual model calls are either single-operator
+        //      occurrences or within-operator textual duplicates.
+        //   2. Per-operator pass — handles those residuals (within-operator
+        //      structural dedup + singleton hoisting). Same mechanics as
+        //      before, just on a smaller surface.
+        op = HoistCrossClauseFirst(op, catalog);
         return HoistRecursive(op, catalog);
+    }
+
+    /// <summary>
+    /// Stage-1 cross-clause pass: walks linear chains of expression-bearing
+    /// operators (Project, Filter, OrderBy) and unifies model calls that
+    /// appear at sites in two or more different operators within the same
+    /// chain. One <see cref="ModelInvocationOperator"/> is inserted at the
+    /// <em>deepest</em> referencing operator's source position (so eager
+    /// evaluation only happens when WHERE actually needs the result), and
+    /// every reference site across every operator rewrites to a
+    /// <see cref="ColumnReference"/>. Fingerprints appearing in only one
+    /// operator are left untouched for stage-2 to handle.
+    /// </summary>
+    private static IQueryOperator HoistCrossClauseFirst(IQueryOperator op, ModelCatalog catalog)
+    {
+        if (IsCrossClauseChainable(op))
+        {
+            // Collect the linear chain top-to-bottom. The first element is
+            // the topmost operator (closest to the root); the last element's
+            // Source is the chain boundary we recurse into separately.
+            List<IQueryOperator> chain = new();
+            IQueryOperator cursor = op;
+            while (IsCrossClauseChainable(cursor))
+            {
+                chain.Add(cursor);
+                cursor = GetChainSource(cursor);
+            }
+
+            // `cursor` is the chain boundary — recurse into it independently.
+            IQueryOperator newSource = HoistCrossClauseFirst(cursor, catalog);
+
+            return ProcessChainCrossClause(chain, newSource, catalog);
+        }
+
+        return RewriteChildren(op, child => HoistCrossClauseFirst(child, catalog));
+    }
+
+    private static bool IsCrossClauseChainable(IQueryOperator op) =>
+        op is ProjectOperator or FilterOperator or OrderByOperator;
+
+    private static IQueryOperator GetChainSource(IQueryOperator op) => op switch
+    {
+        ProjectOperator p => p.Source,
+        FilterOperator f => f.Source,
+        OrderByOperator ob => ob.Source,
+        _ => throw new InvalidOperationException(
+            $"GetChainSource called on non-chainable operator {op.GetType().Name}."),
+    };
+
+    /// <summary>
+    /// Processes one linear chain of cross-clause-chainable operators. If a
+    /// model-call fingerprint appears at sites in two or more chain operators,
+    /// hoist it once into a <see cref="ModelInvocationOperator"/> placed
+    /// upstream of the deepest referencing operator. Otherwise, return the
+    /// chain rebuilt with the new source unchanged.
+    /// </summary>
+    private static IQueryOperator ProcessChainCrossClause(
+        List<IQueryOperator> chain, IQueryOperator source, ModelCatalog catalog)
+    {
+        if (chain.Count == 0) return source;
+        if (chain.Count == 1) return RebuildChainOperator(chain[0], source, EmptyRewriteMap);
+
+        // Per-operator collectors (chain index → collector).
+        ModelHoistCollector[] perOpCollectors = new ModelHoistCollector[chain.Count];
+        for (int i = 0; i < chain.Count; i++)
+        {
+            ModelHoistCollector c = new();
+            VisitChainOperator(chain[i], c);
+            perOpCollectors[i] = c;
+        }
+
+        // Fingerprint → set of operator indices that reference it.
+        Dictionary<string, HashSet<int>> fingerprintOps = new(StringComparer.Ordinal);
+        Dictionary<string, FunctionCallExpression> fingerprintCanonical =
+            new(StringComparer.Ordinal);
+        for (int i = 0; i < chain.Count; i++)
+        {
+            foreach (FunctionCallExpression fn in perOpCollectors[i].HoistedOrder)
+            {
+                string fp = QueryExplainer.FormatExpression(fn);
+                if (!fingerprintOps.TryGetValue(fp, out HashSet<int>? ops))
+                {
+                    ops = new HashSet<int>();
+                    fingerprintOps[fp] = ops;
+                    fingerprintCanonical[fp] = fn;
+                }
+                ops.Add(i);
+            }
+        }
+
+        // Cross-clause = appears in two or more distinct chain operators.
+        // Within-operator-only duplicates are stage-2's problem.
+        List<string> crossClauseFingerprints = new();
+        foreach ((string fp, HashSet<int> ops) in fingerprintOps)
+        {
+            if (ops.Count >= 2) crossClauseFingerprints.Add(fp);
+        }
+
+        if (crossClauseFingerprints.Count == 0)
+        {
+            // No cross-clause work needed. Rebuild the chain unchanged with the
+            // recursed source.
+            IQueryOperator augmented = source;
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                augmented = RebuildChainOperator(chain[i], augmented, EmptyRewriteMap);
+            }
+            return augmented;
+        }
+
+        // Allocate columns + remember the deepest referencing index for each
+        // cross-clause fingerprint (deeper = closer to the source = larger index).
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, int> fpToDeepestIndex = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach (string fp in crossClauseFingerprints)
+        {
+            FunctionCallExpression canonical = fingerprintCanonical[fp];
+            string column = $"__model_{StripNamespace(canonical.FunctionName)}_xc{counter++}";
+            fpToColumn[fp] = column;
+            fpToDeepestIndex[fp] = fingerprintOps[fp].Max();
+        }
+
+        // Build a unified identity rewrite map: every AST node in any of the
+        // per-op collectors whose fingerprint is cross-clause maps to the
+        // shared column name. Non-cross-clause occurrences stay unmapped (they
+        // remain raw model-call AST for stage-2 to pick up).
+        Dictionary<FunctionCallExpression, string> unifiedRewriteMap =
+            new(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < chain.Count; i++)
+        {
+            foreach (FunctionCallExpression fn in perOpCollectors[i].HoistedColumns.Keys)
+            {
+                string fp = QueryExplainer.FormatExpression(fn);
+                if (fpToColumn.TryGetValue(fp, out string? column))
+                {
+                    unifiedRewriteMap[fn] = column;
+                }
+            }
+        }
+
+        // Group hoists by their target operator index (the "deepest" referencing
+        // operator). At each chain position, before rebuilding the operator
+        // itself, we insert the MIOs for fingerprints whose deepest reference
+        // is here.
+        Dictionary<int, List<string>> hoistsByIndex = new();
+        foreach (string fp in crossClauseFingerprints)
+        {
+            int idx = fpToDeepestIndex[fp];
+            if (!hoistsByIndex.TryGetValue(idx, out List<string>? list))
+            {
+                list = new List<string>();
+                hoistsByIndex[idx] = list;
+            }
+            list.Add(fp);
+        }
+
+        // Rebuild bottom-up.
+        IQueryOperator aug = source;
+        for (int i = chain.Count - 1; i >= 0; i--)
+        {
+            if (hoistsByIndex.TryGetValue(i, out List<string>? fps))
+            {
+                foreach (string fp in fps)
+                {
+                    FunctionCallExpression canonical = fingerprintCanonical[fp];
+                    string column = fpToColumn[fp];
+                    aug = BuildSingleMio(aug, canonical, column, unifiedRewriteMap, catalog);
+                }
+            }
+            aug = RebuildChainOperator(chain[i], aug, unifiedRewriteMap);
+        }
+        return aug;
+    }
+
+    private static readonly Dictionary<FunctionCallExpression, string> EmptyRewriteMap =
+        new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Rebuilds <paramref name="op"/> with <paramref name="newSource"/> as its
+    /// source and every model-call AST node in its expressions rewritten via
+    /// <paramref name="rewriteMap"/>. Used by the cross-clause pass.
+    /// </summary>
+    private static IQueryOperator RebuildChainOperator(
+        IQueryOperator op,
+        IQueryOperator newSource,
+        IReadOnlyDictionary<FunctionCallExpression, string> rewriteMap)
+    {
+        return op switch
+        {
+            ProjectOperator p => new ProjectOperator(
+                newSource,
+                p.Columns
+                    .Select(c => c with { Expression = RewriteExpression(c.Expression, rewriteMap) })
+                    .ToArray(),
+                p.LetBindings?
+                    .Select(b => b with { Expression = RewriteExpression(b.Expression, rewriteMap) })
+                    .ToArray(),
+                p.Assertions),
+            FilterOperator f => new FilterOperator(
+                newSource,
+                RewriteExpression(f.Predicate, rewriteMap)),
+            OrderByOperator ob => new OrderByOperator(
+                newSource,
+                ob.OrderByItems
+                    .Select(i => i with { Expression = RewriteExpression(i.Expression, rewriteMap) })
+                    .ToArray(),
+                ob.TopNRows),
+            _ => throw new InvalidOperationException(
+                $"RebuildChainOperator called on non-chainable {op.GetType().Name}."),
+        };
+    }
+
+    /// <summary>
+    /// Walks the expression sites of <paramref name="op"/>, feeding each
+    /// expression to <paramref name="collector"/>. Different chainable
+    /// operators expose different expression collections — this method is the
+    /// per-operator-type dispatch.
+    /// </summary>
+    private static void VisitChainOperator(IQueryOperator op, ModelHoistCollector collector)
+    {
+        switch (op)
+        {
+            case ProjectOperator p:
+                if (p.LetBindings is not null)
+                {
+                    foreach (LetBinding b in p.LetBindings) collector.Visit(b.Expression);
+                }
+                foreach (SelectColumn c in p.Columns) collector.Visit(c.Expression);
+                break;
+            case FilterOperator f:
+                collector.Visit(f.Predicate);
+                break;
+            case OrderByOperator ob:
+                foreach (OrderByItem i in ob.OrderByItems) collector.Visit(i.Expression);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Builds one <see cref="ModelInvocationOperator"/> for a single canonical
+    /// call site, sourced from <paramref name="source"/>, writing to
+    /// <paramref name="column"/>. Argument expressions are rewritten via
+    /// <paramref name="rewriteMap"/> so any nested cross-clause references
+    /// resolve to their hidden columns rather than re-invoking the model.
+    /// </summary>
+    private static IQueryOperator BuildSingleMio(
+        IQueryOperator source,
+        FunctionCallExpression canonical,
+        string column,
+        IReadOnlyDictionary<FunctionCallExpression, string> rewriteMap,
+        ModelCatalog catalog)
+    {
+        string modelName = StripNamespace(canonical.FunctionName);
+        ModelCatalogEntry? entry = catalog.TryGetEntry(modelName);
+        if (entry is null)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}' is not registered in the catalog. Reference '{canonical.FunctionName}' " +
+                $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
+        }
+
+        int requiredCount = entry.InputKinds.Count;
+        int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
+        int suppliedCount = canonical.Arguments.Count;
+
+        if (suppliedCount < requiredCount)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}' expects at least {requiredCount} required input(s) " +
+                $"but the call site '{canonical.FunctionName}' supplies only {suppliedCount}.");
+        }
+        if (suppliedCount > requiredCount + maxOptional)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}' accepts at most {requiredCount + maxOptional} arguments " +
+                $"({requiredCount} required + {maxOptional} optional) but the call site " +
+                $"'{canonical.FunctionName}' supplies {suppliedCount}.");
+        }
+
+        Expression[] requiredArgs = new Expression[requiredCount];
+        for (int i = 0; i < requiredCount; i++)
+        {
+            requiredArgs[i] = RewriteExpression(canonical.Arguments[i], rewriteMap);
+        }
+
+        Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
+        for (int i = 0; i < optionalArgs.Length; i++)
+        {
+            optionalArgs[i] = RewriteExpression(canonical.Arguments[requiredCount + i], rewriteMap);
+        }
+
+        return new ModelInvocationOperator(source, modelName, requiredArgs, optionalArgs, column);
     }
 
     private static IQueryOperator HoistRecursive(IQueryOperator op, ModelCatalog catalog)
@@ -62,8 +369,7 @@ public static class ModelInvocationHoister
         // they differ only in which expression sites they walk and how they
         // reconstruct the operator. Each hoister handles same-operator dedup
         // (textually-identical calls in one operator share an MIO). Cross-operator
-        // dedup — same call in WHERE and SELECT, for example — would need a
-        // unified pass; not done here.
+        // dedup is handled by stage-1 (HoistCrossClauseFirst) before this runs.
         if (op is ProjectOperator project)
         {
             IQueryOperator hoistedSource = HoistRecursive(project.Source, catalog);
