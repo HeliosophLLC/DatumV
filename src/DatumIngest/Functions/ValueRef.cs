@@ -258,6 +258,59 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Bulk-constructor for a fixed-width primitive array. Stores the caller's
+    /// <paramref name="values"/> array directly as the managed payload — zero
+    /// per-element wrapping, zero copies until the boundary <see cref="ToDataValue"/>
+    /// flushes the bytes into the target arena. The path that
+    /// <c>ValueRef.FromArray(DataKind.Float32, [ValueRef.FromFloat32(…), …])</c>
+    /// would have wrapped 1536 individual <see cref="ValueRef"/> structs collapses
+    /// to a single reference here.
+    /// </summary>
+    /// <typeparam name="T">
+    /// Element type. Must be unmanaged and must match the kind's
+    /// <see cref="DataValue.ScalarByteSize"/> exactly. The size check at
+    /// construction catches obvious mismatches (e.g. <c>FromPrimitiveArray&lt;double&gt;(values, DataKind.Float32)</c>);
+    /// it does not validate that the bit-pattern of <typeparamref name="T"/>
+    /// is the canonical encoding of <paramref name="elementKind"/> (e.g.
+    /// passing a <c>long[]</c> for <see cref="DataKind.Int64"/> or for
+    /// <see cref="DataKind.Time"/> both pass the size check; the latter is
+    /// reasonable because Time stores ticks directly).
+    /// </typeparam>
+    /// <param name="values">Caller-owned array. Held by reference until materialise.</param>
+    /// <param name="elementKind">Per-element kind. Must be a fixed-width primitive.</param>
+    /// <exception cref="ArgumentException">
+    /// <typeparamref name="T"/>'s size doesn't match <paramref name="elementKind"/>'s
+    /// <see cref="DataValue.ScalarByteSize"/>.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// <paramref name="elementKind"/> is <see cref="DataKind.DateTime"/> — the
+    /// fixed-width array convention drops the timezone offset; aggregate into
+    /// <c>Struct{ticks: Int64, offset_minutes: Int32}</c> instead.
+    /// </exception>
+    public static ValueRef FromPrimitiveArray<T>(T[] values, DataKind elementKind) where T : unmanaged
+    {
+        if (elementKind == DataKind.DateTime)
+        {
+            throw new NotSupportedException(
+                "Array<DateTime> is not supported via FromPrimitiveArray. The fixed-width "
+                + "array convention drops the timezone offset; aggregate into "
+                + "Struct{ticks: Int64, offset_minutes: Int32} instead.");
+        }
+
+        int sizeT = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+        int kindSize = DataValue.ScalarByteSize(elementKind);
+        if (sizeT != kindSize)
+        {
+            throw new ArgumentException(
+                $"Type {typeof(T).Name} (size={sizeT}) doesn't match DataKind.{elementKind} "
+                + $"(size={kindSize}). Pass a T whose size matches the kind's ScalarByteSize.",
+                nameof(elementKind));
+        }
+
+        return new(DataValue.NullArrayOf(elementKind), values);
+    }
+
+    /// <summary>
     /// Typed null struct with the given <paramref name="fieldCount"/>. No
     /// payload — boundary materialisation produces <see cref="DataValue.NullStruct"/>.
     /// </summary>
@@ -501,6 +554,11 @@ public readonly struct ValueRef
                 BuildTypedArray(_inline.Kind, elements, targetStore),
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
                 DataValue.FromStruct((short)fields.Length, MaterialiseEach(fields, targetStore), targetStore),
+            // Bulk primitive-array path: a typed T[] payload (Float32, Int32, …)
+            // produced by FromPrimitiveArray<T>. Dispatch by kind to the matching
+            // typed-span factory; bytes copy once into the target arena.
+            Array primitiveArray when _inline.IsArray =>
+                BuildPrimitiveArray(_inline.Kind, primitiveArray, targetStore),
             _ => throw new InvalidOperationException(
                 $"Cannot lower ValueRef with managed payload of type {_materialized.GetType().Name} "
                 + $"and kind {Kind} into a DataValue. Add a ToDataValue arm for this combination."),
@@ -661,5 +719,47 @@ public readonly struct ValueRef
             return DataValue.FromInlineArrayBytes(span, elementKind);
         }
         return DataValue.FromArenaArrayBytes(span, elementKind, target);
+    }
+
+    /// <summary>
+    /// Materialises a <c>FromPrimitiveArray&lt;T&gt;</c> payload into a typed
+    /// <see cref="DataValue"/>. The payload is a primitive <c>T[]</c>; we cast
+    /// to the right element type and call <see cref="DataValue.FromArenaArray{T}"/>,
+    /// which copies the bytes contiguously into the target arena in one
+    /// <c>StoreBytes</c> call. Always arena-backed — the bulk constructor is
+    /// targeted at long arrays (embeddings) where inline doesn't apply.
+    /// </summary>
+    /// <remarks>
+    /// The cast set covers every fixed-width primitive kind. <see cref="DataKind.DateTime"/>
+    /// is rejected at construction (<see cref="FromPrimitiveArray{T}"/>); other
+    /// 8-byte temporal kinds (Time, Duration) accept <c>long[]</c> ticks.
+    /// </remarks>
+    private static DataValue BuildPrimitiveArray(DataKind elementKind, Array values, IValueStore target)
+    {
+        return elementKind switch
+        {
+            DataKind.Boolean  => DataValue.FromArenaArray<byte>((byte[])values, elementKind, target),
+            DataKind.UInt8    => DataValue.FromArenaArray<byte>((byte[])values, elementKind, target),
+            DataKind.Int8     => DataValue.FromArenaArray<sbyte>((sbyte[])values, elementKind, target),
+            DataKind.UInt16   => DataValue.FromArenaArray<ushort>((ushort[])values, elementKind, target),
+            DataKind.Int16    => DataValue.FromArenaArray<short>((short[])values, elementKind, target),
+            DataKind.Float16  => DataValue.FromArenaArray<Half>((Half[])values, elementKind, target),
+            DataKind.UInt32   => DataValue.FromArenaArray<uint>((uint[])values, elementKind, target),
+            DataKind.Int32    => DataValue.FromArenaArray<int>((int[])values, elementKind, target),
+            DataKind.Float32  => DataValue.FromArenaArray<float>((float[])values, elementKind, target),
+            DataKind.Date     => DataValue.FromArenaArray<int>((int[])values, elementKind, target),
+            DataKind.UInt64   => DataValue.FromArenaArray<ulong>((ulong[])values, elementKind, target),
+            DataKind.Int64    => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
+            DataKind.Float64  => DataValue.FromArenaArray<double>((double[])values, elementKind, target),
+            DataKind.Time     => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
+            DataKind.Duration => DataValue.FromArenaArray<long>((long[])values, elementKind, target),
+            DataKind.Decimal  => DataValue.FromArenaArray<decimal>((decimal[])values, elementKind, target),
+            DataKind.UInt128  => DataValue.FromArenaArray<UInt128>((UInt128[])values, elementKind, target),
+            DataKind.Int128   => DataValue.FromArenaArray<Int128>((Int128[])values, elementKind, target),
+            DataKind.Uuid     => DataValue.FromArenaArray<Guid>((Guid[])values, elementKind, target),
+            _ => throw new NotSupportedException(
+                $"FromPrimitiveArray materialisation for element kind {elementKind} is not supported. "
+                + "Add a case here when the kind has a fixed-width primitive representation."),
+        };
     }
 }

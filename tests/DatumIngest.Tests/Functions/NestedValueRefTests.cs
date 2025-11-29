@@ -307,6 +307,136 @@ public sealed class NestedValueRefTests : ServiceTestBase
         finally { ReturnArena(arena); }
     }
 
+    // ─── Bulk primitive-array constructor (FromPrimitiveArray<T>) ──────────
+
+    [Fact]
+    public void FromPrimitiveArray_Float32_Large_RoundTripsViaAsArraySpan()
+    {
+        // Embedder-sized: 1536 floats (CLIP / sentence-transformer territory).
+        // Construction must not wrap each float in a ValueRef — the payload is
+        // the float[] directly, and bytes flow into the arena in one StoreBytes
+        // call at materialise.
+        float[] embedding = new float[1536];
+        for (int i = 0; i < embedding.Length; i++)
+        {
+            embedding[i] = MathF.Sin(i * 0.001f);
+        }
+
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(embedding, DataKind.Float32);
+
+        Assert.Equal(DataKind.Float32, arrayRef.Kind);
+        Assert.True(arrayRef.IsArray);
+
+        Arena arena = RentArena();
+        try
+        {
+            DataValue dv = arrayRef.ToDataValue(arena);
+            Assert.Equal(DataKind.Float32, dv.Kind);
+            Assert.True(dv.IsArray);
+            Assert.False(dv.IsInlineArray); // 1536 × 4 = 6144 bytes ≫ 16-byte inline cap
+            ReadOnlySpan<float> readback = dv.AsArraySpan<float>(arena);
+            Assert.Equal(embedding.Length, readback.Length);
+            for (int i = 0; i < embedding.Length; i++)
+            {
+                Assert.Equal(embedding[i], readback[i]);
+            }
+        }
+        finally { ReturnArena(arena); }
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_Int32_RoundTrips()
+    {
+        int[] values = [-100, 0, 100, 200, 300, 400, 500, 600];
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(values, DataKind.Int32);
+
+        Arena arena = RentArena();
+        try
+        {
+            DataValue dv = arrayRef.ToDataValue(arena);
+            ReadOnlySpan<int> readback = dv.AsArraySpan<int>(arena);
+            Assert.Equal(values.Length, readback.Length);
+            for (int i = 0; i < values.Length; i++)
+            {
+                Assert.Equal(values[i], readback[i]);
+            }
+        }
+        finally { ReturnArena(arena); }
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_Empty_RoundTrips()
+    {
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(Array.Empty<float>(), DataKind.Float32);
+
+        Arena arena = RentArena();
+        try
+        {
+            DataValue dv = arrayRef.ToDataValue(arena);
+            Assert.Equal(DataKind.Float32, dv.Kind);
+            Assert.True(dv.IsArray);
+            ReadOnlySpan<float> readback = dv.AsArraySpan<float>(arena);
+            Assert.Equal(0, readback.Length);
+        }
+        finally { ReturnArena(arena); }
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_SizeMismatch_ThrowsAtConstruction()
+    {
+        // double is 8 bytes; Float32 is 4 bytes. Caller error.
+        ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+            ValueRef.FromPrimitiveArray<double>([1.0, 2.0, 3.0], DataKind.Float32));
+        Assert.Contains("Double", ex.Message);
+        Assert.Contains("Float32", ex.Message);
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_DateTime_ThrowsAtConstruction()
+    {
+        // DateTime arrays drop the timezone offset under the fixed-width
+        // packing convention; rejected at construction with a guidance message.
+        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
+            ValueRef.FromPrimitiveArray<long>([0L, 1L, 2L], DataKind.DateTime));
+        Assert.Contains("Array<DateTime>", ex.Message);
+        Assert.Contains("offset", ex.Message);
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_Float64_RoundTrips()
+    {
+        double[] values = [Math.PI, Math.E, double.MinValue, double.MaxValue, 0.0, -1.5];
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(values, DataKind.Float64);
+
+        Arena arena = RentArena();
+        try
+        {
+            DataValue dv = arrayRef.ToDataValue(arena);
+            ReadOnlySpan<double> readback = dv.AsArraySpan<double>(arena);
+            Assert.Equal(values.Length, readback.Length);
+            for (int i = 0; i < values.Length; i++)
+            {
+                Assert.Equal(values[i], readback[i]);
+            }
+        }
+        finally { ReturnArena(arena); }
+    }
+
+    [Fact]
+    public void FromPrimitiveArray_HoldsCallerArrayByReference()
+    {
+        // No defensive copy at construction — the caller's T[] is the payload.
+        // This is the whole point of the bulk constructor (vs. wrapping each
+        // element in a ValueRef struct). Verify by checking the carrier kind
+        // and that materialisation reads back what we put in (the alternative
+        // implementation that pre-extracts bytes would also pass this test;
+        // it's a smoke test that the bulk path is wired up at all).
+        float[] caller = [1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f];
+        ValueRef arrayRef = ValueRef.FromPrimitiveArray(caller, DataKind.Float32);
+
+        Assert.Same(caller, arrayRef.Materialized);
+    }
+
     [Fact]
     public void FromArray_DateTime_ThrowsOnMaterialise()
     {
