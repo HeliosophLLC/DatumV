@@ -126,20 +126,36 @@ internal static class TableFormatter
         }
     }
 
+    /// <summary>
+    /// Maximum number of array elements rendered inline before the tail is
+    /// elided as <c>... (N more)</c>. Long detection arrays (e.g. YOLO with
+    /// 20+ boxes) blow past column width otherwise; truncating keeps the
+    /// table readable while still showing what shape the value has.
+    /// </summary>
+    private const int InlineArrayPreviewCount = 4;
+
     public static string FormatValue(
         DataValue value,
         Arena arena,
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? structFields = null)
     {
-        if (structFields is not null && value.Kind == DataKind.Struct)
-        {
-            return FormatStructValue(value, arena, registry, structFields);
-        }
-
+        // Byte arrays render as a hex preview regardless of how the column was
+        // declared — the IsArray-aware branch below would format them as a
+        // numeric array, which is unreadable for image/blob payloads.
         if (value.IsByteArrayKind)
         {
             return FormatBlobPreview(value, arena, registry);
+        }
+
+        if (value.IsArray)
+        {
+            return FormatArrayValue(value, arena, registry, structFields);
+        }
+
+        if (value.Kind == DataKind.Struct)
+        {
+            return FormatStructValue(value, arena, registry, structFields);
         }
 
         return value.Kind switch
@@ -190,7 +206,7 @@ internal static class TableFormatter
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? fields)
     {
-        DataValue[] fieldValues = value.AsStruct();
+        DataValue[] fieldValues = value.AsStruct(arena);
         IEnumerable<string> parts = fieldValues.Select((fieldValue, index) =>
         {
             string name = fields is not null && index < fields.Count ? fields[index].Name : $"f{index}";
@@ -202,5 +218,122 @@ internal static class TableFormatter
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";
+    }
+
+    /// <summary>
+    /// Renders an <c>Array&lt;Kind&gt;</c> value as <c>[a, b, c, ... (N more)]</c>.
+    /// Element formatting recurses through <see cref="FormatValue"/> so
+    /// <c>Array&lt;Struct&gt;</c> stays readable (each element is itself a
+    /// <c>{f0: ..., f1: ...}</c>). Truncates after
+    /// <see cref="InlineArrayPreviewCount"/> elements — an unbounded YOLO
+    /// detection array would otherwise render hundreds of characters per row.
+    /// </summary>
+    private static string FormatArrayValue(
+        DataValue value,
+        Arena arena,
+        SidecarRegistry? registry,
+        IReadOnlyList<ColumnInfo>? structFields)
+    {
+        if (value.Kind == DataKind.Struct)
+        {
+            DataValue[][] rows = value.AsStructArray(arena, registry);
+            return FormatArrayElements(
+                rows.Length,
+                index => FormatStructFromFieldArray(rows[index], arena, registry, structFields));
+        }
+
+        if (value.Kind == DataKind.String)
+        {
+            string[] strings = value.AsStringArray(arena, registry);
+            return FormatArrayElements(strings.Length, index => $"\"{strings[index]}\"");
+        }
+
+        if (value.Kind == DataKind.Image)
+        {
+            byte[][] images = value.AsImageArray(arena, registry);
+            return FormatArrayElements(
+                images.Length,
+                index =>
+                {
+                    int len = images[index].Length;
+                    string preview = Convert.ToHexString(images[index].AsSpan(0, Math.Min(8, len)));
+                    return $"0x{preview}{(len > 8 ? "..." : "")} ({len:N0} bytes)";
+                });
+        }
+
+        // Fixed-width primitive arrays — packed in arena/inline bytes; fall
+        // through to ToDisplayString for kinds the formatter doesn't yet
+        // unpack here (Decimal, Int128, Uuid arrays etc.). The supported
+        // kinds cover everything models currently emit.
+        return value.Kind switch
+        {
+            DataKind.Boolean => FormatPrimitiveArray<byte>(value, arena, registry, b => (b != 0).ToString()),
+            DataKind.UInt8 => FormatPrimitiveArray<byte>(value, arena, registry, b => b.ToString()),
+            DataKind.Int8 => FormatPrimitiveArray<sbyte>(value, arena, registry, b => b.ToString()),
+            DataKind.UInt16 => FormatPrimitiveArray<ushort>(value, arena, registry, v => v.ToString()),
+            DataKind.Int16 => FormatPrimitiveArray<short>(value, arena, registry, v => v.ToString()),
+            DataKind.UInt32 => FormatPrimitiveArray<uint>(value, arena, registry, v => v.ToString()),
+            DataKind.Int32 => FormatPrimitiveArray<int>(value, arena, registry, v => v.ToString()),
+            DataKind.UInt64 => FormatPrimitiveArray<ulong>(value, arena, registry, v => v.ToString()),
+            DataKind.Int64 => FormatPrimitiveArray<long>(value, arena, registry, v => v.ToString()),
+            DataKind.Float32 => FormatPrimitiveArray<float>(value, arena, registry, v => v.ToString("G")),
+            DataKind.Float64 => FormatPrimitiveArray<double>(value, arena, registry, v => v.ToString("G")),
+            _ => $"<Array<{value.Kind}>>",
+        };
+    }
+
+    private static string FormatPrimitiveArray<T>(
+        DataValue value, Arena arena, SidecarRegistry? registry, Func<T, string> format)
+        where T : unmanaged
+    {
+        ReadOnlySpan<T> elements = value.AsArraySpan<T>(arena, registry);
+        // Span captured by ref struct can't escape into a closure — eagerly
+        // materialize a small preview window before delegating to the shared
+        // bracket/truncation helper.
+        int previewCount = Math.Min(elements.Length, InlineArrayPreviewCount);
+        string[] previews = new string[previewCount];
+        for (int i = 0; i < previewCount; i++)
+        {
+            previews[i] = format(elements[i]);
+        }
+        return FormatArrayElements(elements.Length, index => previews[index]);
+    }
+
+    private static string FormatStructFromFieldArray(
+        DataValue[] fieldValues, Arena arena, SidecarRegistry? registry, IReadOnlyList<ColumnInfo>? fields)
+    {
+        IEnumerable<string> parts = fieldValues.Select((fv, i) =>
+        {
+            string name = fields is not null && i < fields.Count ? fields[i].Name : $"f{i}";
+            IReadOnlyList<ColumnInfo>? nested = fields is not null && i < fields.Count ? fields[i].Fields : null;
+            string formatted = fv.IsNull ? "NULL" : FormatValue(fv, arena, registry, nested);
+            return $"{name}: {formatted}";
+        });
+        return $"{{{string.Join(", ", parts)}}}";
+    }
+
+    /// <summary>
+    /// Shared bracket + truncation wrapper. <paramref name="totalCount"/> is
+    /// the array's logical length; <paramref name="renderElement"/> is invoked
+    /// only for indices that survive the preview window.
+    /// </summary>
+    private static string FormatArrayElements(int totalCount, Func<int, string> renderElement)
+    {
+        if (totalCount == 0) return "[]";
+
+        int previewCount = Math.Min(totalCount, InlineArrayPreviewCount);
+        StringBuilder sb = new();
+        sb.Append('[');
+        for (int i = 0; i < previewCount; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append(renderElement(i));
+        }
+        if (totalCount > previewCount)
+        {
+            sb.Append(", ... (").Append(totalCount - previewCount).Append(" more)");
+        }
+        sb.Append(']');
+        return sb.ToString();
     }
 }

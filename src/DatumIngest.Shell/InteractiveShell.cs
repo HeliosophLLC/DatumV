@@ -584,16 +584,20 @@ internal sealed class InteractiveShell
     {
         IReadOnlyList<string> names = batch.ColumnLookup.ColumnNames;
 
-        // Use the first row to read each column's DataKind. If the batch is empty
-        // (e.g. all rows filtered out before yielding), fall back to Unknown so we
-        // can still print headers.
+        // Use the first row to read each column's DataKind + IsArray flag. The
+        // IsArray bit matters for renderers — without it, an Array<Struct>
+        // column (e.g. YOLO output) looks indistinguishable from a scalar
+        // Struct and the formatter picks the wrong arm. If the batch is empty
+        // (all rows filtered upstream) fall back to Unknown so we can still
+        // print headers.
         ColumnInfo[] columns = new ColumnInfo[names.Count];
         if (batch.Count > 0)
         {
             Row row = batch[0];
             for (int i = 0; i < names.Count; i++)
             {
-                columns[i] = new ColumnInfo(names[i], row[i].Kind, true);
+                DataValue cell = row[i];
+                columns[i] = new ColumnInfo(names[i], cell.Kind, true) { IsArray = cell.IsArray };
             }
         }
         else
