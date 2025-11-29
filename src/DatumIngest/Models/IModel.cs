@@ -43,7 +43,7 @@ public interface IModel
 
     /// <summary>
     /// The <see cref="DataKind"/> each input column must have. Length is the model's
-    /// input arity. The planner uses this to validate <c>models.classify(x, y, z)</c>
+    /// input arity. The planner uses this to validate <c>models.mobilenetv2(x, y, z)</c>
     /// argument types at plan time.
     /// </summary>
     IReadOnlyList<DataKind> InputKinds { get; }

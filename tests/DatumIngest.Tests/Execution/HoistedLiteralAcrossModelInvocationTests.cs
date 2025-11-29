@@ -6,7 +6,7 @@ using DatumIngest.Model;
 using DatumIngest.Models;
 
 /// <summary>
-/// Regression for the user's <c>SELECT models.llm(concat('long literal', "Description"))</c>
+/// Regression for the user's <c>SELECT models.llama31_8b(concat('long literal', "Description"))</c>
 /// failure — it threw <c>"Arena[#3] has not been allocated... GetString at offset=0 length=64"</c>
 /// because the hoisted long-string literal lived in <c>context.Store</c> (the plan-scoped
 /// hoist arena) but <see cref="ModelInvocationOperator"/> built the EvaluationFrame

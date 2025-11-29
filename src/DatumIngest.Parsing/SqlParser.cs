@@ -309,7 +309,7 @@ public static class SqlParser
     /// <remarks>
     /// Returns the raw <see cref="Token{TKind}"/> for the unqualified name (used for
     /// <c>SourceSpan</c>) plus the optional namespace string. Callers fold the namespace
-    /// into the function name with a dot — <c>"models.classify"</c> — so
+    /// into the function name with a dot — <c>"models.mobilenetv2"</c> — so
     /// <see cref="FunctionCallExpression"/>'s string-keyed lookup picks the right entry
     /// without an AST change.
     /// </remarks>
@@ -342,7 +342,7 @@ public static class SqlParser
     /// contextual identifiers — they are not reserved keywords.
     /// The optional <c>IGNORE NULLS</c> / <c>RESPECT NULLS</c> clause controls
     /// null handling for value window functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE).
-    /// Function names may be namespaced (<c>models.classify</c>); the namespace is
+    /// Function names may be namespaced (<c>models.mobilenetv2</c>); the namespace is
     /// folded into the function name with a dot for registry lookup.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =

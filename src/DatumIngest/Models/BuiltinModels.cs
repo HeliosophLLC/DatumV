@@ -31,7 +31,7 @@ public static class BuiltinModels
 
     /// <summary>
     /// Registers MobileNetV2 under the catalog name <paramref name="modelName"/>
-    /// (defaults to <c>"classify"</c>). The ONNX file is resolved as
+    /// (defaults to <c>"mobilenetv2"</c>). The ONNX file is resolved as
     /// <c>{ModelDirectory}/{modelFilename}</c>; ImageNet labels load from
     /// <c>{ModelDirectory}/{labelsFilename}</c> if present, otherwise predictions
     /// fall back to <c>class_&lt;index&gt;</c>.
@@ -39,7 +39,9 @@ public static class BuiltinModels
     /// <param name="catalog">Catalog to register against.</param>
     /// <param name="modelName">
     /// SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to
-    /// <c>"classify"</c>.
+    /// <c>"mobilenetv2"</c> — the architecture name. The capability-level
+    /// <c>tasks.classify</c> namespace routes here (and to other classifiers)
+    /// once the task layer lands.
     /// </param>
     /// <param name="modelFilename">
     /// ONNX filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
@@ -52,7 +54,7 @@ public static class BuiltinModels
     /// </param>
     public static void RegisterMobileNetV2(
         ModelCatalog catalog,
-        string modelName = "classify",
+        string modelName = "mobilenetv2",
         string modelFilename = MobileNetV2DefaultFilename,
         string? labelsFilename = ImageNetLabelsDefaultFilename)
     {
@@ -81,15 +83,18 @@ public static class BuiltinModels
 
     /// <summary>
     /// Registers Llama 3.1 8B Instruct under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"llm"</c>). The GGUF file is
-    /// resolved as <c>{ModelDirectory}/{modelFilename}</c> and loaded via
+    /// <paramref name="modelName"/> (defaults to <c>"llama31_8b"</c>). The GGUF file
+    /// is resolved as <c>{ModelDirectory}/{modelFilename}</c> and loaded via
     /// LlamaSharp; all layers offload to GPU when a supported backend is
     /// installed (CUDA 12 by default in this build).
     /// </summary>
     /// <param name="catalog">Catalog to register against.</param>
     /// <param name="modelName">
     /// SQL-visible name (the <c>X</c> in <c>models.X(prompt)</c>). Defaults to
-    /// <c>"llm"</c>.
+    /// <c>"llama31_8b"</c> — architecture + size, leaving room for sibling
+    /// registrations like <c>llama31_70b</c>. The capability-level
+    /// <c>tasks.llm</c> namespace will route here (and to cheaper LLMs)
+    /// once the task layer lands.
     /// </param>
     /// <param name="modelFilename">
     /// GGUF filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
@@ -106,7 +111,7 @@ public static class BuiltinModels
     /// </param>
     public static void RegisterLlama31(
         ModelCatalog catalog,
-        string modelName = "llm",
+        string modelName = "llama31_8b",
         string modelFilename = Llama31_8BDefaultFilename,
         uint contextSize = 4096,
         int maxTokens = 256,
@@ -127,9 +132,9 @@ public static class BuiltinModels
             // Trailing optional positional args:
             //   [0] temperature (Float64)  — sampling temperature override
             //   [1] max_tokens  (Int32)    — max new tokens to generate
-            // Order matters: callers supply a prefix. `models.llm(prompt, 0.9)`
-            // overrides temperature only; `models.llm(prompt, 0.9, 64)` overrides
-            // both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
+            // Order matters: callers supply a prefix. `models.llama31_8b(prompt, 0.9)`
+            // overrides temperature only; `models.llama31_8b(prompt, 0.9, 64)`
+            // overrides both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
     }
 
@@ -141,7 +146,7 @@ public static class BuiltinModels
 
     /// <summary>
     /// Registers Microsoft Phi-3-mini-4k-instruct under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"phi3"</c>). Same backend
+    /// <paramref name="modelName"/> (defaults to <c>"phi3_mini"</c>). Same backend
     /// (LlamaSharp) as Llama 3.1, just with the Phi-3 chat template — making
     /// it a much smaller (~2.4 GB on disk, ~3 GB cold VRAM) drop-in for
     /// budget-tight setups or for verifying the engine handles multiple
@@ -150,7 +155,9 @@ public static class BuiltinModels
     /// <param name="catalog">Catalog to register against.</param>
     /// <param name="modelName">
     /// SQL-visible name (the <c>X</c> in <c>models.X(prompt)</c>). Defaults to
-    /// <c>"phi3"</c>.
+    /// <c>"phi3_mini"</c> — architecture + size, leaving room for
+    /// <c>phi3_medium</c> later. The cheap end of the eventual <c>tasks.llm</c>
+    /// cascade.
     /// </param>
     /// <param name="modelFilename">
     /// GGUF filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>.
@@ -161,7 +168,7 @@ public static class BuiltinModels
     /// <param name="temperature">Sampling temperature. Defaults to 0.7.</param>
     public static void RegisterPhi3(
         ModelCatalog catalog,
-        string modelName = "phi3",
+        string modelName = "phi3_mini",
         string modelFilename = Phi3MiniDefaultFilename,
         uint contextSize = 4096,
         int maxTokens = 256,
@@ -190,18 +197,20 @@ public static class BuiltinModels
     public const string YoloDefaultFilename = "yolov8n.onnx";
 
     /// <summary>
-    /// Registers YOLOv8 object detection under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"detect"</c>). Returns one
-    /// detection-array per image.
+    /// Registers YOLOv8-nano object detection under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"yolov8n"</c>). Returns one
+    /// detection-array per image. Sibling registrations like <c>yolov8s</c> /
+    /// <c>yolov8m</c> drop in by passing the appropriate filename + name; the
+    /// capability-level <c>tasks.detect</c> namespace will route across them.
     /// </summary>
     /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to <c>"detect"</c>.</param>
+    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to <c>"yolov8n"</c> — Ultralytics' own size suffix.</param>
     /// <param name="modelFilename">ONNX filename relative to <see cref="ModelCatalog.ModelDirectory"/>. Defaults to <see cref="YoloDefaultFilename"/>.</param>
     /// <param name="confidenceThreshold">Score threshold below which a prediction is dropped pre-NMS. Defaults to 0.25.</param>
     /// <param name="iouThreshold">IoU threshold for NMS. Defaults to 0.45.</param>
     public static void RegisterYolo(
         ModelCatalog catalog,
-        string modelName = "detect",
+        string modelName = "yolov8n",
         string modelFilename = YoloDefaultFilename,
         float confidenceThreshold = 0.25f,
         float iouThreshold = 0.45f)

@@ -46,7 +46,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
     /// </summary>
     /// <param name="source">Upstream operator providing input rows.</param>
     /// <param name="modelName">
-    /// Unqualified model name (the <c>"classify"</c> in <c>"models.classify"</c>) —
+    /// Unqualified model name (the <c>"mobilenetv2"</c> in <c>"models.mobilenetv2"</c>) —
     /// resolved via <see cref="ExecutionContext.Models"/> at execute time.
     /// </param>
     /// <param name="inputExpressions">

@@ -54,9 +54,9 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
             return;
         }
 
-        using MobileNetV2Model model = new(name: "classify", modelFilePath: ModelPath, labels: null);
+        using MobileNetV2Model model = new(name: "mobilenetv2", modelFilePath: ModelPath, labels: null);
 
-        Assert.Equal("classify", model.Name);
+        Assert.Equal("mobilenetv2", model.Name);
         Assert.True(model.IsDeterministic);
         Assert.Equal(DataKind.String, model.OutputKind);
         Assert.Single(model.InputKinds);
@@ -83,7 +83,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         try
         {
-            using MobileNetV2Model model = new(name: "classify", modelFilePath: ModelPath, labels: null);
+            using MobileNetV2Model model = new(name: "mobilenetv2", modelFilePath: ModelPath, labels: null);
 
             byte[] png = MakeSolidPng(64, 64, SKColors.Red);
 
@@ -129,7 +129,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         try
         {
-            using MobileNetV2Model model = new(name: "classify", modelFilePath: ModelPath, labels: null);
+            using MobileNetV2Model model = new(name: "mobilenetv2", modelFilePath: ModelPath, labels: null);
 
             DatumIngest.Functions.ValueRef[][] inputs =
             [
@@ -187,7 +187,7 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
 
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterMobileNetV2(catalog);
-        using ModelLease lease = catalog.ResolveLeaseSynchronously("classify");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("mobilenetv2");
         IModel model = lease.Model;
 
         Pool pool = GetService<Pool>();
@@ -235,12 +235,12 @@ public sealed class MobileNetV2ModelTests : ServiceTestBase
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterMobileNetV2(catalog);
 
-        ModelCatalogEntry? entry = catalog.TryGetEntry("classify");
+        ModelCatalogEntry? entry = catalog.TryGetEntry("mobilenetv2");
         Assert.NotNull(entry);
         Assert.Equal("onnx", entry!.Backend);
         Assert.Equal(BuiltinModels.MobileNetV2DefaultFilename, entry.RelativePath);
 
-        using ModelLease lease = catalog.ResolveLeaseSynchronously("classify");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("mobilenetv2");
         IModel model = lease.Model;
         Assert.IsType<MobileNetV2Model>(model);
         Assert.Equal(DataKind.String, model.OutputKind);

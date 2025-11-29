@@ -37,9 +37,9 @@ public sealed class YoloModelTests : ServiceTestBase
     {
         if (!ModelAvailable) return;
 
-        using YoloModel model = new(name: "detect", modelFilePath: ModelPath);
+        using YoloModel model = new(name: "yolov8n", modelFilePath: ModelPath);
 
-        Assert.Equal("detect", model.Name);
+        Assert.Equal("yolov8n", model.Name);
         Assert.True(model.IsDeterministic);
         // OutputKind currently advertises only the per-element kind (Struct);
         // the IsArray bit will join the IModel surface in the schema-layer PR.
@@ -65,7 +65,7 @@ public sealed class YoloModelTests : ServiceTestBase
 
         try
         {
-            using YoloModel model = new(name: "detect", modelFilePath: ModelPath);
+            using YoloModel model = new(name: "yolov8n", modelFilePath: ModelPath);
 
             byte[] png = MakeSolidPng(640, 480, SKColors.SteelBlue);
 
@@ -102,12 +102,12 @@ public sealed class YoloModelTests : ServiceTestBase
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterYolo(catalog);
 
-        ModelCatalogEntry? entry = catalog.TryGetEntry("detect");
+        ModelCatalogEntry? entry = catalog.TryGetEntry("yolov8n");
         Assert.NotNull(entry);
         Assert.Equal("onnx", entry!.Backend);
         Assert.Equal(BuiltinModels.YoloDefaultFilename, entry.RelativePath);
 
-        using ModelLease lease = catalog.ResolveLeaseSynchronously("detect");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("yolov8n");
         IModel model = lease.Model;
         Assert.IsType<YoloModel>(model);
         Assert.Equal(DataKind.Struct, model.OutputKind);

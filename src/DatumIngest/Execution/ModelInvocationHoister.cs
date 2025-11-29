@@ -14,7 +14,7 @@ namespace DatumIngest.Execution;
 /// <para>
 /// <strong>Phase A scope</strong> — hoists only out of <see cref="ProjectOperator"/>
 /// expressions, which covers Demo 0.5
-/// (<c>SELECT models.classify(image) FROM coco LIMIT 10</c>). Filter, Join,
+/// (<c>SELECT models.mobilenetv2(image) FROM coco LIMIT 10</c>). Filter, Join,
 /// OrderBy, GroupBy, and Window expressions still execute model calls inline if
 /// any are present — for those operators the planner currently throws at runtime
 /// (the model "function" is a marker only; it has no <c>Execute</c> body).
@@ -90,9 +90,9 @@ public static class ModelInvocationHoister
                     // get appended to hoistedOrder before this one. The order in
                     // hoistedOrder dictates operator stacking — the first entry
                     // becomes the innermost MIO (closest to the scan), so nested
-                    // models.classify(file) inside models.llm(...) ends up below
-                    // models.llm in the plan and its output column is available
-                    // by the time llm runs.
+                    // models.mobilenetv2(file) inside models.llama31_8b(...) ends up below
+                    // models.llama31_8b in the plan and its output column is available
+                    // by the time llama31_8b runs.
                     foreach (Expression arg in fn.Arguments) Visit(arg);
                     if (!hoistedColumns.ContainsKey(fn))
                     {
@@ -184,7 +184,7 @@ public static class ModelInvocationHoister
             // in hoistedOrder); RewriteExpression replaces those nested
             // FunctionCallExpression nodes with ColumnReferences to their
             // hoisted output columns. Without this rewrite the MIO's
-            // ExpressionEvaluator would see the inner models.classify(...)
+            // ExpressionEvaluator would see the inner models.mobilenetv2(...)
             // node and fail with "Unknown function" because models.* isn't in
             // the scalar function registry.
             Expression[] requiredArgs = new Expression[requiredCount];

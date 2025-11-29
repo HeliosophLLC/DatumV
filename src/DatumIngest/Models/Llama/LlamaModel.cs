@@ -84,7 +84,7 @@ public sealed class LlamaModel : IModel, IDisposable
     /// offloaded to GPU when available (LlamaSharp falls back to CPU when no
     /// supported GPU backend is present).
     /// </summary>
-    /// <param name="name">Catalog-visible name (the <c>"llm"</c> in <c>models.llm</c>).</param>
+    /// <param name="name">Catalog-visible name (the <c>"llama31_8b"</c> in <c>models.llama31_8b</c>).</param>
     /// <param name="modelFilePath">Absolute path to the <c>.gguf</c> file.</param>
     /// <param name="template">
     /// Chat template to wrap user messages with, plus the stop-sequence

@@ -51,9 +51,9 @@ public sealed class LlamaModelTests : ServiceTestBase
             return;
         }
 
-        using LlamaModel model = new(name: "llm", modelFilePath: ModelPath, maxTokens: 16);
+        using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 16);
 
-        Assert.Equal("llm", model.Name);
+        Assert.Equal("llama31_8b", model.Name);
         Assert.False(model.IsDeterministic);
         Assert.Equal(DataKind.String, model.OutputKind);
         Assert.Single(model.InputKinds);
@@ -79,7 +79,7 @@ public sealed class LlamaModelTests : ServiceTestBase
 
         try
         {
-            using LlamaModel model = new(name: "llm", modelFilePath: ModelPath, maxTokens: 32);
+            using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 32);
 
             DatumIngest.Functions.ValueRef[][] inputs =
             [
@@ -124,7 +124,7 @@ public sealed class LlamaModelTests : ServiceTestBase
 
         try
         {
-            using LlamaModel model = new(name: "llm", modelFilePath: ModelPath, maxTokens: 24);
+            using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 24);
 
             DatumIngest.Functions.ValueRef[][] inputs =
             [
@@ -171,13 +171,13 @@ public sealed class LlamaModelTests : ServiceTestBase
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterLlama31(catalog, maxTokens: 16);
 
-        ModelCatalogEntry? entry = catalog.TryGetEntry("llm");
+        ModelCatalogEntry? entry = catalog.TryGetEntry("llama31_8b");
         Assert.NotNull(entry);
         Assert.Equal("llama", entry!.Backend);
         Assert.Equal(BuiltinModels.Llama31_8BDefaultFilename, entry.RelativePath);
         Assert.False(entry.IsDeterministic);
 
-        using ModelLease lease = catalog.ResolveLeaseSynchronously("llm");
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("llama31_8b");
         IModel model = lease.Model;
         Assert.IsType<LlamaModel>(model);
         Assert.Equal(DataKind.String, model.OutputKind);

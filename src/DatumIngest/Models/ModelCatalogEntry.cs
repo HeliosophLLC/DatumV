@@ -19,8 +19,8 @@ namespace DatumIngest.Models;
 /// </para>
 /// </remarks>
 /// <param name="Name">
-/// Stable identifier without a namespace prefix. The function call <c>models.classify(x)</c>
-/// resolves <c>Name == "classify"</c>.
+/// Stable identifier without a namespace prefix. The function call <c>models.mobilenetv2(x)</c>
+/// resolves <c>Name == "mobilenetv2"</c>.
 /// </param>
 /// <param name="Backend">
 /// Free-form backend identifier (<c>"onnx"</c>, <c>"llama"</c>, <c>"echo"</c>) — used

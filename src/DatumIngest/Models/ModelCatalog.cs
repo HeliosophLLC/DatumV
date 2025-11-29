@@ -11,8 +11,8 @@ namespace DatumIngest.Models;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Lookup is namespaced by the SQL surface: <c>models.classify</c> resolves to
-/// the entry whose <see cref="ModelCatalogEntry.Name"/> equals <c>"classify"</c>.
+/// Lookup is namespaced by the SQL surface: <c>models.mobilenetv2</c> resolves to
+/// the entry whose <see cref="ModelCatalogEntry.Name"/> equals <c>"mobilenetv2"</c>.
 /// The leading <c>"models."</c> qualifier is stripped by the planner before lookup.
 /// </para>
 /// <para>
