@@ -19,7 +19,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void WithOuterRow_PropagatesAllProperties()
     {
-        Row outerRow = new(["x"], [DataValue.FromFloat32(1f)]);
+        Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
         using ParallelismBudget budget = new(4);
         ExecutionContext original = new(
             CancellationToken.None,
@@ -55,7 +55,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void WithOuterRow_PreservesDefaultMaxRecursionDepth()
     {
-        Row outerRow = new(["y"], [DataValue.FromFloat32(2f)]);
+        Row outerRow = MakeRow(["y"], DataValue.FromFloat32(2f));
         ExecutionContext original = CreateExecutionContext();
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);

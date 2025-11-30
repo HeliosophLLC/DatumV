@@ -501,6 +501,12 @@ public sealed class QueryPlanner
         // GroupBy's aggregate columns and rewritten as column references.
         // null when no rewrite happened — falls back to the original clause.
         OrderByClause? rewrittenOrderByClause = null;
+        // Aggregate column names appended to the projection as hidden
+        // passthroughs because ORDER BY references them but SELECT doesn't.
+        // After the OrderByOperator runs, a final trim ProjectOperator drops
+        // these columns so the user-visible output matches their SELECT list.
+        // null/empty when no passthroughs were needed.
+        List<string>? orderByAggregatePassthroughs = null;
 
         if (hasGroupBy || hasAggregates)
         {
@@ -611,6 +617,21 @@ public sealed class QueryPlanner
                         : item with { Expression = rewritten });
                 }
                 rewrittenOrderByClause = new OrderByClause(rewrittenOrderBy);
+
+                // ORDER BY may reference aggregate columns the SELECT list
+                // doesn't emit (e.g. `SELECT category … ORDER BY COUNT(*)`,
+                // or `SELECT … COUNT(*) AS c … ORDER BY COUNT(*)` where the
+                // SELECT renamed it). The GroupByOperator emits those aggregate
+                // columns by their synthesised output name; without a matching
+                // entry in the projection, the column gets dropped before
+                // ORDER BY runs and the column ref dangles. Append a synthetic
+                // passthrough SelectColumn for each missing aggregate name so
+                // it survives the projection. The trim Project after
+                // ORDER BY drops them again so the user-visible schema matches
+                // their SELECT list.
+                AppendOrderByAggregatePassthroughs(
+                    rewrittenOrderBy, aggregateColumns, rewrittenColumns,
+                    ref orderByAggregatePassthroughs);
             }
 
             if (hasGroupBy && aggregateColumns.Count == 0 && statement.Having is null)
@@ -923,6 +944,20 @@ public sealed class QueryPlanner
         if (statement.Limit is not null)
         {
             source = new LimitOperator(source, statement.Limit.Value, statement.Offset ?? 0);
+        }
+
+        // 8. Trim hidden ORDER BY-aggregate passthroughs that were appended to
+        //    the projection so ORDER BY could see them. After the sort has run
+        //    they're surplus to the user's SELECT list — drop them with a final
+        //    SELECT * EXCEPT (...) projection so the output schema matches what
+        //    the user asked for.
+        if (orderByAggregatePassthroughs is { Count: > 0 })
+        {
+            source = new ProjectOperator(
+                source,
+                [new SelectAllColumns(ExcludedColumns: orderByAggregatePassthroughs)],
+                letBindings: null,
+                assertions: null);
         }
 
         return source;
@@ -2911,6 +2946,76 @@ public sealed class QueryPlanner
             CaseExpression caseExpr => CaseExpressionContainsAggregate(caseExpr, functionRegistry),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// After ORDER BY items have been aggregate-rewritten, find any aggregate column
+    /// names referenced by ORDER BY that aren't already present in the projection's
+    /// output, and append synthetic <see cref="SelectColumn"/> entries that pass them
+    /// through. The corresponding aggregate names are recorded in <paramref name="passthroughs"/>
+    /// so the caller can emit a final trim <see cref="ProjectOperator"/> that drops them
+    /// after the sort runs.
+    /// </summary>
+    /// <remarks>
+    /// Skipped when the projection contains a wildcard (<see cref="SelectAllColumns"/> or
+    /// <see cref="SelectTableColumns"/>): the wildcard already passes through every
+    /// column the GroupBy emits, so the aggregate is in scope at sort time. The user
+    /// will see the extra column in their output, which matches the wildcard contract.
+    /// </remarks>
+    private static void AppendOrderByAggregatePassthroughs(
+        IReadOnlyList<OrderByItem> rewrittenOrderByItems,
+        IReadOnlyList<AggregateColumn> aggregateColumns,
+        List<SelectColumn> rewrittenColumns,
+        ref List<string>? passthroughs)
+    {
+        if (aggregateColumns.Count == 0) return;
+
+        // Wildcard projection already includes every GroupBy output column, so no
+        // passthrough is needed (and trimming would be incorrect — the user asked
+        // for everything). Bail out early.
+        foreach (SelectColumn column in rewrittenColumns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns) return;
+        }
+
+        HashSet<string> aggregateOutputNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (AggregateColumn aggregate in aggregateColumns)
+        {
+            aggregateOutputNames.Add(aggregate.OutputName);
+        }
+
+        HashSet<string> projectionOutputNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SelectColumn column in rewrittenColumns)
+        {
+            string outputName = column.Alias
+                ?? ColumnNameResolver.GetRawName(column.Expression);
+            projectionOutputNames.Add(outputName);
+        }
+
+        foreach (OrderByItem item in rewrittenOrderByItems)
+        {
+            foreach ((string? _, string columnName) in
+                ColumnReferenceCollector.Collect(item.Expression))
+            {
+                if (!aggregateOutputNames.Contains(columnName)) continue;
+                if (projectionOutputNames.Contains(columnName)) continue;
+
+                passthroughs ??= new List<string>();
+                if (passthroughs.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                passthroughs.Add(columnName);
+                projectionOutputNames.Add(columnName);
+
+                // Synthetic entry: alias matches the aggregate's output name so
+                // the projected schema exposes it under the same name the rewritten
+                // ORDER BY items reference.
+                rewrittenColumns.Add(new SelectColumn(
+                    new ColumnReference(null, columnName),
+                    columnName));
+            }
+        }
     }
 
     /// <summary>

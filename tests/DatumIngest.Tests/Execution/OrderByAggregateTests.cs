@@ -87,12 +87,79 @@ public sealed class OrderByAggregateTests : ServiceTestBase
         Assert.Equal(3L, results[2]["c"].AsInt64());
     }
 
-    // NOTE: `SELECT category FROM t GROUP BY category ORDER BY COUNT(*)` —
-    // aggregate in ORDER BY that doesn't also appear in SELECT — isn't yet
-    // supported. The rewrite pass correctly registers the aggregate on the
-    // GroupBy and rewrites the ORDER BY item to a column reference, but the
-    // downstream projection (which emits only the SELECT list) drops the
-    // aggregate column before the OrderByOperator runs, so the column ref
-    // dangles. Fixing it needs the projection to keep ORDER BY-only aggregate
-    // columns as hidden passthroughs. Out of scope for this fix.
+    /// <summary>
+    /// Aggregate referenced only in ORDER BY (not in SELECT). The planner
+    /// must register the aggregate on the GroupBy <em>and</em> append a
+    /// passthrough to the projection so the column survives until the sort
+    /// runs, then trim it back out so the user-visible schema matches their
+    /// SELECT list.
+    /// </summary>
+    [Fact]
+    public async Task OrderByAggregate_NotInSelect_PassesThroughAndTrims()
+    {
+        TableCatalog catalog = CategoryCatalog();
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT category FROM t GROUP BY category ORDER BY COUNT(*)",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+
+        // Sort order: gamma=1, beta=2, alpha=3 — ascending by hidden count.
+        Assert.Equal("gamma", results[0]["category"].AsString());
+        Assert.Equal("beta", results[1]["category"].AsString());
+        Assert.Equal("alpha", results[2]["category"].AsString());
+
+        // The aggregate column must NOT appear in the user-visible schema.
+        Assert.Single(results[0].ColumnNames);
+        Assert.Equal("category", results[0].ColumnNames[0]);
+    }
+
+    /// <summary>
+    /// Aggregate appears in SELECT under an alias and in ORDER BY as the bare
+    /// call — the rewrite produces a passthrough for the aggregate's synthetic
+    /// name (since the alias renames it), but the trim removes the passthrough
+    /// so the output still has just <c>category, c</c>.
+    /// </summary>
+    [Fact]
+    public async Task OrderByBareAggregate_AliasInSelect_TrimsPassthrough()
+    {
+        TableCatalog catalog = CategoryCatalog();
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT category, COUNT(*) AS c FROM t GROUP BY category ORDER BY COUNT(*)",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal(1L, results[0]["c"].AsInt64());
+        Assert.Equal(2L, results[1]["c"].AsInt64());
+        Assert.Equal(3L, results[2]["c"].AsInt64());
+
+        // Output schema is exactly [category, c] — no leaked passthrough column.
+        Assert.Equal(2, results[0].ColumnNames.Count);
+        Assert.Contains("category", results[0].ColumnNames);
+        Assert.Contains("c", results[0].ColumnNames);
+    }
+
+    /// <summary>
+    /// Compound expression in ORDER BY containing a bare aggregate
+    /// (<c>ORDER BY COUNT(*) DESC</c> uses the column directly, but
+    /// <c>ORDER BY COUNT(*) + 1</c> nests it inside a binary op). The rewrite
+    /// must walk into the expression and still produce a passthrough.
+    /// </summary>
+    [Fact]
+    public async Task OrderByAggregate_NestedInExpression_NotInSelect()
+    {
+        TableCatalog catalog = CategoryCatalog();
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT category FROM t GROUP BY category ORDER BY COUNT(*) + 1",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal("gamma", results[0]["category"].AsString());
+        Assert.Equal("beta", results[1]["category"].AsString());
+        Assert.Equal("alpha", results[2]["category"].AsString());
+        Assert.Single(results[0].ColumnNames);
+    }
 }

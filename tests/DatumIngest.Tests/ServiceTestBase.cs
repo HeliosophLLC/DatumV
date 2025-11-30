@@ -56,6 +56,12 @@ public abstract class ServiceTestBase : IDisposable
 
 
     
+    protected static Row MakeRow(string[] columnNames, params DataValue[] values)
+    {
+        ColumnLookup columnLookup = new(columnNames);
+        return new Row(columnLookup, values);
+    }
+    
     protected static Row MakeRow(ColumnLookup columnLookup, params DataValue[] values)
     {
         return new Row(columnLookup, values);
