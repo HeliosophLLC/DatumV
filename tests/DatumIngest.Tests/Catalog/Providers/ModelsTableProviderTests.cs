@@ -43,21 +43,29 @@ public sealed class ModelsTableProviderTests : IDisposable
 
         Schema schema = provider.GetSchema();
 
+        Assert.Equal(12, schema.Columns.Count);
+
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
 
         Assert.Equal("display_name", schema.Columns[1].Name);
-        Assert.Equal("backend", schema.Columns[2].Name);
-        Assert.Equal("parameters", schema.Columns[3].Name);
-        Assert.Equal("file_name", schema.Columns[4].Name);
+        Assert.Equal("category", schema.Columns[2].Name);
 
-        Assert.Equal("file_size_bytes", schema.Columns[5].Name);
-        Assert.Equal(DataKind.Int64, schema.Columns[5].Kind);
+        Assert.Equal("modalities", schema.Columns[3].Name);
+        Assert.Equal(DataKind.String, schema.Columns[3].Kind);
+        Assert.True(schema.Columns[3].IsArray);
 
-        Assert.Equal("license", schema.Columns[6].Name);
-        Assert.Equal("license_holder", schema.Columns[7].Name);
-        Assert.Equal("source_url", schema.Columns[8].Name);
-        Assert.Equal("status", schema.Columns[9].Name);
+        Assert.Equal("backend", schema.Columns[4].Name);
+        Assert.Equal("parameters", schema.Columns[5].Name);
+        Assert.Equal("file_name", schema.Columns[6].Name);
+
+        Assert.Equal("file_size_bytes", schema.Columns[7].Name);
+        Assert.Equal(DataKind.Int64, schema.Columns[7].Kind);
+
+        Assert.Equal("license", schema.Columns[8].Name);
+        Assert.Equal("license_holder", schema.Columns[9].Name);
+        Assert.Equal("source_url", schema.Columns[10].Name);
+        Assert.Equal("status", schema.Columns[11].Name);
     }
 
     /// <summary>
@@ -87,21 +95,31 @@ public sealed class ModelsTableProviderTests : IDisposable
             Parameters: "0.1B",
             License: "MIT",
             LicenseHolder: "Nobody",
-            SourceUrl: "https://example.com/fake"));
+            SourceUrl: "https://example.com/fake",
+            Category: "llm",
+            Modalities: ["text", "image"]));
 
         using ModelsTableProvider provider = new(pool, catalog);
         (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
 
         Assert.Equal("fake", row[0].AsString(arena));
         Assert.Equal("Fake Test Model", row[1].AsString(arena));
-        Assert.Equal("test", row[2].AsString(arena));
-        Assert.Equal("0.1B", row[3].AsString(arena));
-        Assert.Equal(filename, row[4].AsString(arena));
-        Assert.Equal(payload.Length, row[5].AsInt64());
-        Assert.Equal("MIT", row[6].AsString(arena));
-        Assert.Equal("Nobody", row[7].AsString(arena));
-        Assert.Equal("https://example.com/fake", row[8].AsString(arena));
-        Assert.Equal("available", row[9].AsString(arena));
+        Assert.Equal("llm", row[2].AsString(arena));
+
+        // modalities — typed Array<String> cell.
+        Assert.True(row[3].IsArray);
+        Assert.Equal(DataKind.String, row[3].Kind);
+        string[] modalities = row[3].AsStringArray(arena);
+        Assert.Equal(["text", "image"], modalities);
+
+        Assert.Equal("test", row[4].AsString(arena));
+        Assert.Equal("0.1B", row[5].AsString(arena));
+        Assert.Equal(filename, row[6].AsString(arena));
+        Assert.Equal(payload.Length, row[7].AsInt64());
+        Assert.Equal("MIT", row[8].AsString(arena));
+        Assert.Equal("Nobody", row[9].AsString(arena));
+        Assert.Equal("https://example.com/fake", row[10].AsString(arena));
+        Assert.Equal("available", row[11].AsString(arena));
     }
 
     /// <summary>
@@ -130,9 +148,9 @@ public sealed class ModelsTableProviderTests : IDisposable
         (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
 
         Assert.Equal("ghost", row[0].AsString(arena));
-        Assert.Equal("never-downloaded.bin", row[4].AsString(arena));
-        Assert.True(row[5].IsNull);
-        Assert.Equal("missing", row[9].AsString(arena));
+        Assert.Equal("never-downloaded.bin", row[6].AsString(arena));
+        Assert.True(row[7].IsNull);
+        Assert.Equal("missing", row[11].AsString(arena));
     }
 
     /// <summary>

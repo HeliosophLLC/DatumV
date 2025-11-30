@@ -49,6 +49,54 @@ public sealed record LlamaChatTemplate(
         StopSequences: ["<|end|>", "<|endoftext|>"]);
 
     /// <summary>
+    /// Zephyr / HuggingFaceH4 chat template. Used by TinyLlama-1.1B-Chat-v1.0
+    /// (which fine-tuned on the same prompt format the Zephyr team
+    /// established). <c>&lt;|user|&gt;</c> and <c>&lt;|assistant|&gt;</c> role
+    /// markers; <c>&lt;/s&gt;</c> terminates each turn.
+    /// </summary>
+    public static readonly LlamaChatTemplate Zephyr = new(
+        Format: msg =>
+            "<|user|>\n" + msg + "</s>\n<|assistant|>\n",
+        StopSequences: ["</s>", "<|user|>"]);
+
+    /// <summary>
+    /// Google Gemma instruct template (Gemma / Gemma 2 / Gemma 3 share this
+    /// shape). <c>&lt;start_of_turn&gt;</c> opens a turn, <c>&lt;end_of_turn&gt;</c>
+    /// closes it. The role keyword is bare text after <c>start_of_turn</c> —
+    /// <c>user</c> for input, <c>model</c> for output (note: <c>model</c>, not
+    /// <c>assistant</c>; Gemma is the odd one out here).
+    /// </summary>
+    public static readonly LlamaChatTemplate Gemma = new(
+        Format: msg =>
+            "<start_of_turn>user\n" + msg + "<end_of_turn>\n<start_of_turn>model\n",
+        StopSequences: ["<end_of_turn>", "<eos>"]);
+
+    /// <summary>
+    /// ChatML chat template — originated by OpenAI for early GPT-3.5/4 chat
+    /// completions, now used by Qwen 2 / 2.5 (including the Coder variants),
+    /// Falcon3, and a swath of community fine-tunes. <c>&lt;|im_start|&gt;</c>
+    /// opens a turn, <c>&lt;|im_end|&gt;</c> closes it; role keyword
+    /// (<c>user</c> / <c>assistant</c> / <c>system</c>) follows the start tag.
+    /// </summary>
+    public static readonly LlamaChatTemplate ChatML = new(
+        Format: msg =>
+            "<|im_start|>user\n" + msg + "<|im_end|>\n<|im_start|>assistant\n",
+        StopSequences: ["<|im_end|>", "<|endoftext|>"]);
+
+    /// <summary>
+    /// IBM Granite 3.x instruct template. Roles wrap in
+    /// <c>&lt;|start_of_role|&gt;...&lt;|end_of_role|&gt;</c>; turn content
+    /// terminates with <c>&lt;|end_of_text|&gt;</c>. Visually wordier than
+    /// Llama or ChatML but the structure is the same: open role, write
+    /// message, close turn, open next role.
+    /// </summary>
+    public static readonly LlamaChatTemplate Granite = new(
+        Format: msg =>
+            "<|start_of_role|>user<|end_of_role|>" + msg +
+            "<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
+        StopSequences: ["<|end_of_text|>", "<|start_of_role|>"]);
+
+    /// <summary>
     /// Strips a trailing stop sequence from <paramref name="raw"/>, if present,
     /// then trims surrounding whitespace. The stop sequence is supposed to be
     /// consumed by the executor's anti-prompt list, but llama.cpp's emit

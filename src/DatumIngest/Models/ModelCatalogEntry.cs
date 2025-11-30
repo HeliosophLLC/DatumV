@@ -93,6 +93,21 @@ namespace DatumIngest.Models;
 /// where it came from. Repo URL preferred over direct file URL — direct
 /// file URLs rot when uploaders re-quantize.
 /// </param>
+/// <param name="Category">
+/// Single-valued purpose label: <c>"llm"</c>, <c>"classifier"</c>,
+/// <c>"detector"</c>, <c>"embedder"</c>, <c>"captioner"</c>,
+/// <c>"transcriber"</c>, <c>"generator"</c>. Routing key for the
+/// future <c>tasks.X</c> namespace — <c>tasks.classify</c> consumes
+/// models where <c>Category == "classifier"</c>, etc.
+/// </param>
+/// <param name="Modalities">
+/// All mediums this model touches in either direction: e.g.
+/// <c>["text"]</c> for an LLM, <c>["image", "text"]</c> for a
+/// classifier or captioner, <c>["audio", "text"]</c> for a transcriber.
+/// Order is not significant. Lets users find "every model that handles
+/// image" via <c>WHERE 'image' IN modalities</c> regardless of whether
+/// image is the input or output side.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -107,7 +122,9 @@ public sealed record ModelCatalogEntry(
     string? Parameters = null,
     string? License = null,
     string? LicenseHolder = null,
-    string? SourceUrl = null);
+    string? SourceUrl = null,
+    string? Category = null,
+    IReadOnlyList<string>? Modalities = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

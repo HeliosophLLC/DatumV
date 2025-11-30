@@ -57,10 +57,25 @@ public static class BuiltinModels
         string? modelDirectory = null)
     {
         ModelCatalog modelCatalog = new(modelDirectory);
+
+        // Vision models
         RegisterMobileNetV2(modelCatalog);
         RegisterYolo(modelCatalog);
+
+        // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
+        // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
+        // quantization for clean cross-model comparison (architectural
+        // differences, not quantization noise). Total disk: ~12 GB if all
+        // present; missing files surface in `system_models` as `status =
+        // 'missing'` with re-download hints.
         RegisterLlama31(modelCatalog);
         RegisterPhi3(modelCatalog);
+        RegisterTinyLlama(modelCatalog);
+        RegisterGemma22b(modelCatalog);
+        RegisterQwen25Coder(modelCatalog);
+        RegisterGranite31(modelCatalog);
+        RegisterFalcon31b(modelCatalog);
+
         tableCatalog.Models = modelCatalog;
         tableCatalog.Add(new ModelsTableProvider(tableCatalog.Pool, modelCatalog));
         return modelCatalog;
@@ -131,7 +146,9 @@ public static class BuiltinModels
             Parameters: "3.5M",
             License: "Apache-2.0",
             LicenseHolder: "ONNX Model Zoo",
-            SourceUrl: "https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet"));
+            SourceUrl: "https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet",
+            Category: "classifier",
+            Modalities: ["image", "text"]));
     }
 
     /// <summary>
@@ -202,7 +219,9 @@ public static class BuiltinModels
             // commercial threshold. Distinct from a standard OSS license.
             License: "Llama 3.1 Community",
             LicenseHolder: "Meta",
-            SourceUrl: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"));
+            SourceUrl: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
     }
 
     /// <summary>
@@ -258,7 +277,213 @@ public static class BuiltinModels
             Parameters: "3.8B",
             License: "MIT",
             LicenseHolder: "Microsoft",
-            SourceUrl: "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF"));
+            SourceUrl: "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
+    }
+
+    /// <summary>Default filename for TinyLlama-1.1B-Chat-v1.0 (TheBloke's GGUF mirror).</summary>
+    public const string TinyLlama11BChatDefaultFilename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers TinyLlama-1.1B-Chat-v1.0 under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"tinyllama_1b"</c>). The
+    /// "previous-era" voice in the LLM zoo — its 2023-vintage chat tuning
+    /// produces noticeably different prose to modern instruction-tuned models,
+    /// useful for tonal comparison.
+    /// </summary>
+    public static void RegisterTinyLlama(
+        ModelCatalog catalog,
+        string modelName = "tinyllama_1b",
+        string modelFilename = TinyLlama11BChatDefaultFilename,
+        uint contextSize = 2048,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Zephyr, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "TinyLlama 1.1B Chat v1.0",
+            Parameters: "1.1B",
+            License: "Apache-2.0",
+            LicenseHolder: "TinyLlama community",
+            SourceUrl: "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
+    }
+
+    /// <summary>Default filename for Gemma-2-2b-it (bartowski's GGUF mirror).</summary>
+    public const string Gemma22bItDefaultFilename = "gemma-2-2b-it-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers Google's Gemma-2-2b-it under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"gemma2_2b"</c>). Larger
+    /// than the other small zoo entries (~1.6 GB Q4_K_M) but a distinct
+    /// Google-trained voice for comparison — careful, thorough, often
+    /// verbose. Ships under Google's Gemma Terms of Use (custom permissive,
+    /// allows commercial use; downstream redistribution must pass the
+    /// Gemma terms along).
+    /// </summary>
+    public static void RegisterGemma22b(
+        ModelCatalog catalog,
+        string modelName = "gemma2_2b",
+        string modelFilename = Gemma22bItDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Gemma, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Gemma 2 2B Instruct",
+            Parameters: "2B",
+            License: "Gemma Terms",
+            LicenseHolder: "Google",
+            SourceUrl: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
+    }
+
+    /// <summary>Default filename for Qwen2.5-Coder-1.5B-Instruct (bartowski's GGUF mirror).</summary>
+    public const string Qwen25Coder15bDefaultFilename = "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers Alibaba's Qwen2.5-Coder-1.5B-Instruct under the catalog
+    /// name <paramref name="modelName"/> (defaults to <c>"qwen25_coder_1_5b"</c>).
+    /// Code-specialised variant — adds genre diversity to the zoo: prompts
+    /// like "write me a quicksort" produce noticeably different output
+    /// shape from the general-chat models.
+    /// </summary>
+    public static void RegisterQwen25Coder(
+        ModelCatalog catalog,
+        string modelName = "qwen25_coder_1_5b",
+        string modelFilename = Qwen25Coder15bDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Qwen 2.5 Coder 1.5B Instruct",
+            Parameters: "1.5B",
+            License: "Apache-2.0",
+            LicenseHolder: "Alibaba",
+            SourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
+    }
+
+    /// <summary>Default filename for Granite-3.1-1B-A400M-Instruct (bartowski's GGUF mirror).</summary>
+    public const string Granite31_1bDefaultFilename = "granite-3.1-1b-a400m-instruct-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers IBM's Granite-3.1-1B-A400M-Instruct under the catalog
+    /// name <paramref name="modelName"/> (defaults to <c>"granite31_1b"</c>).
+    /// Mixture-of-experts (1B total params, 400M active per token).
+    /// IBM's instruction tuning produces a noticeably structured /
+    /// "enterprise-y" voice — frequently bullet-pointed, careful with
+    /// caveats. Apache-2.0 — fully unencumbered for commercial use.
+    /// </summary>
+    public static void RegisterGranite31(
+        ModelCatalog catalog,
+        string modelName = "granite31_1b",
+        string modelFilename = Granite31_1bDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Granite, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "IBM Granite 3.1 1B A400M Instruct",
+            Parameters: "1B (400M active)",
+            License: "Apache-2.0",
+            LicenseHolder: "IBM",
+            SourceUrl: "https://huggingface.co/bartowski/granite-3.1-1b-a400m-instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
+    }
+
+    /// <summary>Default filename for Falcon3-1B-Instruct (TII's official GGUF).</summary>
+    public const string Falcon3_1bDefaultFilename = "Falcon3-1B-Instruct-q4_k_m.gguf";
+
+    /// <summary>
+    /// Registers TII's Falcon3-1B-Instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"falcon3_1b"</c>). Yet
+    /// another family corner — Technology Innovation Institute (UAE)
+    /// trained, distinctive vocabulary and style. Uses ChatML format
+    /// (same template as Qwen). Custom <c>TII Falcon-LLM License 2.0</c>
+    /// — broadly permissive with an acceptable-use policy.
+    /// </summary>
+    public static void RegisterFalcon31b(
+        ModelCatalog catalog,
+        string modelName = "falcon3_1b",
+        string modelFilename = Falcon3_1bDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Falcon3 1B Instruct",
+            Parameters: "1B",
+            License: "Falcon LLM License 2.0",
+            LicenseHolder: "TII",
+            SourceUrl: "https://huggingface.co/tiiuae/Falcon3-1B-Instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"]));
     }
 
     /// <summary>
@@ -315,7 +540,9 @@ public static class BuiltinModels
             // under AGPL or buy Ultralytics' separate commercial license.
             License: "AGPL-3.0",
             LicenseHolder: "Ultralytics",
-            SourceUrl: "https://github.com/ultralytics/ultralytics"));
+            SourceUrl: "https://github.com/ultralytics/ultralytics",
+            Category: "detector",
+            Modalities: ["image"]));
     }
 
     /// <summary>

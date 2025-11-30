@@ -24,10 +24,12 @@ namespace DatumIngest.Catalog.Providers;
 /// from a single snapshot would defeat the diagnostic.
 /// </para>
 /// <para>
-/// Schema (10 columns):
+/// Schema (12 columns):
 /// <list type="table">
 ///   <item><term>name</term><description>SQL identifier (the <c>X</c> in <c>models.X(...)</c>).</description></item>
 ///   <item><term>display_name</term><description>Human-readable model name.</description></item>
+///   <item><term>category</term><description>Single-valued purpose: <c>llm</c>, <c>classifier</c>, <c>detector</c>, <c>embedder</c>, etc. Routing key for <c>tasks.X</c>.</description></item>
+///   <item><term>modalities</term><description><c>Array&lt;String&gt;</c> — every medium the model touches (<c>["image", "text"]</c> for a captioner, <c>["text"]</c> for an LLM).</description></item>
 ///   <item><term>backend</term><description><c>onnx</c> / <c>llama</c> / <c>echo</c>.</description></item>
 ///   <item><term>parameters</term><description>Architectural param count (<c>"8B"</c>, <c>"3.5M"</c>).</description></item>
 ///   <item><term>file_name</term><description>Filename relative to the catalog's models directory.</description></item>
@@ -180,32 +182,48 @@ public sealed class ModelsTableProvider : ITableProvider
             fileSize = fileExists ? info.Length : null;
         }
 
-        cells[0] = DataValue.FromString(entry.Name, arena);
-        cells[1] = WriteOptionalString(entry.DisplayName, arena);
-        cells[2] = DataValue.FromString(entry.Backend, arena);
-        cells[3] = WriteOptionalString(entry.Parameters, arena);
-        cells[4] = WriteOptionalString(entry.RelativePath, arena);
-        cells[5] = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
-        cells[6] = WriteOptionalString(entry.License, arena);
-        cells[7] = WriteOptionalString(entry.LicenseHolder, arena);
-        cells[8] = WriteOptionalString(entry.SourceUrl, arena);
-        cells[9] = DataValue.FromString(fileExists ? "available" : "missing", arena);
+        cells[0]  = DataValue.FromString(entry.Name, arena);
+        cells[1]  = WriteOptionalString(entry.DisplayName, arena);
+        cells[2]  = WriteOptionalString(entry.Category, arena);
+        cells[3]  = WriteOptionalStringArray(entry.Modalities, arena);
+        cells[4]  = DataValue.FromString(entry.Backend, arena);
+        cells[5]  = WriteOptionalString(entry.Parameters, arena);
+        cells[6]  = WriteOptionalString(entry.RelativePath, arena);
+        cells[7]  = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
+        cells[8]  = WriteOptionalString(entry.License, arena);
+        cells[9]  = WriteOptionalString(entry.LicenseHolder, arena);
+        cells[10] = WriteOptionalString(entry.SourceUrl, arena);
+        cells[11] = DataValue.FromString(fileExists ? "available" : "missing", arena);
     }
 
     private static DataValue WriteOptionalString(string? value, Arena arena) =>
         value is null ? DataValue.Null(DataKind.String) : DataValue.FromString(value, arena);
 
+    /// <summary>
+    /// Writes a string list as a typed <c>Array&lt;String&gt;</c> cell, or a
+    /// typed null when the source is null. Empty lists round-trip as empty
+    /// arrays (distinguishable from null in display: <c>[]</c> vs <c>NULL</c>).
+    /// </summary>
+    private static DataValue WriteOptionalStringArray(IReadOnlyList<string>? values, Arena arena)
+    {
+        if (values is null) return DataValue.NullArrayOf(DataKind.String);
+        string[] copy = values is string[] array ? array : values.ToArray();
+        return DataValue.FromStringArray(copy, arena);
+    }
+
     private static Schema BuildSchema() => new(
     [
-        new ColumnInfo("name",            DataKind.String,  nullable: false),
-        new ColumnInfo("display_name",    DataKind.String,  nullable: true),
-        new ColumnInfo("backend",         DataKind.String,  nullable: false),
-        new ColumnInfo("parameters",      DataKind.String,  nullable: true),
-        new ColumnInfo("file_name",       DataKind.String,  nullable: true),
-        new ColumnInfo("file_size_bytes", DataKind.Int64,   nullable: true),
-        new ColumnInfo("license",         DataKind.String,  nullable: true),
-        new ColumnInfo("license_holder",  DataKind.String,  nullable: true),
-        new ColumnInfo("source_url",      DataKind.String,  nullable: true),
-        new ColumnInfo("status",          DataKind.String,  nullable: false),
+        new ColumnInfo("name",            DataKind.String, nullable: false),
+        new ColumnInfo("display_name",    DataKind.String, nullable: true),
+        new ColumnInfo("category",        DataKind.String, nullable: true),
+        new ColumnInfo("modalities",      DataKind.String, nullable: true) { IsArray = true },
+        new ColumnInfo("backend",         DataKind.String, nullable: false),
+        new ColumnInfo("parameters",      DataKind.String, nullable: true),
+        new ColumnInfo("file_name",       DataKind.String, nullable: true),
+        new ColumnInfo("file_size_bytes", DataKind.Int64,  nullable: true),
+        new ColumnInfo("license",         DataKind.String, nullable: true),
+        new ColumnInfo("license_holder",  DataKind.String, nullable: true),
+        new ColumnInfo("source_url",      DataKind.String, nullable: true),
+        new ColumnInfo("status",          DataKind.String, nullable: false),
     ]);
 }
