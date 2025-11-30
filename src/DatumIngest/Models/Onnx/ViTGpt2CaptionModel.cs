@@ -71,6 +71,15 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
     /// <summary>Maximum tokens the decoder will generate per image.</summary>
     public int MaxTokens => _maxTokens;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Captioning takes ~500ms-1s per image (vision-encoder pass + ~16
+    /// autoregressive decoder steps). Stream in groups of 8 so the user
+    /// sees first captions in a few seconds rather than waiting for
+    /// 1024-row batches.
+    /// </remarks>
+    public int? PreferredBatchSize => 8;
+
     /// <summary>
     /// Loads the ViT-GPT2 captioner from a directory of ONNX + tokenizer files.
     /// </summary>

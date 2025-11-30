@@ -1,0 +1,1 @@
+huggingface-cli download tlwu/sd-turbo-onnxruntime --local-dir E:\Models\sd-turbo-onnx

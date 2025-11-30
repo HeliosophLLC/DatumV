@@ -229,92 +229,109 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
             }
 
-            // Step 1: rent the output batch sized to rowsThisBatch (capped by
-            // RowLimit when set). Bound to context.Store so it shares the
-            // single per-query arena — same arena as inputs and the rest of
-            // the operator chain. No cross-arena routing needed.
-            RowBatch outputBatch = context.RentRowBatch(outputLookup, rowsThisBatch);
+            // Sub-batching for streaming UX. Models with a non-null
+            // PreferredBatchSize stream results back to the user as soon as
+            // each chunk completes, rather than waiting for a full 1024-row
+            // upstream batch to finish. For LLMs (Llama, Phi, Gemma, …) at
+            // ~3s per generation this means first results in seconds, not
+            // hours. PreferredBatchSize == null means "process whatever the
+            // upstream hands me as one batch" — preserves existing behaviour
+            // for cheap models (classifiers, detectors).
+            int subBatchSize = model.PreferredBatchSize ?? rowsThisBatch;
+            if (subBatchSize <= 0) subBatchSize = rowsThisBatch;
 
-            // Step 2: evaluate input expressions and per-row hyperparameter
-            // overrides as ValueRefs. The evaluator's ToValueRef handles arena
-            // and sidecar resolution at the boundary, so the function chain
-            // feeding the model never writes its result to the arena —
-            // inputs[r][c] holds a managed payload (string / byte[] / inline
-            // numeric) ready for direct consumption by the model. When there
-            // are no optional expressions, overrideValues stays a shared empty
-            // array — no per-row allocation cost in the common case.
-            ValueRef[][] inputs = new ValueRef[rowsThisBatch][];
-            ValueRef[][] overrideValues = new ValueRef[rowsThisBatch][];
-            ValueRef[] emptyOverrideRow = [];
-
-            for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
+            for (int chunkStart = 0; chunkStart < rowsThisBatch; chunkStart += subBatchSize)
             {
-                Row row = sourceBatch[rowIdx];
-                EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
-                for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
-                {
-                    rowInputs[argIdx] = evaluator.EvaluateAsValueRef(_inputExpressions[argIdx], frame);
-                }
-                inputs[rowIdx] = rowInputs;
+                int chunkSize = Math.Min(subBatchSize, rowsThisBatch - chunkStart);
 
-                if (_optionalExpressions.Count == 0)
+                // Step 1: rent an output batch sized to this chunk. Bound to
+                // context.Store so it shares the single per-query arena — same
+                // arena as inputs and the rest of the operator chain.
+                RowBatch outputBatch = context.RentRowBatch(outputLookup, chunkSize);
+
+                // Step 2: evaluate input expressions and per-row hyperparameter
+                // overrides for the chunk's rows. The evaluator's ToValueRef
+                // handles arena and sidecar resolution at the boundary, so
+                // the function chain feeding the model never writes its result
+                // to the arena — inputs[r][c] holds a managed payload ready
+                // for direct consumption by the model.
+                ValueRef[][] inputs = new ValueRef[chunkSize][];
+                ValueRef[][] overrideValues = new ValueRef[chunkSize][];
+                ValueRef[] emptyOverrideRow = [];
+
+                for (int chunkRowIdx = 0; chunkRowIdx < chunkSize; chunkRowIdx++)
                 {
-                    overrideValues[rowIdx] = emptyOverrideRow;
-                }
-                else
-                {
-                    ValueRef[] rowOverrides = new ValueRef[_optionalExpressions.Count];
-                    for (int i = 0; i < _optionalExpressions.Count; i++)
+                    Row row = sourceBatch[chunkStart + chunkRowIdx];
+                    EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry);
+
+                    ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
+                    for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                     {
-                        rowOverrides[i] = evaluator.EvaluateAsValueRef(_optionalExpressions[i], frame);
+                        rowInputs[argIdx] = evaluator.EvaluateAsValueRef(_inputExpressions[argIdx], frame);
                     }
-                    overrideValues[rowIdx] = rowOverrides;
+                    inputs[chunkRowIdx] = rowInputs;
+
+                    if (_optionalExpressions.Count == 0)
+                    {
+                        overrideValues[chunkRowIdx] = emptyOverrideRow;
+                    }
+                    else
+                    {
+                        ValueRef[] rowOverrides = new ValueRef[_optionalExpressions.Count];
+                        for (int i = 0; i < _optionalExpressions.Count; i++)
+                        {
+                            rowOverrides[i] = evaluator.EvaluateAsValueRef(_optionalExpressions[i], frame);
+                        }
+                        overrideValues[chunkRowIdx] = rowOverrides;
+                    }
                 }
-            }
 
-            // Step 3: dispatch the whole batch in one async call. The model
-            // returns ValueRefs — managed payloads — and the scatter step
-            // below materialises them into outputBatch.Arena via
-            // ValueRef.ToDataValue. Nothing in the model body touches an arena.
-            IReadOnlyList<ValueRef> modelOutputs = await model
-                .InferBatchAsync(
-                    inputs,
-                    overrideValues,
-                    cancellationToken)
-                .ConfigureAwait(false);
+                // Step 3: dispatch this chunk. The model returns ValueRefs —
+                // managed payloads — and the scatter step below materialises
+                // them into outputBatch.Arena via ValueRef.ToDataValue.
+                IReadOnlyList<ValueRef> modelOutputs = await model
+                    .InferBatchAsync(
+                        inputs,
+                        overrideValues,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (modelOutputs.Count != rowsThisBatch)
-            {
-                context.ReturnRowBatch(outputBatch);
-                context.ReturnRowBatch(sourceBatch);
-                throw new InvalidOperationException(
-                    $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {rowsThisBatch}-row input batch.");
-            }
-
-            // Step 4: scatter — for each source row, copy source columns and append the
-            // model output. Source values stabilise from the source batch's arena into
-            // the output batch's arena so they survive the source batch returning to the
-            // pool below. The model output's ValueRef is materialised via
-            // ToDataValue against outputBatch.Arena — the single boundary write
-            // for any nested struct/array payload.
-            for (int rowIdx = 0; rowIdx < rowsThisBatch; rowIdx++)
-            {
-                Row sourceRow = sourceBatch[rowIdx];
-                DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
-                for (int slot = 0; slot < sourceCopySlots!.Length; slot++)
+                if (modelOutputs.Count != chunkSize)
                 {
-                    outValues[slot] = DataValueRetention.Stabilize(
-                        sourceRow[sourceCopySlots[slot]], sourceBatch.Arena, outputBatch.Arena);
+                    context.ReturnRowBatch(outputBatch);
+                    context.ReturnRowBatch(sourceBatch);
+                    throw new InvalidOperationException(
+                        $"Model '{_modelName}' returned {modelOutputs.Count} outputs for a {chunkSize}-row input chunk.");
                 }
-                outValues[^1] = modelOutputs[rowIdx].ToDataValue(outputBatch.Arena);
-                outputBatch.Add(outValues);
+
+                // Step 4: scatter — for each source row in the chunk, copy
+                // source columns and append the model output. Source values
+                // stabilise from the source batch's arena into the output
+                // batch's arena. The model output's ValueRef is materialised
+                // via ToDataValue against outputBatch.Arena — the single
+                // boundary write for any nested struct/array payload.
+                for (int chunkRowIdx = 0; chunkRowIdx < chunkSize; chunkRowIdx++)
+                {
+                    Row sourceRow = sourceBatch[chunkStart + chunkRowIdx];
+                    DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
+                    for (int slot = 0; slot < sourceCopySlots!.Length; slot++)
+                    {
+                        outValues[slot] = DataValueRetention.Stabilize(
+                            sourceRow[sourceCopySlots[slot]], sourceBatch.Arena, outputBatch.Arena);
+                    }
+                    outValues[^1] = modelOutputs[chunkRowIdx].ToDataValue(outputBatch.Arena);
+                    outputBatch.Add(outValues);
+                }
+
+                yieldedRows += chunkSize;
+                yield return outputBatch;
             }
 
+            // Source batch has been fully consumed (or partially consumed +
+            // RowLimit reached). Return it once after all chunks emit.
             context.ReturnRowBatch(sourceBatch);
-            yieldedRows += rowsThisBatch;
-            yield return outputBatch;
 
             if (rowLimit.HasValue && yieldedRows >= rowLimit.Value)
             {

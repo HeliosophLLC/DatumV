@@ -94,6 +94,17 @@ public sealed class Florence2Model : OnnxModel
     /// <summary>The task prompt this instance is configured for (for diagnostics).</summary>
     public string TaskPromptDescription => _taskPromptDescription;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Florence-2 captioning is ~1-2s per image: vision encoder pass +
+    /// embed + encoder + autoregressive decode. Stream in groups of 8
+    /// so the user sees first captions quickly. <c>MORE_DETAILED_CAPTION</c>
+    /// is closer to 2s per image (long output sequences); even at that
+    /// cost a group-of-8 first batch arrives in ~15s, much better than
+    /// waiting for 1024 rows.
+    /// </remarks>
+    public int? PreferredBatchSize => 8;
+
     /// <summary>
     /// Loads the Florence-2 pipeline from a directory containing the four
     /// ONNX files plus tokenizer + configs.

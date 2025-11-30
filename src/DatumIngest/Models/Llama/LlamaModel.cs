@@ -79,6 +79,17 @@ public sealed class LlamaModel : IModel, IDisposable
     /// <inheritdoc />
     public DataKind OutputKind => DataKind.String;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// LLMs typically take 2–5 seconds per generation on a consumer GPU.
+    /// A 1024-row upstream batch would mean ~hour-long waits before the
+    /// user sees a single result. Streaming in groups of 4 keeps total
+    /// throughput nearly identical (each group is run with one
+    /// <c>InferBatchAsync</c> call) while delivering first results in
+    /// seconds.
+    /// </remarks>
+    public int? PreferredBatchSize => 4;
+
     /// <summary>
     /// Loads the GGUF file at <paramref name="modelFilePath"/> with all layers
     /// offloaded to GPU when available (LlamaSharp falls back to CPU when no

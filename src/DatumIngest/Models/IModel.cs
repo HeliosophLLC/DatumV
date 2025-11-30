@@ -98,4 +98,49 @@ public interface IModel
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Optional mini-batch size used by <c>ModelInvocationOperator</c> to
+    /// stream results to the user. When non-<see langword="null"/>, the
+    /// operator splits incoming <c>RowBatch</c>es into sub-batches of this
+    /// size, runs <see cref="InferBatchAsync"/> per sub-batch, and emits
+    /// one output batch per inference call — so the user sees results
+    /// arrive incrementally rather than waiting for the full upstream
+    /// batch (typically 1024 rows) to complete.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Cost-tier-aware defaults.</strong>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     Cheap models (classifiers, detectors, embedders — sub-100ms per
+    ///     row): leave <see langword="null"/>. Per-row latency is small
+    ///     enough that batch-level emission feels instant; rebatching adds
+    ///     overhead without UX gain.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Medium-cost models (captioners, OCR — ~500ms-2s per row):
+    ///     return <c>8</c>. First results visible in seconds; total
+    ///     throughput nearly identical to non-rebatched.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Expensive models (LLMs — ~2-5s per generation): return <c>4</c>.
+    ///     Streaming dominates; user perceives the system as live rather
+    ///     than batch-frozen.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Very expensive models (image generation — ~1-2s per image,
+    ///     each producing MB-scale output): return <c>1</c>. Each image
+    ///     emits as soon as it's done.
+    ///   </description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// Scan-side batching (typically 1024 rows) is unaffected — that's
+    /// throughput-oriented and shouldn't shrink. The rebatching only
+    /// happens at model-invocation boundaries where per-row latency is
+    /// large enough that streaming matters more than per-call overhead.
+    /// </para>
+    /// </remarks>
+    int? PreferredBatchSize => null;
 }
