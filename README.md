@@ -35,13 +35,13 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 
 **Sources** are files — any mix of CSV, JSON, JSONL, ZIP, HDF5, Parquet, and IDX. Each becomes a named table. ZIP entries become rows with lazy-decompressed bytes. IDX files (MNIST, Fashion-MNIST, etc.) become tables with an `index` column for joining images with labels. All sources are available simultaneously for joins.
 
-**Operators** are expressed as SQL. Filter with WHERE, join across formats with JOIN, transform with 200+ functions. Columns can hold scalars, strings, vectors, matrices, tensors, images, UUIDs, booleans, times, or durations — all as first-class types. Image transforms fuse automatically: `resize(grayscale(crop(img)))` decodes once and encodes once.
+**Operators** are expressed as SQL. Filter with WHERE, join across formats with JOIN, transform with 200+ functions. Columns can hold scalars, strings, typed arrays (numeric or otherwise), images, structs, UUIDs, booleans, dates, times, datetimes, or durations — all as first-class types. Image transforms fuse automatically: `resize(grayscale(crop(img)))` decodes once and encodes once.
 
 **Output** is an ML-ready file in CSV, Parquet, or HDF5. Add `SHARD ON` to split into fixed-size shards. Add `--checkpoint` to resume after interruption.
 
 ## Key Features
 
-- **ML-native type system** — Vector, Matrix, Tensor, Image, and Struct are first-class column types alongside Float32, String, Date, DateTime, Time, Duration, JsonValue, UUID, and Boolean
+- **Rich type system** — first-class column types include Boolean, signed and unsigned integers up to 128 bits (Int8/16/32/64/128, UInt8/16/32/64/128), Float16/32/64, Decimal, Date, Time, DateTime, Duration, String, Uuid, Image, and Struct. Any primitive type can also be carried as a typed array (`Float32` array for embeddings, `UInt8` array for byte buffers, etc.) via an orthogonal IsArray flag
 - **Fused image pipeline** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more transforms, with automatic decode/encode fusion across chains
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
@@ -67,7 +67,7 @@ DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-bu
 
 - **Image transforms in SQL** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more, with automatic decode/encode fusion across chained transforms. DuckDB and Pandas have no image pipeline.
 - **ZIP archives as tables** — `FROM images` where `images` is a ZIP file. Each entry becomes a row with lazy decompression. No extract step.
-- **ML-native types** — Vector, Matrix, Tensor, Image, and Struct are first-class column types with dedicated functions (`softmax`, `cosine_similarity`, `cyclical_encode`, `normalize`).
+- **ML-friendly types** — Image and Struct are first-class column types, and any numeric kind (Float16/32/64, integers up to 128 bits) can be used as a typed array for embeddings, tensors, and feature vectors via an orthogonal IsArray flag — no separate Vector/Matrix/Tensor types to juggle.
 - **Dataset manifests** — one command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions. Sidecar `.datum-manifest` and `.datum-schema` files are auto-discovered and feed back into the query planner for data-driven cardinality estimation and cached schema resolution.
 - **SCAN fold expressions** — `SCAN acc = f(acc, row) INIT seed OVER (ORDER BY ...)` computes sequential state (exponential moving averages, sessionization, streak detection, state machines) directly in SQL. No recursive CTEs, no UDFs, no post-processing scripts.
 - **Sharded output with checkpointing** — write to sharded CSV/Parquet/HDF5 and resume from the last completed shard after a crash.

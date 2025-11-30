@@ -4,7 +4,7 @@ title: Type System
 
 ## Why Use This
 
-DatumIngest has more types than standard SQL -- vectors for embeddings, tensors for image data, durations for time spans. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
+DatumIngest has more types than standard SQL -- typed arrays for embeddings and tensors, durations for time spans, images as a first-class kind, structs for nested values. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
 
 ## Quick Start
 
@@ -42,30 +42,37 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 |----------|-------------|------------------------|
 | `Boolean` | True or false | `bool` |
 | `UInt8` | Unsigned 8-bit integer (0–255) | `byte` |
+| `UInt16` | Unsigned 16-bit integer | `ushort` |
+| `UInt32` | Unsigned 32-bit integer | `uint` |
+| `UInt64` | Unsigned 64-bit integer | `ulong` |
+| `UInt128` | Unsigned 128-bit integer | `System.UInt128` |
 | `Int8` | Signed 8-bit integer (−128–127) | `sbyte` |
 | `Int16` | Signed 16-bit integer | `short` |
-| `UInt16` | Unsigned 16-bit integer | `ushort` |
 | `Int32` | Signed 32-bit integer | `int` |
-| `UInt32` | Unsigned 32-bit integer | `uint` |
 | `Int64` | Signed 64-bit integer | `long` |
-| `UInt64` | Unsigned 64-bit integer | `ulong` |
+| `Int128` | Signed 128-bit integer | `System.Int128` |
+| `Float16` | 16-bit IEEE 754 binary16 float | `System.Half` |
 | `Float32` | 32-bit IEEE 754 float | `float` |
 | `Float64` | 64-bit IEEE 754 double | `double` |
-| `String` | Variable-length UTF-8 text | `string` |
+| `Decimal` | 128-bit decimal floating point | `decimal` |
 | `Date` | Calendar date (no time component) | `DateOnly` |
-| `DateTime` | Date and time with UTC offset | `DateTimeOffset` |
 | `Time` | Time of day (no date component) | `TimeOnly` |
+| `DateTime` | Date and time with UTC offset | `DateTimeOffset` |
 | `Duration` | Elapsed time span | `TimeSpan` |
+| `String` | Variable-length UTF-8 text | `string` |
 | `Uuid` | 128-bit UUID (RFC 9562) | `Guid` |
-| `JsonValue` | Raw JSON string for deferred parsing | `string` |
-| `Vector` | Rank-1 float array | `float[]` |
-| `Matrix` | Rank-2 float array | `float[]` + shape `[rows, cols]` |
-| `Tensor` | N-dimensional float array | `float[]` + `int[]` shape |
-| `UInt8Array` | Raw byte array | `byte[]` |
 | `Image` | Encoded image bytes | `byte[]` |
-| `Array` | Ordered sequence of same-typed values | `DataValue[]` |
 | `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
 | `Type` | A type tag describing another DataKind | `DataKind` enum value (stored as byte) |
+
+#### Arrays
+
+Arrays are not a separate `DataKind`. Any primitive kind can carry an
+orthogonal `IsArray` flag, turning a single value into an ordered sequence of
+values of that kind. `Float32` with `IsArray` is what you'd call a vector;
+`UInt8` with `IsArray` is a raw byte buffer. There is no fixed shape —
+multi-dimensional shapes live above this level (e.g. paired with a separate
+shape descriptor).
 
 ### Type Literals and typeof()
 
@@ -109,7 +116,7 @@ SELECT * FROM t WHERE can_cast(name, Date)     -- false for "abc", true for "202
 `can_cast` matches CAST semantics: truncation of fractional parts is allowed
 (it's not data loss — it's expected CAST behavior). Only overflow (value outside
 the target range) and parse failures return false. Widening conversions (e.g.,
-Int32 → Float64) always return true. Unsupported pairs (e.g., Vector → Int32)
+Int32 → Float64) always return true. Unsupported pairs (e.g., Image → Int32)
 return false.
 
 #### try_cast()
@@ -204,12 +211,12 @@ FROM t
 
 #### Type literal rules
 
-All `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`,
-`UInt16`, `UInt32`, `UInt64`, `Float32`, `Float64`, `String`, `Date`,
-`DateTime`, `Time`, `Duration`, `Uuid`, `JsonValue`, `Vector`, `Matrix`,
-`Tensor`, `UInt8Array`, `Image`, `Array`, `Struct`, `Type`) are reserved in
-expression position. They produce a `Type` value that can be compared with
-`typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
+`DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
+`UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
+`Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
+`Uuid`, `Image`, `Struct`, `Type`) are reserved in expression position. They
+produce a `Type` value that can be compared with `typeof()` results using
+`=`, `!=`, `IN`, `CASE`, and `IS`.
 
 To use a type name as a column alias or table name, double-quote it:
 
@@ -226,18 +233,22 @@ table names after `FROM`) are accepted without quoting.
 #### Implicit widening
 
 When an operator or function receives mixed types, the engine automatically
-widens both sides to the narrowest common type. The widening chain is:
+widens both sides to the narrowest common type. The numeric widening chain
+is roughly:
 
 ```
-Boolean → UInt8 ─→ Int16 ─→ Int32 ─→ Int64 ─→ Float64 → Vector → Tensor
+Boolean → UInt8 ─→ Int16 ─→ Int32 ─→ Int64 ─→ Float64
            Int8 ↗    UInt16 ↗   UInt32 ↗   UInt64 ↗
-                                             Float32 ↗
-                                            Duration ↗
-                                      Matrix ──────────→ Tensor
+                                            Float16 ↗
+                                            Float32 ↗
+                                           Duration ↗
 ```
 
 Widening is transitive — `UInt8` can reach `Float64` by following the chain
-through `Int16 → Int32 → Int64 → Float64`. Same-kind is always a no-op.
+through `Int16 → Int32 → Int64 → Float64`. Same-kind is always a no-op. The
+128-bit kinds (`Int128`, `UInt128`, `Decimal`) participate as widening
+targets from their respective lanes; element-wise widening across an array
+applies to each element independently.
 
 #### Explicit conversion (CAST)
 
@@ -258,8 +269,7 @@ Supported conversions include:
 - **DateTime → Time** — extract time-of-day.
 - **Date/DateTime → numeric** — epoch days or epoch seconds.
 - **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
-- **String ↔ JsonValue** — text reinterpretation.
-- **UInt8Array ↔ Image** — byte reinterpretation.
+- **`UInt8` array ↔ Image** — byte reinterpretation between a raw byte buffer and an encoded image blob.
 
 Use `can_cast(x, Type)` to check if a conversion is lossless before casting, or
 `try_cast(x, Type)` to get NULL on failure instead of an error. The function-call
@@ -382,14 +392,6 @@ FROM trips
 
 Timezone names follow the [IANA tz database](https://www.iana.org/time-zones) (e.g. `America/New_York`, `Europe/London`, `Asia/Kolkata`, `UTC`). DST transitions are handled automatically.
 
-### Vector, Matrix, and Tensor relationship
-
-All three store a flat `float[]` buffer internally:
-- **Vector**: `float[]` with implicit shape `[length]`
-- **Matrix**: `float[]` with shape `[rows, cols]`
-- **Tensor**: `float[]` with arbitrary `int[]` shape
-
-Conversion between them is zero-copy when ranks match. Use `reshape()` to reinterpret shape without copying (element count must match).
 
 ## See Also
 

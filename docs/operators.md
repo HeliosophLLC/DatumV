@@ -89,6 +89,14 @@ Builds a `ProjectionSchema` once from the first row; subsequent rows only alloca
 
 Prefixes column names with a table alias (e.g. `t.col`) so qualified references resolve correctly. Retains unqualified names too, so either form works.
 
+### `RowEnricherOperator`
+
+Evaluates a fixed set of pure scalar expressions per row and appends them as hidden columns on the output batch. Inserted by [common-subexpression elimination](common-subexpression-elimination.md) to share work between repeated subexpressions; the columns it adds (named `__cse_*`) ride on the batch's `ColumnLookup` so downstream operators reference them like any source column. Earlier enrichments in the same operator are **not** visible to later ones — when subsumed subtrees need dependent evaluation, the planner stacks multiple `RowEnricherOperator`s in dependency order.
+
+### `ModelInvocationOperator`
+
+Hoisted target for `models.<name>(...)` calls. Evaluates the model's input expressions per row, dispatches the model in batches (one batch per upstream `RowBatch`), and scatters outputs back as a hidden column (named `__model_*`). One operator per distinct hoisted call site; nested model calls become a stack of operators with the inner one closer to the source. See [common-subexpression elimination](common-subexpression-elimination.md) for the planner pass that inserts these operators.
+
 ---
 
 ## Aggregation
@@ -229,6 +237,8 @@ Uniform Bernoulli filter at a given percentage. Each row is independently includ
 | `SampleScanOperator` | ✅ | any |
 | `ProjectOperator` | ✅ | any |
 | `AliasOperator` | ✅ | any |
+| `RowEnricherOperator` | ✅ | any |
+| `ModelInvocationOperator` | ✅ (per-batch dispatch) | any |
 | `GroupByOperator` | ⚠️ blocking in hash mode, streaming in sorted mode | any / sorted |
 | `WindowOperator` | ❌ blocking | any |
 | `PivotOperator` | ❌ blocking | any |
