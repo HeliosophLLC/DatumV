@@ -90,7 +90,172 @@ public static class CommonSubexpressionEliminator
             IQueryOperator newSource = EliminateRecursive(orderBy.Source, functions);
             return EliminateInOrderBy(orderBy, newSource, functions);
         }
+        if (op is GroupByOperator group)
+        {
+            IQueryOperator newSource = EliminateRecursive(group.Source, functions);
+            return EliminateInGroupBy(group, newSource, functions);
+        }
+        if (op is WindowOperator window)
+        {
+            IQueryOperator newSource = EliminateRecursive(window.Source, functions);
+            return EliminateInWindow(window, newSource, functions);
+        }
         return RewriteChildren(op, child => EliminateRecursive(child, functions));
+    }
+
+    /// <summary>
+    /// Within-GroupBy CSE. Hoists pure subexpressions appearing two-or-more
+    /// times across the GROUP BY keys, aggregate arguments, and intra-aggregate
+    /// ORDER BY items into a single <see cref="RowEnricherOperator"/> upstream
+    /// of the <see cref="GroupByOperator"/>. Common pattern: same expression
+    /// used as a group key AND as an aggregate argument
+    /// (<c>SELECT SUM(upper(name)), upper(name) FROM t GROUP BY upper(name)</c>).
+    /// </summary>
+    private static IQueryOperator EliminateInGroupBy(
+        GroupByOperator group, IQueryOperator source, FunctionRegistry functions)
+    {
+        HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
+
+        foreach (Expression key in group.GroupByExpressions)
+        {
+            CollectCandidates(key, entries, letNames, functions);
+        }
+        foreach (AggregateColumn ac in group.AggregateColumns)
+        {
+            foreach (Expression arg in ac.ArgumentExpressions)
+            {
+                CollectCandidates(arg, entries, letNames, functions);
+            }
+            if (ac.OrderBy is not null)
+            {
+                foreach (OrderByItem ob in ac.OrderBy)
+                {
+                    CollectCandidates(ob.Expression, entries, letNames, functions);
+                }
+            }
+        }
+
+        IQueryOperator RebuildUnchanged() =>
+            ReferenceEquals(source, group.Source)
+                ? group
+                : new GroupByOperator(source, group.GroupByExpressions, group.AggregateColumns, group.StreamingSorted);
+
+        if (entries.Count == 0) return RebuildUnchanged();
+
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> fpToCanonical = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach ((string fp, FingerprintEntry entry) in entries)
+        {
+            if (entry.Count < 2) continue;
+            string column = $"__cse_g{counter++}";
+            fpToColumn[fp] = column;
+            fpToCanonical[fp] = entry.Canonical;
+        }
+
+        if (fpToColumn.Count == 0) return RebuildUnchanged();
+
+        IQueryOperator augmented = BuildEnricherStack(
+            source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
+
+        Expression[] rewrittenKeys = group.GroupByExpressions
+            .Select(e => RewriteWithHoists(e, fpToColumn))
+            .ToArray();
+
+        AggregateColumn[] rewrittenAggs = group.AggregateColumns
+            .Select(ac => ac with
+            {
+                ArgumentExpressions = ac.ArgumentExpressions
+                    .Select(a => RewriteWithHoists(a, fpToColumn))
+                    .ToList(),
+                OrderBy = ac.OrderBy?
+                    .Select(ob => ob with { Expression = RewriteWithHoists(ob.Expression, fpToColumn) })
+                    .ToList(),
+            })
+            .ToArray();
+
+        return new GroupByOperator(augmented, rewrittenKeys, rewrittenAggs, group.StreamingSorted);
+    }
+
+    /// <summary>
+    /// Within-Window CSE. Hoists pure subexpressions appearing two-or-more
+    /// times across a window column's arguments, partition keys, and order
+    /// items into a single <see cref="RowEnricherOperator"/> upstream of the
+    /// <see cref="WindowOperator"/>. Common pattern: same expression
+    /// used as both a partition key and a sort key
+    /// (<c>RANK() OVER (PARTITION BY upper(name) ORDER BY upper(name))</c>).
+    /// </summary>
+    private static IQueryOperator EliminateInWindow(
+        WindowOperator window, IQueryOperator source, FunctionRegistry functions)
+    {
+        HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
+
+        foreach (WindowColumn wc in window.WindowColumns)
+        {
+            foreach (Expression arg in wc.ArgumentExpressions)
+            {
+                CollectCandidates(arg, entries, letNames, functions);
+            }
+            if (wc.WindowSpecification.PartitionBy is not null)
+            {
+                foreach (Expression p in wc.WindowSpecification.PartitionBy)
+                {
+                    CollectCandidates(p, entries, letNames, functions);
+                }
+            }
+            if (wc.WindowSpecification.OrderBy is not null)
+            {
+                foreach (OrderByItem ob in wc.WindowSpecification.OrderBy)
+                {
+                    CollectCandidates(ob.Expression, entries, letNames, functions);
+                }
+            }
+        }
+
+        IQueryOperator RebuildUnchanged() =>
+            ReferenceEquals(source, window.Source)
+                ? window
+                : new WindowOperator(source, window.WindowColumns);
+
+        if (entries.Count == 0) return RebuildUnchanged();
+
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> fpToCanonical = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach ((string fp, FingerprintEntry entry) in entries)
+        {
+            if (entry.Count < 2) continue;
+            string column = $"__cse_w{counter++}";
+            fpToColumn[fp] = column;
+            fpToCanonical[fp] = entry.Canonical;
+        }
+
+        if (fpToColumn.Count == 0) return RebuildUnchanged();
+
+        IQueryOperator augmented = BuildEnricherStack(
+            source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
+
+        WindowColumn[] rewrittenColumns = window.WindowColumns
+            .Select(wc => wc with
+            {
+                ArgumentExpressions = wc.ArgumentExpressions
+                    .Select(a => RewriteWithHoists(a, fpToColumn))
+                    .ToList(),
+                WindowSpecification = wc.WindowSpecification with
+                {
+                    PartitionBy = wc.WindowSpecification.PartitionBy?
+                        .Select(p => RewriteWithHoists(p, fpToColumn))
+                        .ToList(),
+                    OrderBy = wc.WindowSpecification.OrderBy?
+                        .Select(ob => ob with { Expression = RewriteWithHoists(ob.Expression, fpToColumn) })
+                        .ToList(),
+                },
+            })
+            .ToArray();
+
+        return new WindowOperator(augmented, rewrittenColumns);
     }
 
     /// <summary>
@@ -909,6 +1074,9 @@ public static class CommonSubexpressionEliminator
             FilterOperator f => new FilterOperator(childRewriter(f.Source), f.Predicate),
             OrderByOperator ob => new OrderByOperator(
                 childRewriter(ob.Source), ob.OrderByItems, ob.TopNRows),
+            GroupByOperator g => new GroupByOperator(
+                childRewriter(g.Source), g.GroupByExpressions, g.AggregateColumns, g.StreamingSorted),
+            WindowOperator w => new WindowOperator(childRewriter(w.Source), w.WindowColumns),
             LimitOperator l => RewriteLimit(l, childRewriter),
             ModelInvocationOperator m => new ModelInvocationOperator(
                 childRewriter(m.Source), m.ModelName, m.InputExpressions, m.OptionalExpressions, m.OutputColumnName),

@@ -519,6 +519,145 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         finally { catalog.Pool.Backing.TryReturn(scratch); }
     }
 
+    // ─────────────── Within-GroupBy / Within-Window CSE ───────────────
+
+    [Fact]
+    public void WithinGroupBy_KeyAndAggregateArgShare_HoistsAboveGroupBy()
+    {
+        // upper(a) appears in both the GROUP BY key and the aggregate argument.
+        // Within-GroupBy CSE hoists it once into a RowEnricher upstream of
+        // the GroupByOperator, so partitioning and accumulation share one
+        // evaluation per row.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT upper(a), COUNT(upper(a)) FROM t GROUP BY upper(a)",
+            catalog);
+
+        // Walk the plan to find the GroupByOperator. The chain is typically
+        // Project → GroupBy → ... possibly with intermediate operators.
+        GroupByOperator? group = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is GroupByOperator g) { group = g; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                OrderByOperator ob => ob.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(group);
+
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(group!.Source);
+
+        Assert.Single(enricher.Enrichments);
+        Assert.Equal("__cse_g0", enricher.Enrichments[0].ColumnName);
+
+        FunctionCallExpression hoisted = Assert.IsType<FunctionCallExpression>(
+            enricher.Enrichments[0].Expression);
+        Assert.Equal("upper", hoisted.FunctionName);
+
+        // GROUP BY keys should reference the hidden column, not the original
+        // upper(a) call.
+        Assert.Single(group.GroupByExpressions);
+        ColumnReference keyRef = Assert.IsType<ColumnReference>(group.GroupByExpressions[0]);
+        Assert.Equal("__cse_g0", keyRef.ColumnName);
+
+        // The aggregate's argument should likewise reference the hidden column.
+        Assert.Single(group.AggregateColumns);
+        Assert.Single(group.AggregateColumns[0].ArgumentExpressions);
+        ColumnReference argRef = Assert.IsType<ColumnReference>(
+            group.AggregateColumns[0].ArgumentExpressions[0]);
+        Assert.Equal("__cse_g0", argRef.ColumnName);
+    }
+
+    [Fact]
+    public void WithinGroupBy_TwoAggregateArgsShare_HoistsOnce()
+    {
+        // Same expression in two different aggregate args (no group key match).
+        // Within-GroupBy CSE collapses to one enrichment.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT SUM(upper(a)), MIN(upper(a)) FROM t",
+            catalog);
+
+        GroupByOperator? group = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is GroupByOperator g) { group = g; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(group);
+
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(group!.Source);
+        Assert.Single(enricher.Enrichments);
+        Assert.Equal("__cse_g0", enricher.Enrichments[0].ColumnName);
+
+        // Both aggregate args reference the hidden column.
+        Assert.Equal(2, group.AggregateColumns.Count);
+        ColumnReference sumArg = Assert.IsType<ColumnReference>(
+            group.AggregateColumns[0].ArgumentExpressions[0]);
+        ColumnReference minArg = Assert.IsType<ColumnReference>(
+            group.AggregateColumns[1].ArgumentExpressions[0]);
+        Assert.Equal(sumArg.ColumnName, minArg.ColumnName);
+        Assert.Equal("__cse_g0", sumArg.ColumnName);
+    }
+
+    [Fact]
+    public void WithinGroupBy_SingleOccurrence_NotHoisted()
+    {
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT upper(a), COUNT(*) FROM t GROUP BY upper(a)",
+            catalog);
+
+        GroupByOperator? group = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is GroupByOperator g) { group = g; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(group);
+
+        // upper(a) used only once (the GROUP BY key; SELECT references the
+        // group key column, not re-evaluating). No hoist.
+        Assert.IsNotType<RowEnricherOperator>(group!.Source);
+    }
+
+    [Fact]
+    public async Task EndToEnd_WithinGroupBy_TwoAggsShareArg_PreservesResults()
+    {
+        TableCatalog catalog = Catalog2Cols();
+        // Two aggregates over the same expression — within-GroupBy CSE
+        // collapses upper(a) into one __cse_g0 enrichment. End-to-end check
+        // verifies the rewritten plan still computes the right aggregates.
+        // No GROUP BY → single result row.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT COUNT(upper(a)) AS cnt, MIN(upper(a)) AS first FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal(2L, rows[0]["cnt"].AsInt64());
+            Assert.Equal("ALPHA", rows[0]["first"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+    }
+
     [Fact]
     public async Task EndToEnd_SubsumedNestedHoist_PreservesResults()
     {

@@ -400,6 +400,16 @@ public static class ModelInvocationHoister
             IQueryOperator hoistedSource = HoistRecursive(orderBy.Source, catalog);
             return HoistOrderBy(orderBy, hoistedSource, catalog);
         }
+        else if (op is GroupByOperator group)
+        {
+            IQueryOperator hoistedSource = HoistRecursive(group.Source, catalog);
+            return HoistGroupBy(group, hoistedSource, catalog);
+        }
+        else if (op is WindowOperator window)
+        {
+            IQueryOperator hoistedSource = HoistRecursive(window.Source, catalog);
+            return HoistWindow(window, hoistedSource, catalog);
+        }
 
         return RewriteChildren(op, child => HoistRecursive(child, catalog));
     }
@@ -494,6 +504,106 @@ public static class ModelInvocationHoister
         IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
         Expression rewrittenPredicate = RewriteExpression(filter.Predicate, collector.HoistedColumns);
         return new FilterOperator(augmented, rewrittenPredicate);
+    }
+
+    /// <summary>
+    /// Hoists model calls out of <see cref="GroupByOperator.GroupByExpressions"/>,
+    /// <see cref="AggregateColumn.ArgumentExpressions"/>, and any intra-aggregate
+    /// <see cref="AggregateColumn.OrderBy"/> items. The MIO stack lands between
+    /// the GroupBy's source and the GroupBy itself, so partitioning,
+    /// accumulation, and intra-aggregate sorting all see pre-computed columns.
+    /// </summary>
+    private static IQueryOperator HoistGroupBy(
+        GroupByOperator group, IQueryOperator hoistedSource, ModelCatalog catalog)
+    {
+        ModelHoistCollector collector = new();
+        foreach (Expression key in group.GroupByExpressions)
+        {
+            collector.Visit(key);
+        }
+        foreach (AggregateColumn ac in group.AggregateColumns)
+        {
+            foreach (Expression arg in ac.ArgumentExpressions) collector.Visit(arg);
+            if (ac.OrderBy is not null)
+            {
+                foreach (OrderByItem ob in ac.OrderBy) collector.Visit(ob.Expression);
+            }
+        }
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return ReferenceEquals(hoistedSource, group.Source)
+                ? group
+                : new GroupByOperator(hoistedSource, group.GroupByExpressions, group.AggregateColumns, group.StreamingSorted);
+        }
+
+        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        Expression[] rewrittenKeys = group.GroupByExpressions
+            .Select(e => RewriteExpression(e, collector.HoistedColumns))
+            .ToArray();
+        AggregateColumn[] rewrittenAggs = group.AggregateColumns
+            .Select(ac => ac with
+            {
+                ArgumentExpressions = ac.ArgumentExpressions
+                    .Select(a => RewriteExpression(a, collector.HoistedColumns))
+                    .ToList(),
+                OrderBy = ac.OrderBy?
+                    .Select(ob => ob with { Expression = RewriteExpression(ob.Expression, collector.HoistedColumns) })
+                    .ToList(),
+            })
+            .ToArray();
+        return new GroupByOperator(augmented, rewrittenKeys, rewrittenAggs, group.StreamingSorted);
+    }
+
+    /// <summary>
+    /// Hoists model calls out of <see cref="WindowOperator.WindowColumns"/> —
+    /// across the column's argument expressions, the window's PARTITION BY
+    /// keys, and ORDER BY items. The MIO stack lands between the Window's
+    /// source and the Window itself.
+    /// </summary>
+    private static IQueryOperator HoistWindow(
+        WindowOperator window, IQueryOperator hoistedSource, ModelCatalog catalog)
+    {
+        ModelHoistCollector collector = new();
+        foreach (WindowColumn wc in window.WindowColumns)
+        {
+            foreach (Expression arg in wc.ArgumentExpressions) collector.Visit(arg);
+            if (wc.WindowSpecification.PartitionBy is not null)
+            {
+                foreach (Expression p in wc.WindowSpecification.PartitionBy) collector.Visit(p);
+            }
+            if (wc.WindowSpecification.OrderBy is not null)
+            {
+                foreach (OrderByItem ob in wc.WindowSpecification.OrderBy) collector.Visit(ob.Expression);
+            }
+        }
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return ReferenceEquals(hoistedSource, window.Source)
+                ? window
+                : new WindowOperator(hoistedSource, window.WindowColumns);
+        }
+
+        IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
+        WindowColumn[] rewrittenColumns = window.WindowColumns
+            .Select(wc => wc with
+            {
+                ArgumentExpressions = wc.ArgumentExpressions
+                    .Select(a => RewriteExpression(a, collector.HoistedColumns))
+                    .ToList(),
+                WindowSpecification = wc.WindowSpecification with
+                {
+                    PartitionBy = wc.WindowSpecification.PartitionBy?
+                        .Select(p => RewriteExpression(p, collector.HoistedColumns))
+                        .ToList(),
+                    OrderBy = wc.WindowSpecification.OrderBy?
+                        .Select(ob => ob with { Expression = RewriteExpression(ob.Expression, collector.HoistedColumns) })
+                        .ToList(),
+                },
+            })
+            .ToArray();
+        return new WindowOperator(augmented, rewrittenColumns);
     }
 
     /// <summary>
@@ -786,6 +896,9 @@ public static class ModelInvocationHoister
                 childRewriter(p.Source), p.Columns, p.LetBindings, p.Assertions),
             FilterOperator f => new FilterOperator(childRewriter(f.Source), f.Predicate),
             OrderByOperator ob => RewriteOrderBy(ob, childRewriter),
+            GroupByOperator g => new GroupByOperator(
+                childRewriter(g.Source), g.GroupByExpressions, g.AggregateColumns, g.StreamingSorted),
+            WindowOperator w => new WindowOperator(childRewriter(w.Source), w.WindowColumns),
             LimitOperator l => RewriteLimit(l, childRewriter),
             // Default: leave the operator alone. Hoisting model calls inside
             // operators we don't recognise here would need their own rewrite
