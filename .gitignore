@@ -13,3 +13,4 @@ docs-site/docs/
 benchmark-output.log
 traces/
 .claude/settings.local.json
+.venv/**

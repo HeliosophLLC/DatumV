@@ -108,6 +108,16 @@ namespace DatumIngest.Models;
 /// image" via <c>WHERE 'image' IN modalities</c> regardless of whether
 /// image is the input or output side.
 /// </param>
+/// <param name="Files">
+/// Every file the model needs to run, expressed as paths *relative to
+/// the model directory*. For single-file models this is a one-element
+/// list (<c>["yolov8n.onnx"]</c>); for multi-file models like Florence-2
+/// or ViT-GPT2 it lists every <c>.onnx</c> + tokenizer + config file
+/// the loader will read. Surfaced via <c>system_models.file_names</c>
+/// so users can audit dependencies and reconstruct missing installs.
+/// Distinct from <see cref="RelativePath"/>, which is the single
+/// "anchor" file the catalog uses for status checks.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -124,7 +134,8 @@ public sealed record ModelCatalogEntry(
     string? LicenseHolder = null,
     string? SourceUrl = null,
     string? Category = null,
-    IReadOnlyList<string>? Modalities = null);
+    IReadOnlyList<string>? Modalities = null,
+    IReadOnlyList<string>? Files = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

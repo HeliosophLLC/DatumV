@@ -24,7 +24,7 @@ namespace DatumIngest.Catalog.Providers;
 /// from a single snapshot would defeat the diagnostic.
 /// </para>
 /// <para>
-/// Schema (12 columns):
+/// Schema (13 columns):
 /// <list type="table">
 ///   <item><term>name</term><description>SQL identifier (the <c>X</c> in <c>models.X(...)</c>).</description></item>
 ///   <item><term>display_name</term><description>Human-readable model name.</description></item>
@@ -32,8 +32,9 @@ namespace DatumIngest.Catalog.Providers;
 ///   <item><term>modalities</term><description><c>Array&lt;String&gt;</c> — every medium the model touches (<c>["image", "text"]</c> for a captioner, <c>["text"]</c> for an LLM).</description></item>
 ///   <item><term>backend</term><description><c>onnx</c> / <c>llama</c> / <c>echo</c>.</description></item>
 ///   <item><term>parameters</term><description>Architectural param count (<c>"8B"</c>, <c>"3.5M"</c>).</description></item>
-///   <item><term>file_name</term><description>Filename relative to the catalog's models directory.</description></item>
-///   <item><term>file_size_bytes</term><description>Actual on-disk size, or <see langword="null"/> when missing.</description></item>
+///   <item><term>file_name</term><description>Anchor file the catalog status-checks against; for multi-file models, the registration "entry point".</description></item>
+///   <item><term>file_names</term><description><c>Array&lt;String&gt;</c> — every file the model needs to run (ONNX weights + tokenizer + configs). Lets users audit dependencies and rebuild missing installs.</description></item>
+///   <item><term>file_size_bytes</term><description>Anchor file's on-disk size, or <see langword="null"/> when missing.</description></item>
 ///   <item><term>license</term><description>SPDX-style or model-specific license identifier.</description></item>
 ///   <item><term>license_holder</term><description>Entity granting the license (Meta, Microsoft, etc.).</description></item>
 ///   <item><term>source_url</term><description>Repo / model-zoo URL for re-downloading.</description></item>
@@ -189,11 +190,12 @@ public sealed class ModelsTableProvider : ITableProvider
         cells[4]  = DataValue.FromString(entry.Backend, arena);
         cells[5]  = WriteOptionalString(entry.Parameters, arena);
         cells[6]  = WriteOptionalString(entry.RelativePath, arena);
-        cells[7]  = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
-        cells[8]  = WriteOptionalString(entry.License, arena);
-        cells[9]  = WriteOptionalString(entry.LicenseHolder, arena);
-        cells[10] = WriteOptionalString(entry.SourceUrl, arena);
-        cells[11] = DataValue.FromString(fileExists ? "available" : "missing", arena);
+        cells[7]  = WriteOptionalStringArray(entry.Files, arena);
+        cells[8]  = fileSize.HasValue ? DataValue.FromInt64(fileSize.Value) : DataValue.Null(DataKind.Int64);
+        cells[9]  = WriteOptionalString(entry.License, arena);
+        cells[10] = WriteOptionalString(entry.LicenseHolder, arena);
+        cells[11] = WriteOptionalString(entry.SourceUrl, arena);
+        cells[12] = DataValue.FromString(fileExists ? "available" : "missing", arena);
     }
 
     private static DataValue WriteOptionalString(string? value, Arena arena) =>
@@ -220,6 +222,7 @@ public sealed class ModelsTableProvider : ITableProvider
         new ColumnInfo("backend",         DataKind.String, nullable: false),
         new ColumnInfo("parameters",      DataKind.String, nullable: true),
         new ColumnInfo("file_name",       DataKind.String, nullable: true),
+        new ColumnInfo("file_names",      DataKind.String, nullable: true) { IsArray = true },
         new ColumnInfo("file_size_bytes", DataKind.Int64,  nullable: true),
         new ColumnInfo("license",         DataKind.String, nullable: true),
         new ColumnInfo("license_holder",  DataKind.String, nullable: true),

@@ -43,7 +43,7 @@ public sealed class ModelsTableProviderTests : IDisposable
 
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(12, schema.Columns.Count);
+        Assert.Equal(13, schema.Columns.Count);
 
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
@@ -59,13 +59,17 @@ public sealed class ModelsTableProviderTests : IDisposable
         Assert.Equal("parameters", schema.Columns[5].Name);
         Assert.Equal("file_name", schema.Columns[6].Name);
 
-        Assert.Equal("file_size_bytes", schema.Columns[7].Name);
-        Assert.Equal(DataKind.Int64, schema.Columns[7].Kind);
+        Assert.Equal("file_names", schema.Columns[7].Name);
+        Assert.Equal(DataKind.String, schema.Columns[7].Kind);
+        Assert.True(schema.Columns[7].IsArray);
 
-        Assert.Equal("license", schema.Columns[8].Name);
-        Assert.Equal("license_holder", schema.Columns[9].Name);
-        Assert.Equal("source_url", schema.Columns[10].Name);
-        Assert.Equal("status", schema.Columns[11].Name);
+        Assert.Equal("file_size_bytes", schema.Columns[8].Name);
+        Assert.Equal(DataKind.Int64, schema.Columns[8].Kind);
+
+        Assert.Equal("license", schema.Columns[9].Name);
+        Assert.Equal("license_holder", schema.Columns[10].Name);
+        Assert.Equal("source_url", schema.Columns[11].Name);
+        Assert.Equal("status", schema.Columns[12].Name);
     }
 
     /// <summary>
@@ -97,7 +101,8 @@ public sealed class ModelsTableProviderTests : IDisposable
             LicenseHolder: "Nobody",
             SourceUrl: "https://example.com/fake",
             Category: "llm",
-            Modalities: ["text", "image"]));
+            Modalities: ["text", "image"],
+            Files: [filename, "extra-config.json"]));
 
         using ModelsTableProvider provider = new(pool, catalog);
         (Row row, Arena arena) = await ReadOnlyRowAsync(provider);
@@ -115,11 +120,18 @@ public sealed class ModelsTableProviderTests : IDisposable
         Assert.Equal("test", row[4].AsString(arena));
         Assert.Equal("0.1B", row[5].AsString(arena));
         Assert.Equal(filename, row[6].AsString(arena));
-        Assert.Equal(payload.Length, row[7].AsInt64());
-        Assert.Equal("MIT", row[8].AsString(arena));
-        Assert.Equal("Nobody", row[9].AsString(arena));
-        Assert.Equal("https://example.com/fake", row[10].AsString(arena));
-        Assert.Equal("available", row[11].AsString(arena));
+
+        // file_names — typed Array<String> with the full dependency list.
+        Assert.True(row[7].IsArray);
+        Assert.Equal(DataKind.String, row[7].Kind);
+        string[] fileNames = row[7].AsStringArray(arena);
+        Assert.Equal([filename, "extra-config.json"], fileNames);
+
+        Assert.Equal(payload.Length, row[8].AsInt64());
+        Assert.Equal("MIT", row[9].AsString(arena));
+        Assert.Equal("Nobody", row[10].AsString(arena));
+        Assert.Equal("https://example.com/fake", row[11].AsString(arena));
+        Assert.Equal("available", row[12].AsString(arena));
     }
 
     /// <summary>
@@ -149,8 +161,8 @@ public sealed class ModelsTableProviderTests : IDisposable
 
         Assert.Equal("ghost", row[0].AsString(arena));
         Assert.Equal("never-downloaded.bin", row[6].AsString(arena));
-        Assert.True(row[7].IsNull);
-        Assert.Equal("missing", row[11].AsString(arena));
+        Assert.True(row[8].IsNull);
+        Assert.Equal("missing", row[12].AsString(arena));
     }
 
     /// <summary>

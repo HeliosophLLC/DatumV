@@ -61,6 +61,14 @@ public static class BuiltinModels
         // Vision models
         RegisterMobileNetV2(modelCatalog);
         RegisterYolo(modelCatalog);
+        RegisterViTGpt2Caption(modelCatalog);
+
+        // Captioner zoo — Florence-2 in three caption styles plus a
+        // quantized comparison entry. Same model, different task tokens.
+        RegisterFlorence2Caption(modelCatalog);
+        RegisterFlorence2DetailedCaption(modelCatalog);
+        RegisterFlorence2MoreDetailedCaption(modelCatalog);
+        RegisterFlorence2CaptionQuantized(modelCatalog);
 
         // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
         // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
@@ -148,7 +156,10 @@ public static class BuiltinModels
             LicenseHolder: "ONNX Model Zoo",
             SourceUrl: "https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet",
             Category: "classifier",
-            Modalities: ["image", "text"]));
+            Modalities: ["image", "text"],
+            Files: labelsFilename is null
+                ? [modelFilename]
+                : [modelFilename, labelsFilename]));
     }
 
     /// <summary>
@@ -221,7 +232,8 @@ public static class BuiltinModels
             LicenseHolder: "Meta",
             SourceUrl: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>
@@ -279,7 +291,8 @@ public static class BuiltinModels
             LicenseHolder: "Microsoft",
             SourceUrl: "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>Default filename for TinyLlama-1.1B-Chat-v1.0 (TheBloke's GGUF mirror).</summary>
@@ -319,7 +332,8 @@ public static class BuiltinModels
             LicenseHolder: "TinyLlama community",
             SourceUrl: "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>Default filename for Gemma-2-2b-it (bartowski's GGUF mirror).</summary>
@@ -361,7 +375,8 @@ public static class BuiltinModels
             LicenseHolder: "Google",
             SourceUrl: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>Default filename for Qwen2.5-Coder-1.5B-Instruct (bartowski's GGUF mirror).</summary>
@@ -401,7 +416,8 @@ public static class BuiltinModels
             LicenseHolder: "Alibaba",
             SourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>Default filename for Granite-3.1-1B-A400M-Instruct (bartowski's GGUF mirror).</summary>
@@ -442,7 +458,8 @@ public static class BuiltinModels
             LicenseHolder: "IBM",
             SourceUrl: "https://huggingface.co/bartowski/granite-3.1-1b-a400m-instruct-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
 
     /// <summary>Default filename for Falcon3-1B-Instruct (TII's official GGUF).</summary>
@@ -483,8 +500,211 @@ public static class BuiltinModels
             LicenseHolder: "TII",
             SourceUrl: "https://huggingface.co/tiiuae/Falcon3-1B-Instruct-GGUF",
             Category: "llm",
-            Modalities: ["text"]));
+            Modalities: ["text"],
+            Files: [modelFilename]));
     }
+
+    /// <summary>
+    /// Default folder name for the ViT-GPT2 image captioner. The folder
+    /// contains <c>encoder_model.onnx</c>, <c>decoder_model.onnx</c>,
+    /// <c>vocab.json</c>, <c>merges.txt</c>, and tokenizer/preprocessor
+    /// configs — all produced by <c>optimum-cli export onnx</c>.
+    /// </summary>
+    public const string ViTGpt2CaptionDefaultFolder = "vit-gpt2-image-captioning";
+
+    /// <summary>
+    /// File-existence anchor used by the catalog to verify the captioner is
+    /// installed: <c>{folder}/encoder_model.onnx</c>. Multi-file model
+    /// convention — the catalog's <c>RelativePath</c> still points at a
+    /// single file, the model loader derives the rest from that file's
+    /// directory.
+    /// </summary>
+    public const string ViTGpt2CaptionEncoderRelativePath =
+        ViTGpt2CaptionDefaultFolder + "/encoder_model.onnx";
+
+    /// <summary>
+    /// Registers the nlpconnect/vit-gpt2-image-captioning model under the
+    /// catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"vit_gpt2_caption"</c>). ViT-base encoder + GPT-2 decoder, ~1 GB
+    /// on disk as ONNX. Apache-2.0 — fully unencumbered for commercial use.
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>).</param>
+    /// <param name="encoderRelativePath">
+    /// Path to <c>encoder_model.onnx</c>, relative to the catalog's
+    /// model directory. The loader resolves the rest of the file pack
+    /// (decoder + tokenizer) from the encoder's parent directory.
+    /// </param>
+    /// <param name="maxTokens">Maximum tokens generated per caption. Defaults to 16 (vit-gpt2 produces short captions).</param>
+    public static void RegisterViTGpt2Caption(
+        ModelCatalog catalog,
+        string modelName = "vit_gpt2_caption",
+        string encoderRelativePath = ViTGpt2CaptionEncoderRelativePath,
+        int maxTokens = 16)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: encoderRelativePath,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                return new ViTGpt2CaptionModel(modelName, encoderPath, maxTokens);
+            },
+            DisplayName: "ViT-GPT2 Image Captioner",
+            Parameters: "239M",
+            License: "Apache-2.0",
+            LicenseHolder: "nlpconnect",
+            SourceUrl: "https://huggingface.co/nlpconnect/vit-gpt2-image-captioning",
+            Category: "captioner",
+            Modalities: ["image", "text"],
+            // Multi-file model — every file required to run, relative to the
+            // model directory. The catalog's RelativePath = encoderRelativePath
+            // is the anchor for status checks; this list is for documentation /
+            // recovery. Order: ONNX weights first, then tokenizer/configs.
+            Files:
+            [
+                ViTGpt2CaptionDefaultFolder + "/encoder_model.onnx",
+                ViTGpt2CaptionDefaultFolder + "/decoder_model.onnx",
+                ViTGpt2CaptionDefaultFolder + "/tokenizer.json",
+                ViTGpt2CaptionDefaultFolder + "/vocab.json",
+                ViTGpt2CaptionDefaultFolder + "/merges.txt",
+                ViTGpt2CaptionDefaultFolder + "/config.json",
+                ViTGpt2CaptionDefaultFolder + "/generation_config.json",
+                ViTGpt2CaptionDefaultFolder + "/tokenizer_config.json",
+                ViTGpt2CaptionDefaultFolder + "/special_tokens_map.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the fp16 Florence-2 build.</summary>
+    public const string Florence2Fp16Folder = "florence-2-base-ft-fp16";
+
+    /// <summary>Default folder for the int8-quantized Florence-2 build.</summary>
+    public const string Florence2QuantizedFolder = "florence-2-base-ft-quantized";
+
+    /// <summary>
+    /// Files needed for any Florence-2 install (relative to its variant
+    /// folder). The four ONNX file names are interpolated per
+    /// quantization suffix; tokenizer + configs are shared across both.
+    /// </summary>
+    private static IReadOnlyList<string> Florence2Files(string folder, string componentSuffix) =>
+    [
+        $"{folder}/vision_encoder{componentSuffix}.onnx",
+        $"{folder}/embed_tokens{componentSuffix}.onnx",
+        $"{folder}/encoder_model{componentSuffix}.onnx",
+        $"{folder}/decoder_model{componentSuffix}.onnx",
+        $"{folder}/tokenizer.json",
+        $"{folder}/vocab.json",
+        $"{folder}/merges.txt",
+        $"{folder}/config.json",
+        $"{folder}/generation_config.json",
+        $"{folder}/preprocessor_config.json",
+        $"{folder}/special_tokens_map.json",
+    ];
+
+    /// <summary>
+    /// Common backbone for the four Florence-2 caption registrations. Each
+    /// caller passes the catalog name, the task prompt token, and the
+    /// folder/variant to register against.
+    /// </summary>
+    private static void RegisterFlorence2Caption(
+        ModelCatalog catalog,
+        string modelName,
+        string displayName,
+        string taskPrompt,
+        string folder,
+        string componentSuffix,
+        string licenseTag,
+        int maxTokens)
+    {
+        string encoderRelativePath = $"{folder}/vision_encoder{componentSuffix}.onnx";
+
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: encoderRelativePath,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                return new Florence2Model(modelName, encoderPath, taskPrompt, maxTokens);
+            },
+            DisplayName: displayName,
+            Parameters: "232M",
+            License: "MIT",
+            LicenseHolder: "Microsoft",
+            SourceUrl: "https://huggingface.co/onnx-community/Florence-2-base-ft",
+            Category: "captioner",
+            Modalities: ["image", "text"],
+            Files: Florence2Files(folder, componentSuffix)));
+    }
+
+    /// <summary>
+    /// Registers Florence-2 in short-caption mode (fp16). Output is a
+    /// COCO-style single-sentence caption similar to ViT-GPT2 but with
+    /// noticeably better quality.
+    /// </summary>
+    public static void RegisterFlorence2Caption(ModelCatalog catalog) =>
+        RegisterFlorence2Caption(
+            catalog,
+            modelName: "florence2_caption",
+            displayName: "Florence-2 Caption (fp16)",
+            taskPrompt: "<CAPTION>",
+            folder: Florence2Fp16Folder,
+            componentSuffix: "_fp16",
+            licenseTag: "fp16",
+            maxTokens: 50);
+
+    /// <summary>
+    /// Registers Florence-2 in detailed-caption mode (fp16). Outputs a
+    /// fuller sentence with descriptive context.
+    /// </summary>
+    public static void RegisterFlorence2DetailedCaption(ModelCatalog catalog) =>
+        RegisterFlorence2Caption(
+            catalog,
+            modelName: "florence2_detailed_caption",
+            displayName: "Florence-2 Detailed Caption (fp16)",
+            taskPrompt: "<DETAILED_CAPTION>",
+            folder: Florence2Fp16Folder,
+            componentSuffix: "_fp16",
+            licenseTag: "fp16",
+            maxTokens: 150);
+
+    /// <summary>
+    /// Registers Florence-2 in paragraph-caption mode (fp16). Outputs a
+    /// multi-sentence description suitable as an SDXL prompt seed.
+    /// </summary>
+    public static void RegisterFlorence2MoreDetailedCaption(ModelCatalog catalog) =>
+        RegisterFlorence2Caption(
+            catalog,
+            modelName: "florence2_more_detailed_caption",
+            displayName: "Florence-2 More Detailed Caption (fp16)",
+            taskPrompt: "<MORE_DETAILED_CAPTION>",
+            folder: Florence2Fp16Folder,
+            componentSuffix: "_fp16",
+            licenseTag: "fp16",
+            maxTokens: 300);
+
+    /// <summary>
+    /// Registers Florence-2 in short-caption mode using the int8-quantized
+    /// build. Same model, ¼ the disk; useful for quality / size A/B against
+    /// <c>florence2_caption</c>.
+    /// </summary>
+    public static void RegisterFlorence2CaptionQuantized(ModelCatalog catalog) =>
+        RegisterFlorence2Caption(
+            catalog,
+            modelName: "florence2_caption_q8",
+            displayName: "Florence-2 Caption (int8)",
+            taskPrompt: "<CAPTION>",
+            folder: Florence2QuantizedFolder,
+            componentSuffix: "_quantized",
+            licenseTag: "q8",
+            maxTokens: 50);
 
     /// <summary>
     /// Default filename for the YOLOv8-nano ONNX file (the smallest variant
@@ -542,7 +762,8 @@ public static class BuiltinModels
             LicenseHolder: "Ultralytics",
             SourceUrl: "https://github.com/ultralytics/ultralytics",
             Category: "detector",
-            Modalities: ["image"]));
+            Modalities: ["image"],
+            Files: [modelFilename]));
     }
 
     /// <summary>
