@@ -170,8 +170,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                             }
 
                             int spillPartition = AssignPartition(spillHash);
-                            partitionBuffers![spillPartition] ??= pool.RentRowBatch(
-                                schema!, context.BatchSize, hashSetArena);
+                            partitionBuffers![spillPartition] ??= context.RentRowBatch(schema!);
                             pool.RentAndCopyToOutput(inputBatch, i, partitionBuffers[spillPartition]!);
                             SpilledRowCount++;
 
