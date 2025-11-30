@@ -113,6 +113,39 @@ $DATUM_MODELS\
   `yolov8l`, `yolov8x` drop in by registering with a different
   filename — they trade accuracy for speed/size.
 
+### YOLOX — license-clean object detector ladder
+
+Megvii's YOLOX detector family registered as seven sibling entries
+spanning the full speed/accuracy spectrum. Same architecture, same
+COCO-80 vocabulary, different parameter counts. The license-clean
+default detector for `tasks.detect` once that namespace lands.
+
+- **License**: Apache-2.0 (Megvii)
+- **Source**: [github.com/Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
+- **Setup**: Pre-built ONNX files attached to the GitHub releases
+  page — no Python conversion needed. Direct download:
+  ```powershell
+  $base = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0"
+  foreach ($file in @("yolox_nano.onnx","yolox_tiny.onnx","yolox_s.onnx","yolox_m.onnx","yolox_l.onnx","yolox_x.onnx","yolox_darknet.onnx")) {
+    Invoke-WebRequest "$base/$file" -OutFile "$env:DATUM_MODELS\$file"
+  }
+  ```
+
+| Catalog name | File | Params | Input size | Disk |
+|---|---|---|---|---|
+| `yolox_n` | `yolox_nano.onnx` | 0.91M | 416×416 | ~3 MB |
+| `yolox_t` | `yolox_tiny.onnx` | 5.06M | 416×416 | ~20 MB |
+| `yolox_s` | `yolox_s.onnx` | 9.0M | 640×640 | ~36 MB |
+| `yolox_m` | `yolox_m.onnx` | 25.3M | 640×640 | ~98 MB |
+| `yolox_l` | `yolox_l.onnx` | 54.2M | 640×640 | ~200 MB |
+| `yolox_x` | `yolox_x.onnx` | 99.1M | 640×640 | ~378 MB |
+| `yolox_darknet` | `yolox_darknet.onnx` | 63.7M | 640×640 | ~250 MB |
+
+Note that nano and tiny use 416×416 input (smaller, faster); the
+others use 640×640. The `YoloXModel` class auto-detects input size
+from the ONNX metadata so a single class handles both. Output format
+is identical across all sizes.
+
 ### `vit_gpt2_caption` — image captioner
 
 - **What it does**: Generates a single-sentence COCO-style caption for
