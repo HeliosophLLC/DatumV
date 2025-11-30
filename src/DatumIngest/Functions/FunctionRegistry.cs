@@ -222,6 +222,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.CastFunction>();
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
+        registry.RegisterScalar<Scalar.Math.AbsFunction>();
 
         // Image — pipeline functions are still wired through the legacy
         // path; the image rework is out of scope for this rebuild.
