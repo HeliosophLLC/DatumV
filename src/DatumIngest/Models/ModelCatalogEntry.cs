@@ -63,6 +63,36 @@ namespace DatumIngest.Models;
 /// real residency for a model and the file-size heuristic is materially off
 /// (e.g. ONNX models where activations dominate).
 /// </param>
+/// <param name="DisplayName">
+/// Human-readable model name surfaced in <c>system.models</c> and error
+/// messages. Independent of <see cref="Name"/> (the SQL identifier) — e.g.
+/// <c>"MobileNetV2 ImageNet Classifier"</c>, <c>"Llama 3.1 8B Instruct"</c>.
+/// </param>
+/// <param name="Parameters">
+/// Readable parameter-count for the model: <c>"8B"</c>, <c>"7B"</c>,
+/// <c>"3.8B"</c>, <c>"0.5B"</c>, <c>"3.5M"</c>. Not the on-disk size — the
+/// architectural parameter count, stable across quantizations. Useful for
+/// the side-by-side LLM-comparison use case.
+/// </param>
+/// <param name="License">
+/// SPDX-style or model-specific license identifier:
+/// <c>"Apache-2.0"</c>, <c>"MIT"</c>, <c>"AGPL-3.0"</c>,
+/// <c>"Llama 3.1 Community"</c>, <c>"Gemma Terms"</c>, etc.
+/// Surfaced in <c>system.models</c> so users can audit license compatibility
+/// at a glance.
+/// </param>
+/// <param name="LicenseHolder">
+/// Who issued the license — <c>"Meta"</c>, <c>"Microsoft"</c>,
+/// <c>"Google"</c>, <c>"Alibaba"</c>, <c>"Ultralytics"</c>. Not strictly
+/// the copyright holder (training data may have other rights), but the
+/// entity granting the license under which the weights are distributed.
+/// </param>
+/// <param name="SourceUrl">
+/// HuggingFace repo, model-zoo URL, or other canonical source for the
+/// weights file. Lets users re-download a missing file without remembering
+/// where it came from. Repo URL preferred over direct file URL — direct
+/// file URLs rot when uploaders re-quantize.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -72,7 +102,12 @@ public sealed record ModelCatalogEntry(
     bool IsDeterministic,
     Func<ModelLoadContext, IModel> Loader,
     IReadOnlyList<DataKind>? OptionalArgKinds = null,
-    long? EstimatedVramBytes = null);
+    long? EstimatedVramBytes = null,
+    string? DisplayName = null,
+    string? Parameters = null,
+    string? License = null,
+    string? LicenseHolder = null,
+    string? SourceUrl = null);
 
 /// <summary>
 /// Context handed to a <see cref="ModelCatalogEntry.Loader"/> when first instantiating

@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
@@ -15,6 +17,55 @@ namespace DatumIngest.Models;
 /// </summary>
 public static class BuiltinModels
 {
+    /// <summary>
+    /// One-call setup for the standard model surface on a
+    /// <see cref="TableCatalog"/>. Builds a fresh <see cref="ModelCatalog"/>
+    /// rooted at <paramref name="modelDirectory"/> (or the default —
+    /// <c>DATUM_MODELS</c> env var, then per-user fallback), registers every
+    /// builtin model (<c>mobilenetv2</c>, <c>yolov8n</c>, <c>llama31_8b</c>,
+    /// <c>phi3_mini</c>), wires the model catalog onto
+    /// <see cref="TableCatalog.Models"/>, and adds the <c>system_models</c>
+    /// virtual table for runtime introspection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Use this from any callsite that wants the canonical model-enabled
+    /// configuration: shell startup, batch tools, programmatic API consumers,
+    /// integration tests. Returns the constructed <see cref="ModelCatalog"/>
+    /// so callers that need finer control (custom VRAM budget, additional
+    /// non-builtin entries) can keep configuring after the standard set
+    /// lands.
+    /// </para>
+    /// <para>
+    /// Order of registrations: builtins first, then <c>system_models</c>.
+    /// The user's data tables can be registered before or after this call —
+    /// the virtual <c>system_models</c> table doesn't conflict because it
+    /// uses a reserved name. Callers that gate on "user provided at least
+    /// one data table" should track datum-file count explicitly rather than
+    /// relying on <see cref="TableCatalog.Count"/>, since <c>system_models</c>
+    /// always contributes one entry.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableCatalog">The table catalog to configure. Mutated in place.</param>
+    /// <param name="modelDirectory">
+    /// Override for the model files directory. <see langword="null"/> uses
+    /// <see cref="ModelCatalog.DefaultModelDirectory"/> (env-var aware).
+    /// </param>
+    /// <returns>The freshly constructed <see cref="ModelCatalog"/>.</returns>
+    public static ModelCatalog AttachStandardModels(
+        TableCatalog tableCatalog,
+        string? modelDirectory = null)
+    {
+        ModelCatalog modelCatalog = new(modelDirectory);
+        RegisterMobileNetV2(modelCatalog);
+        RegisterYolo(modelCatalog);
+        RegisterLlama31(modelCatalog);
+        RegisterPhi3(modelCatalog);
+        tableCatalog.Models = modelCatalog;
+        tableCatalog.Add(new ModelsTableProvider(tableCatalog.Pool, modelCatalog));
+        return modelCatalog;
+    }
+
     /// <summary>
     /// Default filename for the MobileNetV2 ONNX file (the canonical
     /// <c>mobilenetv2-12.onnx</c> from the ONNX model zoo).
@@ -75,7 +126,12 @@ public static class BuiltinModels
                     ? null
                     : TryLoadLabels(Path.Combine(ctx.ModelDirectory, labelsFilename));
                 return new MobileNetV2Model(modelName, modelPath, labels);
-            }));
+            },
+            DisplayName: "MobileNetV2 ImageNet Classifier",
+            Parameters: "3.5M",
+            License: "Apache-2.0",
+            LicenseHolder: "ONNX Model Zoo",
+            SourceUrl: "https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet"));
     }
 
     /// <summary>
@@ -138,7 +194,15 @@ public static class BuiltinModels
             // Order matters: callers supply a prefix. `models.llama31_8b(prompt, 0.9)`
             // overrides temperature only; `models.llama31_8b(prompt, 0.9, 64)`
             // overrides both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Llama 3.1 8B Instruct",
+            Parameters: "8B",
+            // Llama 3.1 ships under Meta's custom community license — broadly
+            // permissive but with anti-misuse clauses and a >700M-MAU
+            // commercial threshold. Distinct from a standard OSS license.
+            License: "Llama 3.1 Community",
+            LicenseHolder: "Meta",
+            SourceUrl: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"));
     }
 
     /// <summary>
@@ -189,7 +253,12 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32]));
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Phi-3-mini-4k Instruct",
+            Parameters: "3.8B",
+            License: "MIT",
+            LicenseHolder: "Microsoft",
+            SourceUrl: "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF"));
     }
 
     /// <summary>
@@ -237,7 +306,16 @@ public static class BuiltinModels
             //   [1] iouThreshold        (Float64) — NMS overlap threshold
             // Not yet wired into YoloModel (it uses its construction-time thresholds);
             // parser will accept them for forward-compat. TODO: thread overrides through.
-            OptionalArgKinds: [DataKind.Float64, DataKind.Float64]));
+            OptionalArgKinds: [DataKind.Float64, DataKind.Float64],
+            DisplayName: "YOLOv8-nano Detector",
+            Parameters: "3.2M",
+            // AGPL-3.0 is strong copyleft + propagates to network use. Personal /
+            // research / open-source-with-AGPL-compatible-license is fine; commercial
+            // SaaS that exposes detection as a service must either release source
+            // under AGPL or buy Ultralytics' separate commercial license.
+            License: "AGPL-3.0",
+            LicenseHolder: "Ultralytics",
+            SourceUrl: "https://github.com/ultralytics/ultralytics"));
     }
 
     /// <summary>

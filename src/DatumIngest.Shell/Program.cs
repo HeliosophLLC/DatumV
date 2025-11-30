@@ -3,12 +3,16 @@ using DatumIngest.Models;
 using DatumIngest.Shell;
 using Spectre.Console;
 
-// datum-shell <path>...
+// datum-shell [--models <path>] <path>...
 //
 //   Opens an interactive SQL REPL over one or more .datum files or directories.
 //   Each path may be a single .datum file or a directory of .datum files.
 //   Inside the REPL, type SQL terminated by `;` to execute; type `EXPLAIN <sql>;`
 //   or `EXPLAIN ANALYZE <sql>;` to inspect the plan; `.help`, `.quit`, `.exit`.
+//
+//   Model directory resolution order:
+//     --models <path> CLI flag  →  DATUM_MODELS env var  →  per-user default
+//     (%LOCALAPPDATA%/DatumIngest/models on Windows, ~/.local/share/... on Linux).
 
 if (args.Length == 0 || args[0] is "--help" or "-h")
 {
@@ -16,35 +20,60 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
     return args.Length == 0 ? 1 : 0;
 }
 
-TableCatalog catalog = new(new DatumIngest.Pooling.Pool(new DatumIngest.Pooling.PoolBacking()));
+string? modelsOverride = null;
+List<string> dataPaths = new();
+for (int i = 0; i < args.Length; i++)
+{
+    string arg = args[i];
+    if (arg == "--models")
+    {
+        if (++i >= args.Length)
+        {
+            AnsiConsole.MarkupLine("[red]--models requires a path.[/]");
+            return 1;
+        }
+        modelsOverride = args[i];
+    }
+    else
+    {
+        dataPaths.Add(arg);
+    }
+}
 
-// Register the built-in model catalog so `models.*` calls resolve. Each
-// model loads lazily on first use, so missing files don't block startup —
-// `models.foo(...)` calls fail at the moment they're actually evaluated.
-// The residency manager runs with an unlimited budget by default; switch
-// to the (modelDirectory, vramBudgetBytes, admissionTimeout) ctor when you
-// want eviction to kick in (e.g. on a 12 GB card hosting a captioner +
-// LLM + diffusion model concurrently).
-ModelCatalog modelCatalog = new();
-BuiltinModels.RegisterMobileNetV2(modelCatalog);
-BuiltinModels.RegisterYolo(modelCatalog);
-BuiltinModels.RegisterLlama31(modelCatalog);
-BuiltinModels.RegisterPhi3(modelCatalog);
-catalog.Models = modelCatalog;
+if (dataPaths.Count == 0)
+{
+    AnsiConsole.MarkupLine("[red]No data paths provided.[/]");
+    PrintUsage();
+    return 1;
+}
+
+DatumIngest.Pooling.Pool pool = new(new DatumIngest.Pooling.PoolBacking());
+TableCatalog catalog = new(pool);
+
+// One-call setup: ModelCatalog rooted at the resolved models directory,
+// every builtin model registered, plus the system_models virtual table for
+// `SELECT * FROM system_models` introspection. Models directory precedence:
+// --models flag → DATUM_MODELS env var → per-user default. Models load
+// lazily; missing files surface at plan time with a clear redownload hint.
+BuiltinModels.AttachStandardModels(catalog, modelsOverride);
+
+int datumFilesAdded = 0;
 try
 {
-    foreach (string path in args)
+    foreach (string path in dataPaths)
     {
         if (Directory.Exists(path))
         {
             foreach (string file in Directory.EnumerateFiles(path, "*.datum", SearchOption.TopDirectoryOnly))
             {
                 catalog.AddFile(file);
+                datumFilesAdded++;
             }
         }
         else if (File.Exists(path))
         {
             catalog.AddFile(path);
+            datumFilesAdded++;
         }
         else
         {
@@ -61,7 +90,10 @@ catch (Exception ex)
     return 1;
 }
 
-if (catalog.Count == 0)
+// Track datum-file count explicitly because `catalog.Count` includes the
+// always-present `system_models` virtual table — using it as the empty-data
+// guard would silently let a no-args invocation slip through.
+if (datumFilesAdded == 0)
 {
     AnsiConsole.MarkupLine("[red]No .datum files registered.[/]");
     catalog.Dispose();
@@ -76,9 +108,13 @@ using (catalog)
 
 static void PrintUsage()
 {
-    Console.Error.WriteLine("Usage: datum-shell <path>...");
+    Console.Error.WriteLine("Usage: datum-shell [--models <path>] <path>...");
     Console.Error.WriteLine();
     Console.Error.WriteLine("  Each <path> is either a .datum file or a directory of .datum files.");
+    Console.Error.WriteLine("  --models <path>   Override the model files directory.");
+    Console.Error.WriteLine("                    Falls back to DATUM_MODELS env var, then a per-user default.");
+    Console.Error.WriteLine();
     Console.Error.WriteLine("  Inside the REPL: SQL terminated by `;`, `EXPLAIN [ANALYZE] <sql>;`,");
     Console.Error.WriteLine("                   `.help`, `.quit`, `.exit`. Ctrl+C cancels a running query.");
+    Console.Error.WriteLine("                   `SELECT * FROM system.models` lists registered models.");
 }

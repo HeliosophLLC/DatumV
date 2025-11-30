@@ -610,11 +610,62 @@ internal sealed class InteractiveShell
         return new Schema(columns);
     }
 
-    private static void PrintBanner()
+    private void PrintBanner()
     {
         AnsiConsole.MarkupLine("[bold blue]DatumIngest Shell[/]");
         AnsiConsole.MarkupLine("[grey]Type SQL (end with ;) or .help for commands.[/]");
+
+        // Surface the resolved models directory + a quick available/registered
+        // count so users immediately see whether the shell is pointing at the
+        // right place. Without this, a stale env var or wrong --models flag
+        // produces the silently-missing failure mode where every model says
+        // "missing" in system_models and queries fail with a not-found error.
+        Models.ModelCatalog? models = _catalog.Models;
+        if (models is not null)
+        {
+            (int registered, int available) = SummarizeModels(models);
+            string countSummary = $"{registered} registered, {available} available";
+            string countColour = available == 0 && registered > 0 ? "yellow" : "grey";
+            AnsiConsole.MarkupLine(
+                $"[grey]Models:[/] [white]{Markup.Escape(models.ModelDirectory)}[/] " +
+                $"[{countColour}]({countSummary})[/]");
+
+            if (available == 0 && registered > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    "[grey]  Set DATUM_MODELS or pass --models <path> to point at a directory with model files.[/]");
+                AnsiConsole.MarkupLine(
+                    "[grey]  Run `SELECT * FROM system_models` to see registered names, sources, and licenses.[/]");
+            }
+        }
+
         AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Counts registered model entries and how many have their backing file
+    /// present on disk (or are synthetic — no <c>RelativePath</c>). Cheap
+    /// stat-per-entry; runs once at shell startup.
+    /// </summary>
+    private static (int Registered, int Available) SummarizeModels(Models.ModelCatalog catalog)
+    {
+        int registered = catalog.Entries.Count;
+        int available = 0;
+        foreach (Models.ModelCatalogEntry entry in catalog.Entries.Values)
+        {
+            if (entry.RelativePath is null)
+            {
+                // Synthetic backend (e.g. EchoModel) — no file required, count as available.
+                available++;
+                continue;
+            }
+            string resolved = Path.Combine(catalog.ModelDirectory, entry.RelativePath);
+            if (File.Exists(resolved))
+            {
+                available++;
+            }
+        }
+        return (registered, available);
     }
 
     private static void PrintHelp()

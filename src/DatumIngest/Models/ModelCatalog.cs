@@ -27,13 +27,27 @@ namespace DatumIngest.Models;
 /// </remarks>
 public sealed class ModelCatalog : IDisposable
 {
-    /// <summary>Default model directory when none is configured.</summary>
-    /// <remarks>
-    /// User-specific default per <c>project_inference_integration_approach.md</c>.
-    /// Production deployments configure this per-database; tests default to a
-    /// temp path so they don't touch the user's models directory.
-    /// </remarks>
-    public const string DefaultModelDirectory = @"E:\models";
+    /// <summary>
+    /// Default model directory when none is explicitly configured. Resolved in
+    /// this order:
+    /// <list type="number">
+    ///   <item><description>The <c>DATUM_MODELS</c> environment variable, if set.</description></item>
+    ///   <item><description>A portable per-user fallback —
+    ///     <c>%LOCALAPPDATA%/DatumIngest/models</c> on Windows,
+    ///     <c>~/.local/share/DatumIngest/models</c> on Linux/macOS — via
+    ///     <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
+    ///   </description></item>
+    /// </list>
+    /// Production deployments either set the env var or pass an explicit path
+    /// to the constructor. Tests rely on the env var being set on developer
+    /// machines and self-skip when the model file is absent.
+    /// </summary>
+    public static string DefaultModelDirectory =>
+        Environment.GetEnvironmentVariable("DATUM_MODELS")
+        ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DatumIngest",
+            "models");
 
     private readonly ConcurrentDictionary<string, ModelCatalogEntry> _entries =
         new(StringComparer.OrdinalIgnoreCase);

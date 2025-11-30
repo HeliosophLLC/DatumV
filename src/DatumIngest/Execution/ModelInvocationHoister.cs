@@ -345,6 +345,27 @@ public static class ModelInvocationHoister
                 $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
         }
 
+        // Plan-time file-existence check. Catches the missing-weights case here
+        // (clear, source-pointing message) instead of letting it surface as an
+        // opaque FileNotFoundException at execute time. Skipped when there's no
+        // file (synthetic backends like EchoModel have RelativePath == null).
+        // Error message uses filename only — full paths leak machine-specific
+        // drive/user info that isn't useful to the reader.
+        if (entry.RelativePath is not null)
+        {
+            string resolvedPath = Path.Combine(catalog.ModelDirectory, entry.RelativePath);
+            if (!File.Exists(resolvedPath))
+            {
+                string sourceHint = entry.SourceUrl is not null
+                    ? $" Download from {entry.SourceUrl} and place it in your models directory."
+                    : "";
+                throw new InvalidOperationException(
+                    $"Model '{modelName}' is registered but its file '{entry.RelativePath}' is not present " +
+                    $"in the configured models directory.{sourceHint} " +
+                    $"Run `SELECT * FROM system_models` to see status for all registered models.");
+            }
+        }
+
         int requiredCount = entry.InputKinds.Count;
         int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
         int suppliedCount = canonical.Arguments.Count;
