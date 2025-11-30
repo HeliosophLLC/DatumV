@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
@@ -1255,6 +1256,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             IReadOnlyList<OrderByItem> orderByItems = aggregateColumn.OrderBy;
 
+            // Sort keys in OrderedAggregateBuffer were stabilised to frame.Source
+            // (the per-query store / accumulator arena depending on the path); both
+            // sides of the comparison live in the same store.
+            IValueStore sortKeyStore = frame.Source;
+            SidecarRegistry? sortKeyRegistry = frame.SidecarRegistry;
             buffer.Sort((a, b) =>
             {
                 ReadOnlySpan<DataValue> sortA = buffer.GetSortKeys(a);
@@ -1262,7 +1268,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 for (int sortIndex = 0; sortIndex < orderByItems.Count; sortIndex++)
                 {
                     int comparison = OrderByOperator.CompareDataValues(
-                        sortA[sortIndex], sortB[sortIndex]);
+                        sortA[sortIndex], sortKeyStore, sortKeyRegistry,
+                        sortB[sortIndex], sortKeyStore, sortKeyRegistry);
 
                     if (orderByItems[sortIndex].Direction == SortDirection.Descending)
                     {

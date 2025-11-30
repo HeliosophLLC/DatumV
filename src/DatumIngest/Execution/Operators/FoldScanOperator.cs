@@ -1,4 +1,5 @@
 using System.Linq;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -185,7 +186,8 @@ public sealed class FoldScanOperator : IQueryOperator
             {
                 WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;
                 ComputeForSpecification(
-                    spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter);
+                    spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter,
+                    context.Store, context.SidecarRegistry);
             }
 
             // ───── Step 4: emit in original input order ─────
@@ -262,7 +264,9 @@ public sealed class FoldScanOperator : IQueryOperator
         List<Row> allRows,
         ExpressionEvaluator evaluator,
         DataValue[][] scanResults,
-        QueryMeter? meter)
+        QueryMeter? meter,
+        IValueStore store,
+        SidecarRegistry? sidecarRegistry)
     {
         // Build an index array to track original positions through partitioning.
         int[] originalIndices = new int[allRows.Count];
@@ -287,7 +291,9 @@ public sealed class FoldScanOperator : IQueryOperator
         {
             if (spec.OrderBy is { Count: > 0 })
             {
-                SortPartition(allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator);
+                SortPartition(
+                    allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator,
+                    store, sidecarRegistry);
             }
 
             // Fold each scan column group within this partition.
@@ -502,7 +508,9 @@ public sealed class FoldScanOperator : IQueryOperator
         int startIndex,
         int count,
         IReadOnlyList<OrderByItem> orderByItems,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        IValueStore store,
+        SidecarRegistry? sidecarRegistry)
     {
         try
         {
@@ -514,7 +522,9 @@ public sealed class FoldScanOperator : IQueryOperator
                 {
                     DataValue leftValue = evaluator.Evaluate(item.Expression, rowA);
                     DataValue rightValue = evaluator.Evaluate(item.Expression, rowB);
-                    int comparison = CompareDataValues(leftValue, rightValue);
+                    int comparison = CompareDataValues(
+                        leftValue, store, sidecarRegistry,
+                        rightValue, store, sidecarRegistry);
                     if (item.Direction == SortDirection.Descending)
                     {
                         comparison = -comparison;
@@ -539,13 +549,17 @@ public sealed class FoldScanOperator : IQueryOperator
         }
     }
 
-    private static int CompareDataValues(DataValue left, DataValue right)
+    private static int CompareDataValues(
+        DataValue left, IValueStore leftStore, SidecarRegistry? leftRegistry,
+        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
     {
         if (left.IsNull && right.IsNull) return 0;
         if (left.IsNull) return 1;
         if (right.IsNull) return -1;
 
-        return DataValueComparer.Compare(left, right);
+        return DataValueComparer.Compare(
+            left, leftStore, leftRegistry,
+            right, rightStore, rightRegistry);
     }
 
     /// <summary>

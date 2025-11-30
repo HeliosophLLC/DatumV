@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -122,7 +123,9 @@ public sealed class WindowOperator : IQueryOperator
         foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
         {
             WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
-            ComputeForSpecification(spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter);
+            ComputeForSpecification(
+                spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter,
+                context.Store, context.SidecarRegistry);
         }
 
         // Step 4: Emit all rows in original order, augmented with window columns.
@@ -189,7 +192,9 @@ public sealed class WindowOperator : IQueryOperator
         List<Row> allRows,
         ExpressionEvaluator evaluator,
         DataValue[][] windowResults,
-        QueryMeter? meter)
+        QueryMeter? meter,
+        IValueStore store,
+        SidecarRegistry? sidecarRegistry)
     {
         // Build an index array to track original positions through partitioning.
         int[] originalIndices = new int[allRows.Count];
@@ -217,7 +222,9 @@ public sealed class WindowOperator : IQueryOperator
             // Sort partition rows by ORDER BY expressions (stable sort via index).
             if (spec.OrderBy is { Count: > 0 })
             {
-                SortPartition(allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator);
+                SortPartition(
+                    allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator,
+                    store, sidecarRegistry);
             }
 
             // Build partition row list for the computation interface.
@@ -340,7 +347,9 @@ public sealed class WindowOperator : IQueryOperator
         int startIndex,
         int count,
         IReadOnlyList<OrderByItem> orderByItems,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        IValueStore store,
+        SidecarRegistry? sidecarRegistry)
     {
         Array.Sort(indices, startIndex, count, Comparer<int>.Create((a, b) =>
         {
@@ -350,7 +359,9 @@ public sealed class WindowOperator : IQueryOperator
             {
                 DataValue leftValue = evaluator.Evaluate(item.Expression, rowA);
                 DataValue rightValue = evaluator.Evaluate(item.Expression, rowB);
-                int comparison = CompareDataValues(leftValue, rightValue);
+                int comparison = CompareDataValues(
+                    leftValue, store, sidecarRegistry,
+                    rightValue, store, sidecarRegistry);
                 if (item.Direction == SortDirection.Descending)
                 {
                     comparison = -comparison;
@@ -364,13 +375,17 @@ public sealed class WindowOperator : IQueryOperator
         }));
     }
 
-    private static int CompareDataValues(DataValue left, DataValue right)
+    private static int CompareDataValues(
+        DataValue left, IValueStore leftStore, SidecarRegistry? leftRegistry,
+        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
     {
         if (left.IsNull && right.IsNull) return 0;
         if (left.IsNull) return 1;
         if (right.IsNull) return -1;
 
-        return DataValueComparer.Compare(left, right);
+        return DataValueComparer.Compare(
+            left, leftStore, leftRegistry,
+            right, rightStore, rightRegistry);
     }
 
     /// <summary>

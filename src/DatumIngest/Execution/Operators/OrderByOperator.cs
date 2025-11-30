@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -135,9 +136,14 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         // return to the pool immediately. The heap is a max-heap (reverse comparison)
         // — its peek is the worst-of-the-best, which is what gets evicted on overflow.
         Arena? bufferArena = null;
+        SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         ColumnLookup? schema = null;
         PriorityQueue<Row, Row> heap = new(
-            Comparer<Row>.Create((left, right) => -CompareRows(left, right, evaluator)));
+            Comparer<Row>.Create((left, right) =>
+                -CompareRows(
+                    left, bufferArena!, sidecarRegistry,
+                    right, bufferArena!, sidecarRegistry,
+                    evaluator)));
         RowBatch? outputBatch = null;
 
         try
@@ -170,8 +176,14 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                             // Compare without allocating: peek the worst, decide if the
                             // new row beats it. If so, evict the worst (return its array
                             // to the pool) and insert the new row (rented + stabilised).
+                            // Asymmetric arenas: the source row's payloads live in the
+                            // input batch's arena, while the heap row was already
+                            // stabilised into bufferArena.
                             Row worst = heap.Peek();
-                            if (CompareRows(sourceRow, worst, evaluator) < 0)
+                            if (CompareRows(
+                                    sourceRow, inputBatch.Arena, sidecarRegistry,
+                                    worst, bufferArena!, sidecarRegistry,
+                                    evaluator) < 0)
                             {
                                 Row evicted = heap.Dequeue();
                                 pool.ReturnRow(evicted);
@@ -199,7 +211,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             {
                 sorted.Add(heap.Dequeue());
             }
-            sorted.Sort((left, right) => CompareRows(left, right, evaluator));
+            sorted.Sort((left, right) =>
+                CompareRows(
+                    left, bufferArena!, sidecarRegistry,
+                    right, bufferArena!, sidecarRegistry,
+                    evaluator));
 
             for (int i = 0; i < sorted.Count; i++)
             {
@@ -247,6 +263,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 
         Arena? bufferArena = null;
+        SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         ColumnLookup? schema = null;
         List<Row> buffer = [];
         List<SpillReaderWriter> sortedRuns = [];
@@ -288,7 +305,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                             if (estimatedMemory > memoryBudget!.Value)
                             {
                                 // Sort the in-memory chunk and write it as a sorted run.
-                                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                                buffer.Sort((left, right) =>
+                                    CompareRows(
+                                        left, bufferArena!, sidecarRegistry,
+                                        right, bufferArena!, sidecarRegistry,
+                                        evaluator));
                                 SpillReaderWriter run = SpillSortedBuffer(
                                     pool, schema!, context, bufferArena!, buffer);
                                 sortedRuns.Add(run);
@@ -321,7 +342,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             if (sortedRuns.Count == 0)
             {
                 // Everything fit in memory. Sort buffer and emit.
-                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                buffer.Sort((left, right) =>
+                    CompareRows(
+                        left, bufferArena!, sidecarRegistry,
+                        right, bufferArena!, sidecarRegistry,
+                        evaluator));
 
                 for (int i = 0; i < buffer.Count; i++)
                 {
@@ -351,7 +376,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             // Flush any remaining in-memory rows as the final sorted run.
             if (buffer.Count > 0)
             {
-                buffer.Sort((left, right) => CompareRows(left, right, evaluator));
+                buffer.Sort((left, right) =>
+                    CompareRows(
+                        left, bufferArena!, sidecarRegistry,
+                        right, bufferArena!, sidecarRegistry,
+                        evaluator));
                 SpillReaderWriter finalRun = SpillSortedBuffer(
                     pool, schema!, context, bufferArena!, buffer);
                 sortedRuns.Add(finalRun);
@@ -433,6 +462,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         Arena outputArena)
     {
         List<RunReader> readers = new(runs.Count);
+        SidecarRegistry? sidecarRegistry = context.SidecarRegistry;
         RowBatch? outputBatch = null;
 
         try
@@ -453,7 +483,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             if (readers.Count == 0) yield break;
 
             PriorityQueue<RunReader, RunReader> heap = new(
-                Comparer<RunReader>.Create((a, b) => CompareRows(a.Current, b.Current, evaluator)));
+                Comparer<RunReader>.Create((a, b) =>
+                    CompareRows(
+                        a.Current, a.CurrentBatch.Arena, sidecarRegistry,
+                        b.Current, b.CurrentBatch.Arena, sidecarRegistry,
+                        evaluator)));
             foreach (RunReader r in readers)
             {
                 heap.Enqueue(r, r);
@@ -502,14 +536,19 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         }
     }
 
-    private int CompareRows(Row left, Row right, ExpressionEvaluator evaluator)
+    private int CompareRows(
+        Row left, IValueStore leftStore, SidecarRegistry? leftRegistry,
+        Row right, IValueStore rightStore, SidecarRegistry? rightRegistry,
+        ExpressionEvaluator evaluator)
     {
         foreach (OrderByItem item in _orderByItems)
         {
             DataValue leftValue = evaluator.Evaluate(item.Expression, left);
             DataValue rightValue = evaluator.Evaluate(item.Expression, right);
 
-            int comparison = CompareDataValues(leftValue, rightValue);
+            int comparison = CompareDataValues(
+                leftValue, leftStore, leftRegistry,
+                rightValue, rightStore, rightRegistry);
 
             if (item.Direction == SortDirection.Descending)
             {
@@ -526,15 +565,26 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>
-    /// Compares two <see cref="DataValue"/> instances for ordering. Nulls sort last.
+    /// Compares two <see cref="DataValue"/> instances for ordering across all three storage
+    /// tiers (inline / arena-backed / sidecar-backed). Nulls sort last.
     /// </summary>
-    internal static int CompareDataValues(DataValue left, DataValue right)
+    /// <param name="left">Left value.</param>
+    /// <param name="leftStore">Arena backing <paramref name="left"/> when arena-backed.</param>
+    /// <param name="leftRegistry">Sidecar registry resolving <paramref name="left"/> when sidecar-backed.</param>
+    /// <param name="right">Right value.</param>
+    /// <param name="rightStore">Arena backing <paramref name="right"/> when arena-backed.</param>
+    /// <param name="rightRegistry">Sidecar registry resolving <paramref name="right"/> when sidecar-backed.</param>
+    internal static int CompareDataValues(
+        DataValue left, IValueStore leftStore, SidecarRegistry? leftRegistry,
+        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
     {
         if (left.IsNull && right.IsNull) return 0;
         if (left.IsNull) return 1;
         if (right.IsNull) return -1;
 
-        return DataValueComparer.Compare(left, right);
+        return DataValueComparer.Compare(
+            left, leftStore, leftRegistry,
+            right, rightStore, rightRegistry);
     }
 
     /// <inheritdoc />

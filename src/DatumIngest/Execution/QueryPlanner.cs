@@ -496,6 +496,11 @@ public sealed class QueryPlanner
             || HasLetAggregateFunction(letBindings, _functionRegistry);
         IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
         IReadOnlyList<AssertClause>? assertions = statement.Assertions;
+        // Aggregate-rewritten ORDER BY clause when the query has GROUP BY /
+        // aggregates; bare aggregate calls in ORDER BY are lifted into the
+        // GroupBy's aggregate columns and rewritten as column references.
+        // null when no rewrite happened — falls back to the original clause.
+        OrderByClause? rewrittenOrderByClause = null;
 
         if (hasGroupBy || hasAggregates)
         {
@@ -583,6 +588,29 @@ public sealed class QueryPlanner
                     });
                 }
                 assertions = rewrittenAssertions;
+            }
+
+            // Rewrite ORDER BY items so bare aggregate calls (e.g.
+            // `ORDER BY COUNT(*)`) become column references to the GroupBy's
+            // synthesised aggregate output. The rewrite de-duplicates by output
+            // name, so an aggregate that already appears in SELECT shares its
+            // column with the ORDER BY ref instead of producing a second
+            // AggregateColumn. Done here — before the DISTINCT-vs-GroupBy
+            // decision below — so an ORDER BY-only aggregate (no SELECT/LET
+            // counterpart) still populates aggregateColumns and routes the
+            // query through the real GroupByOperator path.
+            if (statement.OrderBy is not null)
+            {
+                List<OrderByItem> rewrittenOrderBy = new(statement.OrderBy.Items.Count);
+                foreach (OrderByItem item in statement.OrderBy.Items)
+                {
+                    Expression rewritten = RewriteAggregateExpression(
+                        item.Expression, _functionRegistry, aggregateColumns);
+                    rewrittenOrderBy.Add(ReferenceEquals(rewritten, item.Expression)
+                        ? item
+                        : item with { Expression = rewritten });
+                }
+                rewrittenOrderByClause = new OrderByClause(rewrittenOrderBy);
             }
 
             if (hasGroupBy && aggregateColumns.Count == 0 && statement.Having is null)
@@ -872,17 +900,22 @@ public sealed class QueryPlanner
         //    or elide entirely when a streaming GROUP BY already produces sorted output.
         if (statement.OrderBy is not null)
         {
-            if (OutputOrderingSatisfiesOrderBy(source, statement.OrderBy))
+            // When the query had GROUP BY / aggregates, ORDER BY items have
+            // been rewritten so bare aggregate calls reference the GroupBy's
+            // output columns. Otherwise fall back to the original parsed clause.
+            OrderByClause effectiveOrderBy = rewrittenOrderByClause ?? statement.OrderBy;
+
+            if (OutputOrderingSatisfiesOrderBy(source, effectiveOrderBy))
             {
                 ExecutionTracer.Write("ORDER BY elided — output already sorted by streaming GROUP BY");
             }
-            else if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
+            else if (!TryReplaceWithIndexScan(ref source, effectiveOrderBy))
             {
                 int? topNRows = statement.Limit is not null
                     ? statement.Limit.Value + (statement.Offset ?? 0)
                     : null;
 
-                source = new OrderByOperator(source, statement.OrderBy.Items, topNRows);
+                source = new OrderByOperator(source, effectiveOrderBy.Items, topNRows);
             }
         }
 

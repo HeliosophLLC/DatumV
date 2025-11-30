@@ -1,4 +1,5 @@
 using System.Globalization;
+using DatumIngest.DatumFile.Sidecar;
 
 namespace DatumIngest.Model;
 
@@ -21,53 +22,73 @@ namespace DatumIngest.Model;
 internal static class DataValueComparer
 {
     /// <summary>
-    /// Compares two non-null values without providing an <see cref="Arena"/>. Safe for
-    /// scalar kinds, null values, and inline strings (which are self-contained in the
-    /// <see cref="DataValue"/> struct). Throws for non-inline <see cref="DataKind.String"/>
-    /// values — those require arenas to resolve payload
-    /// bytes; use <see cref="Compare(DataValue, IValueStore, DataValue, IValueStore)"/> instead.
+    /// Compares two values when both sides are guaranteed to be self-contained — null,
+    /// scalar, or inline String. Throws when either side requires external resolution
+    /// (arena-backed or sidecar-backed String); those callers must use the
+    /// <see cref="Compare(DataValue, IValueStore, SidecarRegistry?, DataValue, IValueStore, SidecarRegistry?)"/>
+    /// overload that carries per-side store + registry.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when either side is a non-inline String. The caller must
-    /// supply arenas via the two-arena overload to compare those content-correctly.
+    /// Thrown when either side is a non-inline String. Non-inline strings live either in
+    /// an <see cref="IValueStore"/> arena (engine-produced values) or in a
+    /// <c>.datum-blob</c> sidecar (v2 reader output); both require external resolution
+    /// and must use the per-side store + registry overload.
     /// </exception>
     internal static int Compare(DataValue left, DataValue right)
     {
-        bool leftNeedsArena = NeedsArenaForCompare(left);
-        bool rightNeedsArena = NeedsArenaForCompare(right);
-        if (leftNeedsArena || rightNeedsArena)
+        if (NeedsResolutionForCompare(left) || NeedsResolutionForCompare(right))
         {
             throw new InvalidOperationException(
-                "Comparing non-inline String requires arenas. " +
-                "Use DataValueComparer.Compare(left, leftArena, right, rightArena) instead.");
+                "Comparing non-inline String requires per-side store and sidecar registry. " +
+                "Non-inline strings may live in an arena (engine-produced) or a .datum-blob " +
+                "sidecar (v2 reader output) — pass both via DataValueComparer.Compare(" +
+                "left, leftStore, leftRegistry, right, rightStore, rightRegistry).");
         }
 
-        // Safe: arena is only read inside Compare for String reference-store kinds,
-        // and we've just proven both sides are either inline, null, or scalar.
-        return Compare(left, null!, right, null!);
+        // Safe: store/registry are only read inside Compare for non-inline String, and
+        // we've just proven both sides are either inline, null, or scalar.
+        return Compare(left, null!, null, right, null!, null);
     }
 
-    private static bool NeedsArenaForCompare(DataValue value) =>
+    private static bool NeedsResolutionForCompare(DataValue value) =>
         value.Kind == DataKind.String
         && !value.IsNull
         && !value.IsInline;
 
     /// <summary>
-    /// Compares two non-null values of the same kind.
-    /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
-    /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
-    /// are widened to <see cref="double"/> before comparison.
+    /// Compares two non-null values of the same kind, both backed by the same arena and
+    /// neither sidecar-backed. Convenience for arena-only callers; sidecar-backed values
+    /// will fail with a registry-related error inside <see cref="DataValue.AsUtf8Span(IValueStore, SidecarRegistry?)"/>.
+    /// Use the six-arg overload when sidecar resolution is required.
     /// </summary>
     internal static int Compare(DataValue left, DataValue right, IValueStore arena)
-        => Compare(left, arena, right, arena);
+        => Compare(left, arena, null, right, arena, null);
 
     /// <summary>
-    /// Compares two non-null values of the same kind.
-    /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
-    /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
-    /// are widened to <see cref="double"/> before comparison.
+    /// Compares two non-null values that may live in different arenas, neither sidecar-backed.
+    /// Convenience for cross-arena arena-only callers. Use the six-arg overload when
+    /// sidecar resolution is required.
     /// </summary>
     internal static int Compare(DataValue left, IValueStore leftArena, DataValue right, IValueStore rightArena)
+        => Compare(left, leftArena, null, right, rightArena, null);
+
+    /// <summary>
+    /// Compares two non-null values across all three storage tiers: inline (self-contained),
+    /// arena-backed (resolved via <paramref name="leftStore"/> / <paramref name="rightStore"/>),
+    /// and sidecar-backed (resolved via <paramref name="leftRegistry"/> / <paramref name="rightRegistry"/>).
+    /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
+    /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values are widened to
+    /// <see cref="double"/> before comparison.
+    /// </summary>
+    /// <param name="left">Left value to compare.</param>
+    /// <param name="leftStore">Arena that backs <paramref name="left"/> when arena-backed; may be <see langword="null"/> when <paramref name="left"/> is inline / scalar / null / sidecar-backed.</param>
+    /// <param name="leftRegistry">Sidecar registry resolving <paramref name="left"/> when sidecar-backed; may be <see langword="null"/> when no side is sidecar-backed.</param>
+    /// <param name="right">Right value to compare.</param>
+    /// <param name="rightStore">Arena that backs <paramref name="right"/> when arena-backed.</param>
+    /// <param name="rightRegistry">Sidecar registry resolving <paramref name="right"/> when sidecar-backed.</param>
+    internal static int Compare(
+        DataValue left,  IValueStore leftStore,  SidecarRegistry? leftRegistry,
+        DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
     {
         // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
         // original per-class implementations and handles cases like INT column vs FLOAT literal.
@@ -99,7 +120,8 @@ internal static class DataValueComparer
             DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
             DataKind.Type     => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
-            DataKind.String   => left.AsUtf8Span(leftArena).SequenceCompareTo(right.AsUtf8Span(rightArena)),
+            DataKind.String   => left.AsUtf8Span(leftStore, leftRegistry)
+                                     .SequenceCompareTo(right.AsUtf8Span(rightStore, rightRegistry)),
             _ => 0,
         };
     }
