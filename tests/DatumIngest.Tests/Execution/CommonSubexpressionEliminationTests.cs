@@ -383,6 +383,142 @@ public sealed class CommonSubexpressionEliminationTests : ServiceTestBase
         Assert.Equal("concat", innerCall.FunctionName);
     }
 
+    // ─────────────── Within-Filter / Within-OrderBy CSE ───────────────
+
+    [Fact]
+    public void WithinFilter_DuplicatePureCallInSinglePredicate_HoistsAboveFilter()
+    {
+        // The planner splits AND-compound predicates into multiple FilterOperators,
+        // so an `AND`-style duplicate is caught by cross-clause (different ops).
+        // Within-Filter CSE fires when a SINGLE predicate (e.g. an OR or a
+        // boolean comparison) references the same expression twice and the
+        // predicate stays as one FilterOperator.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT a, b FROM t WHERE concat(a, b) = 'alphabeta' OR concat(a, b) = 'gammadelta'",
+            catalog);
+
+        // Walk to the FilterOperator. There may be a Project above it, possibly
+        // additional Filters. Find the FIRST Filter encountered top-down.
+        FilterOperator? filter = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is FilterOperator f) { filter = f; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(filter);
+
+        // Filter's source must be a RowEnricher (the within-Filter hoist).
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(filter!.Source);
+        Assert.Single(enricher.Enrichments);
+        Assert.Equal("__cse_f0", enricher.Enrichments[0].ColumnName);
+
+        FunctionCallExpression hoisted = Assert.IsType<FunctionCallExpression>(
+            enricher.Enrichments[0].Expression);
+        Assert.Equal("concat", hoisted.FunctionName);
+
+        // Both predicate occurrences became refs.
+        string predicateText = QueryExplainer.FormatExpression(filter.Predicate);
+        Assert.DoesNotContain("concat", predicateText);
+        Assert.Contains("__cse_f0", predicateText);
+    }
+
+    [Fact]
+    public void WithinFilter_SingleOccurrence_NotHoisted()
+    {
+        // Single occurrence — no hoist.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT a, b FROM t WHERE concat(a, b) = 'alphabeta'",
+            catalog);
+
+        // No RowEnricher anywhere.
+        bool foundEnricher = false;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is RowEnricherOperator) { foundEnricher = true; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                FilterOperator f => f.Source,
+                _ => null,
+            };
+        }
+        Assert.False(foundEnricher);
+    }
+
+    [Fact]
+    public async Task EndToEnd_WithinFilter_DuplicatePredicate_PreservesResults()
+    {
+        TableCatalog catalog = Catalog2Cols();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT a, b FROM t WHERE concat(a, b) = 'alphabeta' OR concat(a, b) = 'gammadelta'",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+    }
+
+    [Fact]
+    public void WithinOrderBy_DuplicatePureCall_HoistsAboveSource()
+    {
+        // concat(a, b) appears twice in ORDER BY: once as a key, once inside
+        // a deriving function. Within-OrderBy hoists upstream.
+        TableCatalog catalog = Catalog2Cols();
+        IQueryOperator plan = PlanQuery(
+            "SELECT a FROM t ORDER BY concat(a, b) DESC, upper(concat(a, b)) ASC",
+            catalog);
+
+        // Walk down to find OrderByOperator and verify a RowEnricher is its
+        // direct source.
+        OrderByOperator? orderBy = null;
+        IQueryOperator? cursor = plan;
+        while (cursor is not null)
+        {
+            if (cursor is OrderByOperator ob) { orderBy = ob; break; }
+            cursor = cursor switch
+            {
+                ProjectOperator p => p.Source,
+                _ => null,
+            };
+        }
+        Assert.NotNull(orderBy);
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(orderBy!.Source);
+
+        // One hoist with the __cse_o prefix.
+        Assert.Single(enricher.Enrichments);
+        Assert.Equal("__cse_o0", enricher.Enrichments[0].ColumnName);
+
+        FunctionCallExpression hoisted = Assert.IsType<FunctionCallExpression>(
+            enricher.Enrichments[0].Expression);
+        Assert.Equal("concat", hoisted.FunctionName);
+    }
+
+    [Fact]
+    public async Task EndToEnd_WithinOrderBy_DuplicateKeys_PreservesOrder()
+    {
+        TableCatalog catalog = Catalog2Cols();
+        // SELECT a, b so projection pushdown keeps both columns visible to
+        // the upstream RowEnricher inserted by within-OrderBy CSE.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT a, b FROM t ORDER BY concat(a, b) DESC, upper(concat(a, b)) ASC",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("gamma", rows[0]["a"].AsString(scratch));
+            Assert.Equal("alpha", rows[1]["a"].AsString(scratch));
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
+    }
+
     [Fact]
     public async Task EndToEnd_SubsumedNestedHoist_PreservesResults()
     {

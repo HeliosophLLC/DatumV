@@ -80,7 +80,119 @@ public static class CommonSubexpressionEliminator
             IQueryOperator newSource = EliminateRecursive(project.Source, functions);
             return EliminateInProject(project, newSource, functions);
         }
+        if (op is FilterOperator filter)
+        {
+            IQueryOperator newSource = EliminateRecursive(filter.Source, functions);
+            return EliminateInFilter(filter, newSource, functions);
+        }
+        if (op is OrderByOperator orderBy)
+        {
+            IQueryOperator newSource = EliminateRecursive(orderBy.Source, functions);
+            return EliminateInOrderBy(orderBy, newSource, functions);
+        }
         return RewriteChildren(op, child => EliminateRecursive(child, functions));
+    }
+
+    /// <summary>
+    /// Within-Filter CSE. Catches duplicates inside a single
+    /// <see cref="FilterOperator"/>'s predicate that didn't get picked up by
+    /// the cross-clause stage (because they only appear in this one operator).
+    /// Common pattern: <c>WHERE expensive(x) &gt; 10 AND expensive(x) &lt; 100</c>.
+    /// Inserts a <see cref="RowEnricherOperator"/> upstream of the filter and
+    /// rewrites the predicate.
+    /// </summary>
+    private static IQueryOperator EliminateInFilter(
+        FilterOperator filter, IQueryOperator source, FunctionRegistry functions)
+    {
+        // Filter has no LET bindings; the empty letNames set short-circuits the
+        // LET-name reference check inside IsCseEligible.
+        HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
+        CollectCandidates(filter.Predicate, entries, letNames, functions);
+
+        if (entries.Count == 0)
+        {
+            return ReferenceEquals(source, filter.Source)
+                ? filter
+                : new FilterOperator(source, filter.Predicate);
+        }
+
+        // No LET unification (nothing to unify with). Allocate __cse_f{N} for
+        // each fingerprint with count >= 2. The "f" prefix prevents collision
+        // with within-Project's __cse_{N} columns when both passes hoist into
+        // separate enrichers in the same plan.
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> fpToCanonical = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach ((string fp, FingerprintEntry entry) in entries)
+        {
+            if (entry.Count < 2) continue;
+            string column = $"__cse_f{counter++}";
+            fpToColumn[fp] = column;
+            fpToCanonical[fp] = entry.Canonical;
+        }
+
+        if (fpToColumn.Count == 0)
+        {
+            return ReferenceEquals(source, filter.Source)
+                ? filter
+                : new FilterOperator(source, filter.Predicate);
+        }
+
+        IQueryOperator augmented = BuildEnricherStack(
+            source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
+        Expression rewrittenPredicate = RewriteWithHoists(filter.Predicate, fpToColumn);
+        return new FilterOperator(augmented, rewrittenPredicate);
+    }
+
+    /// <summary>
+    /// Within-OrderBy CSE. Same shape as <see cref="EliminateInFilter"/> but
+    /// over <see cref="OrderByOperator.OrderByItems"/>. Rare in practice — the
+    /// realistic case is a sort that uses the same expression both as a
+    /// primary key and inside a deriving function on a tiebreaker, e.g.
+    /// <c>ORDER BY concat(a,b) DESC, length(concat(a,b)) ASC</c>.
+    /// </summary>
+    private static IQueryOperator EliminateInOrderBy(
+        OrderByOperator orderBy, IQueryOperator source, FunctionRegistry functions)
+    {
+        HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, FingerprintEntry> entries = new(StringComparer.Ordinal);
+        foreach (OrderByItem item in orderBy.OrderByItems)
+        {
+            CollectCandidates(item.Expression, entries, letNames, functions);
+        }
+
+        if (entries.Count == 0)
+        {
+            return ReferenceEquals(source, orderBy.Source)
+                ? orderBy
+                : new OrderByOperator(source, orderBy.OrderByItems, orderBy.TopNRows);
+        }
+
+        Dictionary<string, string> fpToColumn = new(StringComparer.Ordinal);
+        Dictionary<string, Expression> fpToCanonical = new(StringComparer.Ordinal);
+        int counter = 0;
+        foreach ((string fp, FingerprintEntry entry) in entries)
+        {
+            if (entry.Count < 2) continue;
+            string column = $"__cse_o{counter++}";
+            fpToColumn[fp] = column;
+            fpToCanonical[fp] = entry.Canonical;
+        }
+
+        if (fpToColumn.Count == 0)
+        {
+            return ReferenceEquals(source, orderBy.Source)
+                ? orderBy
+                : new OrderByOperator(source, orderBy.OrderByItems, orderBy.TopNRows);
+        }
+
+        IQueryOperator augmented = BuildEnricherStack(
+            source, fpToColumn.Keys.ToList(), fpToColumn, fpToCanonical);
+        OrderByItem[] rewrittenItems = orderBy.OrderByItems
+            .Select(i => i with { Expression = RewriteWithHoists(i.Expression, fpToColumn) })
+            .ToArray();
+        return new OrderByOperator(augmented, rewrittenItems, orderBy.TopNRows);
     }
 
     /// <summary>
