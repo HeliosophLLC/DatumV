@@ -71,6 +71,10 @@ public static class BuiltinModels
         RegisterFlorence2MoreDetailedCaption(modelCatalog);
         RegisterFlorence2CaptionQuantized(modelCatalog);
 
+        // Image generation. SD-Turbo is the closing leg of the
+        // image-in → caption → LLM-narrative → image-out pipeline.
+        RegisterSdTurbo(modelCatalog);
+
         // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
         // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
         // quantization for clean cross-model comparison (architectural
@@ -577,6 +581,83 @@ public static class BuiltinModels
                 ViTGpt2CaptionDefaultFolder + "/generation_config.json",
                 ViTGpt2CaptionDefaultFolder + "/tokenizer_config.json",
                 ViTGpt2CaptionDefaultFolder + "/special_tokens_map.json",
+            ]));
+    }
+
+    /// <summary>Default folder for SD-Turbo's diffusers ONNX layout.</summary>
+    public const string SdTurboFolder = "sd-turbo-onnx";
+
+    /// <summary>
+    /// File-existence anchor for SD-Turbo: the UNet weights, the largest
+    /// component (~1.6 GB) and the heart of the diffusion pipeline. Catalog
+    /// status checks against this file; the model loader resolves the rest
+    /// of the components from sibling subfolders.
+    /// </summary>
+    public const string SdTurboAnchor = SdTurboFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers Stability AI's SD-Turbo text-to-image model under the
+    /// catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"sd_turbo"</c>). Generates 512×512 images in a single denoising
+    /// step (~1–2 seconds per image on consumer GPUs).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>License:</strong> Stability AI Community License — free
+    /// for personal use and commercial use under $1M ARR. See
+    /// <a href="https://huggingface.co/stabilityai/sd-turbo">the model
+    /// card</a> for current terms. Above the threshold, an Enterprise
+    /// license from Stability AI is required.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> the model is a folder of HuggingFace
+    /// diffusers-format subfolders (<c>text_encoder/</c>, <c>unet/</c>,
+    /// <c>vae_decoder/</c>, <c>tokenizer/</c>, <c>scheduler/</c>). The
+    /// model loader resolves sub-paths from the folder root.
+    /// </para>
+    /// </remarks>
+    public static void RegisterSdTurbo(
+        ModelCatalog catalog,
+        string modelName = "sd_turbo",
+        string folder = SdTurboFolder,
+        int? seed = null)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            // Diffusion sampling — different output every call without a
+            // fixed seed. The deterministic flag drives planner CSE: same
+            // call site shares result regardless, but two textually
+            // identical call sites with different seeds shouldn't fold.
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed);
+            },
+            DisplayName: "Stable Diffusion Turbo",
+            Parameters: "865M",
+            License: "Stability AI Community",
+            LicenseHolder: "Stability AI",
+            SourceUrl: "https://huggingface.co/stabilityai/sd-turbo",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",  // external-data file (UNet weights > 2GB ONNX limit)
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",  // for img2img (not used by txt2img path)
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
             ]));
     }
 

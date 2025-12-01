@@ -170,6 +170,40 @@ is identical across all sizes.
   `optimum[onnxruntime] transformers`, and runs `optimum-cli export
   onnx`. ~5 minutes including download.
 
+### `sd_turbo` — text-to-image generator
+
+- **What it does**: Generates 512×512 images from a text prompt in a
+  single denoising step. Returns `Image` (PNG bytes).
+- **License**: ⚠️ **Stability AI Community License** — free for personal
+  use and commercial use under $1M ARR. Above that threshold an
+  Enterprise license from Stability AI is required.
+- **Source**: [huggingface.co/stabilityai/sd-turbo](https://huggingface.co/stabilityai/sd-turbo)
+- **Folder**: `sd-turbo-onnx/` — diffusers-format layout
+- **Files** (relative to the folder):
+  - `text_encoder/model.onnx` (~1.4 GB) — CLIP ViT-H/14 text encoder
+  - `unet/model.onnx` + `unet/model.onnx_data` (~3.5 GB) — UNet weights (split
+    via ONNX external-data because total exceeds the 2 GB ONNX limit)
+  - `vae_decoder/model.onnx` (~200 MB) — latent → RGB
+  - `vae_encoder/model.onnx` (~140 MB) — only used by img2img; not used by
+    DatumIngest's text-to-image path
+  - `tokenizer/{vocab.json, merges.txt, special_tokens_map.json, tokenizer_config.json}`
+  - `scheduler/scheduler_config.json`
+  - `model_index.json`
+- **Disk footprint**: ~5 GB total (FP32). FP16 builds (~half size) exist
+  in some community repos; the optimum-cli conversion produces FP32 by
+  default.
+- **Setup**: requires conversion from PyTorch — pre-built ONNX repos
+  (e.g. `tlwu/sd-turbo-onnxruntime`) are typically optimized for the
+  DirectML execution provider and use Microsoft-specific NhwcConv
+  operators that the standard CPU/CUDA EPs don't handle. The
+  [scripts/export-sd-turbo.ps1](../scripts/export-sd-turbo.ps1) script
+  handles the full conversion via `optimum-cli`:
+  ```powershell
+  ./scripts/export-sd-turbo.ps1
+  ```
+  Reuses the same `.venv` the ViT-GPT2 export created. ~5–10 minutes
+  including download.
+
 ### Florence-2 captioners (`florence2_*`)
 
 Microsoft's prompt-driven vision-language model. One model handles
