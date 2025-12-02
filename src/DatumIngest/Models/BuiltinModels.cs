@@ -73,7 +73,9 @@ public static class BuiltinModels
 
         // Image generation. SD-Turbo is the closing leg of the
         // image-in → caption → LLM-narrative → image-out pipeline.
+        // SDXL-Turbo is the higher-quality sibling for hero outputs.
         RegisterSdTurbo(modelCatalog);
+        RegisterSdxlTurbo(modelCatalog);
 
         // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
         // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
@@ -656,6 +658,80 @@ public static class BuiltinModels
                 $"{folder}/tokenizer/merges.txt",
                 $"{folder}/tokenizer/special_tokens_map.json",
                 $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for SDXL-Turbo's diffusers ONNX layout.</summary>
+    public const string SdxlTurboFolder = "sdxl-turbo-onnx";
+
+    /// <summary>
+    /// File-existence anchor for SDXL-Turbo: the UNet weights, ~2.6B params
+    /// — the largest component and the heart of the diffusion pipeline.
+    /// </summary>
+    public const string SdxlTurboAnchor = SdxlTurboFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers SDXL-Turbo under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"sdxl_turbo"</c>). Generates 1024×1024 images with
+    /// notably better composition and prompt adherence than SD-Turbo,
+    /// at modestly higher latency (~3-5s per image vs SD-Turbo's ~1-2s).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>License:</strong> Stability AI Community License — same
+    /// terms as SD-Turbo. Free for personal use and commercial use under
+    /// $1M ARR; Enterprise license required above that threshold.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> diffusers folder layout with the SDXL-
+    /// specific addition of a second text encoder
+    /// (<c>text_encoder_2/</c> alongside <c>text_encoder/</c>).
+    /// </para>
+    /// </remarks>
+    public static void RegisterSdxlTurbo(
+        ModelCatalog catalog,
+        string modelName = "sdxl_turbo",
+        string folder = SdxlTurboFolder,
+        int? seed = null)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new SdxlTurboModel(modelName, modelDirectory, seed);
+            },
+            DisplayName: "Stable Diffusion XL Turbo",
+            Parameters: "2.6B (UNet) + 1.4B (text encoders)",
+            License: "Stability AI Community",
+            LicenseHolder: "Stability AI",
+            SourceUrl: "https://huggingface.co/stabilityai/sdxl-turbo",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx_data",   // OpenCLIP-G is large; uses external data
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",             // UNet is huge (~2.6B params); external data
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/tokenizer_2/vocab.json",
+                $"{folder}/tokenizer_2/merges.txt",
+                $"{folder}/tokenizer_2/special_tokens_map.json",
+                $"{folder}/tokenizer_2/tokenizer_config.json",
                 $"{folder}/scheduler/scheduler_config.json",
                 $"{folder}/model_index.json",
             ]));
