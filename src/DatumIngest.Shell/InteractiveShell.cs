@@ -28,6 +28,29 @@ internal sealed class InteractiveShell
     private CancellationTokenSource? _activeQueryCts;
     private bool _timerEnabled;
     private bool _imagesEnabled;
+    private bool _dumpEnabled;
+    private string _dumpPath = DefaultDumpPath;
+
+    /// <summary>
+    /// Default directory where <c>.dump on</c> writes Image-typed cells.
+    /// Resolved in this order:
+    /// <list type="number">
+    ///   <item><description>The <c>DATUM_IMAGES</c> environment variable, if set.</description></item>
+    ///   <item><description>A portable per-user fallback —
+    ///     <c>%LOCALAPPDATA%/DatumIngest/images</c> on Windows,
+    ///     <c>~/.local/share/DatumIngest/images</c> on Linux/macOS.
+    ///   </description></item>
+    /// </list>
+    /// Mirrors <c>ModelCatalog.DefaultModelDirectory</c>'s
+    /// <c>DATUM_MODELS</c> resolution so users only need to set
+    /// <c>DATUM_IMAGES</c> once.
+    /// </summary>
+    private static string DefaultDumpPath =>
+        Environment.GetEnvironmentVariable("DATUM_IMAGES")
+        ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DatumIngest",
+            "images");
 
     public InteractiveShell(TableCatalog catalog)
     {
@@ -156,6 +179,37 @@ internal sealed class InteractiveShell
                         AnsiConsole.MarkupLine(_imagesEnabled
                             ? "[green]Images on. Results render one record at a time with Sixel-encoded image cells.[/]"
                             : "[yellow]Images off. Image cells render as a hex preview.[/]");
+                        continue;
+                    }
+
+                    if (trimmed.StartsWith(".dump", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string arg = trimmed[".dump".Length..].Trim();
+                        if (arg.Length == 0)
+                        {
+                            // Show current state.
+                            AnsiConsole.MarkupLine(_dumpEnabled
+                                ? $"[green]Dump on:[/] [white]{Markup.Escape(_dumpPath)}[/]"
+                                : "[grey]Dump off.[/]");
+                        }
+                        else if (arg.StartsWith("on", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string pathArg = arg["on".Length..].Trim();
+                            _dumpEnabled = true;
+                            if (pathArg.Length > 0) _dumpPath = pathArg;
+                            AnsiConsole.MarkupLine(
+                                $"[green]Dump on. Image cells will be saved to:[/] [white]{Markup.Escape(_dumpPath)}[/]");
+                        }
+                        else if (arg.StartsWith("off", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _dumpEnabled = false;
+                            AnsiConsole.MarkupLine("[yellow]Dump off.[/]");
+                        }
+                        else
+                        {
+                            AnsiConsole.MarkupLine(
+                                "[red]Usage: .dump on [path] | .dump off | .dump (show state)[/]");
+                        }
                         continue;
                     }
 
@@ -306,6 +360,8 @@ internal sealed class InteractiveShell
                     while (i < batch.Count && page.Count < PageSize)
                     {
                         Row row = batch[i];
+                        long absoluteRowIndex = totalRows + page.Count;
+                        DumpImageCellsIfEnabled(row, schema, arena, registry, absoluteRowIndex);
                         string[] cells = new string[columnCount];
                         for (int c = 0; c < columnCount; c++)
                         {
@@ -380,6 +436,7 @@ internal sealed class InteractiveShell
                 Row row = batch[batchOffset];
                 recordIndex++;
 
+                DumpImageCellsIfEnabled(row, schema, arena, registry, recordIndex - 1);
                 RenderExpandedRow(row, schema, arena, registry, recordIndex, nameWidth);
 
                 batchOffset++;
@@ -457,6 +514,116 @@ internal sealed class InteractiveShell
     private static byte[] ResolveImageBytes(DataValue value, Arena arena, SidecarRegistry registry)
     {
         return value.AsByteSpan(arena, registry).ToArray();
+    }
+
+    /// <summary>
+    /// When <c>.dump on</c> is active, writes every <c>DataKind.Image</c> cell
+    /// in the row to <see cref="_dumpPath"/>. Filename pattern:
+    /// <c>{guid}-r{rowIndex}-{columnName}.{ext}</c>, where <c>ext</c> is
+    /// detected from the magic bytes (PNG / JPEG / GIF / WebP / fallback
+    /// to <c>bin</c>). Prints the saved path inline so users can correlate
+    /// rendered output with files on disk.
+    /// </summary>
+    /// <remarks>
+    /// Runs independently of <c>.images on</c> rendering — dumping happens
+    /// whether the cell is being Sixel-rendered, hex-previewed, or shown in
+    /// expanded mode. One side effect: querying a table of source images
+    /// (e.g. <c>SELECT image FROM coco</c>) with dump on will write every
+    /// row's image to disk. Useful for "snapshot the dataset to a folder"
+    /// workflows; surprising for casual queries against image columns.
+    /// </remarks>
+    private void DumpImageCellsIfEnabled(
+        Row row, Schema schema, Arena arena, SidecarRegistry registry, long rowIndex)
+    {
+        if (!_dumpEnabled) return;
+
+        // Lazy-create the directory on the first row that needs it. Avoids
+        // creating the folder when dump is on but the query yields no images.
+        bool dirChecked = false;
+
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            ColumnInfo column = schema.Columns[i];
+            DataValue value = row[i];
+            if (value.IsNull) continue;
+            if (column.Kind != DataKind.Image && !column.IsByteArrayColumn) continue;
+
+            if (!dirChecked)
+            {
+                Directory.CreateDirectory(_dumpPath);
+                dirChecked = true;
+            }
+
+            try
+            {
+                byte[] bytes = value.AsByteSpan(arena, registry).ToArray();
+                string ext = DetectImageExtension(bytes);
+                string safeColName = SanitizeForFilename(column.Name);
+                string filename = $"{Guid.NewGuid():N}-r{rowIndex}-{safeColName}.{ext}";
+                string fullPath = Path.Combine(_dumpPath, filename);
+                File.WriteAllBytes(fullPath, bytes);
+                AnsiConsole.MarkupLine(
+                    $"[dim]  saved: {Markup.Escape(fullPath)} ({bytes.Length:N0} bytes)[/]");
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[red]  dump failed for column '{Markup.Escape(column.Name)}': {Markup.Escape(ex.Message)}[/]");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Maps known image-format magic bytes to a filename extension. Falls
+    /// back to <c>bin</c> for unrecognised payloads so the user can still
+    /// inspect the bytes (and we don't promise an extension we can't
+    /// honour).
+    /// </summary>
+    private static string DetectImageExtension(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length >= 8
+            && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+            && bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A)
+        {
+            return "png";
+        }
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+        {
+            return "jpg";
+        }
+        if (bytes.Length >= 6 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46
+            && bytes[3] == 0x38 && (bytes[4] == 0x37 || bytes[4] == 0x39) && bytes[5] == 0x61)
+        {
+            return "gif";
+        }
+        if (bytes.Length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46
+            && bytes[3] == 0x46 && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42
+            && bytes[11] == 0x50)
+        {
+            return "webp";
+        }
+        if (bytes.Length >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D)
+        {
+            return "bmp";
+        }
+        return "bin";
+    }
+
+    /// <summary>
+    /// Strips characters illegal in filenames (Windows is the strictest;
+    /// applying its rules makes paths portable). Falls back to a constant
+    /// when sanitisation strips everything.
+    /// </summary>
+    private static string SanitizeForFilename(string columnName)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        StringBuilder sb = new(columnName.Length);
+        foreach (char c in columnName)
+        {
+            sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+        }
+        string cleaned = sb.ToString().Trim('_', '.', ' ');
+        return cleaned.Length > 0 ? cleaned : "col";
     }
 
     /// <summary>
@@ -677,6 +844,8 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green].tables[/]                      List registered tables and row counts");
         AnsiConsole.MarkupLine("  [green].timer[/]                       Toggle elapsed-time reporting after each query");
         AnsiConsole.MarkupLine("  [green].images on[/] / [green].images off[/]      Render image cells as inline Sixel (one record at a time)");
+        AnsiConsole.MarkupLine("  [green].dump on [[path]][/] / [green].dump off[/]   Save image cells to disk as files. Path defaults to");
+        AnsiConsole.MarkupLine("                                  [grey]$DATUM_IMAGES, falling back to %LOCALAPPDATA%\\DatumIngest\\images.[/]");
         AnsiConsole.MarkupLine("  [green].help[/]                        Show this help");
         AnsiConsole.MarkupLine("  [green].quit[/] / [green].exit[/]                Exit the shell");
         AnsiConsole.MarkupLine("  [grey]Tab[/] / [grey]Ctrl+Space[/]              Trigger SQL completion (Ctrl+Space if Tab is swallowed by the terminal)");
