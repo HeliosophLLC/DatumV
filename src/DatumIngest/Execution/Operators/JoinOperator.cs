@@ -7,6 +7,7 @@ using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using DatumIngest.Indexing.Bloom;
 
 namespace DatumIngest.Execution.Operators;
@@ -359,6 +360,8 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteHashJoinAsync(
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
@@ -379,311 +382,375 @@ public sealed class JoinOperator : IQueryOperator
             useSingleKey ? null
             : new Dictionary<CompositeKey, List<(int Index, Row Row)>>(CompositeKeyComparer.Instance);
 
+        // Build rows are stabilised into operator-owned DataValue[] rentals so build
+        // batches return to the pool immediately. Same-store fast path under one-
+        // arena-per-query keeps this a fresh DataValue[] rental with no payload copy.
         List<Row> buildRows = new();
         bool hasNullKey = false;
 
         ExecutionTracer.Write($"HASH BUILD start  buildSide={GetOperatorLabel(buildSource)}  probeSide={GetOperatorLabel(probeSource)}");
         long buildStartTicks = Stopwatch.GetTimestamp();
 
-        await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
-            {
-                Row buildRow = buildBatch[batchIndex];
-                int buildIndex = buildRows.Count;
-                buildRows.Add(buildRow);
-
-            if (useSingleKey)
-            {
-                DataValue keyValue = evaluator.Evaluate(
-                    buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
-                if (keyValue.IsNull)
-                {
-                    hasNullKey = true;
-                    continue;
-                }
-
-                if (!singleKeyTable!.TryGetValue(keyValue, out List<(int, Row)>? bucket))
-                {
-                    bucket = new List<(int, Row)>();
-                    singleKeyTable[keyValue] = bucket;
-                }
-
-                bucket.Add((buildIndex, buildRow));
-            }
-            else
-            {
-                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, buildRow, rightSide: buildKeyIsRight);
-                if (HasNull(parts))
-                {
-                    hasNullKey = true;
-                    continue;
-                }
-
-                CompositeKey compositeKey = new(parts);
-                if (!compositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
-                {
-                    bucket = new List<(int, Row)>();
-                    compositeKeyTable[compositeKey] = bucket;
-                }
-
-                bucket.Add((buildIndex, buildRow));
-            }
-            }
-            context.ReturnRowBatch(buildBatch);
-        }
-
-        ExecutionTracer.Write($"HASH BUILD done  rows={buildRows.Count}  keys={singleKeyTable?.Count ?? compositeKeyTable?.Count ?? 0}  elapsed={Stopwatch.GetElapsedTime(buildStartTicks).TotalMilliseconds:F0}ms");
-
-        // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
-        if (_nullSensitiveAntiSemi && hasNullKey)
-        {
-            yield break;
-        }
-
-        // Bloom pruning: if the probe side has a source index with bloom filters
-        // and the join key is a simple column reference, push the build-side key
-        // values down so entire chunks can be skipped.
-        if (!isSemiJoin)
-        {
-            ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
-        }
-
-        // Determine which physical sides need unmatched-row tracking.
-        // Build rows are tracked via BitArray; unmatched probe rows are emitted inline.
-        bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
-        bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
-        bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
-        bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
-
-        // Parallel probe dispatch: when build-side tracking is not needed (no BitArray
-        // contention) and the probe side is large enough, fan out probe rows across
-        // P concurrent workers sharing the read-only hash table.
-        if (!needBuildUnmatched && context.DegreeOfParallelism > 1)
-        {
-            long? estimatedProbeRows = GetEstimatedRowCount(probeSource);
-            if (estimatedProbeRows is null or >= 100_000)
-            {
-                ExecutionTracer.Write($"HASH PROBE parallel  workers={context.DegreeOfParallelism}  estimatedProbe={estimatedProbeRows}");
-                await foreach (RowBatch batch in ExecuteParallelProbeAsync(
-                    context, extraction, probeSource, singleKeyTable, compositeKeyTable,
-                    buildRows, useSingleKey, isSemiJoin, needProbeUnmatched).ConfigureAwait(false))
-                {
-                    yield return batch;
-                }
-
-                yield break;
-            }
-        }
-
-        BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRows.Count) : null;
-
-        // Probe phase: stream the probe side.
-        // Schema is built lazily from the first combined pair so that zero-match
-        // joins never attempt to build it.
-        CombinedRowSchema? schema = null;
-        Row? cachedNullBuild = null;
-
-        // Rent a reusable scratch buffer for composite-key probes so that every
-        // probe row reuses the same DataValue[] instead of allocating a fresh one.
-        // The AlternateLookup probes the dictionary directly from the span, avoiding
-        // the per-row CompositeKey heap allocation.
+        // Probe-phase scratch / state declared up front so the outer try/finally
+        // can release them on early exit. Cached null pad rows hold DataValue[]
+        // rentals that must round-trip through pool.ReturnRow at end-of-execute.
         int keyCount = keyPairs.Count;
         DataValue[]? probeKeyScratch = (!useSingleKey)
             ? ArrayPool<DataValue>.Shared.Rent(keyCount)
             : null;
-        Dictionary<CompositeKey, List<(int Index, Row Row)>>.AlternateLookup<ReadOnlySpan<DataValue>>
-            compositeKeyLookup = default;
-        if (compositeKeyTable is not null)
-        {
-            compositeKeyLookup = compositeKeyTable.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-        }
-
-        // Pool for combined-row DataValue[] buffers. Buffers are returned by the
-        // downstream consumer (e.g. GroupByOperator) after it has extracted all
-        // needed values, not by this operator.
-        LocalBufferPool bufferPool = context.LocalBufferPool;
-        Row? residualCheckRow = null;
-        DataValue[]? residualCheckBuffer = null;
         RowBatch? outputBatch = null;
+        Row? cachedNullBuild = null;
+        Row? cachedNullProbe = null;
 
         try
         {
-        await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
-        {
-        for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
-        {
-            Row probeRow = probeBatch[probeIndex];
-            // For null-sensitive anti-semi (NOT IN), NULL probe keys are excluded.
-            if (_nullSensitiveAntiSemi)
+            await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
             {
-                bool probeKeyIsNull;
-                if (useSingleKey)
+                try
                 {
-                    probeKeyIsNull = evaluator.Evaluate(
-                        buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
-                }
-                else
-                {
-                    EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
-                    probeKeyIsNull = HasNull(probeKeyScratch.AsSpan(0, keyCount));
-                }
-
-                if (probeKeyIsNull)
-                {
-                    continue;
-                }
-            }
-
-            bool hasMatch = false;
-            List<(int Index, Row Row)>? matches = null;
-
-            if (useSingleKey)
-            {
-                DataValue probeKeyValue = evaluator.Evaluate(
-                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
-                if (!probeKeyValue.IsNull)
-                {
-                    singleKeyTable!.TryGetValue(probeKeyValue, out matches);
-                }
-            }
-            else
-            {
-                // Reuse the scratch buffer and probe via AlternateLookup — zero allocation per row.
-                EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
-                if (!HasNull(probeKeyScratch.AsSpan(0, keyCount)))
-                {
-                    compositeKeyLookup.TryGetValue(probeKeyScratch.AsSpan(0, keyCount), out matches);
-                }
-            }
-
-            if (matches is not null)
-            {
-                foreach ((int buildIndex, Row buildRow) in matches)
-                {
-                    // Combine in logical (left, right) order regardless of physical assignment.
-                    Row leftRow = _flipped ? buildRow : probeRow;
-                    Row rightRow = _flipped ? probeRow : buildRow;
-
-                    // Apply residual filter for non-equi conjuncts.
-                    if (extraction.Residual is not null)
+                    for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
                     {
-                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        if (residualCheckRow is null)
-                        {
-                            (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
-                        }
+                        Row sourceRow = buildBatch[batchIndex];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, buildBatch.Arena, context.Store);
+                        Row buildRow = new(sourceRow.ColumnLookup, copy);
+                        int buildIndex = buildRows.Count;
+                        buildRows.Add(buildRow);
 
-                        schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
-                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow.Value))
+                        if (useSingleKey)
                         {
-                            continue;
+                            DataValue keyValue = evaluator.Evaluate(
+                                buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
+                            if (keyValue.IsNull)
+                            {
+                                hasNullKey = true;
+                                continue;
+                            }
+
+                            if (!singleKeyTable!.TryGetValue(keyValue, out List<(int, Row)>? bucket))
+                            {
+                                bucket = new List<(int, Row)>();
+                                singleKeyTable[keyValue] = bucket;
+                            }
+
+                            bucket.Add((buildIndex, buildRow));
+                        }
+                        else
+                        {
+                            DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, buildRow, rightSide: buildKeyIsRight);
+                            if (HasNull(parts))
+                            {
+                                hasNullKey = true;
+                                continue;
+                            }
+
+                            CompositeKey compositeKey = new(parts);
+                            if (!compositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
+                            {
+                                bucket = new List<(int, Row)>();
+                                compositeKeyTable[compositeKey] = bucket;
+                            }
+
+                            bucket.Add((buildIndex, buildRow));
                         }
                     }
+                }
+                finally
+                {
+                    context.ReturnRowBatch(buildBatch);
+                }
+            }
 
-                    hasMatch = true;
+            ExecutionTracer.Write($"HASH BUILD done  rows={buildRows.Count}  keys={singleKeyTable?.Count ?? compositeKeyTable?.Count ?? 0}  elapsed={Stopwatch.GetElapsedTime(buildStartTicks).TotalMilliseconds:F0}ms");
 
-                    if (isSemiJoin)
+            // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
+            if (_nullSensitiveAntiSemi && hasNullKey)
+            {
+                yield break;
+            }
+
+            // Bloom pruning: if the probe side has a source index with bloom filters
+            // and the join key is a simple column reference, push the build-side key
+            // values down so entire chunks can be skipped.
+            if (!isSemiJoin)
+            {
+                ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
+            }
+
+            // Determine which physical sides need unmatched-row tracking.
+            // Build rows are tracked via BitArray; unmatched probe rows are emitted inline.
+            bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
+            bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
+            bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
+            bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
+
+            // Parallel probe dispatch: when build-side tracking is not needed (no BitArray
+            // contention) and the probe side is large enough, fan out probe rows across
+            // P concurrent workers sharing the read-only hash table.
+            if (!needBuildUnmatched && context.DegreeOfParallelism > 1)
+            {
+                long? estimatedProbeRows = GetEstimatedRowCount(probeSource);
+                if (estimatedProbeRows is null or >= 100_000)
+                {
+                    ExecutionTracer.Write($"HASH PROBE parallel  workers={context.DegreeOfParallelism}  estimatedProbe={estimatedProbeRows}");
+                    await foreach (RowBatch batch in ExecuteParallelProbeAsync(
+                        context, extraction, probeSource, singleKeyTable, compositeKeyTable,
+                        buildRows, useSingleKey, isSemiJoin, needProbeUnmatched).ConfigureAwait(false))
                     {
-                        // Semi-join: emit left row on first match, skip the rest.
-                        break;
+                        yield return batch;
                     }
 
-                    if (buildMatched is not null)
-                    {
-                        buildMatched[buildIndex] = true;
-                    }
-
-                    if (extraction.Residual is null)
-                    {
-                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    }
-
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(schema!.CombinePooled(leftRow, rightRow, bufferPool));
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    yield break;
                 }
             }
 
-            if (isSemiJoin)
-            {
-                // LeftSemi: emit only when matched. LeftAntiSemi: emit only when not matched.
-                if ((_joinType == JoinType.LeftSemi && hasMatch) ||
-                    (_joinType == JoinType.LeftAntiSemi && !hasMatch))
-                {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-                }
-            }
-            else if (!hasMatch && needProbeUnmatched)
-            {
-                if (buildRows.Count > 0)
-                {
-                    cachedNullBuild ??= CreateNullRow(buildRows[0]);
-                    // Null-pad the build side. Column order is always (left, right).
-                    Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
-                    Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
-                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-                }
-                else
-                {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-                }
-            }
-        }
-        context.ReturnRowBatch(probeBatch);
-        }
-        }
-        finally
-        {
-            if (probeKeyScratch is not null)
-            {
-                ArrayPool<DataValue>.Shared.Return(probeKeyScratch);
-            }
-        }
+            BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRows.Count) : null;
 
-        // Emit unmatched build rows when the build side must fully appear in the output.
-        if (buildMatched is not null)
-        {
-            Row? nullProbe = null;
+            CombinedRowSchema? schema = null;
             CombinedRowSchema? buildUnmatchedSchema = null;
 
-            for (int index = 0; index < buildRows.Count; index++)
+            Dictionary<CompositeKey, List<(int Index, Row Row)>>.AlternateLookup<ReadOnlySpan<DataValue>>
+                compositeKeyLookup = default;
+            if (compositeKeyTable is not null)
             {
-                if (!buildMatched[index])
+                compositeKeyLookup = compositeKeyTable.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+            }
+
+            Row? residualCheckRow = null;
+            DataValue[]? residualCheckBuffer = null;
+
+            await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                try
                 {
+                    for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
+                    {
+                        Row probeRow = probeBatch[probeIndex];
+
+                        // For null-sensitive anti-semi (NOT IN), NULL probe keys are excluded.
+                        if (_nullSensitiveAntiSemi)
+                        {
+                            bool probeKeyIsNull;
+                            if (useSingleKey)
+                            {
+                                probeKeyIsNull = evaluator.Evaluate(
+                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
+                            }
+                            else
+                            {
+                                EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                                probeKeyIsNull = HasNull(probeKeyScratch.AsSpan(0, keyCount));
+                            }
+
+                            if (probeKeyIsNull)
+                            {
+                                continue;
+                            }
+                        }
+
+                        bool hasMatch = false;
+                        List<(int Index, Row Row)>? matches = null;
+
+                        if (useSingleKey)
+                        {
+                            DataValue probeKeyValue = evaluator.Evaluate(
+                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                            if (!probeKeyValue.IsNull)
+                            {
+                                singleKeyTable!.TryGetValue(probeKeyValue, out matches);
+                            }
+                        }
+                        else
+                        {
+                            EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                            if (!HasNull(probeKeyScratch.AsSpan(0, keyCount)))
+                            {
+                                compositeKeyLookup.TryGetValue(probeKeyScratch.AsSpan(0, keyCount), out matches);
+                            }
+                        }
+
+                        if (matches is not null)
+                        {
+                            foreach ((int buildIndex, Row buildRow) in matches)
+                            {
+                                Row leftRow = _flipped ? buildRow : probeRow;
+                                Row rightRow = _flipped ? probeRow : buildRow;
+
+                                if (extraction.Residual is not null)
+                                {
+                                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                    if (residualCheckRow is null)
+                                    {
+                                        (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
+                                    }
+
+                                    schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
+                                    if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow.Value))
+                                    {
+                                        continue;
+                                    }
+                                }
+
+                                hasMatch = true;
+
+                                if (isSemiJoin)
+                                {
+                                    break;
+                                }
+
+                                if (buildMatched is not null)
+                                {
+                                    buildMatched[buildIndex] = true;
+                                }
+
+                                if (extraction.Residual is null)
+                                {
+                                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                }
+
+                                outputBatch ??= context.RentRowBatch(schema!.ColumnLookup);
+                                outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                        }
+
+                        if (isSemiJoin)
+                        {
+                            if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                                (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                            {
+                                outputBatch ??= context.RentRowBatch(probeBatch.ColumnLookup);
+                                pool.RentAndCopyToOutput(probeBatch, probeIndex, outputBatch);
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                        }
+                        else if (!hasMatch && needProbeUnmatched)
+                        {
+                            if (buildRows.Count > 0)
+                            {
+                                cachedNullBuild ??= CreateNullRow(buildRows[0], pool);
+                                Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
+                                Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
+                                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                            else
+                            {
+                                outputBatch ??= context.RentRowBatch(probeBatch.ColumnLookup);
+                                pool.RentAndCopyToOutput(probeBatch, probeIndex, outputBatch);
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    context.ReturnRowBatch(probeBatch);
+                }
+            }
+
+            // Emit unmatched build rows when the build side must fully appear in the output.
+            if (buildMatched is not null)
+            {
+                Row? nullProbe = null;
+
+                for (int index = 0; index < buildRows.Count; index++)
+                {
+                    if (buildMatched[index]) continue;
+
                     nullProbe ??= await GetFirstRowForNullPadAsync(probeSource, context).ConfigureAwait(false);
 
                     if (nullProbe is not null)
                     {
-                        Row nullProbeRow = CreateNullRow(nullProbe.Value);
-                        // Column order is always (left, right).
+                        cachedNullProbe ??= CreateNullRow(nullProbe.Value, pool);
+                        Row nullProbeRow = cachedNullProbe.Value;
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                     else
                     {
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(buildRows[index]);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        // No probe rows ever — emit the build row solo. Copy into a
+                        // fresh DataValue[] so the output batch owns its rows
+                        // independent of buildRows' rentals.
+                        outputBatch ??= context.RentRowBatch(buildRows[index].ColumnLookup);
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            buildRows[index], context.Store, outputBatch.Arena);
+                        outputBatch.Add(copy);
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
             }
-        }
 
-        if (outputBatch is not null)
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
+        }
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
+
+            if (probeKeyScratch is not null)
+            {
+                ArrayPool<DataValue>.Shared.Return(probeKeyScratch);
+            }
+
+            // Release pool-rented null pad row buffers (created via CreateNullRow).
+            if (cachedNullBuild is not null)
+            {
+                pool.ReturnRow(cachedNullBuild.Value);
+            }
+            if (cachedNullProbe is not null)
+            {
+                pool.ReturnRow(cachedNullProbe.Value);
+            }
+
+            // Release the stabilised build-row buffers.
+            foreach (Row row in buildRows)
+            {
+                pool.ReturnRow(row);
+            }
         }
     }
 
@@ -704,13 +771,15 @@ public sealed class JoinOperator : IQueryOperator
         bool isSemiJoin,
         bool needProbeUnmatched)
     {
+        Pool pool = context.Pool;
         bool buildKeyIsRight = !_flipped;
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         CancellationToken cancellationToken = context.CancellationToken;
 
-        // Pre-create the null build row for LEFT join unmatched probes.
+        // Pre-create the null build row for LEFT join unmatched probes. Rented
+        // from the pool — released in the outer finally below.
         Row? nullBuildRow = needProbeUnmatched && buildRows.Count > 0
-            ? CreateNullRow(buildRows[0])
+            ? CreateNullRow(buildRows[0], pool)
             : null;
 
         // Acquire worker slots from the optional global budget.
@@ -918,16 +987,36 @@ public sealed class JoinOperator : IQueryOperator
             _ = CompleteOutputWhenDoneAsync(feederTask, workers, output.Writer);
 
             RowBatch? outputBatch = null;
-            await foreach (Row row in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(row);
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-            }
+                await foreach (Row row in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    // Lazy rent on first row so we can pick up the row's own
+                    // ColumnLookup — workers may emit either combined-schema rows
+                    // or pass-through probe rows depending on the join type.
+                    outputBatch ??= context.RentRowBatch(row.ColumnLookup);
+                    outputBatch.Add(row.RawValues);
+                    if (outputBatch.IsFull)
+                    {
+                        RowBatch toYield = outputBatch;
+                        outputBatch = null;
+                        yield return toYield;
+                    }
+                }
 
-            if (outputBatch is not null)
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
+            }
+            finally
             {
-                yield return outputBatch;
+                if (outputBatch is not null)
+                {
+                    context.ReturnRowBatch(outputBatch);
+                }
             }
         }
         finally
@@ -935,6 +1024,11 @@ public sealed class JoinOperator : IQueryOperator
             if (acquiredFromBudget > 0)
             {
                 context.ParallelismBudget!.Release(acquiredFromBudget);
+            }
+
+            if (nullBuildRow is not null)
+            {
+                pool.ReturnRow(nullBuildRow.Value);
             }
         }
     }
@@ -986,6 +1080,8 @@ public sealed class JoinOperator : IQueryOperator
 
     private async IAsyncEnumerable<RowBatch> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
@@ -993,191 +1089,313 @@ public sealed class JoinOperator : IQueryOperator
         IQueryOperator buildSource = _flipped ? _left : _right;
         IQueryOperator probeSource = _flipped ? _right : _left;
 
-        // Materialize build side.
-        List<Row> buildRows = new();
-        await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
-            {
-                buildRows.Add(buildBatch[batchIndex]);
-            }
-            context.ReturnRowBatch(buildBatch);
-        }
-
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
         bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
         bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
         bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
-        BitArray? buildMatched = needBuildUnmatched
-            ? new BitArray(buildRows.Count)
-            : null;
 
+        // Build rows are stabilised into operator-owned DataValue[] rentals so
+        // build batches can return to the pool immediately. Same-store fast path
+        // under one-arena-per-query keeps this allocation-only (no payload copy).
+        List<Row> buildRows = new();
         CombinedRowSchema? schema = null;
+        CombinedRowSchema? buildUnmatchedSchema = null;
         Row? cachedNullBuild = null;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
-
-        // Reusable buffer for ON condition evaluation — avoids renting a pooled
-        // row for each candidate pair only to discard it when the filter fails.
+        Row? cachedNullProbe = null;
         Row? reusableFilterRow = null;
         DataValue[]? reusableFilterBuffer = null;
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-        for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
-        {
-            Row probeRow = probeBatch[probeIndex];
-            bool hasMatch = false;
-
-            for (int index = 0; index < buildRows.Count; index++)
+            await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
             {
-                // Combine in logical (left, right) order.
-                Row leftRow = _flipped ? buildRows[index] : probeRow;
-                Row rightRow = _flipped ? probeRow : buildRows[index];
-
-                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-
-                // When there is an ON condition, evaluate it using a reusable
-                // buffer so that non-matching combinations incur zero allocation.
-                if (_onCondition is not null)
+                try
                 {
-                    if (reusableFilterBuffer is null)
+                    for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
                     {
-                        (reusableFilterRow, reusableFilterBuffer) = schema.CreateReusableRow();
-                    }
-
-                    schema.CombineInto(leftRow, rightRow, reusableFilterBuffer);
-
-                    if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow.GetValueOrDefault()))
-                    {
-                        continue;
+                        Row sourceRow = buildBatch[batchIndex];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, buildBatch.Arena, context.Store);
+                        buildRows.Add(new Row(sourceRow.ColumnLookup, copy));
                     }
                 }
-
-                hasMatch = true;
-
-                if (isSemiJoin)
+                finally
                 {
-                    break;
-                }
-
-                if (buildMatched is not null)
-                {
-                    buildMatched[index] = true;
-                }
-
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-            }
-
-            if (isSemiJoin)
-            {
-                if ((_joinType == JoinType.LeftSemi && hasMatch) ||
-                    (_joinType == JoinType.LeftAntiSemi && !hasMatch))
-                {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    context.ReturnRowBatch(buildBatch);
                 }
             }
-            else if (!hasMatch && needProbeUnmatched)
+
+            BitArray? buildMatched = needBuildUnmatched
+                ? new BitArray(buildRows.Count)
+                : null;
+
+            await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
             {
-                if (buildRows.Count > 0)
+                try
                 {
-                    cachedNullBuild ??= CreateNullRow(buildRows[0]);
-                    Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
-                    Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
-                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
+                    {
+                        Row probeRow = probeBatch[probeIndex];
+                        bool hasMatch = false;
+
+                        for (int index = 0; index < buildRows.Count; index++)
+                        {
+                            Row leftRow = _flipped ? buildRows[index] : probeRow;
+                            Row rightRow = _flipped ? probeRow : buildRows[index];
+
+                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+
+                            if (_onCondition is not null)
+                            {
+                                if (reusableFilterBuffer is null)
+                                {
+                                    (reusableFilterRow, reusableFilterBuffer) = schema.CreateReusableRow();
+                                }
+
+                                schema.CombineInto(leftRow, rightRow, reusableFilterBuffer);
+
+                                if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow.GetValueOrDefault()))
+                                {
+                                    continue;
+                                }
+                            }
+
+                            hasMatch = true;
+
+                            if (isSemiJoin)
+                            {
+                                break;
+                            }
+
+                            if (buildMatched is not null)
+                            {
+                                buildMatched[index] = true;
+                            }
+
+                            outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
+                        }
+
+                        if (isSemiJoin)
+                        {
+                            if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                                (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                            {
+                                outputBatch ??= context.RentRowBatch(probeBatch.ColumnLookup);
+                                pool.RentAndCopyToOutput(probeBatch, probeIndex, outputBatch);
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                        }
+                        else if (!hasMatch && needProbeUnmatched)
+                        {
+                            if (buildRows.Count > 0)
+                            {
+                                cachedNullBuild ??= CreateNullRow(buildRows[0], pool);
+                                Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
+                                Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
+                                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                            else
+                            {
+                                outputBatch ??= context.RentRowBatch(probeBatch.ColumnLookup);
+                                pool.RentAndCopyToOutput(probeBatch, probeIndex, outputBatch);
+                                if (outputBatch.IsFull)
+                                {
+                                    RowBatch toYield = outputBatch;
+                                    outputBatch = null;
+                                    yield return toYield;
+                                }
+                            }
+                        }
+                    }
                 }
-                else
+                finally
                 {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    context.ReturnRowBatch(probeBatch);
                 }
             }
-        }
-        context.ReturnRowBatch(probeBatch);
-        }
 
-        // Emit unmatched build rows.
-        if (buildMatched is not null)
-        {
-            Row? nullProbe = null;
-            CombinedRowSchema? buildUnmatchedSchema = null;
-
-            for (int index = 0; index < buildRows.Count; index++)
+            // Emit unmatched build rows for OUTER joins.
+            if (buildMatched is not null)
             {
-                if (!buildMatched[index])
+                Row? nullProbe = null;
+
+                for (int index = 0; index < buildRows.Count; index++)
                 {
+                    if (buildMatched[index]) continue;
+
                     nullProbe ??= await GetFirstRowForNullPadAsync(probeSource, context).ConfigureAwait(false);
 
                     if (nullProbe is not null)
                     {
-                        Row nullProbeRow = CreateNullRow(nullProbe.Value);
+                        cachedNullProbe ??= CreateNullRow(nullProbe.Value, pool);
+                        Row nullProbeRow = cachedNullProbe.Value;
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                     else
                     {
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(buildRows[index]);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        // No probe rows ever — emit the build row solo. Copy into a
+                        // fresh DataValue[] so the output batch owns its rows
+                        // independent of buildRows' rentals.
+                        outputBatch ??= context.RentRowBatch(buildRows[index].ColumnLookup);
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            buildRows[index], context.Store, outputBatch.Arena);
+                        outputBatch.Add(copy);
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
             }
-        }
 
-        if (outputBatch is not null)
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
+        }
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
+
+            // Release pool-rented null pad row buffers (created via CreateNullRow).
+            if (cachedNullBuild is not null)
+            {
+                pool.ReturnRow(cachedNullBuild.Value);
+            }
+            if (cachedNullProbe is not null)
+            {
+                pool.ReturnRow(cachedNullProbe.Value);
+            }
+
+            // Release the stabilised build-row buffers.
+            foreach (Row row in buildRows)
+            {
+                pool.ReturnRow(row);
+            }
         }
     }
 
     private async IAsyncEnumerable<RowBatch> ExecuteCrossJoinAsync(ExecutionContext context)
     {
-        // Materialize right side.
-        List<Row> rightRows = new();
-        await foreach (RowBatch rightBatch in _right.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int batchIndex = 0; batchIndex < rightBatch.Count; batchIndex++)
-            {
-                rightRows.Add(rightBatch[batchIndex]);
-            }
-            context.ReturnRowBatch(rightBatch);
-        }
-
-        CombinedRowSchema? schema = null;
+        Pool pool = context.Pool;
         LocalBufferPool bufferPool = context.LocalBufferPool;
+        CombinedRowSchema? schema = null;
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
+        // Right side rows are held in an operator-local list across the entire
+        // probe phase, so we need DataValue[] arrays we own — not slices of the
+        // input batches we want to return. RentAndCopyDataValues stabilises each
+        // row into context.Store; under one-arena-per-query that's a same-store
+        // fast path (no payload copy, just a fresh DataValue[] rental).
+        List<Row> rightRows = new();
+
+        try
         {
-            for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
+            await foreach (RowBatch rightBatch in _right.ExecuteAsync(context).ConfigureAwait(false))
             {
-                Row leftRow = leftBatch[leftIndex];
-                foreach (Row rightRow in rightRows)
+                try
                 {
-                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    for (int batchIndex = 0; batchIndex < rightBatch.Count; batchIndex++)
+                    {
+                        Row sourceRow = rightBatch[batchIndex];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, rightBatch.Arena, context.Store);
+                        rightRows.Add(new Row(sourceRow.ColumnLookup, copy));
+                    }
+                }
+                finally
+                {
+                    context.ReturnRowBatch(rightBatch);
                 }
             }
-            context.ReturnRowBatch(leftBatch);
-        }
 
-        if (outputBatch is not null)
+            await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                try
+                {
+                    for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
+                    {
+                        Row leftRow = leftBatch[leftIndex];
+                        foreach (Row rightRow in rightRows)
+                        {
+                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    context.ReturnRowBatch(leftBatch);
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
+        }
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
+
+            // Return the stabilised right-side row buffers to the pool. Under
+            // one-arena-per-query the underlying payloads live in context.Store
+            // (owned by the QueryPlan), so this only releases the DataValue[]
+            // rentals — not the values they reference.
+            foreach (Row row in rightRows)
+            {
+                pool.ReturnRow(row);
+            }
         }
     }
 
@@ -1280,24 +1498,26 @@ public sealed class JoinOperator : IQueryOperator
             values[left.FieldCount + index] = right[index];
         }
 
-        return new Row(names, values);
+        return new Row(new ColumnLookup(names), values);
     }
 
     /// <summary>
-    /// Creates a row with the same column names as the source but all null values.
+    /// Creates a row with the same column names as the source but all null values,
+    /// renting the backing <see cref="DataValue"/> array from <paramref name="pool"/>.
+    /// Callers must release the row via <see cref="Pool.ReturnRow"/> when done.
+    /// Reuses the source row's <see cref="ColumnLookup"/> so the call doesn't pay
+    /// for a fresh dictionary per null pad.
     /// </summary>
-    internal static Row CreateNullRow(Row template)
+    internal static Row CreateNullRow(Row template, Pool pool)
     {
-        string[] names = new string[template.FieldCount];
-        DataValue[] values = new DataValue[template.FieldCount];
+        DataValue[] values = pool.RentDataValues(template.FieldCount);
 
         for (int index = 0; index < template.FieldCount; index++)
         {
-            names[index] = template.ColumnNames[index];
             values[index] = DataValue.Null(template[index].Kind);
         }
 
-        return new Row(names, values);
+        return new Row(template.ColumnLookup, values);
     }
 
     /// <summary>
@@ -1309,14 +1529,28 @@ public sealed class JoinOperator : IQueryOperator
     {
         private readonly string[] _names;
         private readonly Dictionary<string, int> _nameIndex;
+        private readonly ColumnLookup _columnLookup;
         private readonly int _leftFieldCount;
 
-        private CombinedRowSchema(string[] names, Dictionary<string, int> nameIndex, int leftFieldCount)
+        private CombinedRowSchema(
+            string[] names, Dictionary<string, int> nameIndex, int leftFieldCount)
         {
             _names = names;
             _nameIndex = nameIndex;
+            _columnLookup = new ColumnLookup(names, nameIndex);
             _leftFieldCount = leftFieldCount;
         }
+
+        /// <summary>
+        /// The combined column lookup vended to <see cref="ExecutionContext.RentRowBatch(ColumnLookup)"/>
+        /// when the join sets up its output batch. Wraps <see cref="_names"/> + <see cref="_nameIndex"/>
+        /// so every output row constructed via <see cref="Combine"/> / <see cref="CombinePooled"/>
+        /// shares the same schema reference.
+        /// </summary>
+        internal ColumnLookup ColumnLookup => _columnLookup;
+
+        /// <summary>The total combined column count.</summary>
+        internal int FieldCount => _names.Length;
 
         /// <summary>
         /// Builds a schema from the first left and right rows encountered in a join.
@@ -1396,7 +1630,7 @@ public sealed class JoinOperator : IQueryOperator
                 values[_leftFieldCount + index] = right[index];
             }
 
-            return new Row(_names, values, _nameIndex);
+            return new Row(_columnLookup, values);
         }
 
         /// <summary>
@@ -1423,6 +1657,17 @@ public sealed class JoinOperator : IQueryOperator
         /// is no longer needed.
         /// </summary>
         internal Row CombinePooled(Row left, Row right, LocalBufferPool bufferPool)
+            => new(_columnLookup, CombinePooledValues(left, right, bufferPool));
+
+        /// <summary>
+        /// Same as <see cref="CombinePooled"/> but returns the underlying
+        /// <see cref="DataValue"/>[] directly so the caller can hand it to
+        /// <see cref="RowBatch.Add(DataValue[])"/> without paying for a Row
+        /// struct that the batch would discard anyway. The returned array's
+        /// lifecycle matches the one CombinePooled uses — the downstream
+        /// consumer (typically the batch itself) returns it to the pool.
+        /// </summary>
+        internal DataValue[] CombinePooledValues(Row left, Row right, LocalBufferPool bufferPool)
         {
             DataValue[] values = bufferPool.Rent(_names.Length);
 
@@ -1436,7 +1681,7 @@ public sealed class JoinOperator : IQueryOperator
                 values[_leftFieldCount + index] = right[index];
             }
 
-            return new Row(_names, values, _nameIndex);
+            return values;
         }
 
         /// <summary>
@@ -1448,7 +1693,7 @@ public sealed class JoinOperator : IQueryOperator
         internal (Row Row, DataValue[] Buffer) CreateReusableRow()
         {
             DataValue[] buffer = new DataValue[_names.Length];
-            Row row = new(_names, buffer, _nameIndex);
+            Row row = new(_columnLookup, buffer);
             return (row, buffer);
         }
     }

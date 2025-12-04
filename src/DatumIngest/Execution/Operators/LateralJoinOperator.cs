@@ -113,7 +113,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                         }
 
                         matched = true;
-                        cachedNullRight ??= JoinOperator.CreateNullRow(rightRow);
+                        cachedNullRight ??= JoinOperator.CreateNullRow(rightRow, context.Pool);
                         outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(combined);
 

@@ -419,7 +419,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             return new ColumnLookup(schema.Columns);
         }
 
-        (int index, int schemaIndex, string name)[] projected = new (int, int, string)[requiredColumns.Count];
+        // requiredColumns may include names that don't exist in the table schema
+        // (e.g. LET-binding references that the planner's CollectAllReferencedColumns
+        // pass walked through). Size the projection by actual matches, not by the
+        // input set's count — otherwise trailing slots stay (0, 0, null) and the
+        // ColumnLookup constructor crashes inserting a null dictionary key.
+        int matchCount = 0;
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (requiredColumns.Contains(schema.Columns[i].Name))
+            {
+                matchCount++;
+            }
+        }
+
+        (int index, int schemaIndex, string name)[] projected = new (int, int, string)[matchCount];
         int index = 0;
         for (int i = 0; i < schema.Columns.Count; i++)
         {

@@ -63,16 +63,34 @@ public sealed class Pool
     /// <param name="sourceArena">The arena containing the source values.</param>
     /// <param name="targetArena">The arena to stabilize the values in.</param>
     /// <returns>The rented and copied data value array.</returns>
+    /// <remarks>
+    /// When <paramref name="sourceArena"/> and <paramref name="targetArena"/> are
+    /// the same reference (the common case under one-arena-per-query), the function
+    /// short-circuits to a bulk <see cref="ReadOnlySpan{T}.CopyTo(Span{T})"/> — no
+    /// per-element <see cref="DataValueRetention.Stabilize"/> dispatch, no per-element
+    /// flag checks. Behaviour is identical: same-store stabilisation already
+    /// returns its input unchanged. Use this overload when a single-arena fast
+    /// path is desired without burdening the call site with the check.
+    /// </remarks>
     public DataValue[] RentAndCopyDataValues(ReadOnlySpan<DataValue> source, Arena sourceArena, Arena targetArena)
     {
         DataValue[]? buffer = null;
         try
         {
             buffer = Backing.RentDataValues(source.Length);
-            
-            for (int i = 0; i < source.Length; i++)
+
+            if (ReferenceEquals(sourceArena, targetArena))
             {
-                buffer[i] = DataValueRetention.Stabilize(source[i], sourceArena, targetArena);
+                // Same-arena fast path — Stabilize would short-circuit per element,
+                // but a bulk Span.CopyTo skips the loop and dispatch entirely.
+                source.CopyTo(buffer);
+            }
+            else
+            {
+                for (int i = 0; i < source.Length; i++)
+                {
+                    buffer[i] = DataValueRetention.Stabilize(source[i], sourceArena, targetArena);
+                }
             }
 
             return buffer;

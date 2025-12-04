@@ -214,7 +214,7 @@ public sealed class MergeJoinOperator : IQueryOperator
             {
                 if (leftMustAppear)
                 {
-                    cachedNullRight ??= CreateNullRow(rightRow);
+                    cachedNullRight ??= CreateNullRow(rightRow, context.Pool);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                     outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
@@ -229,7 +229,7 @@ public sealed class MergeJoinOperator : IQueryOperator
             {
                 if (rightMustAppear)
                 {
-                    cachedNullLeft ??= CreateNullRow(leftRow);
+                    cachedNullLeft ??= CreateNullRow(leftRow, context.Pool);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                     outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
@@ -247,7 +247,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 // Left key is smaller — no match on the right side.
                 if (leftMustAppear)
                 {
-                    cachedNullRight ??= CreateNullRow(rightRow);
+                    cachedNullRight ??= CreateNullRow(rightRow, context.Pool);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                     outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
@@ -261,7 +261,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 // Right key is smaller — no match on the left side.
                 if (rightMustAppear)
                 {
-                    cachedNullLeft ??= CreateNullRow(leftRow);
+                    cachedNullLeft ??= CreateNullRow(leftRow, context.Pool);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                     outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
@@ -333,7 +333,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                     if (!leftRowMatched && leftMustAppear)
                     {
                         // All right-group rows filtered out by residual — emit unmatched left.
-                        cachedNullRight ??= CreateNullRow(rightGroup[0]);
+                        cachedNullRight ??= CreateNullRow(rightGroup[0], context.Pool);
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                         outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
