@@ -5,6 +5,8 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
+using DatumIngest.Models.Onnx.Whisper;
+using DatumIngest.Models.Python;
 
 namespace DatumIngest.Models;
 
@@ -88,8 +90,27 @@ public static class BuiltinModels
         RegisterTinyLlama(modelCatalog);
         RegisterGemma22b(modelCatalog);
         RegisterQwen25Coder(modelCatalog);
+        RegisterQwen25Coder3B(modelCatalog);
+        RegisterQwen25Coder7B(modelCatalog);
         RegisterGranite31(modelCatalog);
         RegisterFalcon31b(modelCatalog);
+
+        // Whisper STT zoo. All four sizes; each shows status=missing in
+        // system.models until its optimum-cli output folder lands.
+        RegisterWhisperTiny(modelCatalog);
+        RegisterWhisperBase(modelCatalog);
+        RegisterWhisperSmall(modelCatalog);
+        RegisterWhisperMedium(modelCatalog);
+
+        // Python-bridge models. These show status=bridge in system.models
+        // (rather than available/missing) when their worker scripts and
+        // model files exist, signalling that runnability also depends on
+        // a Python venv with the upstream packages installed -- catalog
+        // can't verify pip state without spawning the worker. Conventional
+        // venv layout is {ModelDirectory}/.venv-<name>/ which the loaders
+        // auto-detect.
+        RegisterBarkSmall(modelCatalog);
+        RegisterKokoro82M(modelCatalog);
 
         tableCatalog.Models = modelCatalog;
         tableCatalog.Add(new ModelsTableProvider(tableCatalog.Pool, modelCatalog));
@@ -389,20 +410,29 @@ public static class BuiltinModels
     /// <summary>Default filename for Qwen2.5-Coder-1.5B-Instruct (bartowski's GGUF mirror).</summary>
     public const string Qwen25Coder15bDefaultFilename = "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf";
 
+    /// <summary>Default filename for Qwen2.5-Coder-3B-Instruct (bartowski's GGUF mirror, Q4_K_M).</summary>
+    public const string Qwen25Coder3bDefaultFilename = "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf";
+
+    /// <summary>Default filename for Qwen2.5-Coder-7B-Instruct (bartowski's GGUF mirror, Q5_K_M).</summary>
+    public const string Qwen25Coder7bDefaultFilename = "Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf";
+
     /// <summary>
-    /// Registers Alibaba's Qwen2.5-Coder-1.5B-Instruct under the catalog
-    /// name <paramref name="modelName"/> (defaults to <c>"qwen25_coder_1_5b"</c>).
-    /// Code-specialised variant — adds genre diversity to the zoo: prompts
-    /// like "write me a quicksort" produce noticeably different output
-    /// shape from the general-chat models.
+    /// Common backbone for Qwen2.5-Coder size variants. Each public
+    /// <c>RegisterQwen25Coder*</c> wraps this with size-appropriate
+    /// catalog metadata and defaults — the bigger models default to wider
+    /// context windows and larger output budgets so HTML/multi-file code
+    /// generation works without per-call overrides.
     /// </summary>
-    public static void RegisterQwen25Coder(
+    private static void RegisterQwen25CoderVariant(
         ModelCatalog catalog,
-        string modelName = "qwen25_coder_1_5b",
-        string modelFilename = Qwen25Coder15bDefaultFilename,
-        uint contextSize = 4096,
-        int maxTokens = 256,
-        float temperature = 0.7f)
+        string modelName,
+        string modelFilename,
+        string displayName,
+        string parameters,
+        string sourceUrl,
+        uint contextSize,
+        int maxTokens,
+        float temperature)
     {
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
@@ -417,15 +447,81 @@ public static class BuiltinModels
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
             },
             OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
-            DisplayName: "Qwen 2.5 Coder 1.5B Instruct",
-            Parameters: "1.5B",
+            DisplayName: displayName,
+            Parameters: parameters,
             License: "Apache-2.0",
             LicenseHolder: "Alibaba",
-            SourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+            SourceUrl: sourceUrl,
             Category: "llm",
             Modalities: ["text"],
             Files: [modelFilename]));
     }
+
+    /// <summary>
+    /// Registers Alibaba's Qwen2.5-Coder-1.5B-Instruct under the catalog
+    /// name <paramref name="modelName"/> (defaults to <c>"qwen25_coder_1_5b"</c>).
+    /// The "fast iteration" rung of the Qwen-Coder ladder — small enough
+    /// to dispatch in well under a second on a consumer GPU, useful for
+    /// rapid A/B comparison against the 3B and 7B siblings.
+    /// </summary>
+    public static void RegisterQwen25Coder(
+        ModelCatalog catalog,
+        string modelName = "qwen25_coder_1_5b",
+        string modelFilename = Qwen25Coder15bDefaultFilename,
+        uint contextSize = 4096,
+        int maxTokens = 256,
+        float temperature = 0.7f)
+        => RegisterQwen25CoderVariant(
+            catalog, modelName, modelFilename,
+            displayName: "Qwen 2.5 Coder 1.5B Instruct",
+            parameters: "1.5B",
+            sourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+            contextSize, maxTokens, temperature);
+
+    /// <summary>
+    /// Registers Alibaba's Qwen2.5-Coder-3B-Instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"qwen25_coder_3b"</c>).
+    /// The middle rung — meaningfully more coherent on multi-section HTML
+    /// and short scripts than the 1.5B, still under 2 GB on disk at Q4_K_M.
+    /// Defaults to a 16K context window and 2K-token output budget so
+    /// "write a Geocities page" calls work without per-call overrides.
+    /// </summary>
+    public static void RegisterQwen25Coder3B(
+        ModelCatalog catalog,
+        string modelName = "qwen25_coder_3b",
+        string modelFilename = Qwen25Coder3bDefaultFilename,
+        uint contextSize = 16384,
+        int maxTokens = 2048,
+        float temperature = 0.7f)
+        => RegisterQwen25CoderVariant(
+            catalog, modelName, modelFilename,
+            displayName: "Qwen 2.5 Coder 3B Instruct",
+            parameters: "3B",
+            sourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
+            contextSize, maxTokens, temperature);
+
+    /// <summary>
+    /// Registers Alibaba's Qwen2.5-Coder-7B-Instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"qwen25_coder_7b"</c>).
+    /// The "real coder" rung — handles full single-file pages with embedded
+    /// CSS/JS, multi-paragraph rationale, and consistent style across long
+    /// outputs. Defaults to 16K context, 4K output budget, and a lower
+    /// temperature (0.5) to favour determinism over flair when generating
+    /// code.
+    /// </summary>
+    public static void RegisterQwen25Coder7B(
+        ModelCatalog catalog,
+        string modelName = "qwen25_coder_7b",
+        string modelFilename = Qwen25Coder7bDefaultFilename,
+        uint contextSize = 16384,
+        int maxTokens = 4096,
+        float temperature = 0.5f)
+        => RegisterQwen25CoderVariant(
+            catalog, modelName, modelFilename,
+            displayName: "Qwen 2.5 Coder 7B Instruct",
+            parameters: "7B",
+            sourceUrl: "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+            contextSize, maxTokens, temperature);
 
     /// <summary>Default filename for Granite-3.1-1B-A400M-Instruct (bartowski's GGUF mirror).</summary>
     public const string Granite31_1bDefaultFilename = "granite-3.1-1b-a400m-instruct-Q4_K_M.gguf";
@@ -960,7 +1056,7 @@ public static class BuiltinModels
     public const string YoloXDarknetFilename = "yolox_darknet.onnx";
 
     /// <summary>
-    /// Common backbone for the seven YOLOX size registrations. Each
+    /// Common backbone for the seven YOLOX size registrations. EachS
     /// caller supplies the catalog name, the ONNX filename, the
     /// architectural parameter count, and a one-line description.
     /// </summary>
@@ -1039,6 +1135,417 @@ public static class BuiltinModels
         RegisterYoloXLarge(catalog);
         RegisterYoloXExtraLarge(catalog);
         RegisterYoloXDarknet(catalog);
+    }
+
+    // ────────────────────── Python-backed models (TTS / music gen / cloning) ──────────────────────
+    //
+    // These wrap a Python subprocess via PythonBackedModel — the experimentation
+    // path for HuggingFace transformers pipelines whose .pth/.bin weights would
+    // be a heavy lift to convert to ONNX. Each requires the user to create a
+    // per-model venv with the upstream library installed; setup scripts under
+    // scripts/ automate the venv + pip install + (where applicable) model file
+    // download. Worker scripts ship with the engine in the python/ output
+    // folder — users don't drop their own.
+    //
+    // The catalog uses .venv-{name}/pyvenv.cfg as the discoverability anchor
+    // for these entries: if the venv exists, system_models reports
+    // status=bridge ("set up; runnable as long as pip packages are intact");
+    // otherwise status=missing ("run scripts/setup-{name}-venv.ps1").
+
+    /// <summary>Default filename for the Bark Small Python worker script,
+    /// shipped in the engine's <c>python/</c> output folder.</summary>
+    public const string BarkSmallWorkerFilename = "bark_worker.py";
+
+    /// <summary>
+    /// Catalog anchor file for the Bark venv — written by <c>python -m venv</c>
+    /// and present whenever the venv exists. We use this as <c>RelativePath</c>
+    /// rather than a model file because Bark's weights live in the HF cache,
+    /// not in <c>$DATUM_MODELS</c>; the venv is the closest proxy for "set up".
+    /// </summary>
+    public const string BarkSmallVenvAnchor = ".venv-bark/pyvenv.cfg";
+
+    /// <summary>Default filename for the Kokoro-82M ONNX model file.</summary>
+    public const string Kokoro82MOnnxDefaultFilename = "kokoro-v1.0.onnx";
+
+    /// <summary>
+    /// Default filename for the Kokoro voices bundle. The
+    /// <c>kokoro-onnx</c> package accepts either a single bundled
+    /// <c>voices-v1.0.bin</c> (~26 MB containing all voices) or a path to
+    /// a directory of per-voice <c>.bin</c> files; pass either path
+    /// through <c>voicesPath</c> on registration.
+    /// </summary>
+    public const string Kokoro82MVoicesDefaultFilename = "voices-v1.0.bin";
+
+    /// <summary>
+    /// Default filename for the Kokoro Python worker script. Shipped in
+    /// the engine's <c>python/</c> output folder; the loader resolves it
+    /// relative to <see cref="AppContext.BaseDirectory"/> so users don't
+    /// have to drop their own copy.
+    /// </summary>
+    public const string Kokoro82MWorkerFilename = "kokoro_worker.py";
+
+    /// <summary>
+    /// Registers Suno's Bark Small TTS model under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"bark_small"</c>) via a
+    /// Python subprocess. Bark generates speech with embedded sound effects
+    /// and music notes — write <c>[laughs]</c> or <c>[sighs]</c> in the prompt
+    /// and Bark renders them inline. The worker emits 24kHz WAV bytes; the
+    /// engine carries them as <see cref="DataKind.Image"/> until a proper
+    /// <c>DataKind.Audio</c> lands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Setup.</strong> Run <c>scripts/setup-bark-venv.ps1</c> from
+    /// the repo root — it creates the venv at <c>$DATUM_MODELS/.venv-bark</c>,
+    /// installs <c>transformers</c> + <c>torch</c> (CUDA wheel by default) +
+    /// <c>scipy</c>, and is idempotent (rerun-safe). The Bark model weights
+    /// download from HuggingFace on the first inference call.
+    /// </para>
+    /// <para>
+    /// <strong>Worker script.</strong> Ships with the engine at
+    /// <c>{AppContext.BaseDirectory}/python/bark_worker.py</c>. The
+    /// <paramref name="scriptPath"/> parameter overrides this for users who
+    /// want a customised pipeline (different sampling, voice presets, etc.).
+    /// </para>
+    /// <para>
+    /// <strong>Determinism.</strong> Bark samples internally and is therefore
+    /// nondeterministic — repeated identical prompts produce different audio
+    /// each time, which is part of the appeal for narrative work.
+    /// </para>
+    /// </remarks>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(text)</c>).</param>
+    /// <param name="scriptPath">
+    /// Absolute path to the Bark Python worker. <see langword="null"/>
+    /// resolves to the engine-bundled script at
+    /// <c>{AppContext.BaseDirectory}/python/{BarkSmallWorkerFilename}</c>.
+    /// </param>
+    /// <param name="pythonExecutable">
+    /// Absolute path to the Python interpreter to spawn (typically a venv-
+    /// scoped <c>python.exe</c>). <see langword="null"/> auto-detects the
+    /// conventional <c>{ModelDirectory}/.venv-bark/</c> venv, falling back
+    /// to the <c>DATUM_PYTHON</c> env var or <c>python</c> on PATH.
+    /// </param>
+    /// <param name="readyTimeoutSeconds">
+    /// How long to wait for the worker to print the ready handshake. Bark
+    /// loads in ~10-30s warm-cache, longer on first run when the model
+    /// downloads from HuggingFace.
+    /// </param>
+    public static void RegisterBarkSmall(
+        ModelCatalog catalog,
+        string modelName = "bark_small",
+        string? scriptPath = null,
+        string? pythonExecutable = null,
+        int readyTimeoutSeconds = 180)
+    {
+        string resolvedScriptPath = scriptPath
+            ?? Path.Combine(AppContext.BaseDirectory, "python", BarkSmallWorkerFilename);
+
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "python",
+            // Anchor on the venv marker rather than a model file: Bark's
+            // weights live in the HF cache (not $DATUM_MODELS), so the venv
+            // is the best proxy the catalog can stat for "set up".
+            RelativePath: BarkSmallVenvAnchor,
+            InputKinds: [DataKind.String],
+            // 24kHz mono WAV bytes. Carried as Image (byte payload) until
+            // DataKind.Audio lands — see project_audio_datakind in roadmap.
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                // Auto-detect a per-model venv at the conventional
+                // {ModelDirectory}/.venv-bark/ location when no explicit
+                // executable was passed; falls back to DATUM_PYTHON / PATH
+                // if the venv isn't present.
+                string? py = pythonExecutable
+                    ?? ResolveVenvPython(ctx.ModelDirectory, ".venv-bark");
+                return new PythonBackedModel(
+                    name: modelName,
+                    inputKinds: [DataKind.String],
+                    outputKind: DataKind.Image,
+                    isDeterministic: false,
+                    scriptPath: resolvedScriptPath,
+                    pythonExecutable: py,
+                    readyTimeout: TimeSpan.FromSeconds(readyTimeoutSeconds),
+                    // PreferredBatchSize=1 streams each clip as soon as it
+                    // finishes, matching SDXL-Turbo's interactive cadence.
+                    preferredBatchSize: 1);
+            },
+            // Per-call optional positional args:
+            //   [0] voice_preset (String)  - e.g. 'v2/en_speaker_9'
+            // Worker pins v2/en_speaker_6 by default; without a preset
+            // Bark picks randomly per call, sometimes producing unhinged
+            // speakers. See the Bark speaker library for the full list.
+            OptionalArgKinds: [DataKind.String],
+            DisplayName: "Bark Small (TTS, Python-backed)",
+            Parameters: "~100M",
+            License: "MIT",
+            LicenseHolder: "Suno",
+            SourceUrl: "https://huggingface.co/suno/bark-small",
+            Category: "tts",
+            Modalities: ["text", "audio"],
+            // The venv anchor is what we track for status. The HF model
+            // cache is out of band — catalog can't see it, but its absence
+            // surfaces as a clear PythonProcessException on first invocation.
+            Files: [BarkSmallVenvAnchor]));
+    }
+
+    // ─────────────────────────── Whisper STT ──────────────────────────────
+    //
+    // OpenAI Whisper as native ONNX. Each size variant is a separate
+    // registration pointing at its own optimum-cli output folder. Same
+    // architectural shape as ViT-GPT2 (encoder + autoregressive decoder),
+    // plus a Slaney mel-spectrogram pipeline for the audio side. MIT
+    // license, fully unencumbered.
+
+    /// <summary>Default folder for Whisper Tiny (~78 MB encoder + 250 MB decoder).</summary>
+    public const string WhisperTinyFolder = "whisper-tiny-onnx";
+
+    /// <summary>Default folder for Whisper Base (~78 MB encoder + 300 MB decoder).</summary>
+    public const string WhisperBaseFolder = "whisper-base-onnx";
+
+    /// <summary>Default folder for Whisper Small (~280 MB encoder + 1.1 GB decoder).</summary>
+    public const string WhisperSmallFolder = "whisper-small-onnx";
+
+    /// <summary>Default folder for Whisper Medium (~870 MB encoder + 2.5 GB decoder).</summary>
+    public const string WhisperMediumFolder = "whisper-medium-onnx";
+
+    /// <summary>
+    /// Files needed for any Whisper install (relative to its variant
+    /// folder). Tracks both ONNX components plus tokenizer + configs so
+    /// <c>system.models</c> reports missing pieces accurately.
+    /// </summary>
+    private static IReadOnlyList<string> WhisperFiles(string folder) =>
+    [
+        $"{folder}/encoder_model.onnx",
+        $"{folder}/decoder_model.onnx",
+        $"{folder}/vocab.json",
+        $"{folder}/merges.txt",
+        $"{folder}/tokenizer.json",
+        $"{folder}/preprocessor_config.json",
+        $"{folder}/generation_config.json",
+        $"{folder}/special_tokens_map.json",
+    ];
+
+    /// <summary>
+    /// Common backbone for the four Whisper size registrations. Each
+    /// public <c>RegisterWhisper*</c> wraps this with size-specific
+    /// folder + display metadata.
+    /// </summary>
+    private static void RegisterWhisperVariant(
+        ModelCatalog catalog,
+        string modelName,
+        string folder,
+        string displayName,
+        string parameters,
+        int maxTokens)
+    {
+        string encoderRelativePath = $"{folder}/encoder_model.onnx";
+
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: encoderRelativePath,
+            // Audio bytes (WAV) carried as Image until DataKind.Audio lands.
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.String,
+            // Greedy decoding from a fixed prefix → reproducible.
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderRelativePath);
+                return new WhisperOnnxModel(modelName, encoderPath, maxTokens);
+            },
+            DisplayName: displayName,
+            Parameters: parameters,
+            License: "MIT",
+            LicenseHolder: "OpenAI",
+            SourceUrl: "https://huggingface.co/openai/whisper-base",
+            Category: "stt",
+            Modalities: ["audio", "text"],
+            Files: WhisperFiles(folder)));
+    }
+
+    /// <summary>Registers Whisper Tiny — fastest STT, lowest accuracy. ~39M params.</summary>
+    public static void RegisterWhisperTiny(ModelCatalog catalog, string modelName = "whisper_tiny")
+        => RegisterWhisperVariant(catalog, modelName, WhisperTinyFolder,
+            displayName: "Whisper Tiny", parameters: "39M", maxTokens: 224);
+
+    /// <summary>Registers Whisper Base — balanced STT. ~74M params.</summary>
+    public static void RegisterWhisperBase(ModelCatalog catalog, string modelName = "whisper_base")
+        => RegisterWhisperVariant(catalog, modelName, WhisperBaseFolder,
+            displayName: "Whisper Base", parameters: "74M", maxTokens: 224);
+
+    /// <summary>Registers Whisper Small — better accuracy, modest cost. ~244M params.</summary>
+    public static void RegisterWhisperSmall(ModelCatalog catalog, string modelName = "whisper_small")
+        => RegisterWhisperVariant(catalog, modelName, WhisperSmallFolder,
+            displayName: "Whisper Small", parameters: "244M", maxTokens: 224);
+
+    /// <summary>Registers Whisper Medium — strong STT, slower. ~769M params.</summary>
+    public static void RegisterWhisperMedium(ModelCatalog catalog, string modelName = "whisper_medium")
+        => RegisterWhisperVariant(catalog, modelName, WhisperMediumFolder,
+            displayName: "Whisper Medium", parameters: "769M", maxTokens: 224);
+
+    /// <summary>
+    /// Registers Kokoro-82M TTS under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"kokoro_82m"</c>). 82M-parameter ONNX TTS with 11+ built-in
+    /// voices, fast enough to keep up with token-streaming LLM output.
+    /// Apache-2.0, hosted at <c>hexgrad/Kokoro-82M-ONNX</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Python prerequisites.</strong> The worker needs the
+    /// <c>kokoro-onnx</c> package (which bundles the misaki phonemizer and
+    /// the ONNX Runtime call) plus <c>soundfile</c> for WAV encoding.
+    /// Recommended setup inside the model directory:
+    /// <code>
+    /// python -m venv .venv-kokoro
+    /// .venv-kokoro\Scripts\pip install kokoro-onnx soundfile
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <strong>Required files</strong> in the model directory:
+    /// <list type="bullet">
+    ///   <item><description><c>kokoro-v1.0.onnx</c> — the 82M-parameter model (~326 MB unquantized).</description></item>
+    ///   <item><description><c>voices-v1.0.bin</c> — bundled voices file (~26 MB), OR a directory of per-voice <c>.bin</c> files. Pass whichever via <paramref name="voicesPath"/>.</description></item>
+    /// </list>
+    /// Both available from <c>hexgrad/Kokoro-82M-ONNX</c> on HuggingFace.
+    /// </para>
+    /// <para>
+    /// <strong>Per-call overrides</strong> (declared in <c>OptionalArgKinds</c>):
+    /// <list type="bullet">
+    ///   <item><description>[0] <c>voice</c> (string) — e.g. <c>'af_bella'</c>, <c>'am_michael'</c>, <c>'bm_george'</c>. Empty string falls back to <paramref name="defaultVoice"/>.</description></item>
+    ///   <item><description>[1] <c>speed</c> (Float64) — 0.5..2.0. Defaults to <paramref name="defaultSpeed"/> when omitted.</description></item>
+    /// </list>
+    /// SQL examples:
+    /// <code>
+    /// SELECT models.kokoro_82m(text)                          -- defaults
+    /// SELECT models.kokoro_82m(text, 'af_bella')              -- voice override
+    /// SELECT models.kokoro_82m(text, 'bm_george', 1.2)        -- voice + speed
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <strong>Determinism.</strong> Kokoro is deterministic for a given
+    /// (text, voice, speed) tuple — useful for cached re-renders and
+    /// planner CSE.
+    /// </para>
+    /// </remarks>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(text)</c>).</param>
+    /// <param name="onnxFilename">ONNX model filename relative to the catalog's <see cref="ModelCatalog.ModelDirectory"/>. Defaults to <see cref="Kokoro82MOnnxDefaultFilename"/>.</param>
+    /// <param name="voicesPath">
+    /// Voices file or directory, relative to the model directory. Defaults
+    /// to <see cref="Kokoro82MVoicesDefaultFilename"/>. Pass a directory
+    /// name (e.g. <c>"kokoro-voices"</c>) if you have per-voice <c>.bin</c>
+    /// files instead of the bundled archive.
+    /// </param>
+    /// <param name="scriptPath">
+    /// Absolute path to the Kokoro Python worker. <see langword="null"/>
+    /// resolves to the engine-bundled script at
+    /// <c>{AppContext.BaseDirectory}/python/{Kokoro82MWorkerFilename}</c>.
+    /// </param>
+    /// <param name="pythonExecutable">
+    /// Absolute path to the Python interpreter to spawn (typically a
+    /// venv-scoped <c>python.exe</c>). <see langword="null"/> falls back
+    /// to the <c>DATUM_PYTHON</c> environment variable, then <c>python</c>
+    /// on PATH.
+    /// </param>
+    /// <param name="defaultVoice">Voice used when the per-call override is empty. Defaults to <c>"af_heart"</c>.</param>
+    /// <param name="defaultSpeed">Speed used when the per-call override is omitted. Defaults to 1.0 (unchanged tempo).</param>
+    /// <param name="lang">Language tag passed to Kokoro (e.g. <c>"en-us"</c>, <c>"en-gb"</c>).</param>
+    /// <param name="readyTimeoutSeconds">Worker startup timeout. Kokoro loads in well under 30s warm-cache.</param>
+    public static void RegisterKokoro82M(
+        ModelCatalog catalog,
+        string modelName = "kokoro_82m",
+        string onnxFilename = Kokoro82MOnnxDefaultFilename,
+        string voicesPath = Kokoro82MVoicesDefaultFilename,
+        string? scriptPath = null,
+        string? pythonExecutable = null,
+        string defaultVoice = "af_heart",
+        double defaultSpeed = 1.0,
+        string lang = "en-us",
+        int readyTimeoutSeconds = 60)
+    {
+        string resolvedScriptPath = scriptPath
+            ?? Path.Combine(AppContext.BaseDirectory, "python", Kokoro82MWorkerFilename);
+
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "python",
+            // The .onnx is the discoverability anchor for catalog status.
+            // The voices bundle/dir is captured in Files below.
+            RelativePath: onnxFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            // Same (text, voice, speed) -> same audio. Lets the planner CSE
+            // duplicate call sites within a query.
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string onnxPath = Path.Combine(ctx.ModelDirectory, onnxFilename);
+                string resolvedVoicesPath = Path.Combine(ctx.ModelDirectory, voicesPath);
+                // Auto-detect a per-model venv at the conventional
+                // {ModelDirectory}/.venv-kokoro/ location when no explicit
+                // executable was passed; falls back to DATUM_PYTHON / PATH
+                // if the venv isn't present.
+                string? py = pythonExecutable
+                    ?? ResolveVenvPython(ctx.ModelDirectory, ".venv-kokoro");
+                return new PythonBackedModel(
+                    name: modelName,
+                    inputKinds: [DataKind.String],
+                    outputKind: DataKind.Image,
+                    isDeterministic: true,
+                    scriptPath: resolvedScriptPath,
+                    pythonExecutable: py,
+                    scriptArgs:
+                    [
+                        "--model-path", onnxPath,
+                        "--voices-path", resolvedVoicesPath,
+                        "--default-voice", defaultVoice,
+                        "--default-speed", defaultSpeed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "--lang", lang,
+                    ],
+                    readyTimeout: TimeSpan.FromSeconds(readyTimeoutSeconds),
+                    // Per-clip streaming, same cadence as SDXL-Turbo.
+                    preferredBatchSize: 1);
+            },
+            // Per-call optional positional args:
+            //   [0] voice (String)  - voice override, empty/null -> default
+            //   [1] speed (Float64) - playback speed override (0.5..2.0)
+            OptionalArgKinds: [DataKind.String, DataKind.Float64],
+            DisplayName: "Kokoro 82M TTS (Python-backed)",
+            Parameters: "82M",
+            License: "Apache-2.0",
+            LicenseHolder: "hexgrad",
+            SourceUrl: "https://huggingface.co/hexgrad/Kokoro-82M-ONNX",
+            Category: "tts",
+            Modalities: ["text", "audio"],
+            // Track the .onnx + the voices entry. The voices path may be
+            // a directory; the catalog's existence check still surfaces
+            // its absence as status=missing in `system.models`.
+            Files: [onnxFilename, voicesPath]));
+    }
+
+    /// <summary>
+    /// Resolves a per-model venv's Python executable, if a venv exists at
+    /// <c>{modelDirectory}/{venvFolder}/</c>. Returns <see langword="null"/>
+    /// when no venv is present so <see cref="PythonBackedModel"/> falls back
+    /// to <c>DATUM_PYTHON</c> env var or <c>python</c> on PATH. The venv
+    /// layout is the standard <c>python -m venv</c> convention: <c>Scripts/</c>
+    /// on Windows, <c>bin/</c> elsewhere.
+    /// </summary>
+    private static string? ResolveVenvPython(string modelDirectory, string venvFolder)
+    {
+        string venvRoot = Path.Combine(modelDirectory, venvFolder);
+        if (!Directory.Exists(venvRoot)) return null;
+
+        string candidate = OperatingSystem.IsWindows()
+            ? Path.Combine(venvRoot, "Scripts", "python.exe")
+            : Path.Combine(venvRoot, "bin", "python");
+
+        return File.Exists(candidate) ? candidate : null;
     }
 
     /// <summary>

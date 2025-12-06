@@ -51,11 +51,24 @@ DatumIngest.Pooling.Pool pool = new(new DatumIngest.Pooling.PoolBacking());
 TableCatalog catalog = new(pool);
 
 // One-call setup: ModelCatalog rooted at the resolved models directory,
-// every builtin model registered, plus the system_models virtual table for
+// every builtin model registered (vision, captioner, image-gen, LLM,
+// STT, TTS), plus the system_models virtual table for
 // `SELECT * FROM system_models` introspection. Models directory precedence:
 // --models flag → DATUM_MODELS env var → per-user default. Models load
 // lazily; missing files surface at plan time with a clear redownload hint.
-BuiltinModels.AttachStandardModels(catalog, modelsOverride);
+// Python-bridge models (Kokoro, Bark) are wired by AttachStandardModels
+// too -- they show status=bridge in system_models until their venvs and
+// worker scripts are set up.
+ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(catalog, modelsOverride);
+
+// Kokoro-82M voice override: the bundled voices-v1.0.bin default works
+// out of the box, but if you have per-voice .bin files instead, point at
+// the directory here and reset the default voice to one you actually have.
+modelCatalog.Unregister("kokoro_82m");
+BuiltinModels.RegisterKokoro82M(
+    modelCatalog,
+    voicesPath: "kokoro-voices",
+    defaultVoice: "af_bella");
 
 int datumFilesAdded = 0;
 try
@@ -118,3 +131,4 @@ static void PrintUsage()
     Console.Error.WriteLine("                   `.help`, `.quit`, `.exit`. Ctrl+C cancels a running query.");
     Console.Error.WriteLine("                   `SELECT * FROM system.models` lists registered models.");
 }
+

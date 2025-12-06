@@ -280,11 +280,12 @@ same backbone:
     --local-dir $env:DATUM_MODELS\florence-2-base-ft-quantized
   ```
 
-### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_1_5b`, `granite31_1b`, `falcon3_1b`)
+### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`)
 
-Seven LLMs spanning Meta, Microsoft, TinyLlama community, Google,
-Alibaba, IBM, TII. All quantized to **Q4_K_M** for clean cross-model
-comparison. Each is a single GGUF file loaded via LlamaSharp.
+Nine LLMs spanning Meta, Microsoft, TinyLlama community, Google,
+Alibaba (three Qwen-Coder sizes), IBM, TII. All quantized to **Q4_K_M**
+for clean cross-model comparison (Qwen-Coder 7B is Q5_K_M for the small
+quality bump). Each is a single GGUF file loaded via LlamaSharp.
 
 | Catalog name | Display | License | Holder |
 |---|---|---|---|
@@ -293,8 +294,18 @@ comparison. Each is a single GGUF file loaded via LlamaSharp.
 | `tinyllama_1b` | TinyLlama 1.1B Chat v1.0 | Apache-2.0 | TinyLlama community |
 | `gemma2_2b` | Gemma 2 2B Instruct | Gemma Terms | Google |
 | `qwen25_coder_1_5b` | Qwen 2.5 Coder 1.5B Instruct | Apache-2.0 | Alibaba |
+| `qwen25_coder_3b` | Qwen 2.5 Coder 3B Instruct | Apache-2.0 | Alibaba |
+| `qwen25_coder_7b` | Qwen 2.5 Coder 7B Instruct | Apache-2.0 | Alibaba |
 | `granite31_1b` | IBM Granite 3.1 1B A400M | Apache-2.0 | IBM |
 | `falcon3_1b` | Falcon3 1B Instruct | Falcon LLM License 2.0 | TII |
+
+The Qwen2.5-Coder ladder is registered with size-appropriate defaults:
+the 1.5B uses a 4K context (fast iteration), while the 3B and 7B use a
+16K context with a higher max-tokens budget so single-call generation of
+multi-paragraph code or HTML pages doesn't truncate. The 7B drops to
+`temperature=0.5` (vs 0.7 default) for more deterministic code output.
+Per-call overrides — `models.qwen25_coder_7b(prompt, 0.7, 4096)` — let
+you tweak both temperature and max_tokens at the call site.
 
 **Setup**: each is a single `*.gguf` file dropped into the models
 directory. Filenames must match the catalog defaults
@@ -328,6 +339,16 @@ huggingface-cli download bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF `
   Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf `
   --local-dir $env:DATUM_MODELS
 
+# Qwen 2.5 Coder 3B
+huggingface-cli download bartowski/Qwen2.5-Coder-3B-Instruct-GGUF `
+  Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf `
+  --local-dir $env:DATUM_MODELS
+
+# Qwen 2.5 Coder 7B (note Q5_K_M, not Q4_K_M)
+huggingface-cli download bartowski/Qwen2.5-Coder-7B-Instruct-GGUF `
+  Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf `
+  --local-dir $env:DATUM_MODELS
+
 # Granite 3.1 1B (MoE)
 huggingface-cli download bartowski/granite-3.1-1b-a400m-instruct-GGUF `
   granite-3.1-1b-a400m-instruct-Q4_K_M.gguf `
@@ -339,8 +360,160 @@ huggingface-cli download tiiuae/Falcon3-1B-Instruct-GGUF `
   --local-dir $env:DATUM_MODELS
 ```
 
-Total LLM disk: ~12 GB. Each call holds one model resident; the
-residency manager swaps when VRAM is tight.
+Total LLM disk: ~16 GB with all three Qwen-Coder sizes. Each call holds
+one model resident; the residency manager swaps when VRAM is tight.
+
+### Whisper STT zoo (`whisper_tiny`, `whisper_base`, `whisper_small`, `whisper_medium`)
+
+OpenAI Whisper as native ONNX. Four size variants spanning fast/cheap
+to slow/accurate. Single SQL surface: `models.whisper_X(audio_bytes)`
+returns the transcription as `String`.
+
+| Catalog name | Params | Best for |
+|---|---|---|
+| `whisper_tiny` | 39M | Round-trip verification, smoke tests |
+| `whisper_base` | 74M | Balanced default |
+| `whisper_small` | 244M | Better accuracy on accented / noisy speech |
+| `whisper_medium` | 769M | Strong STT, slower |
+
+- **License**: MIT (OpenAI)
+- **Source**: [huggingface.co/openai/whisper-base](https://huggingface.co/openai/whisper-base)
+  (replace `base` with the size you want)
+- **Folders**: one per variant (`whisper-tiny-onnx/`, etc.)
+- **Files per folder**:
+  - `encoder_model.onnx` — audio features → encoder hidden states
+  - `decoder_model.onnx` — autoregressive caption decoder (no KV cache;
+    `decoder_with_past_model.onnx` shipped alongside but unused)
+  - `vocab.json`, `merges.txt`, `tokenizer.json` — multilingual BPE
+  - `preprocessor_config.json` — mel spectrogram params
+  - `generation_config.json` — special token IDs
+  - `special_tokens_map.json`
+- **Input**: WAV bytes (any sample rate / bit depth — the C# WAV decoder
+  handles 8/16/24-bit PCM and IEEE float32, mono/stereo/multi-channel,
+  resampling to 16kHz via linear interpolation).
+- **Output**: English transcript as `String`. Multilingual models support
+  other languages but the registration uses the English language token
+  prefix (`<|en|>`); to transcribe another language, register with a
+  different `LanguageToken` (one-line constant in `WhisperOnnxModel`).
+- **Setup**: produced by the batch ONNX conversion script:
+  ```powershell
+  ./scripts/export-batch-onnx.ps1 -Models whisper-base
+  ```
+  Convert other sizes by name (`whisper-tiny`, `whisper-small`,
+  `whisper-medium`). The script reuses `.venv/` and runs
+  `optimum-cli export onnx --model openai/whisper-X` per variant.
+
+### Python-bridge models (`bark_small`, `kokoro_82m`)
+
+Some models are difficult or impractical to convert from PyTorch to
+ONNX — multi-stage pipelines with autoregressive Python control flow
+(Bark), or research-grade libraries that don't ship export tooling
+(XTTS-v2, StyleTTS2). DatumIngest runs these through a long-lived
+Python subprocess: the C# side hands inputs over via NDJSON on
+stdio, the Python worker uses the upstream library directly, and the
+results come back as bytes.
+
+The bridge has its own status indicator in `system_models`:
+**`bridge`** — backend is `python`, the venv exists, and the model is
+*probably* runnable. Catalog can't fully verify pip packages without
+spawning the worker, so a clean `status=bridge` doesn't guarantee
+runnability — but a missing venv reliably reports `status=missing`.
+
+#### `bark_small` — TTS with embedded sound effects
+
+- **What it does**: Generates 24kHz mono speech with optional inline
+  non-speech tokens. Write `[laughs]`, `[sighs]`, `[music]` etc. in
+  the prompt and Bark renders them inline. Output is WAV bytes
+  (carried as `Image` until `DataKind.Audio` lands).
+- **License**: MIT (Suno)
+- **Source**: [huggingface.co/suno/bark-small](https://huggingface.co/suno/bark-small)
+- **Backend**: Python bridge — wraps HuggingFace `transformers`'
+  `BarkModel`.
+- **Files (catalog tracks)**: `.venv-bark/pyvenv.cfg` — the venv
+  marker. Bark's actual weights live in `~/.cache/huggingface/`, not
+  in `$DATUM_MODELS`.
+- **Setup**:
+  ```powershell
+  ./scripts/setup-bark-venv.ps1
+  ```
+  Creates `$DATUM_MODELS/.venv-bark`, pip-installs `transformers`,
+  `torch` (CUDA wheel), and `scipy`. The Bark weights download from
+  HuggingFace on the first inference call (~1 GB, one-time).
+  - Use `-Cpu` to install CPU-only torch (much slower; no NVIDIA
+    needed).
+  - Use `-CudaWheel cu126` (or `cu124` / `cu121`) to pin a different
+    PyTorch CUDA wheel — defaults to `cu128`, which works against
+    CUDA Toolkit 12.x system installs.
+  - Use `-Force` to nuke and recreate.
+- **Per-call overrides**:
+  - `[0] voice_preset` (string) — e.g. `'v2/en_speaker_9'`. Worker
+    pins `v2/en_speaker_6` by default (neutral male, well-tested).
+- **Determinism**: Bark samples internally — same prompt produces
+  different audio each call.
+- **Tips for good output**:
+  - **Use full sentences.** Bark expects multi-second context; bare
+    phrases ("Cookie Dadda") produce noisy ~1s clips with weird
+    prosody. "Hello there, this is Cookie Dadda speaking." sounds
+    far better.
+  - **Always specify a voice preset** for repeatable output. Without
+    one, Bark picks a random speaker each call — quality varies wildly.
+  - Inline cues like `[laughs]`, `[clears throat]`, `[sighs]` work.
+  - Bark sometimes adds breath, room tone, or even bird sounds
+    spontaneously — that's by design from upstream.
+- **Demo**:
+  ```sql
+  SELECT models.bark_small(
+    'Hello there from Datum Ingest. [laughs] This is rather fun, actually.',
+    'v2/en_speaker_9'
+  );
+  ```
+
+#### `kokoro_82m` — fast multi-voice TTS
+
+- **What it does**: 82M-parameter ONNX TTS with 11+ built-in voices.
+  Fast enough to keep up with token-streaming LLM output. Apache-2.0,
+  cleaner license than Bark for commercial work.
+- **License**: Apache-2.0 (hexgrad)
+- **Source**: [huggingface.co/hexgrad/Kokoro-82M-ONNX](https://huggingface.co/hexgrad/Kokoro-82M-ONNX)
+- **Backend**: Python bridge — wraps the `kokoro-onnx` package, which
+  bundles the misaki phonemizer + ONNX inference. The model itself is
+  ONNX (we go through Python only for the phonemizer).
+- **Files (catalog tracks)**: `kokoro-v1.0.onnx` — the ONNX model file
+  in `$DATUM_MODELS`. Voices and venv tracked separately:
+  - `voices-v1.0.bin` (~26 MB, bundled all voices), OR
+  - `kokoro-voices/<voice>.bin` (per-voice files; the worker bundles
+    them into a temp `.npz` at startup)
+  - `.venv-kokoro/` for the Python deps
+- **Per-call overrides**:
+  - `[0] voice` (string) — e.g. `'af_bella'`, `'am_michael'`, `'bm_george'`
+  - `[1] speed` (float) — `0.5` ... `2.0`
+  - Example: `models.kokoro_82m('hello', 'bm_george', 1.2)`
+- **Setup** — venv only:
+  ```powershell
+  ./scripts/setup-kokoro-venv.ps1
+  ```
+  Creates `$DATUM_MODELS/.venv-kokoro` and installs `kokoro-onnx`
+  (which pulls in `onnxruntime`, the misaki phonemizer, and `scipy`
+  as transitive deps). You provide the model + voices files yourself
+  (typical for users who already downloaded the per-voice `.bin`
+  files from the original hexgrad repo).
+- **Setup — fully automated** (venv + model + bundled voices):
+  ```powershell
+  ./scripts/setup-kokoro-venv.ps1 -DownloadModel -DownloadVoices
+  ```
+  Downloads `kokoro-v1.0.onnx` (~326 MB) and `voices-v1.0.bin`
+  (~26 MB) from the kokoro-onnx GitHub release into `$DATUM_MODELS`.
+- **Per-voice .bin layout**: if you have separate per-voice files
+  (e.g. `af_bella.bin`, `bm_george.bin`, ...), drop them into
+  `$DATUM_MODELS/kokoro-voices/`. The default registration points at
+  this path; the worker bundles the per-voice arrays into a temp
+  `.npz` at startup and passes that to `kokoro-onnx`.
+- **Determinism**: deterministic for a given (text, voice, speed)
+  tuple. Planner CSE folds duplicate call sites.
+- **Demo**:
+  ```sql
+  SELECT models.kokoro_82m('hello there from datum ingest', 'af_bella');
+  ```
 
 ## Quantization conventions
 
@@ -381,6 +554,14 @@ SELECT name, file_names, source_url
 FROM system_models
 WHERE status = 'missing';
 
+-- Which Python-bridge models are set up but unverified?
+-- (status = 'bridge' means files present, but the catalog can't see
+-- whether the venv's pip packages are intact — first invocation will
+-- fail loudly if they aren't.)
+SELECT name, file_names
+FROM system_models
+WHERE status = 'bridge';
+
 -- License audit
 SELECT category, license, COUNT(*) AS n
 FROM system_models
@@ -394,12 +575,24 @@ WHERE license IN ('Apache-2.0', 'MIT', 'BSD-3-Clause');
 
 ## Adding a new model
 
-1. **Pick a backend.** ONNX (vision, embeddings, captioners,
-   detectors) or GGUF + LlamaSharp (LLMs).
+1. **Pick a backend.** Three options:
+   - **ONNX** — vision, embeddings, captioners, detectors, image gen
+     pipelines. Inherits from `OnnxModel`. The fast, native path.
+   - **GGUF + LlamaSharp** — LLMs. Use `LlamaModel`.
+   - **Python bridge** — for libraries that don't ship ONNX export
+     tooling (research-grade TTS, multi-stage pipelines with dynamic
+     control flow, anything in the HuggingFace transformers ecosystem
+     that fights `optimum-cli`). Inherits from `PythonBackedModel`,
+     ships a worker `.py` in `src/DatumIngest/Models/Python/scripts/`,
+     gets a `setup-X-venv.ps1` script under `scripts/`, and reports
+     `status=bridge` in `system_models`.
 2. **Add a model class** to `src/DatumIngest/Models/Onnx/` or
    `src/DatumIngest/Models/Llama/`. Inherit from `OnnxModel` for ONNX
-   Runtime models; for multi-session pipelines like ViT-GPT2 or
-   Florence-2, override `InferBatchAsync` directly.
+   Runtime models; for multi-session pipelines like ViT-GPT2,
+   Florence-2, or Whisper, override `InferBatchAsync` directly.
+   For Python-bridge models, the model class is just a
+   `PythonBackedModel` instantiation in the registration helper —
+   the worker script does the per-model logic.
 3. **Add a register helper** to
    [BuiltinModels.cs](../src/DatumIngest/Models/BuiltinModels.cs).
    Populate the full metadata: `DisplayName`, `Parameters`, `License`,
@@ -409,4 +602,6 @@ WHERE license IN ('Apache-2.0', 'MIT', 'BSD-3-Clause');
 5. **Add a smoke test** under
    `tests/DatumIngest.Tests/Models/`. Self-skip when the file isn't
    available so CI machines don't fail.
-6. **Update this doc** with the model entry.
+6. **Add a setup script** if Python-backed: `scripts/setup-X-venv.ps1`
+   following the Bark / Kokoro template.
+7. **Update this doc** with the model entry.

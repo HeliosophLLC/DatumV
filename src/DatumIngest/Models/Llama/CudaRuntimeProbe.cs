@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace DatumIngest.Models.Llama;
 
@@ -23,6 +24,16 @@ namespace DatumIngest.Models.Llama;
 /// decide what to do (LlamaModel surfaces it as a clear error when
 /// <see cref="LlamaModel.RequireCuda"/> is set, or silently allows CPU
 /// fallback otherwise).
+/// </para>
+/// <para>
+/// <strong>Windows-only.</strong> All probe paths walk Windows-specific
+/// directory layouts (<c>C:\Program Files\NVIDIA\...</c>,
+/// <c>%LOCALAPPDATA%\Programs\Ollama</c>) and the DLL search behaviour
+/// being augmented (process PATH, same-directory search, kernel32
+/// <c>GetModuleFileName</c>) is Windows-specific too. On other platforms
+/// the entry points are no-ops — Linux's standard <c>LD_LIBRARY_PATH</c>
+/// + system <c>/usr/local/cuda*/lib64</c> conventions handle this natively
+/// and don't need probing.
 /// </para>
 /// </remarks>
 internal static class CudaRuntimeProbe
@@ -64,6 +75,14 @@ internal static class CudaRuntimeProbe
     /// </summary>
     public static (Result Outcome, string? Directory) EnsureOnPath()
     {
+        // Non-Windows hosts rely on standard CUDA conventions (LD_LIBRARY_PATH,
+        // /usr/local/cuda*/lib64 system-wide install). Nothing here applies —
+        // return NotFound and let the caller's normal fallback path proceed.
+        if (!OperatingSystem.IsWindows())
+        {
+            return (Result.NotFound, null);
+        }
+
         // Run cuDNN discovery on every call. The cuDNN install directory is
         // independent of the CUDA Runtime; LLamaSharp didn't need it but
         // ONNX Runtime's CUDA EP does. Idempotent: if already on PATH,
@@ -305,6 +324,12 @@ internal static class CudaRuntimeProbe
     /// </remarks>
     public static void DiagnoseDllLoad(Action<string> log)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            log("[cuda-probe] skipped: not running on Windows");
+            return;
+        }
+
         foreach (string dll in RequiredCudaDlls)
         {
             try
@@ -335,9 +360,11 @@ internal static class CudaRuntimeProbe
         }
     }
 
+    [SupportedOSPlatform("windows")]
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetModuleFileName(IntPtr hModule, [Out] char[] lpFilename, int nSize);
 
+    [SupportedOSPlatform("windows")]
     private static string? TryGetModuleFileName(IntPtr handle)
     {
         char[] buffer = new char[1024];

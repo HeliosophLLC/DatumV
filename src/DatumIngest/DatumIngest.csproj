@@ -29,6 +29,17 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
+
+  <!-- Python worker scripts copy to <output>/python/ so PythonBackedModel
+       can resolve them by file name relative to AppContext.BaseDirectory. -->
+  <ItemGroup>
+    <Content Include="Models\Python\scripts\*.py">
+      <Link>python\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>contentFiles\any\any\python</PackagePath>
+    </Content>
+  </ItemGroup>
   
   <ItemGroup>
     <PackageReference Include="CardinalityEstimation" Version="1.14.0" />

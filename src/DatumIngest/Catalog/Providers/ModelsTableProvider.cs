@@ -17,11 +17,16 @@ namespace DatumIngest.Catalog.Providers;
 /// <remarks>
 /// <para>
 /// Rows materialise on every <see cref="ScanAsync"/> call. The provider stat-s
-/// each catalog entry's resolved file path at scan time and reports
-/// <c>status = 'available'</c> when the file exists on disk, <c>'missing'</c>
-/// otherwise. That liveness matters: a user runs the query, sees a missing
-/// model, downloads it, runs again, and the status flips. Caching rows
-/// from a single snapshot would defeat the diagnostic.
+/// each catalog entry's resolved file path at scan time and reports one of
+/// three statuses:
+/// <list type="bullet">
+///   <item><term><c>available</c></term><description>files present, native backend (ONNX / LlamaSharp), ready to use.</description></item>
+///   <item><term><c>missing</c></term><description>required file(s) not on disk; can't load.</description></item>
+///   <item><term><c>bridge</c></term><description>backend is <c>python</c>, worker script + model files present, but runnability also depends on a Python venv + pip packages the catalog can't verify without spawning the subprocess.</description></item>
+/// </list>
+/// That liveness matters: a user runs the query, sees a missing model,
+/// downloads it, runs again, and the status flips. Caching rows from a
+/// single snapshot would defeat the diagnostic.
 /// </para>
 /// <para>
 /// Schema (13 columns):
@@ -38,7 +43,7 @@ namespace DatumIngest.Catalog.Providers;
 ///   <item><term>license</term><description>SPDX-style or model-specific license identifier.</description></item>
 ///   <item><term>license_holder</term><description>Entity granting the license (Meta, Microsoft, etc.).</description></item>
 ///   <item><term>source_url</term><description>Repo / model-zoo URL for re-downloading.</description></item>
-///   <item><term>status</term><description><c>available</c> / <c>missing</c>.</description></item>
+///   <item><term>status</term><description><c>available</c> / <c>missing</c> / <c>bridge</c>. See class remarks for semantics.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -183,6 +188,27 @@ public sealed class ModelsTableProvider : ITableProvider
             fileSize = fileExists ? info.Length : null;
         }
 
+        // Three-state status:
+        //   missing   -- anchor file absent; can't load.
+        //   bridge    -- backend == "python" with files present; signals
+        //                that a Python venv + pip packages are also
+        //                required, which catalog can't verify here.
+        //   available -- native backend (ONNX / LlamaSharp / synthetic) +
+        //                files present; ready to use.
+        string status;
+        if (!fileExists)
+        {
+            status = "missing";
+        }
+        else if (string.Equals(entry.Backend, "python", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "bridge";
+        }
+        else
+        {
+            status = "available";
+        }
+
         cells[0]  = DataValue.FromString(entry.Name, arena);
         cells[1]  = WriteOptionalString(entry.DisplayName, arena);
         cells[2]  = WriteOptionalString(entry.Category, arena);
@@ -195,7 +221,7 @@ public sealed class ModelsTableProvider : ITableProvider
         cells[9]  = WriteOptionalString(entry.License, arena);
         cells[10] = WriteOptionalString(entry.LicenseHolder, arena);
         cells[11] = WriteOptionalString(entry.SourceUrl, arena);
-        cells[12] = DataValue.FromString(fileExists ? "available" : "missing", arena);
+        cells[12] = DataValue.FromString(status, arena);
     }
 
     private static DataValue WriteOptionalString(string? value, Arena arena) =>
