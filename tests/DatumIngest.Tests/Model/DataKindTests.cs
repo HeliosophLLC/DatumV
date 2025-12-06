@@ -51,14 +51,17 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsTwentySix()
+    public void TotalEnumMemberCountIsTwentyEight()
     {
-        // Was 27 before UInt8Array (-1), Matrix (-1), Tensor (-1) were retired,
-        // then bumped back up by Float16 (+1), Decimal (+1), UInt128 (+1), Int128 (+1),
-        // then JsonValue retired (-1) and Vector retired (-1). Byte arrays use
-        // Kind=UInt8 + IsArray flag; rank-1 float arrays use Float32 + IsArray.
+        // Tally: Unknown, Type, Boolean,
+        // UInt8/16/32/64/128, Int8/16/32/64/128 (10),
+        // Float16/32/64, Decimal (4),
+        // Date, Time, DateTime, Duration (4),
+        // String, Uuid (2),
+        // Image, Audio, Video, Json (4 encoded blobs),
+        // Struct (1) → 28 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(26, allValues.Length);
+        Assert.Equal(28, allValues.Length);
     }
 
     [Fact]

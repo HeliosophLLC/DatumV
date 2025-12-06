@@ -180,6 +180,7 @@ internal static class TableFormatter
             DataKind.Image => FormatBlobPreview(value, arena, registry),
             DataKind.Audio => FormatBlobPreview(value, arena, registry),
             DataKind.Video => FormatBlobPreview(value, arena, registry),
+            DataKind.Json => FormatJsonPreview(value, arena, registry),
             _ => value.ToDisplayString(),
         };
     }
@@ -193,6 +194,32 @@ internal static class TableFormatter
         return bytes.Length > PreviewBytes
             ? $"0x{hex}... ({bytes.Length:N0} bytes)"
             : $"0x{hex} ({bytes.Length:N0} bytes)";
+    }
+
+    /// <summary>
+    /// Decodes the canonical CBOR payload back to JSON text and returns a
+    /// truncated preview suitable for table display. The byte size is shown
+    /// in parentheses so the user knows the on-disk footprint regardless of
+    /// the truncation. Falls back to the hex preview if decode throws — that
+    /// shouldn't happen for engine-produced Json values, but a corrupted
+    /// payload shouldn't crash the formatter.
+    /// </summary>
+    private static string FormatJsonPreview(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        const int PreviewChars = 60;
+        ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+        try
+        {
+            string json = DatumIngest.Functions.Json.CborJsonCodec.DecodeToJsonText(bytes);
+            string trimmed = json.Length > PreviewChars
+                ? json[..PreviewChars] + "..."
+                : json;
+            return $"{trimmed} ({bytes.Length:N0} bytes)";
+        }
+        catch (Exception)
+        {
+            return FormatBlobPreview(value, arena, registry);
+        }
     }
 
     private static bool IsNumericScalar(DataKind kind) => kind is

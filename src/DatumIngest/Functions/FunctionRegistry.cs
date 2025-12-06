@@ -228,6 +228,13 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.RandomFloat32Function>();
         registry.RegisterScalar<Scalar.RandomFloat32FromSeedFunction>();
 
+        // Json — parse, scalar lookup, subdocument query, text re-emit.
+        // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.
+        registry.RegisterScalar<Scalar.Json.JsonParseFunction>();
+        registry.RegisterScalar<Scalar.Json.JsonValueFunction>();
+        registry.RegisterScalar<Scalar.Json.JsonQueryFunction>();
+        registry.RegisterScalar<Scalar.Json.JsonToTextFunction>();
+
         // Image — pipeline functions are still wired through the legacy
         // path; the image rework is out of scope for this rebuild.
         // (Re-enabled per-image-function once those are migrated.)

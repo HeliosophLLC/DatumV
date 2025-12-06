@@ -96,7 +96,7 @@ public static class SqlKeywordRegistry
         "Float16", "Float32", "Float64", "Decimal",
         "Date", "Time", "DateTime", "Duration",
         "String", "Uuid",
-        "Image", "Audio", "Video", "Struct",
+        "Image", "Audio", "Video", "Json", "Struct",
     ];
 
     /// <summary>

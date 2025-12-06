@@ -198,7 +198,7 @@ internal sealed class InteractiveShell
                             _dumpEnabled = true;
                             if (pathArg.Length > 0) _dumpPath = pathArg;
                             AnsiConsole.MarkupLine(
-                                $"[green]Dump on. Image/Audio/Video cells will be saved to:[/] [white]{Markup.Escape(_dumpPath)}[/]");
+                                $"[green]Dump on. Image/Audio/Video/Json cells will be saved to:[/] [white]{Markup.Escape(_dumpPath)}[/]");
                         }
                         else if (arg.StartsWith("off", StringComparison.OrdinalIgnoreCase))
                         {
@@ -549,6 +549,7 @@ internal sealed class InteractiveShell
             if (column.Kind != DataKind.Image
                 && column.Kind != DataKind.Audio
                 && column.Kind != DataKind.Video
+                && column.Kind != DataKind.Json
                 && !column.IsByteArrayColumn) continue;
 
             if (!dirChecked)
@@ -559,14 +560,29 @@ internal sealed class InteractiveShell
 
             try
             {
-                byte[] bytes = value.AsByteSpan(arena, registry).ToArray();
-                string ext = DetectBlobExtension(bytes, column.Kind);
+                ReadOnlySpan<byte> rawBytes = value.AsByteSpan(arena, registry);
+                // For Json columns, write JSON text instead of raw CBOR — much friendlier
+                // for users opening the dumped file, and the round-trip through DecodeToJsonText
+                // preserves canonical structure.
+                byte[] fileBytes;
+                string ext;
+                if (column.Kind == DataKind.Json)
+                {
+                    string json = DatumIngest.Functions.Json.CborJsonCodec.DecodeToJsonText(rawBytes);
+                    fileBytes = System.Text.Encoding.UTF8.GetBytes(json);
+                    ext = "json";
+                }
+                else
+                {
+                    fileBytes = rawBytes.ToArray();
+                    ext = DetectBlobExtension(fileBytes, column.Kind);
+                }
                 string safeColName = SanitizeForFilename(column.Name);
                 string filename = $"{Guid.NewGuid():N}-r{rowIndex}-{safeColName}.{ext}";
                 string fullPath = Path.Combine(_dumpPath, filename);
-                File.WriteAllBytes(fullPath, bytes);
+                File.WriteAllBytes(fullPath, fileBytes);
                 AnsiConsole.MarkupLine(
-                    $"[dim]  saved: {Markup.Escape(fullPath)} ({bytes.Length:N0} bytes)[/]");
+                    $"[dim]  saved: {Markup.Escape(fullPath)} ({fileBytes.Length:N0} bytes)[/]");
             }
             catch (Exception ex)
             {

@@ -198,14 +198,14 @@ public readonly struct ValueRef
 
     /// <summary>
     /// Byte-array payload. Pass <see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
-    /// or <see cref="DataKind.Video"/> for the corresponding encoded-blob kinds, or
-    /// <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set to <c>true</c>
-    /// for generic byte arrays. The DataValue tag carries the kind (and IsArray flag
-    /// for byte arrays); the actual bytes live in <see cref="Materialized"/>.
+    /// <see cref="DataKind.Video"/>, or <see cref="DataKind.Json"/> for the corresponding
+    /// encoded-blob kinds, or <see cref="DataKind.UInt8"/> with <paramref name="isArray"/>
+    /// set to <c>true</c> for generic byte arrays. The DataValue tag carries the kind (and
+    /// IsArray flag for byte arrays); the actual bytes live in <see cref="Materialized"/>.
     /// </summary>
     public static ValueRef FromBytes(DataKind kind, byte[] value, bool isArray = false)
     {
-        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video)
+        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
         {
             return new(DataValue.Null(kind), value);
         }
@@ -214,9 +214,26 @@ public readonly struct ValueRef
             return new(DataValue.NullByteArray(), value);
         }
         throw new ArgumentException(
-            $"FromBytes is only valid for Image/Audio/Video or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
+            $"FromBytes is only valid for Image/Audio/Video/Json or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
             nameof(kind));
     }
+
+    /// <summary>
+    /// JSON payload as a byte slice over canonical CBOR bytes — used by
+    /// <c>json_query</c> to return a subdocument view without copying. The
+    /// segment's <c>(Array, Offset, Count)</c> identifies a window into a
+    /// larger CBOR buffer; downstream <see cref="ToDataValue"/> copies only
+    /// the slice's bytes into the target arena.
+    /// </summary>
+    /// <remarks>
+    /// Boxes the <see cref="ArraySegment{T}"/> struct once when stored in
+    /// <see cref="Materialized"/>. That single allocation replaces what
+    /// would otherwise be a copy of the whole subdocument's bytes — a clear
+    /// win as soon as the slice exceeds a few dozen bytes (which it always
+    /// does for JSON).
+    /// </remarks>
+    public static ValueRef FromJsonSlice(ArraySegment<byte> cborSlice) =>
+        new(DataValue.Null(DataKind.Json), cborSlice);
 
     /// <summary>
     /// Struct value carried as a recursive <see cref="ValueRef"/>[] payload —
@@ -353,6 +370,54 @@ public readonly struct ValueRef
         if (_materialized is byte[] bytes)
         {
             return bytes;
+        }
+        if (_materialized is ArraySegment<byte> slice)
+        {
+            // Materialise the slice once when callers ask for an owned byte[].
+            // Hot paths should prefer AsByteSpan() to avoid this allocation.
+            return slice.ToArray();
+        }
+        throw new InvalidOperationException(
+            $"ValueRef of kind {Kind} does not carry a byte payload.");
+    }
+
+    /// <summary>
+    /// Reads the byte payload as a <see cref="ReadOnlySpan{T}"/> without
+    /// allocating. Handles both whole-buffer payloads (<see cref="byte"/>[])
+    /// and slice payloads (<see cref="ArraySegment{T}"/>) — the latter from
+    /// <see cref="FromJsonSlice"/>. Use this on JSON / Image / Audio / Video
+    /// codec hot paths to skip the <see cref="AsBytes"/> allocation.
+    /// </summary>
+    public ReadOnlySpan<byte> AsByteSpan()
+    {
+        if (_materialized is byte[] bytes)
+        {
+            return bytes;
+        }
+        if (_materialized is ArraySegment<byte> slice)
+        {
+            return slice;
+        }
+        throw new InvalidOperationException(
+            $"ValueRef of kind {Kind} does not carry a byte payload.");
+    }
+
+    /// <summary>
+    /// Returns the byte payload as an <see cref="ArraySegment{T}"/> over the
+    /// underlying buffer — no copy. Used by <c>json_query</c> to compose a
+    /// new slice over the source's backing array without re-materialising the
+    /// bytes. The returned segment shares the source array; subsequent
+    /// mutations to either side would alias.
+    /// </summary>
+    public ArraySegment<byte> AsByteSegment()
+    {
+        if (_materialized is byte[] bytes)
+        {
+            return new ArraySegment<byte>(bytes);
+        }
+        if (_materialized is ArraySegment<byte> slice)
+        {
+            return slice;
         }
         throw new InvalidOperationException(
             $"ValueRef of kind {Kind} does not carry a byte payload.");
@@ -554,6 +619,11 @@ public readonly struct ValueRef
                 DataValue.FromAudio(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Video && !_inline.IsArray =>
                 DataValue.FromVideo(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Json && !_inline.IsArray =>
+                DataValue.FromJson(bytes, targetStore),
+            // Slice form (json_query subdocument): copy only the slice's bytes into the arena.
+            ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
+                DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),
             ValueRef[] elements when _inline.IsArray =>
                 BuildTypedArray(_inline.Kind, elements, targetStore),
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>

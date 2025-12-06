@@ -14,8 +14,8 @@ namespace DatumIngest.DatumFile;
 /// numeric scalars, <see cref="DataKind.Boolean"/>, <see cref="DataKind.String"/>,
 /// temporal types, and <see cref="DataKind.Uuid"/>. Reference types like
 /// <see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
-/// <see cref="DataKind.Video"/>, or typed-array columns never appear in zone
-/// maps and are rejected.
+/// <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>, or typed-array
+/// columns never appear in zone maps and are rejected.
 /// </remarks>
 internal static class ZoneMapValueSerializer
 {

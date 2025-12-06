@@ -699,6 +699,42 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Video, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
+    /// <summary>Creates a JSON value from canonical CBOR bytes.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromJson(byte[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromJson(byte[] value) =>
+        throw new InvalidOperationException("Use FromJson(value, store). ReferenceStore is no longer available.");
+
+    /// <summary>
+    /// Creates a JSON value from canonical CBOR bytes using an explicit
+    /// <see cref="IValueStore"/>. The input bytes must already be CBOR-
+    /// encoded — see <c>CborJsonCodec.EncodeFromJsonText</c> for the
+    /// JSON-text → CBOR boundary.
+    /// </summary>
+    public static DataValue FromJson(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Json, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+    }
+
+    /// <summary>
+    /// Creates a JSON value from a span of canonical CBOR bytes using an explicit
+    /// <see cref="IValueStore"/>. Used by <c>json_query</c> when materialising a
+    /// subdocument span into the target arena without an intermediate
+    /// <c>byte[]</c> allocation.
+    /// </summary>
+    public static DataValue FromJson(ReadOnlySpan<byte> value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Json, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Json"/> value whose canonical CBOR bytes
+    /// live in a <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// </summary>
+    public static DataValue FromJsonInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.Json, offset, length, storeId);
+
     /// <summary>
     /// Creates a <see cref="DataKind.Image"/> value whose encoded bytes live in a
     /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset,
@@ -2232,13 +2268,14 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// True when this value carries an encoded-blob payload — <see cref="DataKind.Image"/>,
-    /// <see cref="DataKind.Audio"/>, or <see cref="DataKind.Video"/>. All three share the
-    /// same byte-content storage shape (inline / arena / sidecar at <c>(_p0, _p1)</c>) and
-    /// the same accessors (<see cref="AsByteSpan"/>, etc.); only the kind discriminator
-    /// distinguishes them.
+    /// <see cref="DataKind.Audio"/>, <see cref="DataKind.Video"/>, or <see cref="DataKind.Json"/>.
+    /// All four share the same byte-content storage shape (inline / arena / sidecar at
+    /// <c>(_p0, _p1)</c>) and the same accessors (<see cref="AsByteSpan"/>, etc.); only the
+    /// kind discriminator distinguishes them. JSON's bytes are canonical CBOR (RFC 7049 §3.9);
+    /// the other three are codec-specific.
     /// </summary>
     public bool IsBlobKind =>
-        _kind is DataKind.Image or DataKind.Audio or DataKind.Video;
+        _kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json;
 
     /// <summary>
     /// Returns the byte payload for a byte-array (UInt8 + IsArray) or
@@ -2769,7 +2806,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
-            DataKind.Image or DataKind.Audio or DataKind.Video
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
                 => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
@@ -2830,7 +2867,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
-            DataKind.Image or DataKind.Audio or DataKind.Video
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Struct
                 => HashCode.Combine(_kind, _p0, _p1, _meta),
@@ -3009,6 +3046,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
             DataKind.Audio => $"Audio[offset={_p0}, len={_p1}]",
             DataKind.Video => $"Video[offset={_p0}, len={_p1}]",
+            DataKind.Json => $"Json[offset={_p0}, len={_p1}]",
             DataKind.Struct => $"Struct({_meta} fields)",
             _ => _kind.ToString(),
         };

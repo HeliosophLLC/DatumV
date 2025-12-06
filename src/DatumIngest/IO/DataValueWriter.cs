@@ -123,6 +123,7 @@ internal static class DataValueWriter
             case DataKind.Image:
             case DataKind.Audio:
             case DataKind.Video:
+            case DataKind.Json:
                 ReadOnlySpan<byte> blobBytes = value.AsByteSpan(store);
                 writer.Write(blobBytes.Length);
                 writer.Write(blobBytes);

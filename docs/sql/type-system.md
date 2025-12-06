@@ -64,6 +64,7 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Image` | Encoded image bytes (PNG, JPG, WebP, etc.) | `byte[]` |
 | `Audio` | Encoded audio bytes (WAV, MP3, FLAC, OGG, M4A) | `byte[]` |
 | `Video` | Encoded video bytes (MP4, WebM, AVI, MKV) | `byte[]` |
+| `Json` | A JSON document, stored as canonical CBOR bytes | `byte[]` (CBOR) |
 | `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
 | `Type` | A type tag describing another DataKind | `DataKind` enum value (stored as byte) |
 
@@ -216,7 +217,7 @@ FROM t
 `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
 `Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
-`Uuid`, `Image`, `Audio`, `Video`, `Struct`, `Type`) are reserved in
+`Uuid`, `Image`, `Audio`, `Video`, `Json`, `Struct`, `Type`) are reserved in
 expression position. They produce a `Type` value that can be compared with
 `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
 
@@ -272,6 +273,7 @@ Supported conversions include:
 - **Date/DateTime → numeric** — epoch days or epoch seconds.
 - **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
 - **`UInt8` array ↔ Image / Audio / Video** — byte reinterpretation between a raw byte buffer and the corresponding encoded blob kind.
+- **String ↔ Json** — `cast(text, Json)` parses the JSON text into canonical CBOR; `cast(json, String)` re-emits the canonical form as text. `try_cast` returns NULL on parse failure.
 
 Use `can_cast(x, Type)` to check if a conversion is lossless before casting, or
 `try_cast(x, Type)` to get NULL on failure instead of an error. The function-call

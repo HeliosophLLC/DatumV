@@ -118,6 +118,15 @@ public enum DataKind : byte
     /// <summary>A byte array containing encoded video data (e.g. MP4, WebM, MKV).</summary>
     Video = 59,
 
+    /// <summary>
+    /// A JSON document, stored as canonical CBOR bytes (RFC 7049 §3.9). Wire
+    /// representation is bytes-in-arena, addressed at <c>(_p0, _p1)</c>; payload
+    /// is structured (object/array/scalar/null) and accessed via the <c>json_*</c>
+    /// function family. Canonical encoding lets two semantically-equal JSON
+    /// inputs hash and compare via raw byte equality.
+    /// </summary>
+    Json = 60,
+
     // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
     /// <summary>

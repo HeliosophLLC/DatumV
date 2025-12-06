@@ -83,6 +83,7 @@ internal static class DataValueReader
             DataKind.Image => ReadImage(reader, store),
             DataKind.Audio => ReadAudio(reader, store),
             DataKind.Video => ReadVideo(reader, store),
+            DataKind.Json => ReadJson(reader, store),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
@@ -188,5 +189,12 @@ internal static class DataValueReader
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
         return DataValue.FromVideo(bytes, store);
+    }
+
+    private static DataValue ReadJson(BinaryReader reader, IValueStore store)
+    {
+        int length = reader.ReadInt32();
+        byte[] bytes = reader.ReadBytes(length);
+        return DataValue.FromJson(bytes, store);
     }
 }

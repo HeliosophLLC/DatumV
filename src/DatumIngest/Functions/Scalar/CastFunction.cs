@@ -220,6 +220,25 @@ public sealed class CastFunction : IFunction, IScalarFunction
             case (DataKind.Boolean, DataKind.String):
                 result = ValueRef.FromString(input.AsBoolean() ? "true" : "false");
                 return true;
+            case (DataKind.String, DataKind.Json):
+                try
+                {
+                    byte[] cbor = DatumIngest.Functions.Json.CborJsonCodec.EncodeFromJsonText(input.AsString());
+                    result = ValueRef.FromBytes(DataKind.Json, cbor);
+                    return true;
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    return false;
+                }
+                catch (OverflowException)
+                {
+                    return false;
+                }
+            case (DataKind.Json, DataKind.String):
+                result = ValueRef.FromString(
+                    DatumIngest.Functions.Json.CborJsonCodec.DecodeToJsonText(input.AsByteSpan()));
+                return true;
             default:
                 return false;
         }

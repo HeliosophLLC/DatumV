@@ -119,6 +119,10 @@ public static class DataValueRetention
             DataKind.Video => DataValue.FromVideo(
                 value.AsByteSpan(sourceStore).ToArray(),
                 retentionStore),
+            // Json carries canonical CBOR bytes; same byte-content shape, takes the span overload.
+            DataKind.Json => DataValue.FromJson(
+                value.AsByteSpan(sourceStore),
+                retentionStore),
 
             // Struct retention path isn't implemented yet because no current retention
             // site uses it as a key. Add a case when needed.

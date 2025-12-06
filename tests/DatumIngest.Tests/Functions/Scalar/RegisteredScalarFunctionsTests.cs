@@ -24,6 +24,15 @@ public sealed class RegisteredScalarFunctionsTests
         "cast",
         "try_cast",
         "typeof",
+        "abs",
+        "random_string",
+        "random_string_from_seed",
+        "random_float32",
+        "random_float32_from_seed",
+        "json_parse",
+        "json_value",
+        "json_query",
+        "json_to_text",
     ];
 
     [Fact]

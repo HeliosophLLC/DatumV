@@ -73,6 +73,7 @@ public sealed record ColumnDescriptorV2(
                 or DataKind.Image
                 or DataKind.Audio
                 or DataKind.Video
+                or DataKind.Json
                 or DataKind.Struct
                 => EncoderKind.VariableSlot,
 

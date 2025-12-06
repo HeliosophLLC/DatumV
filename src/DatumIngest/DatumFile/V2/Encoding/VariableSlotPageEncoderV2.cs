@@ -283,7 +283,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.String
                 => value.AsUtf8Span(store!),
 
-            DataKind.Image or DataKind.Audio or DataKind.Video
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
                 => value.AsByteSpan(store!),
 
             DataKind.Struct

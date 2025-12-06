@@ -164,6 +164,8 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
                 => DataValue.FromAudioInSidecar(offset, length, _sidecarStoreId),
             DataKind.Video
                 => DataValue.FromVideoInSidecar(offset, length, _sidecarStoreId),
+            DataKind.Json
+                => DataValue.FromJsonInSidecar(offset, length, _sidecarStoreId),
             DataKind.Struct
                 => DecodeStructEagerly(offset, length),
             _ => throw new InvalidDataException(
