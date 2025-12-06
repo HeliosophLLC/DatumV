@@ -178,6 +178,8 @@ internal static class TableFormatter
             DataKind.Uuid => value.AsUuid().ToString(),
             DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
             DataKind.Image => FormatBlobPreview(value, arena, registry),
+            DataKind.Audio => FormatBlobPreview(value, arena, registry),
+            DataKind.Video => FormatBlobPreview(value, arena, registry),
             _ => value.ToDisplayString(),
         };
     }

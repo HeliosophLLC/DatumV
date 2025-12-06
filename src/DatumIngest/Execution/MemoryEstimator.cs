@@ -141,7 +141,7 @@ internal sealed class MemoryEstimator
             if (field.IsArray) return false;
 
             DataKind kind = field.Kind;
-            if (kind is DataKind.String or DataKind.Image or DataKind.Struct)
+            if (kind is DataKind.String or DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Struct)
             {
                 return false;
             }

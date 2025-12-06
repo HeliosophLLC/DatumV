@@ -20,6 +20,8 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
     [
         DataKind.Unknown,
         DataKind.Struct,
+        DataKind.Audio,
+        DataKind.Video,
     ];
 
     /// <summary>
@@ -142,6 +144,8 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
         DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
+        DataKind.Audio    => DataValue.FromAudio([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]),
+        DataKind.Video    => DataValue.FromVideo([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]),
         DataKind.Struct   => DataValue.FromStruct(2, [DataValue.FromString("a"), DataValue.FromInt32(1)]),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,

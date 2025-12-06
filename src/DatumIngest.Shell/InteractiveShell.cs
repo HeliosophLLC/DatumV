@@ -198,7 +198,7 @@ internal sealed class InteractiveShell
                             _dumpEnabled = true;
                             if (pathArg.Length > 0) _dumpPath = pathArg;
                             AnsiConsole.MarkupLine(
-                                $"[green]Dump on. Image cells will be saved to:[/] [white]{Markup.Escape(_dumpPath)}[/]");
+                                $"[green]Dump on. Image/Audio/Video cells will be saved to:[/] [white]{Markup.Escape(_dumpPath)}[/]");
                         }
                         else if (arg.StartsWith("off", StringComparison.OrdinalIgnoreCase))
                         {
@@ -546,7 +546,10 @@ internal sealed class InteractiveShell
             ColumnInfo column = schema.Columns[i];
             DataValue value = row[i];
             if (value.IsNull) continue;
-            if (column.Kind != DataKind.Image && !column.IsByteArrayColumn) continue;
+            if (column.Kind != DataKind.Image
+                && column.Kind != DataKind.Audio
+                && column.Kind != DataKind.Video
+                && !column.IsByteArrayColumn) continue;
 
             if (!dirChecked)
             {
@@ -557,7 +560,7 @@ internal sealed class InteractiveShell
             try
             {
                 byte[] bytes = value.AsByteSpan(arena, registry).ToArray();
-                string ext = DetectImageExtension(bytes);
+                string ext = DetectBlobExtension(bytes, column.Kind);
                 string safeColName = SanitizeForFilename(column.Name);
                 string filename = $"{Guid.NewGuid():N}-r{rowIndex}-{safeColName}.{ext}";
                 string fullPath = Path.Combine(_dumpPath, filename);
@@ -574,11 +577,23 @@ internal sealed class InteractiveShell
     }
 
     /// <summary>
-    /// Maps known image-format magic bytes to a filename extension. Falls
-    /// back to <c>bin</c> for unrecognised payloads so the user can still
-    /// inspect the bytes (and we don't promise an extension we can't
-    /// honour).
+    /// Maps known blob-format magic bytes to a filename extension, scoped by the
+    /// column's <see cref="DataKind"/>. Falls back to <c>bin</c> for unrecognised
+    /// payloads so the user can still inspect the bytes (and we don't promise an
+    /// extension we can't honour).
     /// </summary>
+    private static string DetectBlobExtension(ReadOnlySpan<byte> bytes, DataKind kind)
+    {
+        return kind switch
+        {
+            DataKind.Audio => DetectAudioExtension(bytes),
+            DataKind.Video => DetectVideoExtension(bytes),
+            // Image and the legacy byte-array column path both produce image-
+            // shaped payloads; fall through to image detection.
+            _ => DetectImageExtension(bytes),
+        };
+    }
+
     private static string DetectImageExtension(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length >= 8
@@ -605,6 +620,79 @@ internal sealed class InteractiveShell
         if (bytes.Length >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D)
         {
             return "bmp";
+        }
+        return "bin";
+    }
+
+    /// <summary>
+    /// Maps known audio-format magic bytes to a filename extension.
+    /// </summary>
+    private static string DetectAudioExtension(ReadOnlySpan<byte> bytes)
+    {
+        // RIFF....WAVE: WAV/PCM (RIFF at 0..4, WAVE at 8..12)
+        if (bytes.Length >= 12
+            && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+            && bytes[8] == 0x57 && bytes[9] == 0x41 && bytes[10] == 0x56 && bytes[11] == 0x45)
+        {
+            return "wav";
+        }
+        // fLaC
+        if (bytes.Length >= 4 && bytes[0] == 0x66 && bytes[1] == 0x4C
+            && bytes[2] == 0x61 && bytes[3] == 0x43)
+        {
+            return "flac";
+        }
+        // OggS (Ogg/Vorbis/Opus)
+        if (bytes.Length >= 4 && bytes[0] == 0x4F && bytes[1] == 0x67
+            && bytes[2] == 0x67 && bytes[3] == 0x53)
+        {
+            return "ogg";
+        }
+        // ID3 tag header (MP3 with tag): "ID3"
+        if (bytes.Length >= 3 && bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33)
+        {
+            return "mp3";
+        }
+        // MP3 frame sync: 0xFF E0/F0 (top 11 bits = 0xFFE+; permissive across MPEG layer/version)
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0)
+        {
+            return "mp3";
+        }
+        // ftyp box at offset 4 → M4A (audio MP4 container)
+        if (bytes.Length >= 12
+            && bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70)
+        {
+            // Could be M4A or video MP4; brand at bytes 8..12 disambiguates. M4A
+            // brands include "M4A " and "M4B "; default to .m4a for audio columns.
+            return "m4a";
+        }
+        return "bin";
+    }
+
+    /// <summary>
+    /// Maps known video-format magic bytes to a filename extension.
+    /// </summary>
+    private static string DetectVideoExtension(ReadOnlySpan<byte> bytes)
+    {
+        // ftyp box at offset 4 → MP4-family. Brand at bytes 8..12 (e.g. "isom", "mp42",
+        // "qt  ") refines the choice; .mp4 is the safe default for video columns.
+        if (bytes.Length >= 12
+            && bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70)
+        {
+            return "mp4";
+        }
+        // EBML header (WebM / MKV): 0x1A 0x45 0xDF 0xA3
+        if (bytes.Length >= 4 && bytes[0] == 0x1A && bytes[1] == 0x45
+            && bytes[2] == 0xDF && bytes[3] == 0xA3)
+        {
+            return "webm";
+        }
+        // RIFF....AVI : AVI (RIFF at 0..4, AVI at 8..12)
+        if (bytes.Length >= 12
+            && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+            && bytes[8] == 0x41 && bytes[9] == 0x56 && bytes[10] == 0x49 && bytes[11] == 0x20)
+        {
+            return "avi";
         }
         return "bin";
     }

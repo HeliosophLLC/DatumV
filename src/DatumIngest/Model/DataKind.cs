@@ -112,6 +112,12 @@ public enum DataKind : byte
     /// <summary>A byte array containing encoded image data.</summary>
     Image = 57,
 
+    /// <summary>A byte array containing encoded audio data (e.g. WAV, MP3, FLAC, OGG).</summary>
+    Audio = 58,
+
+    /// <summary>A byte array containing encoded video data (e.g. MP4, WebM, MKV).</summary>
+    Video = 59,
+
     // ───────────────────────── Collections &amp; composite (64–71) ─────────────────────────
 
     /// <summary>

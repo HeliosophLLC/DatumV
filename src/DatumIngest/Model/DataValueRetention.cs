@@ -111,6 +111,15 @@ public static class DataValueRetention
                 value.AsImage(sourceStore),
                 retentionStore),
 
+            // Audio and Video share the encoded-blob shape with Image — read bytes
+            // via the kind-agnostic AsByteSpan and rebuild against the retention store.
+            DataKind.Audio => DataValue.FromAudio(
+                value.AsByteSpan(sourceStore).ToArray(),
+                retentionStore),
+            DataKind.Video => DataValue.FromVideo(
+                value.AsByteSpan(sourceStore).ToArray(),
+                retentionStore),
+
             // Struct retention path isn't implemented yet because no current retention
             // site uses it as a key. Add a case when needed.
             _ => throw new NotSupportedException(

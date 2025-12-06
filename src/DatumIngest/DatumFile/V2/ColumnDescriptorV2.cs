@@ -71,6 +71,8 @@ public sealed record ColumnDescriptorV2(
             // the IsArray short-circuit at the top of this method.
             DataKind.String
                 or DataKind.Image
+                or DataKind.Audio
+                or DataKind.Video
                 or DataKind.Struct
                 => EncoderKind.VariableSlot,
 

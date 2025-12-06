@@ -73,8 +73,8 @@ public static class ColumnRoleClassifier
         // structural classifier for them is deferred to the typed-array
         // feature-stats work.
 
-        // Binary kinds: byte arrays (UInt8 + IsArray), Image.
-        if (manifest.Kind == DataKind.Image
+        // Binary kinds: byte arrays (UInt8 + IsArray), Image, Audio, Video.
+        if (manifest.Kind is DataKind.Image or DataKind.Audio or DataKind.Video
             || (manifest.Kind == DataKind.UInt8 && manifest.IsArray))
         {
             return ColumnRole.Binary;

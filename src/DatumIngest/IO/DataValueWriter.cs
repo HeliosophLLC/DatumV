@@ -121,9 +121,11 @@ internal static class DataValueWriter
                 break;
 
             case DataKind.Image:
-                byte[] img = value.AsImage(store);
-                writer.Write(img.Length);
-                writer.Write(img);
+            case DataKind.Audio:
+            case DataKind.Video:
+                ReadOnlySpan<byte> blobBytes = value.AsByteSpan(store);
+                writer.Write(blobBytes.Length);
+                writer.Write(blobBytes);
                 break;
 
             default:

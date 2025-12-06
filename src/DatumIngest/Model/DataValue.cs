@@ -675,6 +675,30 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Image, flags: DataValueFlags.InArena, p0: p0, p1: p1);
     }
 
+    /// <summary>Creates a value from encoded audio bytes.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromAudio(byte[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromAudio(byte[] value) =>
+        throw new InvalidOperationException("Use FromAudio(value, store). ReferenceStore is no longer available.");
+
+    /// <summary>Creates a value from encoded audio bytes using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromAudio(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Audio, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+    }
+
+    /// <summary>Creates a value from encoded video bytes.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVideo(byte[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromVideo(byte[] value) =>
+        throw new InvalidOperationException("Use FromVideo(value, store). ReferenceStore is no longer available.");
+
+    /// <summary>Creates a value from encoded video bytes using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromVideo(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Video, flags: DataValueFlags.InArena, p0: p0, p1: p1);
+    }
+
     /// <summary>
     /// Creates a <see cref="DataKind.Image"/> value whose encoded bytes live in a
     /// <c>.datum-blob</c> sidecar. The DataValue carries 64-bit absolute offset,
@@ -687,6 +711,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="storeId">Registry storeId byte (defaults to 0 for single-sidecar / first-registered).</param>
     public static DataValue FromImageInSidecar(long offset, long length, byte storeId = 0) =>
         BuildSidecar(DataKind.Image, offset, length, storeId);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Audio"/> value whose encoded bytes live in a
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// </summary>
+    public static DataValue FromAudioInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.Audio, offset, length, storeId);
+
+    /// <summary>
+    /// Creates a <see cref="DataKind.Video"/> value whose encoded bytes live in a
+    /// <c>.datum-blob</c> sidecar. Mirrors <see cref="FromImageInSidecar"/>.
+    /// </summary>
+    public static DataValue FromVideoInSidecar(long offset, long length, byte storeId = 0) =>
+        BuildSidecar(DataKind.Video, offset, length, storeId);
 
     /// <summary>
     /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are
@@ -2193,6 +2231,16 @@ public readonly struct DataValue : IEquatable<DataValue>
         _kind == DataKind.UInt8 && (_flags & DataValueFlags.IsArray) != 0;
 
     /// <summary>
+    /// True when this value carries an encoded-blob payload — <see cref="DataKind.Image"/>,
+    /// <see cref="DataKind.Audio"/>, or <see cref="DataKind.Video"/>. All three share the
+    /// same byte-content storage shape (inline / arena / sidecar at <c>(_p0, _p1)</c>) and
+    /// the same accessors (<see cref="AsByteSpan"/>, etc.); only the kind discriminator
+    /// distinguishes them.
+    /// </summary>
+    public bool IsBlobKind =>
+        _kind is DataKind.Image or DataKind.Audio or DataKind.Video;
+
+    /// <summary>
     /// Returns the byte payload for a byte-array (UInt8 + IsArray) or
     /// <see cref="DataKind.Image"/> value as a <see cref="ReadOnlySpan{T}"/>, without
     /// materializing a managed <c>byte[]</c>. Zero-allocation hot-path reader.
@@ -2205,11 +2253,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </remarks>
     public ReadOnlySpan<byte> AsByteSpan(IValueStore store, SidecarRegistry? registry = null)
     {
-        // Image and (UInt8 + IsArray) both carry byte content at (_p0, _p1) — read path is identical.
-        if (_kind != DataKind.Image && !IsByteArrayKind)
+        // Image/Audio/Video and (UInt8 + IsArray) all carry byte content at (_p0, _p1) — read path is identical.
+        if (!IsBlobKind && !IsByteArrayKind)
         {
             throw new InvalidOperationException(
-                $"AsByteSpan is only valid for byte-content kinds (Image or UInt8 + IsArray); got {_kind}.");
+                $"AsByteSpan is only valid for byte-content kinds (Image/Audio/Video or UInt8 + IsArray); got {_kind}.");
         }
 
         if (IsInSidecar)
@@ -2371,7 +2419,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             }
 
             // Arena-backed.
-            if (IsArray || _kind == DataKind.Image) return _p1;
+            if (IsArray || IsBlobKind) return _p1;
             return _kind switch
             {
                 DataKind.String => _p1,
@@ -2721,7 +2769,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             // For reference types without a store, use offset-equality: same (_p0,_p1) in the
             // same store means identical content. Different offsets → unknown, return false.
-            DataKind.Image
+            DataKind.Image or DataKind.Audio or DataKind.Video
                 => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
                 => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
@@ -2782,7 +2830,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             // Offset-based hashing: consistent with offset-equality in Equals.
-            DataKind.Image
+            DataKind.Image or DataKind.Audio or DataKind.Video
                 => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Struct
                 => HashCode.Combine(_kind, _p0, _p1, _meta),
@@ -2959,6 +3007,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
             DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
+            DataKind.Audio => $"Audio[offset={_p0}, len={_p1}]",
+            DataKind.Video => $"Video[offset={_p0}, len={_p1}]",
             DataKind.Struct => $"Struct({_meta} fields)",
             _ => _kind.ToString(),
         };

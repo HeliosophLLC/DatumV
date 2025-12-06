@@ -288,6 +288,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("DURATION"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UUID"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IMAGE"), SqlToken.TypeKeyword, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("AUDIO"), SqlToken.TypeKeyword, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("VIDEO"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("STRUCT"), SqlToken.TypeKeyword, requireDelimiters: true)
 
             // Semicolon statement terminator
