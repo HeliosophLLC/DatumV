@@ -419,30 +419,38 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             return new ColumnLookup(schema.Columns);
         }
 
-        // requiredColumns may include names that don't exist in the table schema
-        // (e.g. LET-binding references that the planner's CollectAllReferencedColumns
-        // pass walked through). Size the projection by actual matches, not by the
-        // input set's count — otherwise trailing slots stay (0, 0, null) and the
-        // ColumnLookup constructor crashes inserting a null dictionary key.
-        int matchCount = 0;
-        for (int i = 0; i < schema.Columns.Count; i++)
-        {
-            if (requiredColumns.Contains(schema.Columns[i].Name))
-            {
-                matchCount++;
-            }
-        }
-
-        (int index, int schemaIndex, string name)[] projected = new (int, int, string)[matchCount];
+        // Contract: requiredColumns is a subset of the table's schema.
+        // Walk the schema once, building the projection in schema order and
+        // tracking which required names we've matched. Any remaining unmatched
+        // name is a planner contract violation — surface it explicitly rather
+        // than silently dropping the column or letting ColumnLookup crash on
+        // a null dictionary key.
+        (int index, int schemaIndex, string name)[] projected =
+            new (int, int, string)[requiredColumns.Count];
+        HashSet<string> resolved = new(StringComparer.OrdinalIgnoreCase);
         int index = 0;
         for (int i = 0; i < schema.Columns.Count; i++)
         {
-            if (requiredColumns.Contains(schema.Columns[i].Name))
+            string columnName = schema.Columns[i].Name;
+            if (requiredColumns.Contains(columnName))
             {
-                projected[index] = (index, i, schema.Columns[i].Name);
+                projected[index] = (index, i, columnName);
+                resolved.Add(columnName);
                 index++;
             }
         }
+
+        if (resolved.Count != requiredColumns.Count)
+        {
+            IEnumerable<string> missing = requiredColumns.Where(n => !resolved.Contains(n));
+            throw new InvalidOperationException(
+                $"requiredColumns contains names not present in the table schema: " +
+                $"[{string.Join(", ", missing)}]. The projection-pushdown contract " +
+                $"requires every name in requiredColumns to resolve to a schema column; " +
+                $"this indicates a planner bug (e.g. a synthetic name leaked through " +
+                $"CollectAllReferencedColumns).");
+        }
+
         return new ColumnLookup(projected);
     }
 

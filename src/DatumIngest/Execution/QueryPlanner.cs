@@ -2664,6 +2664,14 @@ public sealed class QueryPlanner
     {
         HashSet<(string? TableName, string ColumnName)> references = new();
 
+        // Tracks LET-introduced names (binding names, output aliases, destructure
+        // names) so a final pass can strip them from the reference set. LET names
+        // appear as ColumnReference nodes in expressions — same AST shape as a
+        // real column ref — so the recursive walks below can't distinguish them
+        // at collection time. Built lazily, alongside the LET binding ref-collection
+        // pass below, so we only walk statement.LetBindings once.
+        HashSet<string>? letNames = null;
+
         // If SELECT * or SELECT table.*, we need all columns — return empty
         // to signal "no restriction" downstream.
         foreach (SelectColumn column in statement.Columns)
@@ -2684,11 +2692,26 @@ public sealed class QueryPlanner
             }
         }
 
-        // LET binding expressions.
+        // LET binding expressions. Same loop builds the LET-name set used by
+        // the final filter pass below, so statement.LetBindings is walked once.
         if (statement.LetBindings is not null)
         {
+            letNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (LetBinding binding in statement.LetBindings)
             {
+                letNames.Add(binding.Name);
+                if (binding.OutputAlias is not null)
+                {
+                    letNames.Add(binding.OutputAlias);
+                }
+                if (binding.Destructure is not null)
+                {
+                    foreach (string name in binding.Destructure.Names)
+                    {
+                        letNames.Add(name);
+                    }
+                }
+
                 foreach ((string? tableName, string columnName) in
                     ColumnReferenceCollector.Collect(binding.Expression))
                 {
@@ -2794,6 +2817,20 @@ public sealed class QueryPlanner
                     }
                 }
             }
+        }
+
+        // Strip LET-introduced names from the reference set. LET names look
+        // like ColumnReference nodes in expressions (same AST shape as a real
+        // column ref) so the recursive walks above can't tell them apart at
+        // collection time. The contract for `requiredColumns` shipped to
+        // providers is "subset of the table schema"; LET names are planner-
+        // introduced and break that. Only filter unqualified references — a
+        // qualified `t.x` is always a real table column (LET names never carry
+        // a table qualifier). The set was built in the LET-binding ref-collection
+        // pass above; null when the statement has no LET bindings.
+        if (letNames is not null)
+        {
+            references.RemoveWhere(r => r.TableName is null && letNames.Contains(r.ColumnName));
         }
 
         return references;
