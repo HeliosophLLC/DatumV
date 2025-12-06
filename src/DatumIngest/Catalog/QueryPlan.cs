@@ -56,7 +56,14 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
             cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
-            store: _hoistStore);
+            store: _hoistStore)
+        {
+            // Pull the catalog-level tracer (if any) into the per-query
+            // context. Setting / clearing _catalog.ModelTracer at runtime
+            // affects subsequently planned queries; queries already
+            // running keep the tracer they captured at execution start.
+            ModelTracer = _catalog.ModelTracer,
+        };
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(context).WithCancellation(cancellationToken))
         {
@@ -79,7 +86,14 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
             cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
-            store: _hoistStore);
+            store: _hoistStore)
+        {
+            // Pull the catalog-level tracer (if any) into the per-query
+            // context. Setting / clearing _catalog.ModelTracer at runtime
+            // affects subsequently planned queries; queries already
+            // running keep the tracer they captured at execution start.
+            ModelTracer = _catalog.ModelTracer,
+        };
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice

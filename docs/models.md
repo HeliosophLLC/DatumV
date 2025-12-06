@@ -280,6 +280,54 @@ same backbone:
     --local-dir $env:DATUM_MODELS\florence-2-base-ft-quantized
   ```
 
+### `paligemma2_224`, `paligemma2_448` — Google PaliGemma 2 captioners
+
+Google's vision-language model: SigLIP image encoder + Gemma 2B decoder
++ learned linear projector. The "mix" variants are pre-finetuned across
+captioning, VQA, and OCR — a single model handles diverse prompts via
+the prefix passed to the decoder. We register two resolution variants:
+
+| Catalog name | Input | Image tokens | Use for |
+|---|---|---|---|
+| `paligemma2_224` | 224×224 | 256 | Cheap iteration; broad scenes |
+| `paligemma2_448` | 448×448 | 1024 | Fine-detail / OCR / scene art |
+
+- **License**: Gemma Terms (Google) — broadly permissive, allows
+  commercial use; redistribution must pass the terms along.
+- **Source**: [huggingface.co/google/paligemma2-3b-mix-448](https://huggingface.co/google/paligemma2-3b-mix-448)
+  (or `-224` for the smaller variant)
+- **Folders**: one per variant (`paligemma2-3b-mix-224-onnx/`, etc.)
+- **Files per folder**:
+  - `vision_encoder.onnx` — SigLIP encoder + linear projector
+  - `embed_tokens.onnx` — Gemma token-embedding lookup
+  - `decoder_model.onnx` — Gemma 2B autoregressive decoder
+  - `tokenizer.json`, `vocab.json`, `merges.txt`, `config.json`
+- **Default prompt**: `"caption en"` — produces verbose factual
+  English captions like *"Two adventurers in armor stand at the cavern
+  entrance. The taller one holds a torch. Cobwebs hang from the ceiling."*
+- **Output style**: PaliGemma's captions are noticeably more verbose
+  and grounded than Florence-2's, with multiple short sentences
+  rather than one. Good raw material to feed an LLM rewriter.
+- **Other prompts** (set via the registration's `defaultPrompt`):
+  - `"caption en"` / `"caption es"` / `"caption fr"` / etc.
+  - `"answer en What is the dragon doing?"` — VQA mode
+  - `"ocr"` — OCR mode
+  - `"detect <object>"` — object detection
+- **Setup**: produced by the batch ONNX conversion script:
+  ```powershell
+  ./scripts/export-batch-onnx.ps1 -Models paligemma2-3b-mix-448
+  ```
+  Conversion runs `optimum-cli export onnx --model
+  google/paligemma2-3b-mix-448`. ~10-15 minutes including download.
+- **Demo (vs Florence-2 for the same scene)**:
+  ```sql
+  SELECT
+    art_id,
+    models.florence2_more_detailed_caption(art) AS clinical,    -- structured single sentence
+    models.paligemma2_448(art)                  AS verbose      -- multi-sentence factual
+  FROM scene_art LIMIT 3;
+  ```
+
 ### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`)
 
 Nine LLMs spanning Meta, Microsoft, TinyLlama community, Google,

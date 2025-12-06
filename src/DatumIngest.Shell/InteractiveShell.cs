@@ -30,6 +30,7 @@ internal sealed class InteractiveShell
     private bool _imagesEnabled;
     private bool _dumpEnabled;
     private string _dumpPath = DefaultDumpPath;
+    private bool _traceEnabled;
 
     /// <summary>
     /// Default directory where <c>.dump on</c> writes Image-typed cells.
@@ -210,6 +211,28 @@ internal sealed class InteractiveShell
                             AnsiConsole.MarkupLine(
                                 "[red]Usage: .dump on [path] | .dump off | .dump (show state)[/]");
                         }
+                        continue;
+                    }
+
+                    if (trimmed.StartsWith(".trace", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string arg = trimmed[".trace".Length..].Trim().ToLowerInvariant();
+                        if (arg == "on" || (arg == "" && !_traceEnabled)) _traceEnabled = true;
+                        else if (arg == "off" || (arg == "" && _traceEnabled)) _traceEnabled = false;
+                        else
+                        {
+                            AnsiConsole.MarkupLine(
+                                "[red]Usage: .trace on | .trace off (or just .trace to toggle)[/]");
+                            continue;
+                        }
+                        // Attach / detach the tracer on the catalog. QueryPlan
+                        // reads this when constructing each query's
+                        // ExecutionContext, so the toggle takes effect on the
+                        // next query.
+                        _catalog.ModelTracer = _traceEnabled ? new ShellModelTracer() : null;
+                        AnsiConsole.MarkupLine(_traceEnabled
+                            ? "[green]Trace on. Per-model dispatch lines will print before each query result.[/]"
+                            : "[yellow]Trace off.[/]");
                         continue;
                     }
 
@@ -950,6 +973,7 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green].images on[/] / [green].images off[/]      Render image cells as inline Sixel (one record at a time)");
         AnsiConsole.MarkupLine("  [green].dump on [[path]][/] / [green].dump off[/]   Save image cells to disk as files. Path defaults to");
         AnsiConsole.MarkupLine("                                  [grey]$DATUM_IMAGES, falling back to %LOCALAPPDATA%\\DatumIngest\\images.[/]");
+        AnsiConsole.MarkupLine("  [green].trace on[/] / [green].trace off[/]            Print per-dispatch model invocation log (model name, row count, timing)");
         AnsiConsole.MarkupLine("  [green].help[/]                        Show this help");
         AnsiConsole.MarkupLine("  [green].quit[/] / [green].exit[/]                Exit the shell");
         AnsiConsole.MarkupLine("  [grey]Tab[/] / [grey]Ctrl+Space[/]              Trigger SQL completion (Ctrl+Space if Tab is swallowed by the terminal)");

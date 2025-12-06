@@ -291,12 +291,39 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 // Step 3: dispatch this chunk. The model returns ValueRefs —
                 // managed payloads — and the scatter step below materialises
                 // them into outputBatch.Arena via ValueRef.ToDataValue.
-                IReadOnlyList<ValueRef> modelOutputs = await model
-                    .InferBatchAsync(
-                        inputs,
-                        overrideValues,
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                //
+                // Tracer hook: notify before/after the call so .trace on
+                // (interactive shell) can log per-dispatch shape + timing.
+                // Null-checked once per chunk; cost is one branch when
+                // tracing is off, an interface call when it's on.
+                IModelInvocationTracer? tracer = context.ModelTracer;
+                tracer?.OnDispatchStarted(_modelName, chunkSize, inputs, overrideValues);
+                long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+
+                IReadOnlyList<ValueRef> modelOutputs;
+                try
+                {
+                    modelOutputs = await model
+                        .InferBatchAsync(
+                            inputs,
+                            overrideValues,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (tracer is not null)
+                {
+                    tracer.OnDispatchFailed(
+                        _modelName,
+                        chunkSize,
+                        System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp),
+                        ex);
+                    throw;
+                }
+
+                tracer?.OnDispatchCompleted(
+                    _modelName,
+                    chunkSize,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp));
 
                 if (modelOutputs.Count != chunkSize)
                 {

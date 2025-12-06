@@ -177,7 +177,8 @@ app.MapPost("/api/query", async (HttpRequest request, CancellationToken ct) =>
     await queryLock.WaitAsync(ct).ConfigureAwait(false);
     try
     {
-        return await ExecuteQuery(catalog, body.Sql, maxRows, jsonOptions, ct).ConfigureAwait(false);
+        return await ExecuteQuery(catalog, body.Sql, maxRows, body.Trace == true, jsonOptions, ct)
+            .ConfigureAwait(false);
     }
     finally
     {
@@ -261,10 +262,17 @@ static async Task<IResult> ExecuteQuery(
     TableCatalog catalog,
     string sql,
     int maxRows,
+    bool trace,
     JsonSerializerOptions jsonOptions,
     CancellationToken ct)
 {
     Stopwatch sw = Stopwatch.StartNew();
+
+    // Optional per-query trace capture. Untraced queries skip this entirely so
+    // there is zero tracer overhead for the common case.
+    StringWriter? traceCapture = trace
+        ? DatumIngest.Diagnostics.ExecutionTracer.BeginCapture()
+        : null;
 
     IQueryPlan plan;
     try
@@ -273,6 +281,10 @@ static async Task<IResult> ExecuteQuery(
     }
     catch (Exception ex)
     {
+        if (traceCapture is not null)
+        {
+            DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        }
         return Results.Json(new { error = ex.Message }, jsonOptions, statusCode: 400);
     }
 
@@ -332,15 +344,30 @@ static async Task<IResult> ExecuteQuery(
     }
     catch (OperationCanceledException)
     {
+        if (traceCapture is not null)
+        {
+            DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        }
         return Results.Json(new { error = "cancelled" }, jsonOptions, statusCode: 499);
     }
     catch (Exception ex)
     {
+        if (traceCapture is not null)
+        {
+            DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        }
         return Results.Json(
             new { error = ex.Message, detail = ex.ToString() }, jsonOptions, statusCode: 500);
     }
 
     sw.Stop();
+
+    string? traceText = null;
+    if (traceCapture is not null)
+    {
+        traceText = DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        if (string.IsNullOrEmpty(traceText)) traceText = null;
+    }
 
     return Results.Json(
         new QueryResponse(
@@ -348,11 +375,12 @@ static async Task<IResult> ExecuteQuery(
             rows,
             rows.Count,
             truncated,
-            sw.Elapsed.TotalMilliseconds),
+            sw.Elapsed.TotalMilliseconds,
+            traceText),
         jsonOptions);
 }
 
-internal sealed record QueryRequest(string Sql, int? MaxRows);
+internal sealed record QueryRequest(string Sql, int? MaxRows, bool? Trace);
 
 internal sealed record LangPositionRequest(string? Sql, int Offset);
 
@@ -363,6 +391,7 @@ internal sealed record QueryResponse(
     IReadOnlyList<IReadOnlyList<JsonCell>> Rows,
     int RowCount,
     bool Truncated,
-    double ElapsedMs);
+    double ElapsedMs,
+    string? Trace);
 
 internal sealed record ColumnDescriptor(string Name, string Kind, bool IsArray);

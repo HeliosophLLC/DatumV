@@ -158,6 +158,30 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private Models.ModelCatalog? _modelCatalog;
 
     /// <summary>
+    /// Optional tracer for <c>models.X(...)</c> invocations. Set by hosts
+    /// that want to observe per-dispatch shape + timing — the interactive
+    /// shell wires this up via <c>.trace on</c>; production deployments
+    /// can attach metric-emitting or structured-logging implementations.
+    /// <see cref="QueryPlan"/> reads this value when constructing each
+    /// query's <see cref="DatumIngest.Execution.ExecutionContext"/>, so
+    /// toggling at runtime affects subsequently planned queries.
+    /// </summary>
+    public DatumIngest.Execution.IModelInvocationTracer? ModelTracer
+    {
+        get => _modelTracer ?? Parent?.ModelTracer;
+        set
+        {
+            if (Parent is not null && value is not null)
+            {
+                throw new InvalidOperationException(
+                    "ModelTracer cannot be set on a nested table catalog — set it on the root.");
+            }
+            _modelTracer = value;
+        }
+    }
+    private DatumIngest.Execution.IModelInvocationTracer? _modelTracer;
+
+    /// <summary>
     /// Gets the total number of tables registered in this catalog, including
     /// those inherited from the parent catalog if present.
     /// </summary>

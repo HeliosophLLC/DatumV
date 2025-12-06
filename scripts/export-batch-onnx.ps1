@@ -173,6 +173,172 @@ $KnownModels = @(
         OutputFolder = 'clip-vit-base-patch32-onnx'
         ExpectedSize = '~600 MB'
         Description  = 'CLIP ViT-B/32 - image/text contrastive embeddings.'
+    },
+    @{
+        Name        = 'paligemma2-3b-mix-224'
+        HF          = 'google/paligemma2-3b-mix-224'
+        OutputFolder = 'paligemma2-3b-mix-224-onnx'
+        ExpectedSize = '~6.0 GB'
+        # SigLIP vision encoder + Gemma 2B decoder + linear projector.
+        # 224x224 input is faster; 448 variant gives better fine-detail.
+        # Mix-tuned variants are pre-finetuned on multiple tasks
+        # (captioning, VQA, OCR) so they handle generic prompts well.
+        Description  = 'Google PaliGemma 2 3B (mix, 224x224) - verbose factual captioner.'
+    },
+    @{
+        Name        = 'paligemma2-3b-mix-448'
+        HF          = 'google/paligemma2-3b-mix-448'
+        OutputFolder = 'paligemma2-3b-mix-448-onnx'
+        ExpectedSize = '~6.0 GB'
+        # Higher-resolution sibling. Slower (~4x more vision tokens) but
+        # noticeably better at fine details, OCR, small-object recognition.
+        # This is the better default for D&D scene art with rich detail.
+        Description  = 'Google PaliGemma 2 3B (mix, 448x448) - higher-detail captioner.'
+    },
+    @{
+        Name        = 'phi-3.5-vision-instruct'
+        HF          = 'microsoft/Phi-3.5-vision-instruct'
+        OutputFolder = 'phi-3.5-vision-instruct-onnx-converted'
+        ExpectedSize = '~8.0 GB'
+        # Microsoft ships a pre-converted GenAI-format ONNX at
+        # microsoft/Phi-3.5-vision-instruct-onnx, but only int4 quantized.
+        # Try optimum-cli on the original PyTorch repo to get a clean
+        # Florence-2-style export. If optimum rejects it as a "custom
+        # architecture" (likely), we fall back to GenAI integration on
+        # the int4 ONNX.
+        Library      = 'transformers'
+        Task         = 'image-to-text'
+        # Phi-3.5-Vision ships modeling_phi3_v.py as custom code in the HF
+        # repo; optimum refuses to load it without an explicit trust opt-in.
+        TrustRemoteCode = $true
+        Description  = 'Microsoft Phi-3.5-Vision - VLM with instruction-following captions.'
+    },
+    # ─────────────────────── Image generation candidates ───────────────────────
+    #
+    # Realistic outcome estimates for an overnight batch run:
+    #   FLUX.1-schnell        60% works (optimum 1.21+ has FLUX support)
+    #   SD 3.5 Medium / Large 60% works (Stability published export configs)
+    #   PixArt-Sigma          40% works (DiT, partial optimum support)
+    #   AuraFlow              40% works (non-standard)
+    #   Stable Cascade        50% works (multi-stage; needs both prior + decoder)
+    #   Kolors                20% works (Chinese-trained, custom code path)
+    #   Sana                  20% works (very new, NVIDIA's own DiT)
+    #   HunyuanDiT            20% works (Tencent custom architecture)
+    #
+    # Failures are expected; that's why the batch script exists. Disk
+    # budget if all 8 succeed: ~80 GB on top of the converted output;
+    # the PyTorch HF cache holds another ~80 GB transiently.
+
+    @{
+        Name        = 'flux-schnell'
+        HF          = 'black-forest-labs/FLUX.1-schnell'
+        OutputFolder = 'flux-schnell-onnx'
+        ExpectedSize = '~24 GB'
+        # The Apache-2.0 SOTA. 12B params total (transformer + 2 text
+        # encoders + VAE). Right on the 24 GB VRAM edge in FP16.
+        # Gate: requires HF login + license accept on the model card.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'Black Forest Labs FLUX.1-schnell - Apache-2.0 SOTA image gen (12B).'
+    },
+    @{
+        Name        = 'sd-3.5-medium'
+        HF          = 'stabilityai/stable-diffusion-3.5-medium'
+        OutputFolder = 'sd-3.5-medium-onnx'
+        ExpectedSize = '~5 GB'
+        # Stability's mid-size SD3.5. Markedly better text rendering and
+        # composition than SDXL. Stability AI Community License (same as
+        # SDXL-Turbo). Gated -- requires HF login + license accept.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'Stable Diffusion 3.5 Medium - improved successor to SDXL.'
+    },
+    @{
+        Name        = 'sd-3.5-large-turbo'
+        HF          = 'stabilityai/stable-diffusion-3.5-large-turbo'
+        OutputFolder = 'sd-3.5-large-turbo-onnx'
+        ExpectedSize = '~16 GB'
+        # SD3.5 Large + Turbo distillation: same quality as SD3.5 Large
+        # at 4 inference steps instead of 30. Fits on a 24 GB card with
+        # room to spare. Same gated license as SD3.5 Medium.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'Stable Diffusion 3.5 Large Turbo - 4-step distillation.'
+    },
+    @{
+        Name        = 'pixart-sigma-1024'
+        HF          = 'PixArt-alpha/PixArt-Sigma-XL-2-1024-MS'
+        OutputFolder = 'pixart-sigma-1024-onnx'
+        ExpectedSize = '~1.5 GB'
+        # DiT-based, surprisingly good for ~600M params. OpenRAIL-M
+        # license. Not gated. Worth converting just for the
+        # quality/footprint ratio.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'PixArt-Sigma 1024MS - 600M DiT, lightweight quality.'
+    },
+    @{
+        Name        = 'auraflow-v0.3'
+        HF          = 'fal/AuraFlow-v0.3'
+        OutputFolder = 'auraflow-v0.3-onnx'
+        ExpectedSize = '~14 GB'
+        # fal.ai's Apache-2.0 alternative to FLUX/SDXL. ~6.8B params,
+        # composition often beats SDXL. Lower hype than FLUX but fully
+        # license-clean and significantly smaller.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'AuraFlow v0.3 - Apache-2.0 alternative to FLUX (6.8B).'
+    },
+    @{
+        Name        = 'stable-cascade'
+        HF          = 'stabilityai/stable-cascade'
+        OutputFolder = 'stable-cascade-onnx'
+        ExpectedSize = '~10 GB'
+        # Wuerstchen-architecture: 3-stage (prior -> decoder -> VAE) for
+        # better disk/quality tradeoff than monolithic SD. Gated under
+        # Stability terms. Conversion may need separate exports per stage.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        Description  = 'Stable Cascade - 3-stage Wuerstchen-architecture text-to-image.'
+    },
+    @{
+        Name        = 'kolors'
+        HF          = 'Kwai-Kolors/Kolors-diffusers'
+        OutputFolder = 'kolors-onnx'
+        ExpectedSize = '~6 GB'
+        # Kuaishou's Apache-2.0 image gen. Roughly SDXL-quality. Trained
+        # on Asian-leaning data; English prompts work well. Custom code
+        # in the HF repo so trust_remote_code is required.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        TrustRemoteCode = $true
+        Description  = 'Kuaishou Kolors - Apache-2.0 SDXL-class image gen.'
+    },
+    @{
+        Name        = 'sana-1.6b-1024'
+        HF          = 'Efficient-Large-Model/Sana_1600M_1024px_diffusers'
+        OutputFolder = 'sana-1.6b-1024-onnx'
+        ExpectedSize = '~3 GB'
+        # NVIDIA's Sana - 1.6B DiT, very fast inference (~10x SDXL on
+        # equal hardware). Apache-2.0. Custom architecture; optimum
+        # support is uncertain. Worth a shot.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        TrustRemoteCode = $true
+        Description  = 'NVIDIA Sana 1.6B - small, fast Apache-2.0 image gen.'
+    },
+    @{
+        Name        = 'hunyuan-dit'
+        HF          = 'Tencent-Hunyuan/HunyuanDiT-v1.2-Diffusers'
+        OutputFolder = 'hunyuan-dit-onnx'
+        ExpectedSize = '~12 GB'
+        # Tencent's DiT image gen. Strong on Asian aesthetic / styles.
+        # Custom Tencent license (commercial use OK with caveats).
+        # High failure probability due to custom architecture.
+        Library      = 'diffusers'
+        Task         = 'text-to-image'
+        TrustRemoteCode = $true
+        Description  = 'Tencent HunyuanDiT v1.2 - DiT, strong on Asian aesthetic.'
     }
 )
 
@@ -238,12 +404,20 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 
 & .\.venv\Scripts\Activate.ps1
 
-Write-Host 'Ensuring optimum + transformers + diffusers + torch installed ...' -ForegroundColor Cyan
+Write-Host 'Ensuring optimum + transformers + diffusers + torch + tokenizer deps installed ...' -ForegroundColor Cyan
 # optimum 2.x removed the [diffusers] / [exporters] extras; install
 # diffusers separately and use the bare optimum[onnxruntime] extra. The
 # stale extras names were producing "does not provide the extra" warnings
 # without any other functional impact.
-pip install --quiet --upgrade 'optimum[onnxruntime]' transformers diffusers torch
+#
+# sentencepiece: required for T5 / Llama / Gemma family tokenizers.
+#   FLUX, SD3.x, AuraFlow, Sana all use T5 as a text encoder -- without
+#   sentencepiece they fail at "Cannot instantiate this tokenizer from
+#   a slow version" during pipeline load. Cheap install (~3 MB).
+# accelerate: enables low_cpu_mem_usage path for large models. Without
+#   it, optimum prints a warning and uses a fallback that doubles peak
+#   RAM during model load. Required-in-practice for FLUX and SD3.5.
+pip install --quiet --upgrade 'optimum[onnxruntime]' transformers diffusers torch sentencepiece accelerate
 
 # ---- Loop over models ---------------------------------------------------
 
@@ -294,6 +468,14 @@ foreach ($model in $ToConvert) {
         }
         if ($model.ContainsKey('Library') -and $model.Library) {
             $extraArgs += @('--library', $model.Library)
+        }
+        # --trust-remote-code is opt-in per model entry. Required for
+        # repos that ship custom modeling code (Phi-3.5-Vision uses
+        # modeling_phi3_v.py rather than a stock transformers
+        # architecture). Don't enable it globally; only for models we've
+        # explicitly verified.
+        if ($model.ContainsKey('TrustRemoteCode') -and $model.TrustRemoteCode) {
+            $extraArgs += @('--trust-remote-code')
         }
         optimum-cli export onnx --model $model.HF @extraArgs $outputPath
         $exitCode = $LASTEXITCODE

@@ -22,9 +22,9 @@ namespace DatumIngest.Diagnostics;
 /// leave in production code permanently.
 /// </para>
 /// </remarks>
-internal static class ExecutionTracer
+public static class ExecutionTracer
 {
-    private static StreamWriter? _writer;
+    private static TextWriter? _writer;
     private static readonly object _writeLock = new();
     private static readonly Stopwatch _watch = Stopwatch.StartNew();
 
@@ -74,12 +74,55 @@ internal static class ExecutionTracer
     /// <summary>Writes a single timestamped trace line. No-op when tracing is off.</summary>
     internal static void Write(string message)
     {
-        StreamWriter? w = _writer;
+        TextWriter? w = _writer;
         if (w is null) return;
 
         lock (_writeLock)
         {
             w.WriteLine($"[{_watch.Elapsed.TotalSeconds,8:F3}s] {message}");
+        }
+    }
+
+    /// <summary>
+    /// Begins capturing trace output to an in-memory buffer. Returns the
+    /// <see cref="StringWriter"/> the caller passes back to <see cref="EndCapture"/>
+    /// to drain the captured text. Returns <see langword="null"/> when another
+    /// sink is already active (file or another in-flight capture); callers that
+    /// receive null should treat capture as unavailable for this run.
+    /// </summary>
+    /// <remarks>
+    /// Designed for hosts that want per-request trace capture without leaving
+    /// trace I/O always-on. The DevWeb host wraps each query in
+    /// <c>BeginCapture</c> / <c>EndCapture</c> so non-trace runs pay zero cost.
+    /// </remarks>
+    public static StringWriter? BeginCapture()
+    {
+        lock (_writeLock)
+        {
+            if (_writer is not null) return null;
+            StringWriter sw = new();
+            _writer = sw;
+            _watch.Restart();
+            return sw;
+        }
+    }
+
+    /// <summary>
+    /// Ends a capture session begun by <see cref="BeginCapture"/> and returns
+    /// the captured text. The argument must be the <see cref="StringWriter"/>
+    /// returned by the matching <c>BeginCapture</c> call; mismatched calls
+    /// return an empty string and leave the active sink alone.
+    /// </summary>
+    public static string EndCapture(StringWriter? capture)
+    {
+        if (capture is null) return string.Empty;
+        lock (_writeLock)
+        {
+            if (!ReferenceEquals(_writer, capture)) return string.Empty;
+            _writer = null;
+            string text = capture.ToString();
+            capture.Dispose();
+            return text;
         }
     }
 

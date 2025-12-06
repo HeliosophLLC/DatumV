@@ -295,6 +295,15 @@ public sealed class ExecutionContext
     public int? MaxStratifyClasses { get; init; }
 
     /// <summary>
+    /// Optional per-query tracer for <c>models.X(...)</c> invocations. The
+    /// interactive shell wires this up via <c>.trace on</c> to print a
+    /// per-dispatch log. <see langword="null"/> when tracing isn't enabled —
+    /// <see cref="Operators.ModelInvocationOperator"/> short-circuits the
+    /// hook in that case.
+    /// </summary>
+    public IModelInvocationTracer? ModelTracer { get; init; }
+
+    /// <summary>
     /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each
     /// <see cref="DatumFile.Sidecar.IBlobSource"/> in the catalog has a unique
     /// <c>storeId</c> byte stamped onto its DataValues at decode time; image

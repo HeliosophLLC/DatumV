@@ -5,6 +5,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
 using DatumIngest.Models.Llama;
 using DatumIngest.Models.Onnx;
+using DatumIngest.Models.Onnx.PaliGemma;
 using DatumIngest.Models.Onnx.Whisper;
 using DatumIngest.Models.Python;
 
@@ -87,6 +88,7 @@ public static class BuiltinModels
         // 'missing'` with re-download hints.
         RegisterLlama31(modelCatalog);
         RegisterPhi3(modelCatalog);
+        RegisterPhi35Mini(modelCatalog);
         RegisterTinyLlama(modelCatalog);
         RegisterGemma22b(modelCatalog);
         RegisterQwen25Coder(modelCatalog);
@@ -101,6 +103,13 @@ public static class BuiltinModels
         RegisterWhisperBase(modelCatalog);
         RegisterWhisperSmall(modelCatalog);
         RegisterWhisperMedium(modelCatalog);
+
+        // PaliGemma 2 captioner zoo. Two resolutions: the 224 variant
+        // for cheap iteration, the 448 variant as the better default.
+        // Both report status=missing until their optimum-cli output
+        // folders land.
+        RegisterPaliGemma2Mix224(modelCatalog);
+        RegisterPaliGemma2Mix448(modelCatalog);
 
         // Python-bridge models. These show status=bridge in system.models
         // (rather than available/missing) when their worker scripts and
@@ -229,8 +238,16 @@ public static class BuiltinModels
         ModelCatalog catalog,
         string modelName = "llama31_8b",
         string modelFilename = Llama31_8BDefaultFilename,
-        uint contextSize = 4096,
-        int maxTokens = 256,
+        // Llama 3.1 was trained for 128K native. Defaults are sized for
+        // long-form creative output without truncation: 32K context lets
+        // the prompt grow well past 20K tokens (chained captions + system
+        // prompt + multi-shot examples + previous campaign context) while
+        // leaving room for an 8K-token generation. ~2 GB KV cache on 8B
+        // Q4_K_M, so total resident VRAM is ~7 GB -- comfortable on a 24 GB
+        // card alongside SDXL / Whisper / Kokoro. Bump to 65536 / 16384
+        // for the rare campaign-spanning generation that needs more.
+        uint contextSize = 32768,
+        int maxTokens = 8192,
         float temperature = 0.7f)
     {
         catalog.Register(new ModelCatalogEntry(
@@ -319,6 +336,70 @@ public static class BuiltinModels
             License: "MIT",
             LicenseHolder: "Microsoft",
             SourceUrl: "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"],
+            Files: [modelFilename]));
+    }
+
+    /// <summary>Default filename for Phi-3.5-mini-instruct (bartowski's GGUF mirror, Q4_K_M).</summary>
+    public const string Phi35MiniDefaultFilename = "Phi-3.5-mini-instruct-Q4_K_M.gguf";
+
+    /// <summary>
+    /// Registers Microsoft's Phi-3.5-mini-instruct under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"phi35_mini"</c>).
+    /// Same architecture as Phi-3-mini but trained natively for 128K
+    /// context — long-prompt rewrites that NoKvSlot on
+    /// <c>phi3_mini</c> (4K-trained) fit comfortably here. Slightly
+    /// better instruction-following than Phi-3 across the board.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Why pick Phi-3.5-mini over Phi-3-mini?</strong> Phi-3-mini
+    /// shipped two variants — 4K and 128K. Our default <c>phi3_mini</c>
+    /// uses the 4K-trained GGUF, which has a hard ceiling at 4096 tokens
+    /// (RoPE doesn't extrapolate cleanly). Phi-3.5-mini supersedes both;
+    /// it's the recommended Phi entry for any pipeline that chains
+    /// captions + system prompts + multi-paragraph generation.
+    /// </para>
+    /// <para>
+    /// <strong>Setup</strong> — download the bartowski GGUF:
+    /// <code>
+    /// huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF `
+    ///   Phi-3.5-mini-instruct-Q4_K_M.gguf `
+    ///   --local-dir $env:DATUM_MODELS
+    /// </code>
+    /// ~2.4 GB. Same chat template as Phi-3 (<c>LlamaChatTemplate.Phi3</c>);
+    /// LlamaSharp handles both transparently.
+    /// </para>
+    /// </remarks>
+    public static void RegisterPhi35Mini(
+        ModelCatalog catalog,
+        string modelName = "phi35_mini",
+        string modelFilename = Phi35MiniDefaultFilename,
+        // 128K-native; 16K is a comfortable mid-point matching Llama 3.1.
+        // Bump higher if your prompts routinely exceed ~12K tokens.
+        uint contextSize = 16384,
+        int maxTokens = 4096,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Phi-3.5-mini Instruct (128K)",
+            Parameters: "3.8B",
+            License: "MIT",
+            LicenseHolder: "Microsoft",
+            SourceUrl: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF",
             Category: "llm",
             Modalities: ["text"],
             Files: [modelFilename]));
@@ -1436,6 +1517,108 @@ public static class BuiltinModels
     public static void RegisterWhisperMedium(ModelCatalog catalog, string modelName = "whisper_medium")
         => RegisterWhisperVariant(catalog, modelName, WhisperMediumFolder,
             displayName: "Whisper Medium", parameters: "769M", maxTokens: 224);
+
+    // ───────────────────────── PaliGemma 2 captioner ─────────────────────────
+    //
+    // Google's vision-language model: SigLIP encoder + Gemma 2B decoder
+    // with a learned linear projector. The "mix" variants are pre-finetuned
+    // on captioning + VQA + OCR so they handle generic prompts well. We
+    // register at 448x448 by default (better fine-detail than 224); the
+    // 224 variant is a separate registration for cheaper iteration.
+
+    /// <summary>Default folder for PaliGemma 2 mix-224 (faster, less detail).</summary>
+    public const string PaliGemma2Mix224Folder = "paligemma2-3b-mix-224-onnx";
+
+    /// <summary>Default folder for PaliGemma 2 mix-448 (slower, fine-detail aware).</summary>
+    public const string PaliGemma2Mix448Folder = "paligemma2-3b-mix-448-onnx";
+
+    /// <summary>
+    /// Files needed for any PaliGemma 2 install (relative to its variant
+    /// folder). Multi-file model — vision encoder + token embedder +
+    /// autoregressive decoder + tokenizer.
+    /// </summary>
+    private static IReadOnlyList<string> PaliGemma2Files(string folder) =>
+    [
+        $"{folder}/vision_encoder.onnx",
+        $"{folder}/embed_tokens.onnx",
+        $"{folder}/decoder_model.onnx",
+        // optimum may also produce decoder_model_merged.onnx /
+        // decoder_with_past_model.onnx; we only need decoder_model.onnx
+        // for the no-cache path. Skip them in the file list to keep
+        // status checks clean.
+        $"{folder}/vocab.json",
+        $"{folder}/merges.txt",
+        $"{folder}/tokenizer.json",
+        $"{folder}/config.json",
+    ];
+
+    /// <summary>
+    /// Common backbone for the PaliGemma 2 size variants. Each public
+    /// <c>RegisterPaliGemma2*</c> wraps this with size-specific
+    /// folder + display metadata.
+    /// </summary>
+    private static void RegisterPaliGemma2Variant(
+        ModelCatalog catalog,
+        string modelName,
+        string folder,
+        string displayName,
+        string defaultPrompt,
+        int maxTokens)
+    {
+        string visionEncoderRelativePath = $"{folder}/vision_encoder.onnx";
+
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: visionEncoderRelativePath,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.String,
+            // Greedy decoding from a fixed prefix → reproducible.
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string visionEncoderPath = Path.Combine(ctx.ModelDirectory, visionEncoderRelativePath);
+                return new PaliGemmaModel(modelName, visionEncoderPath, defaultPrompt, maxTokens);
+            },
+            DisplayName: displayName,
+            Parameters: "3B",
+            License: "Gemma Terms",
+            LicenseHolder: "Google",
+            SourceUrl: "https://huggingface.co/google/paligemma2-3b-mix-448",
+            Category: "captioner",
+            Modalities: ["image", "text"],
+            Files: PaliGemma2Files(folder)));
+    }
+
+    /// <summary>
+    /// Registers PaliGemma 2 mix-224 — faster captioner (256 image tokens
+    /// vs 1024 for the 448 variant). Use for cheaper iteration; the 448
+    /// variant is the better default for fine-detail scene art.
+    /// </summary>
+    public static void RegisterPaliGemma2Mix224(
+        ModelCatalog catalog,
+        string modelName = "paligemma2_224",
+        string defaultPrompt = "caption en",
+        int maxTokens = 100)
+        => RegisterPaliGemma2Variant(catalog, modelName, PaliGemma2Mix224Folder,
+            displayName: "PaliGemma 2 mix-224 (Captioner)",
+            defaultPrompt: defaultPrompt,
+            maxTokens: maxTokens);
+
+    /// <summary>
+    /// Registers PaliGemma 2 mix-448 — high-detail captioner. 1024 image
+    /// tokens give noticeably better fine-detail recognition than the 224
+    /// variant; ~3-4× slower per call. Default for D&amp;D scene art.
+    /// </summary>
+    public static void RegisterPaliGemma2Mix448(
+        ModelCatalog catalog,
+        string modelName = "paligemma2_448",
+        string defaultPrompt = "caption en",
+        int maxTokens = 100)
+        => RegisterPaliGemma2Variant(catalog, modelName, PaliGemma2Mix448Folder,
+            displayName: "PaliGemma 2 mix-448 (Captioner)",
+            defaultPrompt: defaultPrompt,
+            maxTokens: maxTokens);
 
     /// <summary>
     /// Registers Kokoro-82M TTS under the catalog name <paramref name="modelName"/>
