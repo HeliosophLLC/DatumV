@@ -64,6 +64,14 @@ internal static class CudaRuntimeProbe
     /// </summary>
     public static (Result Outcome, string? Directory) EnsureOnPath()
     {
+        // Run cuDNN discovery on every call. The cuDNN install directory is
+        // independent of the CUDA Runtime; LLamaSharp didn't need it but
+        // ONNX Runtime's CUDA EP does. Idempotent: if already on PATH,
+        // EnsureCudnnOnPath is a no-op. We don't gate cuDNN discovery on
+        // CUDA Runtime status because cuDNN's bin dir might already be on
+        // PATH even when cudart isn't.
+        EnsureCudnnOnPath();
+
         if (IsCudartOnPath())
         {
             return (Result.FoundOnPath, null);
@@ -80,6 +88,120 @@ internal static class CudaRuntimeProbe
         }
 
         return (Result.NotFound, null);
+    }
+
+    /// <summary>
+    /// Locates an installed cuDNN 9.x bin directory and prepends it to the
+    /// process PATH. cuDNN is required by ONNX Runtime's CUDA EP but not by
+    /// LLamaSharp (llama.cpp implements its own GEMM). Standard install
+    /// locations on Windows:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>C:\Program Files\NVIDIA\CUDNN\v9.x\bin\&lt;cuda-major.minor&gt;\x64</c> —
+    ///     NVIDIA's modern cuDNN installer layout. cuDNN 9.x ships DLLs
+    ///     organised by the CUDA version they were built against (e.g.
+    ///     <c>12.9</c>, <c>13.2</c>); we walk each <c>v9.*</c> install and
+    ///     pick the highest-versioned <c>12.*</c> subdirectory.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin</c> —
+    ///     when users have copied cuDNN DLLs directly into the CUDA Toolkit
+    ///     bin folder (the older recommended layout, before cuDNN got its
+    ///     own installer).
+    ///   </description></item>
+    /// </list>
+    /// Idempotent: if cuDNN is already on PATH, returns without changes.
+    /// Non-fatal on failure: caller proceeds and CUDA EP load reports the
+    /// underlying error.
+    /// </summary>
+    private static void EnsureCudnnOnPath()
+    {
+        if (IsCudnnOnPath()) return;
+
+        foreach (string candidate in BundledCudnnPaths())
+        {
+            if (HasCudnnDlls(candidate))
+            {
+                PrependToProcessPath(candidate);
+                return;
+            }
+        }
+    }
+
+    private static IEnumerable<string> BundledCudnnPaths()
+    {
+        // 1) NVIDIA cuDNN installer layout: C:\Program Files\NVIDIA\CUDNN\v9.x\bin\<cuda-version>\x64
+        string cudnnRoot = @"C:\Program Files\NVIDIA\CUDNN";
+        if (Directory.Exists(cudnnRoot))
+        {
+            foreach (string installDir in Directory.EnumerateDirectories(cudnnRoot, "v9.*")
+                .OrderByDescending(d => d, StringComparer.OrdinalIgnoreCase))
+            {
+                string binRoot = Path.Combine(installDir, "bin");
+                if (!Directory.Exists(binRoot)) continue;
+
+                // Prefer 12.* CUDA-version subdirectories; sort descending so
+                // 12.9 is preferred over 12.6 when both are present.
+                IOrderedEnumerable<string> cudaDirs = Directory.EnumerateDirectories(binRoot, "12.*")
+                    .OrderByDescending(d => d, StringComparer.OrdinalIgnoreCase);
+                foreach (string cudaDir in cudaDirs)
+                {
+                    string x64Dir = Path.Combine(cudaDir, "x64");
+                    if (Directory.Exists(x64Dir)) yield return x64Dir;
+                }
+            }
+        }
+
+        // 2) cuDNN copied into CUDA Toolkit bin (older convention).
+        string toolkitRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
+        if (Directory.Exists(toolkitRoot))
+        {
+            foreach (string versionDir in Directory.EnumerateDirectories(toolkitRoot, "v12.*"))
+            {
+                yield return Path.Combine(versionDir, "bin");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tests whether the canonical cuDNN umbrella loader (<c>cudnn64_9.dll</c>)
+    /// is reachable via the current process PATH. cuDNN 9 ships several
+    /// DLLs (<c>cudnn_graph64_9.dll</c>, <c>cudnn_ops64_9.dll</c>, etc.); we
+    /// probe for the umbrella because it's required and its presence
+    /// implies the rest were extracted alongside it.
+    /// </summary>
+    private static bool IsCudnnOnPath()
+    {
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path)) return false;
+
+        foreach (string dir in path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(dir, "cudnn64_9.dll"))) return true;
+            }
+            catch
+            {
+                // Same defensive skip as IsCudartOnPath — malformed PATH
+                // entries shouldn't break startup.
+            }
+        }
+        return false;
+    }
+
+    private static bool HasCudnnDlls(string directory)
+    {
+        try
+        {
+            // cuDNN 9 split the monolithic DLL into several. We require at
+            // least the umbrella loader; the others sit alongside.
+            return File.Exists(Path.Combine(directory, "cudnn64_9.dll"));
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -129,7 +129,7 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
                 "Both encoder_model.onnx and decoder_model.onnx must be in the same directory.",
                 decoderPath);
         }
-        _decoderSession = new InferenceSession(decoderPath);
+        _decoderSession = OnnxSessionFactory.Create(decoderPath);
 
         string vocabPath = Path.Combine(modelDirectory, "vocab.json");
         string mergesPath = Path.Combine(modelDirectory, "merges.txt");

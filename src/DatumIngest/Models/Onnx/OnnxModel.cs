@@ -69,7 +69,11 @@ public abstract class OnnxModel : IModel, IDisposable
         InputKinds = inputKinds;
         OutputKind = outputKind;
         IsDeterministic = isDeterministic;
-        Session = new InferenceSession(modelFilePath);
+        // Centralised session creation routes through the factory so
+        // every ONNX model tries CUDA first and falls back to CPU
+        // consistently. Without this, ONNX models silently run on CPU
+        // even when the machine has a capable GPU.
+        Session = OnnxSessionFactory.Create(modelFilePath);
     }
 
     /// <summary>

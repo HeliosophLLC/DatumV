@@ -147,9 +147,9 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
             }
         }
 
-        _textEncoderSession = new InferenceSession(textEncoderPath);
-        _unetSession = new InferenceSession(unetPath);
-        _vaeDecoderSession = new InferenceSession(vaeDecoderPath);
+        _textEncoderSession = OnnxSessionFactory.Create(textEncoderPath);
+        _unetSession = OnnxSessionFactory.Create(unetPath);
+        _vaeDecoderSession = OnnxSessionFactory.Create(vaeDecoderPath);
 
         using FileStream vocabStream = File.OpenRead(vocabPath);
         using FileStream mergesStream = File.OpenRead(mergesPath);

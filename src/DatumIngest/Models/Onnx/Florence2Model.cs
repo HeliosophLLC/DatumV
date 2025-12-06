@@ -489,7 +489,7 @@ public sealed class Florence2Model : OnnxModel
                 "must share a quantization variant and live in the same folder.",
                 path);
         }
-        return new InferenceSession(path);
+        return OnnxSessionFactory.Create(path);
     }
 
     /// <summary>

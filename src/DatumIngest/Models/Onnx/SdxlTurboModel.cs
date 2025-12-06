@@ -147,10 +147,10 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             }
         }
 
-        _textEncoder1Session = new InferenceSession(textEncoder1Path);
-        _textEncoder2Session = new InferenceSession(textEncoder2Path);
-        _unetSession = new InferenceSession(unetPath);
-        _vaeDecoderSession = new InferenceSession(vaeDecoderPath);
+        _textEncoder1Session = OnnxSessionFactory.Create(textEncoder1Path);
+        _textEncoder2Session = OnnxSessionFactory.Create(textEncoder2Path);
+        _unetSession = OnnxSessionFactory.Create(unetPath);
+        _vaeDecoderSession = OnnxSessionFactory.Create(vaeDecoderPath);
 
         using FileStream vocabStream = File.OpenRead(vocabPath);
         using FileStream mergesStream = File.OpenRead(mergesPath);
