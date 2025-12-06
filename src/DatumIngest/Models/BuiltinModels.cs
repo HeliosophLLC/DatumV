@@ -1303,9 +1303,8 @@ public static class BuiltinModels
             RelativePath: BarkSmallVenvAnchor,
             InputKinds: [DataKind.String],
             // PCM_16 mono WAV bytes at the model's configured sample rate
-            // (24kHz for both bark and bark-small). Carried as Image
-            // (byte payload) until DataKind.Audio lands.
-            OutputKind: DataKind.Image,
+            // (24kHz for both bark and bark-small).
+            OutputKind: DataKind.Audio,
             IsDeterministic: false,
             Loader: ctx =>
             {
@@ -1314,7 +1313,7 @@ public static class BuiltinModels
                 return new PythonBackedModel(
                     name: modelName,
                     inputKinds: [DataKind.String],
-                    outputKind: DataKind.Image,
+                    outputKind: DataKind.Audio,
                     isDeterministic: false,
                     scriptPath: resolvedScriptPath,
                     pythonExecutable: py,
@@ -1399,8 +1398,7 @@ public static class BuiltinModels
             Name: modelName,
             Backend: "onnx",
             RelativePath: encoderRelativePath,
-            // Audio bytes (WAV) carried as Image until DataKind.Audio lands.
-            InputKinds: [DataKind.Image],
+            InputKinds: [DataKind.Audio],
             OutputKind: DataKind.String,
             // Greedy decoding from a fixed prefix → reproducible.
             IsDeterministic: true,
@@ -1529,7 +1527,7 @@ public static class BuiltinModels
             // The voices bundle/dir is captured in Files below.
             RelativePath: onnxFilename,
             InputKinds: [DataKind.String],
-            OutputKind: DataKind.Image,
+            OutputKind: DataKind.Audio,
             // Same (text, voice, speed) -> same audio. Lets the planner CSE
             // duplicate call sites within a query.
             IsDeterministic: true,
@@ -1546,7 +1544,7 @@ public static class BuiltinModels
                 return new PythonBackedModel(
                     name: modelName,
                     inputKinds: [DataKind.String],
-                    outputKind: DataKind.Image,
+                    outputKind: DataKind.Audio,
                     isDeterministic: true,
                     scriptPath: resolvedScriptPath,
                     pythonExecutable: py,

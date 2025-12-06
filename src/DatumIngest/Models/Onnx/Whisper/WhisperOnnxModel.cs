@@ -93,7 +93,7 @@ public sealed class WhisperOnnxModel : OnnxModel
         : base(
             name,
             encoderModelFilePath,
-            inputKinds: [DataKind.Image],   // WAV bytes, carried as Image until DataKind.Audio lands
+            inputKinds: [DataKind.Audio],
             outputKind: DataKind.String,
             isDeterministic: true)
     {

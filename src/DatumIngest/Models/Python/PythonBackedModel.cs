@@ -28,7 +28,7 @@ namespace DatumIngest.Models.Python;
 /// <para>
 /// <strong>Value encoding.</strong> Inputs and outputs flow as JSON. The
 /// supported kinds are the ones an experimentation pipeline actually
-/// needs — String, Image (bytes), byte arrays (UInt8 + IsArray), and
+/// needs — String, Image / Audio / Video (byte payloads), byte arrays (UInt8 + IsArray), and
 /// numerics/booleans. Encoding rules:
 /// <list type="bullet">
 ///   <item><description>Null values map to JSON <c>null</c>.</description></item>
@@ -199,8 +199,11 @@ public sealed class PythonBackedModel : IModel, IDisposable
 
         DataKind kind = value.Kind;
 
-        // Byte payloads — encode as {"_bytes": "<base64>"}.
-        if (kind == DataKind.Image || (kind == DataKind.UInt8 && value.IsArray))
+        // Byte payloads — encode as {"_bytes": "<base64>"}. Image/Audio/Video
+        // and (UInt8 + IsArray) all share the byte-content shape; the kind
+        // tag distinguishes them downstream.
+        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video
+            || (kind == DataKind.UInt8 && value.IsArray))
         {
             byte[] bytes = value.AsBytes();
             return new JsonObject
@@ -238,7 +241,7 @@ public sealed class PythonBackedModel : IModel, IDisposable
             DataKind.Float64 => JsonValue.Create(value.AsFloat64()),
             _ => throw new NotSupportedException(
                 $"PythonBackedModel cannot encode DataKind.{kind} (IsArray={value.IsArray}). "
-                + "Supported kinds: String, Image, byte arrays (UInt8 + IsArray), Boolean, "
+                + "Supported kinds: String, Image / Audio / Video (byte payloads), byte arrays (UInt8 + IsArray), Boolean,"
                 + "and integer/floating-point primitives."),
         };
     }
@@ -273,9 +276,9 @@ public sealed class PythonBackedModel : IModel, IDisposable
         if (node is JsonObject obj && obj["_bytes"] is JsonNode b64)
         {
             byte[] bytes = Convert.FromBase64String(b64.GetValue<string>());
-            if (expectedKind == DataKind.Image)
+            if (expectedKind is DataKind.Image or DataKind.Audio or DataKind.Video)
             {
-                return ValueRef.FromBytes(DataKind.Image, bytes);
+                return ValueRef.FromBytes(expectedKind, bytes);
             }
             if (expectedKind == DataKind.UInt8)
             {
@@ -283,7 +286,7 @@ public sealed class PythonBackedModel : IModel, IDisposable
             }
             throw new PythonProcessException(
                 $"Python worker '{Name}' returned bytes for row {rowIndex} but OutputKind is {expectedKind}. " +
-                "Set OutputKind to Image or UInt8 (with IsArray=true) for byte-returning models.");
+                "Set OutputKind to Image / Audio / Video, or UInt8 (with IsArray=true), for byte-returning models.");
         }
 
         // Scalar paths — pick the right factory by the catalog-declared kind.
@@ -309,7 +312,7 @@ public sealed class PythonBackedModel : IModel, IDisposable
             default:
                 throw new NotSupportedException(
                     $"PythonBackedModel '{Name}' cannot decode DataKind.{expectedKind} outputs. " +
-                    "Supported kinds: String, Image, byte arrays (UInt8 + IsArray), Boolean, " +
+                    "Supported kinds: String, Image / Audio / Video (byte payloads), byte arrays (UInt8 + IsArray), Boolean," +
                     "and integer/floating-point primitives.");
         }
     }

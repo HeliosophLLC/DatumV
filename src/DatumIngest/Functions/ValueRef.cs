@@ -197,24 +197,24 @@ public readonly struct ValueRef
         new(DataValue.Null(DataKind.String), value);
 
     /// <summary>
-    /// Byte-array payload. Pass <see cref="DataKind.Image"/> for image bytes,
-    /// or <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set
-    /// to <c>true</c> for generic byte arrays. The DataValue tag carries the
-    /// kind (and IsArray flag for byte arrays); the actual bytes live in
-    /// <see cref="Materialized"/>.
+    /// Byte-array payload. Pass <see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
+    /// or <see cref="DataKind.Video"/> for the corresponding encoded-blob kinds, or
+    /// <see cref="DataKind.UInt8"/> with <paramref name="isArray"/> set to <c>true</c>
+    /// for generic byte arrays. The DataValue tag carries the kind (and IsArray flag
+    /// for byte arrays); the actual bytes live in <see cref="Materialized"/>.
     /// </summary>
     public static ValueRef FromBytes(DataKind kind, byte[] value, bool isArray = false)
     {
-        if (kind == DataKind.Image)
+        if (kind is DataKind.Image or DataKind.Audio or DataKind.Video)
         {
-            return new(DataValue.Null(DataKind.Image), value);
+            return new(DataValue.Null(kind), value);
         }
         if (kind == DataKind.UInt8 && isArray)
         {
             return new(DataValue.NullByteArray(), value);
         }
         throw new ArgumentException(
-            $"FromBytes is only valid for Image or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
+            $"FromBytes is only valid for Image/Audio/Video or (UInt8 with IsArray=true); got {kind}, isArray={isArray}.",
             nameof(kind));
     }
 
@@ -550,6 +550,10 @@ public readonly struct ValueRef
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Image && !_inline.IsArray =>
                 DataValue.FromImage(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Audio && !_inline.IsArray =>
+                DataValue.FromAudio(bytes, targetStore),
+            byte[] bytes when _inline.Kind == DataKind.Video && !_inline.IsArray =>
+                DataValue.FromVideo(bytes, targetStore),
             ValueRef[] elements when _inline.IsArray =>
                 BuildTypedArray(_inline.Kind, elements, targetStore),
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
