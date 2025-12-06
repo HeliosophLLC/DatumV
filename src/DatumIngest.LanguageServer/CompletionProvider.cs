@@ -199,6 +199,11 @@ public sealed class CompletionProvider
             case CompletionZoneKind.InsideTablesampleArg:
                 // No schema completions — the argument is a numeric literal (percentage or count).
                 break;
+
+            case CompletionZoneKind.InsideStringOrComment:
+                // Cursor is inside a string or comment — suppress all completions
+                // so e.g. ALTER doesn't get inserted while the user types a literal.
+                break;
         }
 
         // Filter by prefix if the user has partially typed something.

@@ -26,6 +26,15 @@ public static class CompletionContext
         // Only analyze text up to the cursor position.
         string textToCursor = sql[..System.Math.Min(cursorOffset, sql.Length)];
 
+        // If the cursor sits inside an unclosed string literal or comment, no
+        // completions make sense. The tokenizer fails on these inputs and would
+        // otherwise leave us at StatementStart, surfacing DDL keywords (ALTER
+        // first by alphabet) inside the user's typed string.
+        if (IsCursorInsideStringOrComment(textToCursor))
+        {
+            return new CompletionZone(CompletionZoneKind.InsideStringOrComment, Prefix: null, TableQualifier: null);
+        }
+
         // Tokenize — the tokenizer may fail on incomplete input, which is fine.
         List<TokenInfo> tokens = TokenizeSafely(textToCursor);
 
@@ -484,6 +493,79 @@ public static class CompletionContext
         return kind < SqlToken.Identifier;
     }
 
+    /// <summary>
+    /// Scans the text from start to cursor and returns <c>true</c> when the
+    /// cursor sits inside an unclosed single-quoted string, line comment, or
+    /// block comment. Mirrors the tokenizer's grammar (<c>''</c> escape inside
+    /// strings, <c>--</c> through end of line, <c>/* ... */</c> block) so that
+    /// what counts as "inside" agrees with how the SQL is parsed.
+    /// </summary>
+    private static bool IsCursorInsideStringOrComment(string text)
+    {
+        int end = text.Length;
+        int i = 0;
+        while (i < end)
+        {
+            char c = text[i];
+
+            // Line comment: -- through end of line.
+            if (c == '-' && i + 1 < end && text[i + 1] == '-')
+            {
+                i += 2;
+                while (i < end && text[i] != '\n') i++;
+                if (i >= end) return true;
+                i++; // consume newline
+                continue;
+            }
+
+            // Block comment: /* ... */
+            if (c == '/' && i + 1 < end && text[i + 1] == '*')
+            {
+                i += 2;
+                bool closed = false;
+                while (i + 1 < end)
+                {
+                    if (text[i] == '*' && text[i + 1] == '/')
+                    {
+                        i += 2;
+                        closed = true;
+                        break;
+                    }
+                    i++;
+                }
+                if (!closed) return true;
+                continue;
+            }
+
+            // Single-quoted string with '' escape.
+            if (c == '\'')
+            {
+                i++; // consume opening quote
+                bool closed = false;
+                while (i < end)
+                {
+                    if (text[i] == '\'')
+                    {
+                        if (i + 1 < end && text[i + 1] == '\'')
+                        {
+                            i += 2; // doubled-quote escape, still inside the string
+                            continue;
+                        }
+                        i++; // consume closing quote
+                        closed = true;
+                        break;
+                    }
+                    i++;
+                }
+                if (!closed) return true;
+                continue;
+            }
+
+            i++;
+        }
+        return false;
+    }
+
     private static bool IsSqlSymbol(char character)
     {
         return character is '(' or ')' or ',' or '.' or '*' or '=' or '<' or '>' or
@@ -612,4 +694,7 @@ public enum CompletionZoneKind
 
     /// <summary>Inside TABLESAMPLE method argument parens — indicate expected argument type (percentage or count).</summary>
     InsideTablesampleArg,
+
+    /// <summary>Cursor sits inside an unclosed string literal or comment — no completions are appropriate.</summary>
+    InsideStringOrComment,
 }

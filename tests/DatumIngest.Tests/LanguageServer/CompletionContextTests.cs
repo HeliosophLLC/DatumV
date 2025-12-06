@@ -445,4 +445,73 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.Equal(CompletionZoneKind.InsideTablesampleArg, zone.Kind);
     }
+
+    // ───────────────────── Inside string / comment ─────────────────────
+
+    [Fact]
+    public void Classify_InsideUnclosedSingleQuote_ReturnsInsideStringOrComment()
+    {
+        // Cursor at offset 24, just after "al" inside an unclosed string.
+        string sql = "SELECT * FROM t WHERE n = 'al";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterClosedSingleQuote_DoesNotReturnInsideStringOrComment()
+    {
+        // After the closing quote we're back in expression context.
+        string sql = "SELECT * FROM t WHERE n = 'al' ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideEscapedSingleQuoteString_ReturnsInsideStringOrComment()
+    {
+        // 'it''s ho — '' is the SQL escape for a single quote inside a string,
+        // so the string is still open at the cursor.
+        string sql = "SELECT 'it''s ho";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideLineComment_ReturnsInsideStringOrComment()
+    {
+        string sql = "SELECT * -- pick the b";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterLineCommentNewline_DoesNotReturnInsideStringOrComment()
+    {
+        string sql = "SELECT * -- comment\nFROM ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideUnclosedBlockComment_ReturnsInsideStringOrComment()
+    {
+        string sql = "SELECT /* note ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterClosedBlockComment_DoesNotReturnInsideStringOrComment()
+    {
+        string sql = "SELECT /* note */ ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
 }
