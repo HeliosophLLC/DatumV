@@ -6,6 +6,7 @@ using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
+using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution;
@@ -288,6 +289,40 @@ public sealed class QueryPlanner
             FlattenAnd(statement.Where, pendingPredicates);
         }
 
+        // Hold back any WHERE predicate that references a LET binding name.
+        // PushPredicatesBelow treats unqualified-only predicates as "globally
+        // pushable" and wraps them directly above the source — but a LET-
+        // referencing predicate can't safely evaluate there because the LET's
+        // hidden column hasn't been computed yet. The held-back predicates are
+        // processed in step 3 below by LiftLetBindingsForWhere, which inserts
+        // the LET rungs first and only then wraps a Filter above them.
+        List<Expression>? letReferencingPredicates = null;
+        if (statement.LetBindings is { Count: > 0 } && pendingPredicates is { Count: > 0 })
+        {
+            HashSet<string> letNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (LetBinding b in statement.LetBindings) letNames.Add(b.Name);
+
+            for (int i = pendingPredicates.Count - 1; i >= 0; i--)
+            {
+                bool referencesLet = false;
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(pendingPredicates[i]))
+                {
+                    if (tableName is null && letNames.Contains(columnName))
+                    {
+                        referencesLet = true;
+                        break;
+                    }
+                }
+                if (referencesLet)
+                {
+                    letReferencingPredicates ??= new List<Expression>();
+                    letReferencingPredicates.Add(pendingPredicates[i]);
+                    pendingPredicates.RemoveAt(i);
+                }
+            }
+        }
+
         if (statement.Joins is not null)
         {
             // Pre-plan all join sources so we can inspect estimated row counts.
@@ -440,16 +475,33 @@ public sealed class QueryPlanner
         }
 
         // 3. Apply remaining WHERE predicates that could not be pushed down.
+        IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
         if (pendingPredicates is not null && pendingPredicates.Count > 0)
         {
             Expression remaining = CombineWithAnd(pendingPredicates);
             source = new FilterOperator(source, remaining);
         }
 
+        // 3a. LET-from-WHERE visibility (Phase 1). Predicates referencing LET
+        // bindings stayed out of pushdown. Lift each referenced LET into a
+        // RowEnricher / ModelInvocation rung between the source and a fresh
+        // Filter, so the synthesised hidden column is on the row by the time
+        // the predicate evaluates. Lifted bindings are replaced with pass-
+        // through column references in `userLetBindings` — the downstream
+        // projection still names them but the "evaluation" is just a column
+        // read. Aggregate / window LET bodies are rejected here with a clear
+        // diagnostic pointing at HAVING / QUALIFY.
+        if (letReferencingPredicates is { Count: > 0 })
+        {
+            Expression letPredicate = CombineWithAnd(letReferencingPredicates);
+            (source, letPredicate, userLetBindings) = LiftLetBindingsForWhere(
+                source, letPredicate, userLetBindings);
+            source = new FilterOperator(source, letPredicate);
+        }
+
         // 3b. GROUP BY / aggregation.
         // Desugar CROSS VALIDATE into a synthetic LET binding before any rewriting pass.
         // The fold expression is: CAST(FLOOR(hash_split(key, seed) * k) AS Int32)
-        IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
         GroupByClause? groupBy = statement.GroupBy;
         if (statement.CrossValidate is CrossValidateClause cv)
         {
@@ -3000,6 +3052,308 @@ public sealed class QueryPlanner
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Phase 1 of LET-from-WHERE visibility. When the residual WHERE predicate
+    /// references one or more LET binding names, lift those bindings into rungs
+    /// below the FilterOperator so the synthesised hidden columns are on the
+    /// row when the predicate evaluates. The set of lifted bindings is
+    /// transitively closed (a lifted binding that references another LET name
+    /// drags that one along too).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pure-scalar LET bodies become <see cref="RowEnricherOperator"/> rungs.
+    /// LET bodies that are exactly a <c>models.*</c> call become
+    /// <see cref="ModelInvocationOperator"/> rungs. Mixed bodies (scalar
+    /// expressions wrapping a model call) are out of scope for Phase 1 — the
+    /// existing model hoister can lift them later when run against the
+    /// projection.
+    /// </para>
+    /// <para>
+    /// Aggregate- or window-derived LET bodies are rejected with a clear
+    /// "use HAVING" / "use QUALIFY" diagnostic — those clauses run after
+    /// WHERE so they cannot be staged below the Filter.
+    /// </para>
+    /// <para>
+    /// Lifted bindings stay in the returned <see cref="LetBinding"/> list as
+    /// pass-through references (their <c>Expression</c> becomes a
+    /// <see cref="ColumnReference"/> to the synthetic column). This keeps the
+    /// downstream projection-side LET handling intact — the binding is still
+    /// "evaluated" inside the projection, but the evaluation is now a no-op
+    /// column read because the value already lives on the row.
+    /// </para>
+    /// </remarks>
+    private (IQueryOperator Source, Expression Predicate, IReadOnlyList<LetBinding>? LetBindings)
+        LiftLetBindingsForWhere(
+            IQueryOperator source,
+            Expression predicate,
+            IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null || letBindings.Count == 0)
+        {
+            return (source, predicate, letBindings);
+        }
+
+        // Step 1: which LET names does WHERE reference directly?
+        HashSet<string> allLetNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, LetBinding> bindingByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (LetBinding b in letBindings)
+        {
+            allLetNames.Add(b.Name);
+            bindingByName[b.Name] = b;
+        }
+
+        HashSet<string> liftedNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string? tableName, string columnName) in
+            ColumnReferenceCollector.Collect(predicate))
+        {
+            if (tableName is null && allLetNames.Contains(columnName))
+            {
+                liftedNames.Add(columnName);
+            }
+        }
+
+        if (liftedNames.Count == 0)
+        {
+            return (source, predicate, letBindings);
+        }
+
+        // Step 2: transitive closure. A lifted binding that mentions another
+        // LET in its body forces that one to lift too.
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (string n in liftedNames.ToArray())
+            {
+                LetBinding b = bindingByName[n];
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(b.Expression))
+                {
+                    if (tableName is null && allLetNames.Contains(columnName)
+                        && liftedNames.Add(columnName))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Step 3: validate. Aggregate / window bodies can't lift below WHERE.
+        foreach (string n in liftedNames)
+        {
+            LetBinding b = bindingByName[n];
+            if (ExpressionContainsAggregate(b.Expression, _functionRegistry))
+            {
+                throw new InvalidOperationException(
+                    $"LET binding '{n}' is referenced from WHERE but its body contains an " +
+                    $"aggregate function. Aggregates are computed after GROUP BY — use " +
+                    $"HAVING instead of WHERE to filter on aggregate results.");
+            }
+            if (ExpressionContainsWindowFunction(b.Expression))
+            {
+                throw new InvalidOperationException(
+                    $"LET binding '{n}' is referenced from WHERE but its body contains a " +
+                    $"window function. Window functions are computed after GROUP BY — use " +
+                    $"QUALIFY instead of WHERE to filter on window results.");
+            }
+        }
+
+        // Step 4: topo-order the lifted bindings. Inner deps first.
+        Dictionary<string, Expression> hoists = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string n in liftedNames)
+        {
+            hoists[n] = bindingByName[n].Expression;
+        }
+        List<List<string>> levels = HoistDependencyOrdering.OrderByDependency(hoists);
+
+        // Step 5: assign synthetic column names and build the staircase. One
+        // rung per level: scalar bindings group into a single RowEnricher,
+        // model bindings each get their own MIO.
+        Dictionary<string, string> nameToSynth = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string n in liftedNames)
+        {
+            nameToSynth[n] = $"__let_{n}_pre";
+        }
+
+        foreach (List<string> level in levels)
+        {
+            List<RowEnrichment> enrichments = new();
+            foreach (string n in level)
+            {
+                LetBinding b = bindingByName[n];
+                Expression rewrittenBody = ReplaceLetNameRefs(b.Expression, nameToSynth);
+
+                if (rewrittenBody is FunctionCallExpression fn
+                    && fn.FunctionName.StartsWith("models.", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_catalog.Models is null)
+                    {
+                        throw new InvalidOperationException(
+                            $"LET binding '{n}' calls a model but no ModelCatalog is configured.");
+                    }
+                    source = BuildSingleMioForLiftedLet(source, fn, nameToSynth[n], _catalog.Models);
+                }
+                else
+                {
+                    enrichments.Add(new RowEnrichment(nameToSynth[n], rewrittenBody));
+                }
+            }
+            if (enrichments.Count > 0)
+            {
+                source = new RowEnricherOperator(source, enrichments);
+            }
+        }
+
+        // Step 6: rewrite the WHERE predicate to use synthetic column names.
+        Expression rewrittenPredicate = ReplaceLetNameRefs(predicate, nameToSynth);
+
+        // Step 7: lifted LETs become pass-through references in the bindings list
+        // so projection-side handling continues to find them by name.
+        List<LetBinding> updatedBindings = new(letBindings.Count);
+        foreach (LetBinding b in letBindings)
+        {
+            updatedBindings.Add(liftedNames.Contains(b.Name)
+                ? b with { Expression = new ColumnReference(TableName: null, ColumnName: nameToSynth[b.Name]) }
+                : b);
+        }
+
+        return (source, rewrittenPredicate, updatedBindings);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="ModelInvocationOperator"/> for a lifted LET binding
+    /// whose body is exactly a <c>models.*</c> call. Mirrors the catalog/arity
+    /// validation in <see cref="ModelInvocationHoister"/>'s equivalent helper
+    /// so the same plan-time error messages surface here.
+    /// </summary>
+    private static IQueryOperator BuildSingleMioForLiftedLet(
+        IQueryOperator source,
+        FunctionCallExpression call,
+        string outputColumn,
+        ModelCatalog catalog)
+    {
+        const string Prefix = "models.";
+        string modelName = call.FunctionName.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+            ? call.FunctionName[Prefix.Length..]
+            : call.FunctionName;
+
+        ModelCatalogEntry? entry = catalog.TryGetEntry(modelName)
+            ?? throw new InvalidOperationException(
+                $"Model '{modelName}' is not registered in the catalog. Reference '{call.FunctionName}' " +
+                $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
+
+        int requiredCount = entry.InputKinds.Count;
+        int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
+        int suppliedCount = call.Arguments.Count;
+
+        if (suppliedCount < requiredCount || suppliedCount > requiredCount + maxOptional)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}' arity mismatch: expected {requiredCount}–{requiredCount + maxOptional} " +
+                $"arguments, got {suppliedCount}.");
+        }
+
+        Expression[] requiredArgs = new Expression[requiredCount];
+        for (int i = 0; i < requiredCount; i++)
+        {
+            requiredArgs[i] = call.Arguments[i];
+        }
+        Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
+        for (int i = 0; i < optionalArgs.Length; i++)
+        {
+            optionalArgs[i] = call.Arguments[requiredCount + i];
+        }
+
+        return new ModelInvocationOperator(source, modelName, requiredArgs, optionalArgs, outputColumn);
+    }
+
+    /// <summary>
+    /// Recursively rewrites <paramref name="expression"/> by substituting any
+    /// unqualified <see cref="ColumnReference"/> whose name is a key in
+    /// <paramref name="nameMap"/> with a column reference to the mapped
+    /// synthetic name. Qualified refs (<c>t.x</c>) and refs to names not in
+    /// the map pass through unchanged.
+    /// </summary>
+    private static Expression ReplaceLetNameRefs(
+        Expression expression, IReadOnlyDictionary<string, string> nameMap)
+    {
+        switch (expression)
+        {
+            case ColumnReference col when col.TableName is null
+                && nameMap.TryGetValue(col.ColumnName, out string? synth):
+                return new ColumnReference(TableName: null, ColumnName: synth);
+
+            case FunctionCallExpression fn:
+                Expression[] rewrittenArgs = new Expression[fn.Arguments.Count];
+                bool argsChanged = false;
+                for (int i = 0; i < fn.Arguments.Count; i++)
+                {
+                    rewrittenArgs[i] = ReplaceLetNameRefs(fn.Arguments[i], nameMap);
+                    if (!ReferenceEquals(rewrittenArgs[i], fn.Arguments[i])) argsChanged = true;
+                }
+                return argsChanged ? fn with { Arguments = rewrittenArgs } : fn;
+
+            case BinaryExpression b:
+                Expression left = ReplaceLetNameRefs(b.Left, nameMap);
+                Expression right = ReplaceLetNameRefs(b.Right, nameMap);
+                return ReferenceEquals(left, b.Left) && ReferenceEquals(right, b.Right)
+                    ? b : b with { Left = left, Right = right };
+
+            case UnaryExpression u:
+                Expression operand = ReplaceLetNameRefs(u.Operand, nameMap);
+                return ReferenceEquals(operand, u.Operand) ? u : u with { Operand = operand };
+
+            case CastExpression c:
+                Expression cExpr = ReplaceLetNameRefs(c.Expression, nameMap);
+                return ReferenceEquals(cExpr, c.Expression) ? c : c with { Expression = cExpr };
+
+            case IsNullExpression isNull:
+                Expression isNullExpr = ReplaceLetNameRefs(isNull.Expression, nameMap);
+                return ReferenceEquals(isNullExpr, isNull.Expression)
+                    ? isNull : isNull with { Expression = isNullExpr };
+
+            case BetweenExpression bt:
+                Expression btE = ReplaceLetNameRefs(bt.Expression, nameMap);
+                Expression btL = ReplaceLetNameRefs(bt.Low, nameMap);
+                Expression btH = ReplaceLetNameRefs(bt.High, nameMap);
+                return ReferenceEquals(btE, bt.Expression) && ReferenceEquals(btL, bt.Low) && ReferenceEquals(btH, bt.High)
+                    ? bt : bt with { Expression = btE, Low = btL, High = btH };
+
+            case InExpression i:
+                Expression iE = ReplaceLetNameRefs(i.Expression, nameMap);
+                Expression[] iVals = new Expression[i.Values.Count];
+                bool iValsChanged = false;
+                for (int j = 0; j < i.Values.Count; j++)
+                {
+                    iVals[j] = ReplaceLetNameRefs(i.Values[j], nameMap);
+                    if (!ReferenceEquals(iVals[j], i.Values[j])) iValsChanged = true;
+                }
+                return ReferenceEquals(iE, i.Expression) && !iValsChanged
+                    ? i : i with { Expression = iE, Values = iVals };
+
+            case LikeExpression like:
+                Expression lE = ReplaceLetNameRefs(like.Expression, nameMap);
+                Expression lP = ReplaceLetNameRefs(like.Pattern, nameMap);
+                Expression lEsc = ReplaceLetNameRefs(like.EscapeCharacter, nameMap);
+                return ReferenceEquals(lE, like.Expression) && ReferenceEquals(lP, like.Pattern) && ReferenceEquals(lEsc, like.EscapeCharacter)
+                    ? like : like with { Expression = lE, Pattern = lP, EscapeCharacter = lEsc };
+
+            case CaseExpression ce:
+                Expression? ceOp = ce.Operand is null ? null : ReplaceLetNameRefs(ce.Operand, nameMap);
+                List<WhenClause> ceWhens = ce.WhenClauses
+                    .Select(w => new WhenClause(
+                        ReplaceLetNameRefs(w.Condition, nameMap),
+                        ReplaceLetNameRefs(w.Result, nameMap)))
+                    .ToList();
+                Expression? ceElse = ce.ElseResult is null ? null : ReplaceLetNameRefs(ce.ElseResult, nameMap);
+                return ce with { Operand = ceOp, WhenClauses = ceWhens, ElseResult = ceElse };
+
+            default:
+                return expression;
+        }
     }
 
     /// <summary>
