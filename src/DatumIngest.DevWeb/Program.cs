@@ -24,6 +24,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
 }
 
 string? modelsOverride = null;
+long? vramBudgetOverrideBytes = null;
 int port = 5005;
 List<string> dataPaths = new();
 for (int i = 0; i < args.Length; i++)
@@ -46,6 +47,22 @@ for (int i = 0; i < args.Length; i++)
             return 1;
         }
     }
+    else if (arg == "--vram-budget-gb")
+    {
+        if (++i >= args.Length ||
+            !double.TryParse(args[i], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double gb) ||
+            gb <= 0)
+        {
+            Console.Error.WriteLine("--vram-budget-gb requires a positive number (e.g. 18 or 18.5).");
+            return 1;
+        }
+        vramBudgetOverrideBytes = (long)(gb * 1024 * 1024 * 1024);
+    }
+    else if (arg == "--vram-budget-unlimited")
+    {
+        vramBudgetOverrideBytes = ModelResidencyManager.UnlimitedBudget;
+    }
     else
     {
         dataPaths.Add(arg);
@@ -62,8 +79,23 @@ if (dataPaths.Count == 0)
 Pool pool = new(new PoolBacking());
 TableCatalog catalog = new(pool);
 
-ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(catalog, modelsOverride);
-_ = modelCatalog;
+ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(
+    catalog, modelsOverride, vramBudgetBytes: vramBudgetOverrideBytes);
+
+// Surface the resolved budget at startup. Auto-detection queries
+// nvidia-smi; if it can't reach a GPU the resolver falls back to a
+// conservative default rather than leaving the residency manager
+// unlimited (which lets CUDA over-allocate into shared system memory
+// transparently and tanks inference latency).
+if (modelCatalog.VramBudgetBytes == ModelResidencyManager.UnlimitedBudget)
+{
+    Console.WriteLine("VRAM budget: unlimited (no eviction; risks shared-RAM spillover)");
+}
+else
+{
+    double gb = modelCatalog.VramBudgetBytes / (1024.0 * 1024.0 * 1024.0);
+    Console.WriteLine($"VRAM budget: {gb:F1} GB (residency manager evicts LRU when exceeded)");
+}
 
 int datumFilesAdded = 0;
 try
@@ -256,6 +288,9 @@ static void PrintUsage()
     Console.Error.WriteLine("  --models <path>   Override the model files directory.");
     Console.Error.WriteLine("                    Falls back to DATUM_MODELS env var, then a per-user default.");
     Console.Error.WriteLine("  --port <port>     HTTP port (default: 5005).");
+    Console.Error.WriteLine("  --vram-budget-gb <n>     Override the auto-detected VRAM budget (e.g. 18 or 18.5).");
+    Console.Error.WriteLine("  --vram-budget-unlimited  Disable residency eviction (risks shared-RAM spillover).");
+    Console.Error.WriteLine("                           Auto-detection queries nvidia-smi and subtracts a 4 GB headroom.");
 }
 
 static async Task<IResult> ExecuteQuery(

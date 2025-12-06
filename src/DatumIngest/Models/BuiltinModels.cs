@@ -55,11 +55,22 @@ public static class BuiltinModels
     /// <see cref="ModelCatalog.DefaultModelDirectory"/> (env-var aware).
     /// </param>
     /// <returns>The freshly constructed <see cref="ModelCatalog"/>.</returns>
+    /// <param name="vramBudgetBytes">
+    /// VRAM budget for the residency manager. <see langword="null"/>
+    /// auto-detects via <see cref="VramBudgetResolver.Resolve"/> — queries
+    /// nvidia-smi for total device memory and subtracts a 4 GiB headroom.
+    /// Pass <see cref="ModelResidencyManager.UnlimitedBudget"/> to disable
+    /// admission control (the old load-once-hold-forever behaviour, which
+    /// over-allocates into shared system memory once the zoo grows past
+    /// physical VRAM).
+    /// </param>
     public static ModelCatalog AttachStandardModels(
         TableCatalog tableCatalog,
-        string? modelDirectory = null)
+        string? modelDirectory = null,
+        long? vramBudgetBytes = null)
     {
-        ModelCatalog modelCatalog = new(modelDirectory);
+        long resolvedBudget = vramBudgetBytes ?? VramBudgetResolver.Resolve();
+        ModelCatalog modelCatalog = new(modelDirectory, resolvedBudget, admissionTimeout: null);
 
         // Vision models
         RegisterMobileNetV2(modelCatalog);

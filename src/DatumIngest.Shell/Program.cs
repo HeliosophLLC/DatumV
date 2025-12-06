@@ -21,6 +21,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
 }
 
 string? modelsOverride = null;
+long? vramBudgetOverrideBytes = null;
 List<string> dataPaths = new();
 for (int i = 0; i < args.Length; i++)
 {
@@ -33,6 +34,25 @@ for (int i = 0; i < args.Length; i++)
             return 1;
         }
         modelsOverride = args[i];
+    }
+    else if (arg == "--vram-budget-gb")
+    {
+        if (++i >= args.Length)
+        {
+            AnsiConsole.MarkupLine("[red]--vram-budget-gb requires a number (e.g. 18 or 18.5).[/]");
+            return 1;
+        }
+        if (!double.TryParse(args[i], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double gb) || gb <= 0)
+        {
+            AnsiConsole.MarkupLine($"[red]Invalid --vram-budget-gb value: {Markup.Escape(args[i])}[/]");
+            return 1;
+        }
+        vramBudgetOverrideBytes = (long)(gb * 1024 * 1024 * 1024);
+    }
+    else if (arg == "--vram-budget-unlimited")
+    {
+        vramBudgetOverrideBytes = ModelResidencyManager.UnlimitedBudget;
     }
     else
     {
@@ -59,7 +79,21 @@ TableCatalog catalog = new(pool);
 // Python-bridge models (Kokoro, Bark) are wired by AttachStandardModels
 // too -- they show status=bridge in system_models until their venvs and
 // worker scripts are set up.
-ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(catalog, modelsOverride);
+ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(
+    catalog, modelsOverride, vramBudgetBytes: vramBudgetOverrideBytes);
+
+// Show the resolved budget at startup so users can see what auto-detection
+// picked. The residency manager already logs per-load lines; this is the
+// "where did the budget come from" header.
+if (modelCatalog.VramBudgetBytes == ModelResidencyManager.UnlimitedBudget)
+{
+    AnsiConsole.MarkupLine("[grey]VRAM budget: [yellow]unlimited[/] (no eviction; risks shared-RAM spillover)[/]");
+}
+else
+{
+    double gb = modelCatalog.VramBudgetBytes / (1024.0 * 1024.0 * 1024.0);
+    AnsiConsole.MarkupLine($"[grey]VRAM budget: [white]{gb:F1} GB[/] (residency manager evicts LRU when exceeded)[/]");
+}
 
 // Kokoro-82M voice override: the bundled voices-v1.0.bin default works
 // out of the box, but if you have per-voice .bin files instead, point at
@@ -126,6 +160,9 @@ static void PrintUsage()
     Console.Error.WriteLine("  Each <path> is either a .datum file or a directory of .datum files.");
     Console.Error.WriteLine("  --models <path>   Override the model files directory.");
     Console.Error.WriteLine("                    Falls back to DATUM_MODELS env var, then a per-user default.");
+    Console.Error.WriteLine("  --vram-budget-gb <n>     Override the auto-detected VRAM budget (e.g. 18 or 18.5).");
+    Console.Error.WriteLine("  --vram-budget-unlimited  Disable residency eviction (risks shared-RAM spillover).");
+    Console.Error.WriteLine("                           Auto-detection queries nvidia-smi and subtracts a 4 GB headroom.");
     Console.Error.WriteLine();
     Console.Error.WriteLine("  Inside the REPL: SQL terminated by `;`, `EXPLAIN [ANALYZE] <sql>;`,");
     Console.Error.WriteLine("                   `.help`, `.quit`, `.exit`. Ctrl+C cancels a running query.");
