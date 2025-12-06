@@ -1,0 +1,1249 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>DatumIngest DevWeb</title>
+<style>
+  :root {
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a313c;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #4493f8;
+    --accent-fg: #ffffff;
+    --error: #f85149;
+    --error-bg: rgba(248, 81, 73, 0.08);
+    --warn: #d29922;
+    --tab-active: #0e1116;
+    --tab-inactive: #1c232c;
+  }
+  [data-theme="light"] {
+    --bg: #ffffff;
+    --panel: #f6f8fa;
+    --panel-2: #eaeef2;
+    --border: #d0d7de;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --accent: #0969da;
+    --accent-fg: #ffffff;
+    --error: #cf222e;
+    --error-bg: rgba(207, 34, 46, 0.08);
+    --warn: #9a6700;
+    --tab-active: #ffffff;
+    --tab-inactive: #eaeef2;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2);
+  }
+  header .title { font-weight: 600; }
+  header .ws-control { display: flex; align-items: center; gap: 4px; }
+  header select, header input[type="text"], header button.icon {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    font-size: 13px; padding: 3px 8px;
+  }
+  header button.icon {
+    padding: 3px 8px; cursor: pointer;
+  }
+  header button.icon:hover { background: var(--panel-2); }
+  header .spacer { flex: 1; }
+  header .status { color: var(--muted); font-size: 12px; }
+
+  /* Tab strip */
+  #tab-strip {
+    display: flex; align-items: stretch;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+    overflow-x: auto;
+    min-height: 32px;
+  }
+  #tab-strip .tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px 6px 12px;
+    border-right: 1px solid var(--border);
+    background: var(--tab-inactive);
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+    max-width: 240px;
+  }
+  #tab-strip .tab.active {
+    background: var(--tab-active);
+    color: var(--fg);
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: -1px;
+  }
+  #tab-strip .tab .name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 180px;
+  }
+  #tab-strip .tab .dirty {
+    color: var(--warn); margin-left: 2px;
+  }
+  #tab-strip .tab .close {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1;
+    border-radius: 3px;
+  }
+  #tab-strip .tab .close:hover { background: var(--border); color: var(--fg); }
+  #tab-strip #new-tab {
+    background: transparent; border: none; color: var(--muted);
+    font-size: 18px; padding: 0 12px; cursor: pointer;
+  }
+  #tab-strip #new-tab:hover { color: var(--fg); }
+
+  /* Editor pane */
+  #editor-pane {
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex; flex-direction: column;
+    min-height: 120px;
+    height: 32vh;
+    resize: vertical;
+    overflow: hidden;
+  }
+  #editor-host {
+    flex: 1;
+    width: 100%;
+    overflow: hidden;
+  }
+  /* Used until Monaco loads (or as fallback if it never loads). */
+  textarea.editor-fallback {
+    width: 100%; height: 100%;
+    background: var(--panel); color: var(--fg);
+    border: none; outline: none; resize: none;
+    font-family: var(--mono); font-size: 14px; line-height: 1.5;
+    padding: 12px 14px;
+    tab-size: 2;
+  }
+
+  #editor-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px;
+    background: var(--panel-2);
+    border-top: 1px solid var(--border);
+  }
+  #editor-toolbar button {
+    background: var(--accent); color: var(--accent-fg);
+    border: none; padding: 6px 14px; border-radius: 4px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  #editor-toolbar button:disabled { opacity: 0.5; cursor: default; }
+  #editor-toolbar .spacer { flex: 1; }
+  #editor-toolbar .tip { color: var(--muted); font-size: 12px; }
+  #editor-toolbar input[type="number"] {
+    width: 70px; background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 3px 6px; margin-left: 4px;
+  }
+
+  /* Results */
+  #results-pane {
+    flex: 1; min-height: 0;
+    overflow: auto;
+    padding: 0;
+  }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .error {
+    color: var(--error); white-space: pre-wrap;
+    font-family: var(--mono); font-size: 13px;
+    background: var(--error-bg);
+    border: 1px solid var(--error);
+    border-radius: 4px; padding: 10px 12px;
+  }
+  .warn { color: var(--warn); font-size: 12px; margin-bottom: 8px; }
+
+  table.results {
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 13px;
+    width: max-content; min-width: 100%;
+  }
+  table.results th, table.results td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    vertical-align: top;
+    max-width: 600px;
+  }
+  table.results th {
+    background: var(--panel-2);
+    text-align: left;
+    position: sticky; top: 0;
+    color: var(--muted); font-weight: 500;
+  }
+  table.results th .kind {
+    color: var(--muted); font-weight: 400; font-size: 11px;
+    margin-left: 6px;
+  }
+  table.results td.null { color: var(--muted); font-style: italic; }
+  table.results td pre {
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    font-family: var(--mono); font-size: 13px;
+  }
+  table.results td img,
+  table.results td video {
+    max-width: 480px; max-height: 320px;
+    display: block; background: #000; border-radius: 4px;
+  }
+  table.results td audio { width: 360px; display: block; }
+  table.results td .blob { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  table.results td pre.json {
+    background: var(--panel-2);
+    border-left: 2px solid var(--accent);
+    padding: 6px 10px;
+    border-radius: 3px;
+    max-height: 400px;
+    overflow: auto;
+  }
+
+  /* Modal-ish prompt for confirm/prompt without using window.prompt */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px 20px; min-width: 320px; max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .modal h3 { margin: 0 0 8px; font-size: 14px; }
+  .modal p  { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+  .modal input[type="text"] {
+    width: 100%; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 6px 8px; font-size: 13px; font-family: var(--mono);
+  }
+  .modal .actions {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;
+  }
+  .modal .actions button {
+    background: var(--panel-2); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  .modal .actions button.primary {
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+  }
+</style>
+
+<!-- Monaco loader from CDN. Editor.main is loaded inside the boot script. -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/loader.js"></script>
+</head>
+<body>
+  <header>
+    <span class="title">DatumIngest</span>
+    <div class="ws-control">
+      <span class="tip" style="color: var(--muted); font-size: 12px;">workspace</span>
+      <select id="ws-select" title="Switch workspace"></select>
+      <button class="icon" id="ws-new" title="New workspace">+</button>
+      <button class="icon" id="ws-delete" title="Delete this workspace">🗑</button>
+    </div>
+    <span class="spacer"></span>
+    <span class="status" id="status"></span>
+    <button class="icon" id="theme-toggle" title="Toggle theme">☾</button>
+  </header>
+
+  <div id="tab-strip"></div>
+
+  <div id="editor-pane">
+    <div id="editor-host"></div>
+    <div id="editor-toolbar">
+      <button id="run">Run</button>
+      <span class="tip">Ctrl/⌘+Enter</span>
+      <span class="tip">max rows
+        <input id="maxRows" type="number" value="200" min="1" max="100000">
+      </span>
+      <span class="spacer"></span>
+      <span id="elapsed" class="tip"></span>
+    </div>
+  </div>
+
+  <div id="results-pane">
+    <div class="meta">Type a query and press Run.</div>
+  </div>
+
+  <div id="modal-root"></div>
+
+<script>
+(() => {
+  // ===== Storage keys & helpers =====
+  // Two-tier persistence:
+  //   localStorage holds small JSON state — workspace registry, theme, and
+  //     per-workspace { tabs: [{ id, name, sql, lastRunAt, sqlOfLastRun }],
+  //     activeTabId }. Read synchronously on boot.
+  //   IndexedDB holds result payloads only, keyed by "<workspace>::<tabId>".
+  //     Lazy-loaded on tab activation so the boot path stays sync.
+  const STORE = {
+    theme: 'datum.devweb.theme',
+    workspaces: 'datum.devweb.workspaces',
+    workspace: (name) => `datum.devweb.workspace.${name}`,
+  };
+
+  function readJson(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch { return fallback; }
+  }
+  function writeJson(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch { return false; }
+  }
+  function uuid() {
+    if (crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  // ===== IndexedDB result store =====
+  // Result payloads (potentially many MB for image/audio queries) live here
+  // instead of localStorage. The DB has one object store keyed by a composite
+  // "<workspaceName>::<tabId>" string so deleting a whole workspace is a
+  // single cursor scan over a key range.
+  const IDB = (() => {
+    const DB_NAME = 'datum-devweb';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'results';
+    let dbPromise = null;
+    let unavailable = false;
+
+    function open() {
+      if (unavailable) return Promise.reject(new Error('IndexedDB unavailable'));
+      if (!dbPromise) {
+        if (!('indexedDB' in window)) {
+          unavailable = true;
+          return Promise.reject(new Error('IndexedDB unavailable'));
+        }
+        dbPromise = new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => { unavailable = true; reject(req.error); };
+          req.onblocked = () => reject(new Error('IndexedDB open blocked'));
+        });
+      }
+      return dbPromise;
+    }
+
+    const key = (ws, tabId) => `${ws}::${tabId}`;
+
+    async function saveResult(ws, tabId, result) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put({
+          key: key(ws, tabId),
+          workspaceName: ws,
+          tabId,
+          result,
+          savedAt: Date.now(),
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+
+    async function loadResult(ws, tabId) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key(ws, tabId));
+        req.onsuccess = () => resolve(req.result ? req.result.result : null);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function deleteResult(ws, tabId) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(key(ws, tabId));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function deleteWorkspaceResults(ws) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const range = IDBKeyRange.bound(`${ws}::`, `${ws}::￿`);
+        const req = store.openCursor(range);
+        req.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) { cursor.delete(); cursor.continue(); }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    function isUnavailable() { return unavailable; }
+
+    return { saveResult, loadResult, deleteResult, deleteWorkspaceResults, isUnavailable };
+  })();
+
+  // ===== Theme =====
+  function loadTheme() {
+    const saved = localStorage.getItem(STORE.theme);
+    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.getElementById('theme-toggle').textContent = (theme === 'dark') ? '☾' : '☼';
+    if (window.monaco) {
+      monaco.editor.setTheme(theme === 'dark' ? 'vs-dark' : 'vs');
+    }
+  }
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(STORE.theme, next);
+    applyTheme(next);
+  }
+
+  // ===== Workspaces =====
+  // A workspace is { tabs: [Tab], activeTabId }.
+  // A tab in localStorage is { id, name, sql, lastRunAt, sqlOfLastRun }.
+  // The runtime tab object also carries `lastResult`:
+  //   undefined → not yet hydrated from IDB; fetch on activation
+  //   null      → no saved result (never run, or freshly created)
+  //   object    → the result payload, cached in memory
+  // Workspace identity comes from location.hash (no hash → "default").
+  function workspaceName() {
+    const h = (location.hash || '').replace(/^#/, '').trim();
+    return validName(h) ? h : 'default';
+  }
+  function validName(name) {
+    return typeof name === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(name);
+  }
+  function listWorkspaces() {
+    const list = readJson(STORE.workspaces, []);
+    return Array.isArray(list) ? list : [];
+  }
+  function registerWorkspace(name) {
+    const list = listWorkspaces();
+    if (!list.includes(name)) {
+      list.push(name);
+      writeJson(STORE.workspaces, list);
+    }
+  }
+  function unregisterWorkspace(name) {
+    const list = listWorkspaces().filter(n => n !== name);
+    writeJson(STORE.workspaces, list);
+    localStorage.removeItem(STORE.workspace(name));
+    IDB.deleteWorkspaceResults(name).catch(err =>
+      console.warn(`Couldn't clear IDB results for "${name}":`, err));
+  }
+  function freshTab(n) {
+    return {
+      id: uuid(),
+      name: `Untitled ${n}`,
+      sql: '',
+      lastResult: null,            // never run yet → no IDB entry to fetch
+      lastRunAt: 0,
+      sqlOfLastRun: '',
+    };
+  }
+  function loadWorkspace(name) {
+    const ws = readJson(STORE.workspace(name), null);
+    if (ws && Array.isArray(ws.tabs) && ws.tabs.length > 0) {
+      // Ensure each tab has the expected shape (forward-compat). Tabs hydrated
+      // from localStorage have `lastResult` left undefined so the renderer
+      // knows to fetch from IDB on first activation. Older saves that included
+      // a `lastResult` field are ignored — IDB is the source of truth now.
+      ws.tabs = ws.tabs.map(t => {
+        const hasRun = (t.lastRunAt || 0) > 0;
+        return {
+          id: t.id || uuid(),
+          name: t.name || 'Untitled',
+          sql: t.sql || '',
+          lastResult: hasRun ? undefined : null,
+          lastRunAt: t.lastRunAt || 0,
+          sqlOfLastRun: t.sqlOfLastRun || '',
+        };
+      });
+      if (!ws.tabs.find(t => t.id === ws.activeTabId)) {
+        ws.activeTabId = ws.tabs[0].id;
+      }
+      return ws;
+    }
+    const tab = freshTab(1);
+    return { tabs: [tab], activeTabId: tab.id };
+  }
+  // Persist current workspace metadata. Result payloads live in IDB and are
+  // not part of this snapshot — keeps the localStorage write small and fast.
+  function persistWorkspace() {
+    const name = workspaceName();
+    const snapshot = {
+      activeTabId: state.workspace.activeTabId,
+      tabs: state.workspace.tabs.map(t => ({
+        id: t.id,
+        name: t.name,
+        sql: t.sql,
+        lastRunAt: t.lastRunAt,
+        sqlOfLastRun: t.sqlOfLastRun,
+      })),
+    };
+    writeJson(STORE.workspace(name), snapshot);
+  }
+
+  // ===== State =====
+  const state = {
+    workspace: null,            // { tabs, activeTabId }
+    queryRunning: false,
+  };
+
+  // Debounce save so rapid keystrokes don't flog localStorage.
+  let saveTimer = null;
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(persistWorkspace, 200);
+  }
+
+  function activeTab() {
+    return state.workspace.tabs.find(t => t.id === state.workspace.activeTabId);
+  }
+
+  // ===== Tabs =====
+  function renderTabStrip() {
+    const strip = document.getElementById('tab-strip');
+    strip.innerHTML = '';
+    for (const t of state.workspace.tabs) {
+      const div = document.createElement('div');
+      div.className = 'tab' + (t.id === state.workspace.activeTabId ? ' active' : '');
+      div.dataset.id = t.id;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = t.name;
+      div.appendChild(name);
+
+      if (t.sql !== t.sqlOfLastRun) {
+        const dirty = document.createElement('span');
+        dirty.className = 'dirty';
+        dirty.textContent = '●';
+        dirty.title = 'unsaved changes since last run';
+        div.appendChild(dirty);
+      }
+
+      const close = document.createElement('button');
+      close.className = 'close';
+      close.textContent = '×';
+      close.title = 'Close tab';
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(t.id);
+      });
+      div.appendChild(close);
+
+      div.addEventListener('click', () => activateTab(t.id));
+      strip.appendChild(div);
+    }
+    const newBtn = document.createElement('button');
+    newBtn.id = 'new-tab';
+    newBtn.textContent = '+';
+    newBtn.title = 'New tab';
+    newBtn.addEventListener('click', newTab);
+    strip.appendChild(newBtn);
+  }
+
+  function newTab() {
+    const n = state.workspace.tabs.length + 1;
+    const t = freshTab(n);
+    state.workspace.tabs.push(t);
+    state.workspace.activeTabId = t.id;
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    persistWorkspace();
+  }
+
+  function activateTab(id) {
+    if (id === state.workspace.activeTabId) return;
+    state.workspace.activeTabId = id;
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    persistWorkspace();
+  }
+
+  async function closeTab(id) {
+    const tab = state.workspace.tabs.find(t => t.id === id);
+    if (!tab) return;
+    if (tab.sql && tab.sql !== tab.sqlOfLastRun) {
+      const ok = await confirmModal('Close tab', `"${tab.name}" has unsaved changes since last run. Close anyway?`);
+      if (!ok) return;
+    }
+    // Dispose any Monaco model attached to this tab.
+    if (monacoModels.has(id)) {
+      monacoModels.get(id).dispose();
+      monacoModels.delete(id);
+    }
+    // Drop the saved result for this tab from IDB. Best-effort.
+    IDB.deleteResult(workspaceName(), id).catch(err =>
+      console.warn(`Couldn't delete IDB result for tab ${id}:`, err));
+    state.workspace.tabs = state.workspace.tabs.filter(t => t.id !== id);
+    if (state.workspace.tabs.length === 0) {
+      state.workspace.tabs.push(freshTab(1));
+    }
+    if (state.workspace.activeTabId === id) {
+      state.workspace.activeTabId = state.workspace.tabs[0].id;
+    }
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    persistWorkspace();
+  }
+
+  // ===== Editor =====
+  // We keep one Monaco editor instance and swap models per tab. Each tab has
+  // its own ITextModel, so cursor position, scroll, and undo stack survive
+  // tab switches. Until Monaco loads we use a textarea fallback.
+  let monacoEditor = null;
+  const monacoModels = new Map();   // tabId -> ITextModel
+  let fallbackTextarea = null;
+
+  function getOrCreateModel(tab) {
+    if (!window.monaco) return null;
+    let model = monacoModels.get(tab.id);
+    if (!model) {
+      model = monaco.editor.createModel(tab.sql || '', 'sql');
+      // Per-model listener so cross-tab switches don't pile up listeners.
+      model.onDidChangeContent(() => {
+        const t = state.workspace.tabs.find(x => monacoModels.get(x.id) === model);
+        if (!t) return;
+        t.sql = model.getValue();
+        renderTabStrip();         // dirty marker may flip
+        scheduleSave();
+      });
+      monacoModels.set(tab.id, model);
+    }
+    return model;
+  }
+
+  function swapEditorToActiveTab() {
+    const tab = activeTab();
+    if (!tab) return;
+    if (monacoEditor) {
+      const model = getOrCreateModel(tab);
+      monacoEditor.setModel(model);
+      monacoEditor.focus();
+    } else if (fallbackTextarea) {
+      fallbackTextarea.value = tab.sql;
+    }
+  }
+
+  function initFallbackEditor() {
+    const host = document.getElementById('editor-host');
+    host.innerHTML = '';
+    fallbackTextarea = document.createElement('textarea');
+    fallbackTextarea.className = 'editor-fallback';
+    fallbackTextarea.spellcheck = false;
+    fallbackTextarea.autocomplete = 'off';
+    fallbackTextarea.autocapitalize = 'off';
+    host.appendChild(fallbackTextarea);
+
+    fallbackTextarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const start = fallbackTextarea.selectionStart;
+        const end = fallbackTextarea.selectionEnd;
+        fallbackTextarea.value =
+          fallbackTextarea.value.slice(0, start) + '  ' +
+          fallbackTextarea.value.slice(end);
+        fallbackTextarea.selectionStart = fallbackTextarea.selectionEnd = start + 2;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        run();
+      }
+    });
+    fallbackTextarea.addEventListener('input', () => {
+      const tab = activeTab();
+      if (!tab) return;
+      tab.sql = fallbackTextarea.value;
+      renderTabStrip();
+      scheduleSave();
+    });
+  }
+
+  function initMonaco() {
+    require.config({
+      paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs' },
+    });
+
+    // Cross-origin worker workaround: load workers via a same-origin Blob
+    // URL that defers to the CDN. Without this, Monaco silently runs without
+    // workers (still functional, but tokenization happens on the main thread).
+    self.MonacoEnvironment = {
+      getWorkerUrl: function () {
+        return URL.createObjectURL(new Blob([
+          `self.MonacoEnvironment = { baseUrl: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/' };` +
+          `importScripts('https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/base/worker/workerMain.js');`
+        ], { type: 'text/javascript' }));
+      },
+    };
+
+    require(['vs/editor/editor.main'], () => {
+      const host = document.getElementById('editor-host');
+      host.innerHTML = '';
+      fallbackTextarea = null;
+
+      monacoEditor = monaco.editor.create(host, {
+        model: null,
+        language: 'sql',
+        theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
+        fontSize: 14,
+        scrollBeyondLastLine: false,
+        wordWrap: 'on',
+        renderLineHighlight: 'all',
+        tabSize: 2,
+        insertSpaces: true,
+      });
+
+      // Ctrl/Cmd+Enter runs the active query. Monaco's keybindings system is
+      // model-agnostic so this works across all per-tab models.
+      monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+
+      // Now that Monaco exists, wire language-server providers and attach
+      // the active tab's model.
+      registerLanguageProviders();
+      swapEditorToActiveTab();
+    }, (err) => {
+      console.warn('Monaco failed to load; staying on textarea fallback.', err);
+    });
+  }
+
+  // ===== Language services (completion / hover / diagnostics) =====
+  // The DatumIngest LanguageService is exposed as three POST endpoints; each
+  // Monaco provider just calls the matching one and translates the response.
+  // Server CompletionItemKind values are LSP-aligned (Keyword=14, Struct=22,
+  // Field=5, Function=3, TypeParameter=25); Monaco uses a different numeric
+  // enum so we map by string name to avoid hard-coding magic numbers.
+
+  // Tracks the latest diagnose-request id per model; older responses are
+  // discarded so a slow server reply can't paint stale markers.
+  const diagnoseGenByModelId = new Map();
+
+  function registerLanguageProviders() {
+    if (!window.monaco) return;
+
+    monaco.languages.registerCompletionItemProvider('sql', {
+      triggerCharacters: [' ', '.', ',', '(', '\n'],
+      provideCompletionItems: async (model, position) => {
+        const sql = model.getValue();
+        const offset = model.getOffsetAt(position);
+        let items;
+        try {
+          items = await postJson('/api/lang/complete', { sql, offset });
+        } catch { return { suggestions: [] }; }
+        if (!Array.isArray(items)) return { suggestions: [] };
+
+        // Replace the word currently under the cursor (Monaco fills this
+        // range with the completion's insertText). Without an explicit range
+        // Monaco picks one heuristically and sometimes keeps stray prefix.
+        const word = model.getWordUntilPosition(position);
+        const range = new monaco.Range(
+          position.lineNumber, word.startColumn,
+          position.lineNumber, word.endColumn);
+
+        return {
+          suggestions: items.map(it => ({
+            label: it.label,
+            kind: completionKindFromName(it.kind),
+            insertText: it.insertText ?? it.label,
+            detail: it.detail ?? undefined,
+            documentation: it.documentation
+              ? { value: it.documentation, isTrusted: false }
+              : undefined,
+            sortText: typeof it.sortOrder === 'number'
+              ? String(it.sortOrder).padStart(8, '0')
+              : undefined,
+            range,
+          })),
+        };
+      },
+    });
+
+    monaco.languages.registerHoverProvider('sql', {
+      provideHover: async (model, position) => {
+        const sql = model.getValue();
+        const offset = model.getOffsetAt(position);
+        let hover;
+        try {
+          hover = await postJson('/api/lang/hover', { sql, offset });
+        } catch { return null; }
+        if (!hover || !hover.contents) return null;
+        return {
+          range: lspRangeToMonaco(
+            hover.startLine, hover.startColumn, hover.endLine, hover.endColumn),
+          contents: [{ value: hover.contents }],
+        };
+      },
+    });
+
+    // Diagnostics — debounced. Re-run on any model content change. Markers
+    // are written directly with monaco.editor.setModelMarkers under the
+    // owner key 'datum-ingest' so we own the namespace cleanly.
+    let diagnoseTimer = null;
+    function scheduleDiagnose(model) {
+      if (diagnoseTimer) clearTimeout(diagnoseTimer);
+      diagnoseTimer = setTimeout(() => runDiagnose(model), 250);
+    }
+    async function runDiagnose(model) {
+      if (model.isDisposed()) return;
+      const gen = (diagnoseGenByModelId.get(model.id) || 0) + 1;
+      diagnoseGenByModelId.set(model.id, gen);
+      const sql = model.getValue();
+      let diags;
+      try {
+        diags = await postJson('/api/lang/diagnose', { sql });
+      } catch { return; }
+      if (model.isDisposed()) return;
+      if (diagnoseGenByModelId.get(model.id) !== gen) return;     // stale
+      const markers = (Array.isArray(diags) ? diags : []).map(d => ({
+        severity: severityFromName(d.severity),
+        message: d.message,
+        startLineNumber: d.startLine + 1,
+        startColumn:     d.startColumn + 1,
+        endLineNumber:   d.endLine   + 1,
+        endColumn:       d.endColumn + 1,
+        source: 'datum-ingest',
+      }));
+      monaco.editor.setModelMarkers(model, 'datum-ingest', markers);
+    }
+
+    // Hook every model that exists or comes into being. Diagnostics fire on
+    // each change after a 250ms debounce.
+    function attachDiagnoseToModel(model) {
+      if (model.getLanguageId() !== 'sql') return;
+      scheduleDiagnose(model);
+      model.onDidChangeContent(() => scheduleDiagnose(model));
+    }
+    monaco.editor.getModels().forEach(attachDiagnoseToModel);
+    monaco.editor.onDidCreateModel(attachDiagnoseToModel);
+  }
+
+  // Map server CompletionItemKind enum-name string to Monaco's enum.
+  function completionKindFromName(name) {
+    const K = monaco.languages.CompletionItemKind;
+    switch (name) {
+      case 'Keyword':       return K.Keyword;
+      case 'Table':         return K.Struct;       // closest visual match
+      case 'Column':        return K.Field;
+      case 'Function':      return K.Function;
+      case 'TypeParameter': return K.TypeParameter;
+      default:              return K.Text;
+    }
+  }
+  function severityFromName(name) {
+    const S = monaco.MarkerSeverity;
+    switch (name) {
+      case 'Error':       return S.Error;
+      case 'Warning':     return S.Warning;
+      case 'Information': return S.Info;
+      default:            return S.Info;
+    }
+  }
+  function lspRangeToMonaco(sl, sc, el, ec) {
+    return new monaco.Range(sl + 1, sc + 1, el + 1, ec + 1);
+  }
+  async function postJson(url, body) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  // ===== Results =====
+  async function renderResultsForActiveTab() {
+    const tab = activeTab();
+    const results = document.getElementById('results-pane');
+    const elapsed = document.getElementById('elapsed');
+    results.innerHTML = '';
+    elapsed.textContent = '';
+    if (!tab) return;
+
+    // tab.lastResult is undefined when hydrated from localStorage and not yet
+    // fetched from IDB. Show a placeholder while we resolve it; guard against
+    // the user switching tabs before the read returns.
+    if (tab.lastResult === undefined) {
+      const loading = document.createElement('div');
+      loading.className = 'meta';
+      loading.textContent = 'Loading saved result…';
+      results.appendChild(loading);
+      const captureTabId = tab.id;
+      const captureWs = workspaceName();
+      try {
+        const r = await IDB.loadResult(captureWs, captureTabId);
+        if (state.workspace.activeTabId !== captureTabId
+            || workspaceName() !== captureWs) return;       // user moved on
+        tab.lastResult = r;                                 // cache, even if null
+      } catch (err) {
+        if (state.workspace.activeTabId !== captureTabId
+            || workspaceName() !== captureWs) return;
+        tab.lastResult = null;
+        results.innerHTML = '';
+        const errDiv = document.createElement('div');
+        errDiv.className = 'error';
+        errDiv.textContent = `Couldn't load saved result: ${err.message}`;
+        results.appendChild(errDiv);
+        return;
+      }
+      results.innerHTML = '';
+    }
+
+    if (!tab.lastResult) {
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = tab.lastRunAt
+        ? '(saved result not found — re-run to see it)'
+        : 'No results yet. Press Run.';
+      results.appendChild(meta);
+      return;
+    }
+    renderResult(tab.lastResult, results);
+    const r = tab.lastResult;
+    if (!r.error) {
+      const rowText = `${r.rowCount} ${r.rowCount === 1 ? 'row' : 'rows'}`;
+      const timeText = typeof r.elapsedMs === 'number' ? `${(r.elapsedMs / 1000).toFixed(2)} s` : '';
+      elapsed.textContent = timeText ? `${rowText} · ${timeText}` : rowText;
+    }
+  }
+
+  function renderResult(res, container) {
+    if (res.error) {
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = res.error + (res.detail ? '\n\n' + res.detail : '');
+      container.appendChild(err);
+      return;
+    }
+
+    if (res.truncated) {
+      const w = document.createElement('div');
+      w.className = 'warn';
+      w.textContent = `⚠ Truncated at ${res.rowCount} rows (raise the max rows control to see more).`;
+      container.appendChild(w);
+    }
+
+    if (!res.schema || res.schema.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'meta';
+      empty.textContent = '(no columns)';
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'results';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const col of res.schema) {
+      const th = document.createElement('th');
+      th.appendChild(document.createTextNode(col.name));
+      const k = document.createElement('span');
+      k.className = 'kind';
+      k.textContent = col.isArray ? `Array<${col.kind}>` : col.kind;
+      th.appendChild(k);
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of res.rows) {
+      const tr = document.createElement('tr');
+      for (const cell of row) tr.appendChild(renderCell(cell));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function renderCell(cell) {
+    const td = document.createElement('td');
+    if (cell.kind === 'null') {
+      td.classList.add('null');
+      td.textContent = 'NULL';
+      return td;
+    }
+    if (cell.kind === 'media' && cell.mime) {
+      const dataUrl = `data:${cell.mime};base64,${cell.dataB64}`;
+      let media;
+      if (cell.mime.startsWith('image/')) {
+        media = document.createElement('img');
+        media.src = dataUrl; media.alt = ''; media.loading = 'lazy';
+      } else if (cell.mime.startsWith('audio/')) {
+        media = document.createElement('audio'); media.controls = true; media.src = dataUrl;
+      } else if (cell.mime.startsWith('video/')) {
+        media = document.createElement('video'); media.controls = true; media.src = dataUrl;
+      } else {
+        media = document.createElement('span'); media.textContent = `<${cell.mime}>`;
+      }
+      td.appendChild(media);
+      const note = document.createElement('div');
+      note.className = 'blob';
+      const bytes = Math.floor((cell.dataB64.length * 3) / 4);
+      note.textContent = `${cell.mime} · ${bytes.toLocaleString()} bytes`;
+      td.appendChild(note);
+      return td;
+    }
+    if (cell.kind === 'json') {
+      // Server already decoded CBOR → JSON text. Pretty-print here so the
+      // browser can show a readable indented form. If the text isn't valid
+      // JSON for some reason (shouldn't happen — the server only emits this
+      // kind on successful decode), show it as-is.
+      const pre = document.createElement('pre');
+      pre.className = 'json';
+      let display = cell.text ?? '';
+      try { display = JSON.stringify(JSON.parse(display), null, 2); }
+      catch { /* fall back to raw text */ }
+      pre.textContent = display;
+      td.appendChild(pre);
+      return td;
+    }
+    const pre = document.createElement('pre');
+    pre.textContent = cell.text ?? '';
+    td.appendChild(pre);
+    return td;
+  }
+
+  // ===== Run =====
+  async function run() {
+    const tab = activeTab();
+    if (!tab) return;
+    const sql = tab.sql.trim();
+    if (!sql) return;
+    if (state.queryRunning) return;
+
+    state.queryRunning = true;
+    const runBtn = document.getElementById('run');
+    const status = document.getElementById('status');
+    runBtn.disabled = true;
+    status.textContent = 'running…';
+
+    const results = document.getElementById('results-pane');
+    results.innerHTML = '<div class="meta">Running…</div>';
+
+    const t0 = performance.now();
+    let res;
+    try {
+      const response = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sql,
+          maxRows: parseInt(document.getElementById('maxRows').value, 10) || 200,
+        }),
+      });
+      res = await response.json();
+    } catch (err) {
+      res = { error: `Network error: ${err.message}` };
+    } finally {
+      state.queryRunning = false;
+      runBtn.disabled = false;
+      status.textContent = '';
+    }
+
+    const wallMs = performance.now() - t0;
+    if (typeof res.elapsedMs !== 'number') res.elapsedMs = wallMs;
+
+    tab.lastResult = res;
+    tab.lastRunAt = Date.now();
+    tab.sqlOfLastRun = tab.sql;
+    renderTabStrip();
+    persistWorkspace();
+    renderResultsForActiveTab();
+
+    // Persist result to IDB. Fire-and-forget — the in-memory cache is what
+    // the UI renders, so an IDB hiccup only affects survival across reload.
+    IDB.saveResult(workspaceName(), tab.id, res).catch(err =>
+      console.warn(`Couldn't save result for tab ${tab.id}:`, err));
+  }
+
+  // ===== Workspace switcher =====
+  function rebuildWsSelect() {
+    const sel = document.getElementById('ws-select');
+    const all = listWorkspaces();
+    sel.innerHTML = '';
+    for (const name of all) {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sel.appendChild(opt);
+    }
+    sel.value = workspaceName();
+  }
+
+  async function newWorkspace() {
+    const name = await promptModal('New workspace', 'Name (letters, digits, _ or -; up to 40 chars):');
+    if (name === null) return;
+    if (!validName(name)) {
+      await alertModal('Invalid name', 'Workspace names must match [a-zA-Z0-9_-]{1,40}.');
+      return;
+    }
+    if (listWorkspaces().includes(name)) {
+      // Already exists — just switch.
+      location.hash = name === 'default' ? '' : name;
+      return;
+    }
+    registerWorkspace(name);
+    location.hash = name === 'default' ? '' : name;
+  }
+
+  async function deleteWorkspace() {
+    const name = workspaceName();
+    if (name === 'default') {
+      await alertModal('Cannot delete', 'The "default" workspace cannot be deleted.');
+      return;
+    }
+    const ok = await confirmModal('Delete workspace?',
+      `This permanently removes "${name}" and all its tabs from this browser. Continue?`);
+    if (!ok) return;
+    unregisterWorkspace(name);
+    location.hash = '';
+  }
+
+  function onHashChange() {
+    persistWorkspace();
+    const name = workspaceName();
+    registerWorkspace(name);
+    state.workspace = loadWorkspace(name);
+    // Clear any Monaco models from the previous workspace; new tabs get fresh
+    // models on first activation via getOrCreateModel.
+    for (const m of monacoModels.values()) m.dispose();
+    monacoModels.clear();
+    rebuildWsSelect();
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+  }
+
+  // ===== Modal helpers (alert/confirm/prompt) =====
+  function showModal(buildContent) {
+    return new Promise((resolve) => {
+      const root = document.getElementById('modal-root');
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+      backdrop.appendChild(modal);
+      root.appendChild(backdrop);
+      const close = (value) => { root.removeChild(backdrop); resolve(value); };
+      buildContent(modal, close);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(null); });
+    });
+  }
+  function alertModal(title, message) {
+    return showModal((modal, close) => {
+      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
+      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
+      ok.addEventListener('click', () => close(true));
+      actions.appendChild(ok); modal.appendChild(actions); ok.focus();
+    });
+  }
+  function confirmModal(title, message) {
+    return showModal((modal, close) => {
+      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
+      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+      cancel.addEventListener('click', () => close(false));
+      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
+      ok.addEventListener('click', () => close(true));
+      actions.appendChild(cancel); actions.appendChild(ok); modal.appendChild(actions);
+      ok.focus();
+    });
+  }
+  function promptModal(title, message, defaultValue = '') {
+    return showModal((modal, close) => {
+      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
+      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
+      const input = document.createElement('input'); input.type = 'text'; input.value = defaultValue;
+      modal.appendChild(input);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+      cancel.addEventListener('click', () => close(null));
+      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
+      ok.addEventListener('click', () => close(input.value));
+      actions.appendChild(cancel); actions.appendChild(ok); modal.appendChild(actions);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') close(input.value);
+        if (e.key === 'Escape') close(null);
+      });
+      input.focus(); input.select();
+    });
+  }
+
+  // ===== Boot =====
+  function boot() {
+    applyTheme(loadTheme());
+    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+    const name = workspaceName();
+    registerWorkspace(name);
+    state.workspace = loadWorkspace(name);
+
+    rebuildWsSelect();
+    document.getElementById('ws-select').addEventListener('change', (e) => {
+      const target = e.target.value;
+      location.hash = target === 'default' ? '' : target;
+    });
+    document.getElementById('ws-new').addEventListener('click', newWorkspace);
+    document.getElementById('ws-delete').addEventListener('click', deleteWorkspace);
+    window.addEventListener('hashchange', onHashChange);
+
+    renderTabStrip();
+    initFallbackEditor();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+
+    document.getElementById('run').addEventListener('click', run);
+
+    // Persist on visibility change to catch cases where the debounced save
+    // hasn't fired yet.
+    window.addEventListener('beforeunload', persistWorkspace);
+
+    // Now try to upgrade the textarea to Monaco. If the loader fails (offline,
+    // CDN blocked) the textarea stays in place and everything still works.
+    if (window.require) initMonaco();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

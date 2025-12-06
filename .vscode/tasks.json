@@ -232,6 +232,36 @@
 			"hide": true
 		},
 		{
+			"label": "Debug: Build DevWeb",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"src/DatumIngest.DevWeb",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
+			"label": "Release: Build DevWeb",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"src/DatumIngest.DevWeb",
+				"-c", "Release"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
 			"label": "Run: ExplainOnce",
 			"type": "shell",
 			"command": "dotnet",

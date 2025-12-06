@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>datum-devweb</AssemblyName>
+    <RootNamespace>DatumIngest.DevWeb</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The web SDK ships wwwroot via the Static Web Assets pipeline, which
+      relies on the host's working directory matching the project directory.
+      VSCode's coreclr launch sets cwd = ${workspaceFolder}, so the host
+      can't find wwwroot at runtime. Copy the assets next to the dll and
+      pin ContentRootPath = AppContext.BaseDirectory in Program.cs so the
+      app works from any working directory.
+    -->
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

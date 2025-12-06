@@ -6,6 +6,7 @@
     <Project Path="src/DatumIngest.LanguageServer/DatumIngest.LanguageServer.csproj" />
     <Project Path="src/DatumIngest.Parsing/DatumIngest.Parsing.csproj" />
     <Project Path="src/DatumIngest.Serialization/DatumIngest.Serialization.csproj" />
+    <Project Path="src/DatumIngest.DevWeb/DatumIngest.DevWeb.csproj" />
     <Project Path="src/DatumIngest.Shell/DatumIngest.Shell.csproj" />
     <Project Path="src/DatumIngest/DatumIngest.csproj" />
   </Folder>
