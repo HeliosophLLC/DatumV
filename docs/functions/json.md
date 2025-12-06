@@ -49,6 +49,21 @@ SELECT
 
 The `String → Json` cast is equivalent to `json_parse`.
 
+### json_try_parse
+
+`json_try_parse(text: String) → Json` | QU: 5
+
+Like `json_parse`, but returns SQL NULL on parse failure (invalid JSON, number out of range) instead of throwing. Use this when the source text may not be well-formed — typical for free-form LLM output where you want to filter or fall back rather than abort the query.
+
+```sql
+-- Filter to rows where the model returned valid JSON.
+SELECT user_id, response
+FROM model_outputs
+WHERE json_try_parse(response) IS NOT NULL
+```
+
+`try_cast(text, Json)` is equivalent — both return NULL on failure with the same set of caught exceptions.
+
 ### json_value
 
 `json_value(doc: Json, path: String) → typed scalar` | QU: 3

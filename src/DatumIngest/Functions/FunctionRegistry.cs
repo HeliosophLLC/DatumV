@@ -231,6 +231,7 @@ public sealed class FunctionRegistry
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.
         registry.RegisterScalar<Scalar.Json.JsonParseFunction>();
+        registry.RegisterScalar<Scalar.Json.JsonTryParseFunction>();
         registry.RegisterScalar<Scalar.Json.JsonValueFunction>();
         registry.RegisterScalar<Scalar.Json.JsonQueryFunction>();
         registry.RegisterScalar<Scalar.Json.JsonToTextFunction>();

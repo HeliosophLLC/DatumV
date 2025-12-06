@@ -30,6 +30,7 @@ public sealed class RegisteredScalarFunctionsTests
         "random_float32",
         "random_float32_from_seed",
         "json_parse",
+        "json_try_parse",
         "json_value",
         "json_query",
         "json_to_text",

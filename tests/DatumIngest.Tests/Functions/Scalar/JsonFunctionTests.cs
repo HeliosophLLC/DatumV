@@ -39,6 +39,39 @@ public sealed class JsonFunctionTests
         Assert.Equal(DataKind.Json, result.Kind);
     }
 
+    // ─── json_try_parse ────────────────────────────────────────────────────
+
+    [Fact]
+    public void TryParse_ValidJson_ReturnsJson()
+    {
+        ValueRef result = new JsonTryParseFunction().Execute(
+            [ValueRef.FromString("""{"a":1}""")], in Frame);
+
+        Assert.False(result.IsNull);
+        Assert.Equal(DataKind.Json, result.Kind);
+        Assert.Equal(1L, ExecuteValue(result, "$.a").AsInt64());
+    }
+
+    [Fact]
+    public void TryParse_InvalidJson_ReturnsTypedNull()
+    {
+        ValueRef result = new JsonTryParseFunction().Execute(
+            [ValueRef.FromString("not json {")], in Frame);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Json, result.Kind);
+    }
+
+    [Fact]
+    public void TryParse_NullInput_ReturnsTypedNull()
+    {
+        ValueRef result = new JsonTryParseFunction().Execute(
+            [ValueRef.Null(DataKind.String)], in Frame);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Json, result.Kind);
+    }
+
     // ─── json_value (typed scalar extraction) ──────────────────────────────
 
     [Fact]
