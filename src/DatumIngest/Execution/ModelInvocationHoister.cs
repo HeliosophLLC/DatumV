@@ -465,6 +465,18 @@ public static class ModelInvocationHoister
                 : RewriteChildren(project, _ => hoistedSource);
         }
 
+        // Option B: only lift LET bindings as their own rungs when the projection
+        // contains at least one model call. Pure-scalar LET projections continue
+        // to use the in-projection LET evaluator (no per-row Enricher hop) and
+        // their plan shape is unchanged. With models present, every LET body
+        // becomes a rung — Enricher for scalar bodies, MIO for model bodies —
+        // so model calls referencing LET-derived columns find them on the row
+        // by the time they execute.
+        if (project.LetBindings is not null && project.LetBindings.Count > 0)
+        {
+            return HoistProjectWithLetStaircase(project, hoistedSource, catalog, collector);
+        }
+
         IQueryOperator augmented = BuildMioStack(hoistedSource, collector, catalog);
 
         // Rewrite projection columns and LET binding bodies. Hoisted model-call
@@ -480,25 +492,349 @@ public static class ModelInvocationHoister
             };
         }
 
-        IReadOnlyList<LetBinding>? rewrittenLet = project.LetBindings;
-        if (project.LetBindings is not null)
+        return new ProjectOperator(
+            augmented,
+            rewrittenColumns,
+            project.LetBindings,
+            project.Assertions);
+    }
+
+    /// <summary>
+    /// Dependency-aware staging when the projection has both LET bindings and at
+    /// least one <c>models.*</c> call. Each LET binding becomes its own upstream
+    /// rung — <see cref="Operators.RowEnricherOperator"/> for scalar bodies,
+    /// <see cref="Operators.ModelInvocationOperator"/> for model bodies — placed
+    /// in dependency order so a model whose argument references a LET binding
+    /// finds the LET's hidden column on the row by the time it dispatches.
+    /// The projection's <see cref="ProjectOperator.LetBindings"/> list is left
+    /// empty; references to LET names in the SELECT list rewrite to their
+    /// synthesised hidden columns. LET bindings carrying an
+    /// <see cref="LetBinding.OutputAlias"/> get a synthetic
+    /// <see cref="SelectColumn"/> prepended so the projected schema still
+    /// includes them.
+    /// </summary>
+    private static IQueryOperator HoistProjectWithLetStaircase(
+        ProjectOperator project,
+        IQueryOperator hoistedSource,
+        ModelCatalog catalog,
+        ModelHoistCollector modelCollector)
+    {
+        // ── Step 1: build the unified hoist target table. ──────────────────
+        // Keys are fingerprints — model calls fingerprint to QueryExplainer
+        // text, LET bindings fingerprint to their bare name (which IS the
+        // fingerprint of any ColumnReference to that name). Both kinds coexist
+        // in one Dictionary that HoistDependencyOrdering can topo-sort.
+        Dictionary<string, Expression> hoists = new(StringComparer.Ordinal);
+        Dictionary<string, string> fpToSynthName = new(StringComparer.Ordinal);
+        Dictionary<string, FunctionCallExpression> modelCanonicals =
+            new(StringComparer.Ordinal);
+        Dictionary<string, LetBinding> letBindingByName =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        // Register model calls. Re-use the synthetic names the collector
+        // already allocated so existing argument-rewrite paths stay consistent.
+        foreach (FunctionCallExpression fn in modelCollector.HoistedOrder)
         {
-            LetBinding[] rebuilt = new LetBinding[project.LetBindings.Count];
-            for (int i = 0; i < project.LetBindings.Count; i++)
+            string fp = QueryExplainer.FormatExpression(fn);
+            if (!hoists.ContainsKey(fp))
             {
-                rebuilt[i] = project.LetBindings[i] with
-                {
-                    Expression = RewriteExpression(project.LetBindings[i].Expression, collector.HoistedColumns),
-                };
+                hoists[fp] = fn;
+                fpToSynthName[fp] = modelCollector.HoistedColumns[fn];
+                modelCanonicals[fp] = fn;
             }
-            rewrittenLet = rebuilt;
+        }
+
+        // Register LET bindings. Each binding's name IS its fingerprint (a
+        // ColumnReference to that name fingerprints to the same string).
+        IReadOnlyList<LetBinding> letBindings = project.LetBindings!;
+        for (int i = 0; i < letBindings.Count; i++)
+        {
+            LetBinding binding = letBindings[i];
+            string fp = binding.Name;
+            if (hoists.ContainsKey(fp))
+            {
+                throw new InvalidOperationException(
+                    $"LET binding '{binding.Name}' fingerprints to a name already " +
+                    $"reserved by another hoist target — name collision in hoister.");
+            }
+
+            hoists[fp] = binding.Expression;
+            // Synthetic hidden-column name; uniqueness via positional suffix
+            // so two LET bindings with the same name (shouldn't happen, but
+            // defensive) wouldn't collide.
+            fpToSynthName[fp] = $"__let_{binding.Name}_{i}";
+            letBindingByName[binding.Name] = binding;
+        }
+
+        // ── Step 2: topo-sort the unified dependency graph. ────────────────
+        // OrderByDependency walks each hoist's expression looking for inner
+        // subtrees whose fingerprint matches another hoist key. ColumnReference
+        // subtrees fingerprint to the column name — matching LET-name keys.
+        // Function-call subtrees match model-call keys. Both kinds resolve in
+        // one pass.
+        List<List<string>> levels = HoistDependencyOrdering.OrderByDependency(hoists);
+
+        // ── Step 3: build the staircase, level by level, source-side first.
+        // Within a level, group scalar-LET targets into a single Enricher
+        // (their enrichments are independent by topo guarantee) and emit one
+        // MIO per model target.
+        IQueryOperator augmented = hoistedSource;
+        foreach (List<string> level in levels)
+        {
+            List<RowEnrichment> levelEnrichments = new();
+            List<string> levelModelFingerprints = new();
+
+            foreach (string fp in level)
+            {
+                if (modelCanonicals.ContainsKey(fp))
+                {
+                    levelModelFingerprints.Add(fp);
+                }
+                else
+                {
+                    // Scalar LET. Rewrite the body so:
+                    //   (a) any model-call subtree becomes a ColumnReference
+                    //       to its already-emitted synthetic column;
+                    //   (b) any LET-name reference becomes a ColumnReference
+                    //       to its already-emitted hidden column.
+                    Expression rewritten = RewriteExpressionWithLetRefs(
+                        hoists[fp], modelCollector.HoistedColumns, fpToSynthName);
+                    levelEnrichments.Add(new RowEnrichment(fpToSynthName[fp], rewritten));
+                }
+            }
+
+            if (levelEnrichments.Count > 0)
+            {
+                augmented = new RowEnricherOperator(augmented, levelEnrichments);
+            }
+
+            foreach (string fp in levelModelFingerprints)
+            {
+                FunctionCallExpression canonical = modelCanonicals[fp];
+                augmented = BuildSingleMioWithLetRefs(
+                    augmented, canonical, fpToSynthName[fp],
+                    modelCollector.HoistedColumns, fpToSynthName, catalog);
+            }
+        }
+
+        // ── Step 4: rebuild the projection. ────────────────────────────────
+        // SELECT-list expressions get the same dual rewrite. Aliased LET
+        // bindings need a synthetic SelectColumn so the projection still
+        // exposes the alias as an output column.
+        List<SelectColumn> rewrittenColumns = new(
+            project.Columns.Count + letBindings.Count(b => b.OutputAlias is not null));
+
+        // Aliased LET bindings appear first, matching the existing in-projection
+        // contract (see ProjectionSchema.Build's "Aliased LET bindings appear at
+        // the beginning of the output").
+        foreach (LetBinding binding in letBindings)
+        {
+            if (binding.OutputAlias is not null)
+            {
+                rewrittenColumns.Add(new SelectColumn(
+                    new ColumnReference(TableName: null, ColumnName: fpToSynthName[binding.Name]),
+                    Alias: binding.OutputAlias));
+            }
+        }
+
+        foreach (SelectColumn column in project.Columns)
+        {
+            Expression rewritten = RewriteExpressionWithLetRefs(
+                column.Expression, modelCollector.HoistedColumns, fpToSynthName);
+
+            // If the user wrote `SELECT … v FROM t` where `v` is a LET name,
+            // preserve `v` as the output column name. Without this, the auto-
+            // derived name would follow the rewritten expression
+            // (`__let_v_N`), not the user's intent. Only apply when the
+            // SELECT column is unaliased and its top-level expression is a
+            // ColumnReference whose name matches a lifted LET binding.
+            string? alias = column.Alias;
+            if (alias is null
+                && column.Expression is ColumnReference originalRef
+                && originalRef.TableName is null
+                && letBindingByName.ContainsKey(originalRef.ColumnName))
+            {
+                alias = originalRef.ColumnName;
+            }
+
+            rewrittenColumns.Add(column with { Expression = rewritten, Alias = alias });
         }
 
         return new ProjectOperator(
             augmented,
             rewrittenColumns,
-            rewrittenLet,
+            letBindings: null, // every LET binding has been lifted upstream
             project.Assertions);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="BuildSingleMio"/> whose argument rewrite also
+    /// substitutes LET-name <see cref="ColumnReference"/>s for their
+    /// synthesised hidden columns. Used by the LET-staircase pass.
+    /// </summary>
+    private static IQueryOperator BuildSingleMioWithLetRefs(
+        IQueryOperator source,
+        FunctionCallExpression canonical,
+        string outputColumn,
+        IReadOnlyDictionary<FunctionCallExpression, string> modelRewrites,
+        IReadOnlyDictionary<string, string> letRewrites,
+        ModelCatalog catalog)
+    {
+        string modelName = StripNamespace(canonical.FunctionName);
+        ModelCatalogEntry? entry = catalog.TryGetEntry(modelName)
+            ?? throw new InvalidOperationException(
+                $"Model '{modelName}' is not registered in the catalog. Reference '{canonical.FunctionName}' " +
+                $"requires a matching ModelCatalog entry — register it via ModelCatalog.Register before planning.");
+
+        int requiredCount = entry.InputKinds.Count;
+        int maxOptional = entry.OptionalArgKinds?.Count ?? 0;
+        int suppliedCount = canonical.Arguments.Count;
+
+        if (suppliedCount < requiredCount || suppliedCount > requiredCount + maxOptional)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelName}' arity mismatch: expected {requiredCount}–{requiredCount + maxOptional} " +
+                $"arguments, got {suppliedCount}.");
+        }
+
+        Expression[] requiredArgs = new Expression[requiredCount];
+        for (int i = 0; i < requiredCount; i++)
+        {
+            requiredArgs[i] = RewriteExpressionWithLetRefs(
+                canonical.Arguments[i], modelRewrites, letRewrites);
+        }
+
+        Expression[] optionalArgs = new Expression[suppliedCount - requiredCount];
+        for (int i = 0; i < optionalArgs.Length; i++)
+        {
+            optionalArgs[i] = RewriteExpressionWithLetRefs(
+                canonical.Arguments[requiredCount + i], modelRewrites, letRewrites);
+        }
+
+        return new ModelInvocationOperator(source, modelName, requiredArgs, optionalArgs, outputColumn);
+    }
+
+    /// <summary>
+    /// Variant of <see cref="RewriteExpression"/> that also rewrites
+    /// <see cref="ColumnReference"/>s whose name matches a LET binding to point
+    /// at the binding's synthesised hidden column. The model-call rewrite
+    /// (identity-keyed by AST node) and LET-name rewrite (string-keyed) are
+    /// applied in a single pass so an expression can mix both kinds of
+    /// reference (a LET body that contains a model call that references
+    /// another LET name).
+    /// </summary>
+    private static Expression RewriteExpressionWithLetRefs(
+        Expression expression,
+        IReadOnlyDictionary<FunctionCallExpression, string> modelRewrites,
+        IReadOnlyDictionary<string, string> letRewrites)
+    {
+        return expression switch
+        {
+            FunctionCallExpression fn when modelRewrites.TryGetValue(fn, out string? synthName)
+                => new ColumnReference(TableName: null, ColumnName: synthName),
+
+            FunctionCallExpression fn => fn with
+            {
+                Arguments = RewriteListWithLetRefs(fn.Arguments, modelRewrites, letRewrites),
+            },
+
+            // Only rewrite unqualified column refs whose name matches a LET
+            // binding. Qualified refs (`t.x`) always resolve to a real source
+            // column and never share names with LET bindings.
+            ColumnReference col when col.TableName is null
+                && letRewrites.TryGetValue(col.ColumnName, out string? hidden)
+                => new ColumnReference(TableName: null, ColumnName: hidden),
+
+            BinaryExpression b => b with
+            {
+                Left = RewriteExpressionWithLetRefs(b.Left, modelRewrites, letRewrites),
+                Right = RewriteExpressionWithLetRefs(b.Right, modelRewrites, letRewrites),
+            },
+            UnaryExpression u => u with
+            {
+                Operand = RewriteExpressionWithLetRefs(u.Operand, modelRewrites, letRewrites),
+            },
+            CastExpression c => c with
+            {
+                Expression = RewriteExpressionWithLetRefs(c.Expression, modelRewrites, letRewrites),
+            },
+            InExpression i => i with
+            {
+                Expression = RewriteExpressionWithLetRefs(i.Expression, modelRewrites, letRewrites),
+                Values = RewriteListWithLetRefs(i.Values, modelRewrites, letRewrites),
+            },
+            BetweenExpression bt => bt with
+            {
+                Expression = RewriteExpressionWithLetRefs(bt.Expression, modelRewrites, letRewrites),
+                Low = RewriteExpressionWithLetRefs(bt.Low, modelRewrites, letRewrites),
+                High = RewriteExpressionWithLetRefs(bt.High, modelRewrites, letRewrites),
+            },
+            IsNullExpression n => n with
+            {
+                Expression = RewriteExpressionWithLetRefs(n.Expression, modelRewrites, letRewrites),
+            },
+            CaseExpression ce => ce with
+            {
+                Operand = ce.Operand is null
+                    ? null : RewriteExpressionWithLetRefs(ce.Operand, modelRewrites, letRewrites),
+                WhenClauses = ce.WhenClauses
+                    .Select(w => new WhenClause(
+                        RewriteExpressionWithLetRefs(w.Condition, modelRewrites, letRewrites),
+                        RewriteExpressionWithLetRefs(w.Result, modelRewrites, letRewrites)))
+                    .ToList(),
+                ElseResult = ce.ElseResult is null
+                    ? null : RewriteExpressionWithLetRefs(ce.ElseResult, modelRewrites, letRewrites),
+            },
+            LikeExpression like => like with
+            {
+                Expression = RewriteExpressionWithLetRefs(like.Expression, modelRewrites, letRewrites),
+                Pattern = RewriteExpressionWithLetRefs(like.Pattern, modelRewrites, letRewrites),
+                EscapeCharacter = RewriteExpressionWithLetRefs(like.EscapeCharacter, modelRewrites, letRewrites),
+            },
+            AtTimeZoneExpression atz => atz with
+            {
+                Expression = RewriteExpressionWithLetRefs(atz.Expression, modelRewrites, letRewrites),
+                TimeZone = RewriteExpressionWithLetRefs(atz.TimeZone, modelRewrites, letRewrites),
+            },
+            StructLiteralExpression sl => sl with
+            {
+                Fields = sl.Fields
+                    .Select(f => new StructField(
+                        f.Name,
+                        RewriteExpressionWithLetRefs(f.Value, modelRewrites, letRewrites)))
+                    .ToList(),
+            },
+            IndexAccessExpression ia => ia with
+            {
+                Source = RewriteExpressionWithLetRefs(ia.Source, modelRewrites, letRewrites),
+                Index = RewriteExpressionWithLetRefs(ia.Index, modelRewrites, letRewrites),
+            },
+            LambdaExpression lam => lam with
+            {
+                Body = RewriteExpressionWithLetRefs(lam.Body, modelRewrites, letRewrites),
+            },
+
+            _ => expression,
+        };
+    }
+
+    private static IReadOnlyList<Expression> RewriteListWithLetRefs(
+        IReadOnlyList<Expression> list,
+        IReadOnlyDictionary<FunctionCallExpression, string> modelRewrites,
+        IReadOnlyDictionary<string, string> letRewrites)
+    {
+        if (list.Count == 0) return list;
+
+        Expression[] rewritten = new Expression[list.Count];
+        bool changed = false;
+        for (int i = 0; i < list.Count; i++)
+        {
+            Expression original = list[i];
+            Expression updated = RewriteExpressionWithLetRefs(original, modelRewrites, letRewrites);
+            rewritten[i] = updated;
+            if (!ReferenceEquals(original, updated)) changed = true;
+        }
+        return changed ? rewritten : list;
     }
 
     /// <summary>

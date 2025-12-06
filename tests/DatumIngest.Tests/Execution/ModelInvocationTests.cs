@@ -357,10 +357,13 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Model calls inside <c>LET</c> binding bodies hoist out of the project
-    /// just like calls in column expressions. Plan shape: Scan → MIO → Project,
-    /// where the LET binding's expression is rewritten to a ColumnReference
-    /// pointing at the MIO's hidden output.
+    /// When a projection contains both LET bindings and at least one
+    /// <c>models.*</c> call, the planner's LET-staircase pass lifts every LET
+    /// binding into its own upstream rung. For <c>LET v = models.echo(name)</c>
+    /// this produces a <see cref="ModelInvocationOperator"/> rung
+    /// (<c>__model_echo_*</c>) followed by a <see cref="RowEnricherOperator"/>
+    /// rung that aliases the model's column under the binding's hidden name
+    /// (<c>__let_v_*</c>). The projection's <c>LetBindings</c> ends up empty.
     /// </summary>
     [Fact]
     public void Planner_HoistsModelCallInLetBody()
@@ -376,15 +379,17 @@ public sealed class ModelInvocationTests : ServiceTestBase
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
         IQueryOperator plan = planner.Plan(query);
 
+        // Plan shape: Project ← Enricher(__let_v_*) ← MIO(echo) ← Scan.
+        // LET binding has been lifted out of the projection.
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
-        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(project.Source);
-        Assert.Equal("echo", invocation.ModelName);
+        Assert.Null(project.LetBindings);
 
-        // LET body now references the MIO's hidden column.
-        Assert.NotNull(project.LetBindings);
-        Assert.Single(project.LetBindings);
-        ColumnReference letRef = Assert.IsType<ColumnReference>(project.LetBindings![0].Expression);
-        Assert.Equal(invocation.OutputColumnName, letRef.ColumnName);
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(project.Source);
+        Assert.Single(enricher.Enrichments);
+        Assert.StartsWith("__let_v_", enricher.Enrichments[0].ColumnName);
+
+        ModelInvocationOperator invocation = Assert.IsType<ModelInvocationOperator>(enricher.Source);
+        Assert.Equal("echo", invocation.ModelName);
     }
 
     /// <summary>

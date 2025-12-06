@@ -389,13 +389,24 @@ public static class CommonSubexpressionEliminator
     }
 
     private static bool IsCrossClauseChainable(IQueryOperator op) =>
-        op is ProjectOperator or FilterOperator or OrderByOperator;
+        op is ProjectOperator
+            or FilterOperator
+            or OrderByOperator
+            or RowEnricherOperator
+            or ModelInvocationOperator;
 
     private static IQueryOperator GetChainSource(IQueryOperator op) => op switch
     {
         ProjectOperator p => p.Source,
         FilterOperator f => f.Source,
         OrderByOperator ob => ob.Source,
+        // RowEnricher and ModelInvocation rungs introduced by the model-hoister's
+        // LET-staircase pass are chainable so CSE sweeps see expression sites
+        // across them — without this, the rungs break the chain and a duplicate
+        // shared between (e.g.) a WHERE predicate and a lifted LET body wouldn't
+        // unify into a single upstream Enricher.
+        RowEnricherOperator e => e.Source,
+        ModelInvocationOperator m => m.Source,
         _ => throw new InvalidOperationException(
             $"GetChainSource called on non-chainable operator {op.GetType().Name}."),
     };
@@ -565,6 +576,22 @@ public static class CommonSubexpressionEliminator
                     CollectCandidatesXC(i.Expression, operatorIndex, entries, letNames, functions);
                 }
                 break;
+            case RowEnricherOperator re:
+                foreach (RowEnrichment e in re.Enrichments)
+                {
+                    CollectCandidatesXC(e.Expression, operatorIndex, entries, letNames, functions);
+                }
+                break;
+            case ModelInvocationOperator mio:
+                foreach (Expression a in mio.InputExpressions)
+                {
+                    CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
+                }
+                foreach (Expression a in mio.OptionalExpressions)
+                {
+                    CollectCandidatesXC(a, operatorIndex, entries, letNames, functions);
+                }
+                break;
         }
     }
 
@@ -634,6 +661,21 @@ public static class CommonSubexpressionEliminator
                     .Select(i => i with { Expression = RewriteWithHoists(i.Expression, hoists) })
                     .ToArray(),
                 ob.TopNRows),
+            RowEnricherOperator re => new RowEnricherOperator(
+                newSource,
+                re.Enrichments
+                    .Select(e => e with { Expression = RewriteWithHoists(e.Expression, hoists) })
+                    .ToList()),
+            ModelInvocationOperator mio => new ModelInvocationOperator(
+                newSource,
+                mio.ModelName,
+                mio.InputExpressions
+                    .Select(a => RewriteWithHoists(a, hoists))
+                    .ToList(),
+                mio.OptionalExpressions
+                    .Select(a => RewriteWithHoists(a, hoists))
+                    .ToList(),
+                mio.OutputColumnName),
             _ => throw new InvalidOperationException(
                 $"RebuildChainOperator called on non-chainable {op.GetType().Name}."),
         };
