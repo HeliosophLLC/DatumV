@@ -102,11 +102,41 @@
     border-radius: 3px;
   }
   #tab-strip .tab .close:hover { background: var(--border); color: var(--fg); }
+  #tab-strip .tab .pin {
+    font-size: 11px; line-height: 1; margin-right: 2px; user-select: none;
+  }
+  #tab-strip .tab .name-input {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--accent); border-radius: 2px;
+    font: inherit; padding: 0 4px; outline: none;
+    width: 160px; max-width: 180px;
+  }
   #tab-strip #new-tab {
     background: transparent; border: none; color: var(--muted);
     font-size: 18px; padding: 0 12px; cursor: pointer;
   }
   #tab-strip #new-tab:hover { color: var(--fg); }
+
+  /* Tab right-click menu */
+  #tab-context-menu {
+    position: fixed;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 0;
+    min-width: 140px; z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    font-size: 13px;
+  }
+  #tab-context-menu button {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: none; color: var(--fg);
+    padding: 6px 14px; cursor: pointer;
+    font: inherit;
+  }
+  #tab-context-menu button:hover:not(:disabled) { background: var(--panel-2); }
+  #tab-context-menu button:disabled { color: var(--muted); cursor: default; }
+  #tab-context-menu .sep {
+    height: 1px; background: var(--border); margin: 4px 0;
+  }
 
   /* Editor pane */
   #editor-pane {
@@ -498,6 +528,7 @@
       lastResult: null,            // never run yet → no IDB entry to fetch
       lastRunAt: 0,
       sqlOfLastRun: '',
+      pinned: false,
     };
   }
   function loadWorkspace(name) {
@@ -516,6 +547,7 @@
           lastResult: hasRun ? undefined : null,
           lastRunAt: t.lastRunAt || 0,
           sqlOfLastRun: t.sqlOfLastRun || '',
+          pinned: t.pinned === true,
         };
       });
       if (!ws.tabs.find(t => t.id === ws.activeTabId)) {
@@ -538,6 +570,7 @@
         sql: t.sql,
         lastRunAt: t.lastRunAt,
         sqlOfLastRun: t.sqlOfLastRun,
+        pinned: t.pinned === true,
       })),
     };
     writeJson(STORE.workspace(name), snapshot);
@@ -566,12 +599,26 @@
     strip.innerHTML = '';
     for (const t of state.workspace.tabs) {
       const div = document.createElement('div');
-      div.className = 'tab' + (t.id === state.workspace.activeTabId ? ' active' : '');
+      div.className = 'tab' + (t.id === state.workspace.activeTabId ? ' active' : '')
+        + (t.pinned ? ' pinned' : '');
       div.dataset.id = t.id;
+
+      if (t.pinned) {
+        const pin = document.createElement('span');
+        pin.className = 'pin';
+        pin.textContent = '📌';
+        pin.title = 'Pinned — right-click to unpin';
+        div.appendChild(pin);
+      }
 
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = t.name;
+      name.title = 'Double-click to rename';
+      name.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        beginRenameTab(t.id, name);
+      });
       div.appendChild(name);
 
       if (t.sql !== t.sqlOfLastRun) {
@@ -582,17 +629,25 @@
         div.appendChild(dirty);
       }
 
-      const close = document.createElement('button');
-      close.className = 'close';
-      close.textContent = '×';
-      close.title = 'Close tab';
-      close.addEventListener('click', (e) => {
-        e.stopPropagation();
-        closeTab(t.id);
-      });
-      div.appendChild(close);
+      // Pinned tabs hide the close button so an accidental click can't drop
+      // the work; the tab can still be closed via right-click → Unpin → Close.
+      if (!t.pinned) {
+        const close = document.createElement('button');
+        close.className = 'close';
+        close.textContent = '×';
+        close.title = 'Close tab';
+        close.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeTab(t.id);
+        });
+        div.appendChild(close);
+      }
 
       div.addEventListener('click', () => activateTab(t.id));
+      div.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showTabContextMenu(e.clientX, e.clientY, t.id);
+      });
       strip.appendChild(div);
     }
     const newBtn = document.createElement('button');
@@ -601,6 +656,110 @@
     newBtn.title = 'New tab';
     newBtn.addEventListener('click', newTab);
     strip.appendChild(newBtn);
+  }
+
+  // Inline-rename: swap the .name span for an <input>. Commit on Enter or
+  // blur; cancel on Escape. The new name is trimmed; an empty result keeps
+  // the previous name so the tab is never anonymous in the strip.
+  function beginRenameTab(id, nameEl) {
+    const tab = state.workspace.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name-input';
+    input.value = tab.name;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = (newName) => {
+      if (done) return;
+      done = true;
+      const trimmed = (newName ?? '').trim();
+      if (trimmed && trimmed !== tab.name) {
+        tab.name = trimmed;
+        persistWorkspace();
+      }
+      renderTabStrip();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(input.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); commit(null); }
+    });
+    input.addEventListener('blur', () => commit(input.value));
+    // Don't let click inside the input bubble up to the tab activator.
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  function togglePinTab(id) {
+    const tab = state.workspace.tabs.find(t => t.id === id);
+    if (!tab) return;
+    tab.pinned = !tab.pinned;
+    renderTabStrip();
+    persistWorkspace();
+  }
+
+  // Custom context menu — single shared element, repositioned on each open.
+  // Dismissed by any outside pointerdown, scroll, resize, or Escape.
+  let tabContextMenu = null;
+  function showTabContextMenu(x, y, tabId) {
+    closeTabContextMenu();
+    const tab = state.workspace.tabs.find(t => t.id === tabId);
+    if (!tab) return;
+
+    const menu = document.createElement('div');
+    menu.id = 'tab-context-menu';
+    const addItem = (label, onClick, opts = {}) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      if (opts.disabled) btn.disabled = true;
+      btn.addEventListener('click', () => { closeTabContextMenu(); onClick(); });
+      menu.appendChild(btn);
+    };
+    const addSep = () => {
+      const s = document.createElement('div'); s.className = 'sep'; menu.appendChild(s);
+    };
+
+    addItem('Rename…', () => {
+      // Re-find the live name span — renderTabStrip may have rebuilt the DOM.
+      const nameEl = document.querySelector(`#tab-strip .tab[data-id="${tabId}"] .name`);
+      if (nameEl) beginRenameTab(tabId, nameEl);
+    });
+    addItem(tab.pinned ? 'Unpin' : 'Pin', () => togglePinTab(tabId));
+    addSep();
+    addItem('Close', () => closeTab(tabId), { disabled: tab.pinned });
+
+    document.body.appendChild(menu);
+    // Clamp to viewport so right-edge clicks don't push the menu off-screen.
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(x, window.innerWidth - rect.width - 4);
+    const top  = Math.min(y, window.innerHeight - rect.height - 4);
+    menu.style.left = `${Math.max(4, left)}px`;
+    menu.style.top  = `${Math.max(4, top)}px`;
+    tabContextMenu = menu;
+
+    setTimeout(() => {
+      window.addEventListener('pointerdown', onTabMenuOutside, true);
+      window.addEventListener('keydown', onTabMenuKey, true);
+      window.addEventListener('scroll', closeTabContextMenu, true);
+      window.addEventListener('resize', closeTabContextMenu, true);
+    }, 0);
+  }
+  function onTabMenuOutside(e) {
+    if (tabContextMenu && !tabContextMenu.contains(e.target)) closeTabContextMenu();
+  }
+  function onTabMenuKey(e) {
+    if (e.key === 'Escape') closeTabContextMenu();
+  }
+  function closeTabContextMenu() {
+    if (!tabContextMenu) return;
+    tabContextMenu.remove();
+    tabContextMenu = null;
+    window.removeEventListener('pointerdown', onTabMenuOutside, true);
+    window.removeEventListener('keydown', onTabMenuKey, true);
+    window.removeEventListener('scroll', closeTabContextMenu, true);
+    window.removeEventListener('resize', closeTabContextMenu, true);
   }
 
   function newTab() {
@@ -626,6 +785,8 @@
   async function closeTab(id) {
     const tab = state.workspace.tabs.find(t => t.id === id);
     if (!tab) return;
+    // Pinned tabs are protected — unpin first to close.
+    if (tab.pinned) return;
     if (tab.sql && tab.sql !== tab.sqlOfLastRun) {
       const ok = await confirmModal('Close tab', `"${tab.name}" has unsaved changes since last run. Close anyway?`);
       if (!ok) return;
