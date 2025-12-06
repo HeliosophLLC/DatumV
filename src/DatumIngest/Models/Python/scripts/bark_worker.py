@@ -61,6 +61,7 @@ Bark Small). Carried by the C# side as ``DataKind.Image`` (byte
 payload) until ``DataKind.Audio`` lands.
 """
 
+import argparse
 import io
 import os
 import struct
@@ -75,20 +76,30 @@ from transformers import AutoProcessor, BarkModel  # noqa: E402
 from python_worker_host import run  # noqa: E402
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model-id",
+    default="suno/bark-small",
+    help="HuggingFace model ID. 'suno/bark-small' (~1 GB) or "
+         "'suno/bark' (~3.5 GB, higher quality, slower).",
+)
+parser.add_argument(
+    "--default-voice-preset",
+    default="v2/en_speaker_6",
+    help="Speaker preset used when the per-call override is empty.",
+)
+ARGS = parser.parse_args()
+
+
 # Pick the best device the venv's torch was actually compiled with.
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[bark] device={DEVICE}", file=sys.stderr, flush=True)
+print(f"[bark] device={DEVICE} model={ARGS.model_id}", file=sys.stderr, flush=True)
 
-# Default voice preset. Pinning one prevents Bark from randomly picking
-# unhinged speakers each call. v2/en_speaker_6 is the well-tested neutral
-# male voice. Override per-call via the first optional positional arg.
-DEFAULT_VOICE_PRESET = "v2/en_speaker_6"
-
-processor = AutoProcessor.from_pretrained("suno/bark-small")
-model = BarkModel.from_pretrained("suno/bark-small").to(DEVICE)
+processor = AutoProcessor.from_pretrained(ARGS.model_id)
+model = BarkModel.from_pretrained(ARGS.model_id).to(DEVICE)
 
 # Read the model's actual sample rate rather than hardcoding 24000 --
-# robust if Suno ships a 16kHz or 48kHz variant later.
+# robust across Bark variants and any future re-tuned models.
 SAMPLE_RATE = int(model.generation_config.sample_rate)
 print(f"[bark] sample_rate={SAMPLE_RATE}", file=sys.stderr, flush=True)
 
@@ -132,7 +143,7 @@ def infer(inputs, overrides):
         row_overrides = overrides[row_idx] if row_idx < len(overrides) else []
         voice_preset = _pick_string(
             row_overrides[0] if len(row_overrides) > 0 else None,
-            DEFAULT_VOICE_PRESET,
+            ARGS.default_voice_preset,
         )
 
         inputs_t = processor(

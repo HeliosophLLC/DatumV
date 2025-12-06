@@ -403,7 +403,7 @@ returns the transcription as `String`.
   `whisper-medium`). The script reuses `.venv/` and runs
   `optimum-cli export onnx --model openai/whisper-X` per variant.
 
-### Python-bridge models (`bark_small`, `kokoro_82m`)
+### Python-bridge models (`bark_small`, `bark`, `kokoro_82m`)
 
 Some models are difficult or impractical to convert from PyTorch to
 ONNX — multi-stage pipelines with autoregressive Python control flow
@@ -466,6 +466,35 @@ runnability — but a missing venv reliably reports `status=missing`.
     'Hello there from Datum Ingest. [laughs] This is rather fun, actually.',
     'v2/en_speaker_9'
   );
+  ```
+
+#### `bark` — full Bark TTS (higher quality)
+
+Same architecture, voices, and worker as `bark_small` — bigger weights
+(~700M params vs ~100M) for noticeably more natural prosody at
+~3-4× the inference cost.
+
+- **License / Source**: same as `bark_small` —
+  [huggingface.co/suno/bark](https://huggingface.co/suno/bark)
+- **Backend**: Python bridge — same `.venv-bark` and worker script
+  (`bark_worker.py`) as `bark_small`, only the HuggingFace model ID
+  differs (`suno/bark` vs `suno/bark-small`).
+- **First-call download**: ~3.5 GB into `~/.cache/huggingface/`.
+- **VRAM**: ~3-4 GB during inference (3-4× `bark_small`'s footprint).
+- **Latency**: ~15-30s per clip on a consumer GPU vs `bark_small`'s
+  ~5-10s. Use `bark` for hero outputs, `bark_small` for fast iteration.
+- **Setup**: nothing extra beyond `setup-bark-venv.ps1` — both
+  variants share the venv. The full model auto-downloads on first
+  inference call.
+- **Per-call overrides**: same as `bark_small` —
+  `models.bark(text, 'v2/en_speaker_9')`.
+- **Demo**:
+  ```sql
+  -- Compare quality side-by-side: same prompt, both variants.
+  SELECT
+    models.bark_small(prompt, 'v2/en_speaker_0') AS small,
+    models.bark      (prompt, 'v2/en_speaker_0') AS full
+  FROM (SELECT 'You enter the cavern. [pause] Distant water drips.' AS prompt);
   ```
 
 #### `kokoro_82m` — fast multi-voice TTS

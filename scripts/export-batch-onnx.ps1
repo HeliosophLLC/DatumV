@@ -82,11 +82,12 @@ $KnownModels = @(
         HF          = 'suno/bark-small'
         OutputFolder = 'bark-small-onnx'
         ExpectedSize = '~1.0 GB'
-        # Optimum's auto-inference doesn't always pick text-to-audio for Bark
-        # variants (and recent transformers releases have churned the export
-        # surface). Hinting explicitly is best-effort -- don't be surprised if
-        # this still fails; Bark on the Python bridge remains the fallback.
-        Task         = 'text-to-audio'
+        # optimum-cli rejects Bark with "custom or unsupported architecture"
+        # -- they recommend filing a feature request at github.com/huggingface/optimum.
+        # Bark's 4-stage autoregressive pipeline doesn't fit static ONNX
+        # cleanly. Stays on the Python bridge.
+        Skip         = $true
+        SkipReason   = 'optimum does not support bark architecture'
         Description  = 'Suno Bark Small - TTS with embedded sound effects.'
     },
     @{
@@ -94,7 +95,8 @@ $KnownModels = @(
         HF          = 'suno/bark'
         OutputFolder = 'bark-onnx'
         ExpectedSize = '~3.5 GB'
-        Task         = 'text-to-audio'
+        Skip         = $true
+        SkipReason   = 'optimum does not support bark architecture'
         Description  = 'Suno Bark (full) - higher-quality TTS variant.'
     },
     @{
@@ -116,8 +118,11 @@ $KnownModels = @(
         HF          = 'facebook/audiogen-medium'
         OutputFolder = 'audiogen-medium-onnx'
         ExpectedSize = '~6.0 GB'
-        # AudioGen has the same architecture as MusicGen but optimum's task
-        # auto-inference picks the wrong slot for it; hint explicitly.
+        # AudioGen is structurally a MusicGen variant. optimum can't infer
+        # the source library automatically, so hint --library transformers.
+        # Whether the export then succeeds is uncertain (audiocraft-format
+        # checkpoints sometimes need extra coaxing).
+        Library      = 'transformers'
         Task         = 'text-to-audio'
         Description  = 'Meta AudioGen - text-to-sound-effect (D&D ambience).'
     },
@@ -154,12 +159,13 @@ $KnownModels = @(
         HF          = 'Salesforce/blip2-opt-2.7b'
         OutputFolder = 'blip2-opt-2_7b-onnx'
         ExpectedSize = '~6.0 GB'
-        # BLIP-2 wraps an OPT decoder doing autoregressive caption generation;
-        # image-to-text is the right task slot. The export still might fail on
-        # the OPT decoder portion regardless -- if so, Florence-2 covers the
-        # captioning niche already.
-        Task         = 'image-to-text'
-        Description  = 'BLIP-2 - image captioning with longer outputs than Florence-2.'
+        # optimum-cli rejects BLIP-2 the same way it rejects Bark: "custom
+        # or unsupported architecture". Florence-2 (already wired up
+        # natively) covers the same captioning niche with cleaner export
+        # support, so this entry stays for documentation only.
+        Skip         = $true
+        SkipReason   = 'optimum does not support blip-2; Florence-2 covers this niche'
+        Description  = 'BLIP-2 - image captioning (Florence-2 is the recommended alternative).'
     },
     @{
         Name        = 'clip-vit-base'
@@ -177,19 +183,33 @@ if ($List) {
     Write-Host 'Known optimum-exportable models:' -ForegroundColor Cyan
     Write-Host ''
     foreach ($entry in $KnownModels) {
-        $taskHint = if ($entry.ContainsKey('Task') -and $entry.Task) { "[$($entry.Task)]" } else { '' }
-        $line = '  {0,-20} {1,-12} {2,-20} {3}' -f $entry.Name, $entry.ExpectedSize, $taskHint, $entry.Description
-        Write-Host $line
+        $tags = @()
+        if ($entry.ContainsKey('Task') -and $entry.Task) { $tags += "[$($entry.Task)]" }
+        if ($entry.ContainsKey('Library') -and $entry.Library) { $tags += "[lib:$($entry.Library)]" }
+        if ($entry.ContainsKey('Skip') -and $entry.Skip) { $tags += '[unsupported]' }
+        $tagStr = if ($tags.Count -gt 0) { ($tags -join ' ') } else { '' }
+
+        $line = '  {0,-20} {1,-12} {2,-30} {3}' -f $entry.Name, $entry.ExpectedSize, $tagStr, $entry.Description
+        if ($entry.ContainsKey('Skip') -and $entry.Skip) {
+            Write-Host $line -ForegroundColor DarkGray
+        } else {
+            Write-Host $line
+        }
     }
     Write-Host ''
     Write-Host 'Run with -Models <name1,name2> to convert a subset, or no args for all.'
-    Write-Host 'Tasks in [...] are explicit hints; unhinted models let optimum-cli auto-infer.'
+    Write-Host 'Tags: [task] = explicit task hint, [lib:X] = source library hint,'
+    Write-Host '      [unsupported] = optimum-cli does not support this architecture; skipped'
+    Write-Host '      by default. Pass explicitly via -Models to retry anyway.'
     return
 }
 
 # ---- Resolve which models to attempt ------------------------------------
 
 $ToConvert = if ($Models.Count -gt 0) {
+    # Explicit -Models list: include everything the user named, even
+    # entries marked Skip (the user is opting in to retry a known-broken
+    # conversion).
     $unknown = @()
     foreach ($name in $Models) {
         $match = $KnownModels | Where-Object { $_.Name -eq $name }
@@ -202,7 +222,9 @@ $ToConvert = if ($Models.Count -gt 0) {
     }
     $KnownModels | Where-Object { $Models -contains $_.Name }
 } else {
-    $KnownModels
+    # Default run: filter out Skip=$true entries so we don't waste cycles
+    # on conversions that are known to fail. They still appear in -List.
+    $KnownModels | Where-Object { -not ($_.ContainsKey('Skip') -and $_.Skip) }
 }
 
 # ---- Set up Python venv (reuses .venv\ from sibling export scripts) ----
@@ -217,7 +239,11 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 & .\.venv\Scripts\Activate.ps1
 
 Write-Host 'Ensuring optimum + transformers + diffusers + torch installed ...' -ForegroundColor Cyan
-pip install --quiet --upgrade 'optimum[onnxruntime,diffusers,exporters]' transformers diffusers torch
+# optimum 2.x removed the [diffusers] / [exporters] extras; install
+# diffusers separately and use the bare optimum[onnxruntime] extra. The
+# stale extras names were producing "does not provide the extra" warnings
+# without any other functional impact.
+pip install --quiet --upgrade 'optimum[onnxruntime]' transformers diffusers torch
 
 # ---- Loop over models ---------------------------------------------------
 
@@ -247,19 +273,29 @@ foreach ($model in $ToConvert) {
     if ($model.ContainsKey('Task') -and $model.Task) {
         Write-Host ('          Task hint: {0}' -f $model.Task) -ForegroundColor DarkGray
     }
+    if ($model.ContainsKey('Library') -and $model.Library) {
+        Write-Host ('          Library hint: {0}' -f $model.Library) -ForegroundColor DarkGray
+    }
+    if ($model.ContainsKey('Skip') -and $model.Skip) {
+        Write-Host ('          [retry of known-unsupported model: {0}]' -f $model.SkipReason) -ForegroundColor Yellow
+    }
 
     $startedAt = Get-Date
     $errorMsg = $null
     try {
-        # Pass --task explicitly when the model entry hints one; otherwise
-        # let optimum-cli auto-infer. Hinting helps for models whose
-        # auto-inference picks the wrong slot (AudioGen vs MusicGen, BLIP-2's
-        # image-to-text task, Bark's text-to-audio).
+        # Build the optimum-cli arg list dynamically: append --task and
+        # --library only when the model entry hints them. Auto-inference
+        # works for the bulk of cases; hints are for models where
+        # inference picks the wrong slot or can't determine the source
+        # library at all (AudioGen).
+        $extraArgs = @()
         if ($model.ContainsKey('Task') -and $model.Task) {
-            optimum-cli export onnx --model $model.HF --task $model.Task $outputPath
-        } else {
-            optimum-cli export onnx --model $model.HF $outputPath
+            $extraArgs += @('--task', $model.Task)
         }
+        if ($model.ContainsKey('Library') -and $model.Library) {
+            $extraArgs += @('--library', $model.Library)
+        }
+        optimum-cli export onnx --model $model.HF @extraArgs $outputPath
         $exitCode = $LASTEXITCODE
     } catch {
         $exitCode = 1

@@ -110,6 +110,7 @@ public static class BuiltinModels
         // venv layout is {ModelDirectory}/.venv-<name>/ which the loaders
         // auto-detect.
         RegisterBarkSmall(modelCatalog);
+        RegisterBark(modelCatalog);
         RegisterKokoro82M(modelCatalog);
 
         tableCatalog.Models = modelCatalog;
@@ -1237,6 +1238,58 @@ public static class BuiltinModels
         string? scriptPath = null,
         string? pythonExecutable = null,
         int readyTimeoutSeconds = 180)
+        => RegisterBarkVariant(
+            catalog, modelName, scriptPath, pythonExecutable, readyTimeoutSeconds,
+            huggingFaceModelId: "suno/bark-small",
+            displayName: "Bark Small (TTS, Python-backed)",
+            parameters: "~100M",
+            sourceUrl: "https://huggingface.co/suno/bark-small");
+
+    /// <summary>
+    /// Registers Suno's full Bark TTS model (~3.5 GB weights, higher
+    /// quality than Bark Small). Same Python venv (<c>.venv-bark</c>),
+    /// same worker script, same per-call overrides — only the
+    /// HuggingFace model ID differs. Inference is ~3-4× slower than
+    /// Bark Small but the speech quality is noticeably more natural.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Setup.</strong> Same as Bark Small — run
+    /// <c>scripts/setup-bark-venv.ps1</c> once. The full Bark model
+    /// downloads from HuggingFace into <c>~/.cache/huggingface/</c>
+    /// on the first inference call (~3.5 GB, one-time).
+    /// </para>
+    /// </remarks>
+    public static void RegisterBark(
+        ModelCatalog catalog,
+        string modelName = "bark",
+        string? scriptPath = null,
+        string? pythonExecutable = null,
+        int readyTimeoutSeconds = 240)
+        => RegisterBarkVariant(
+            catalog, modelName, scriptPath, pythonExecutable, readyTimeoutSeconds,
+            huggingFaceModelId: "suno/bark",
+            displayName: "Bark (TTS, Python-backed)",
+            parameters: "~700M",
+            sourceUrl: "https://huggingface.co/suno/bark");
+
+    /// <summary>
+    /// Common backbone for the Bark size variants. Both registrations
+    /// share the same venv (<c>.venv-bark</c>) and the same worker
+    /// script (<c>bark_worker.py</c>); only the HuggingFace model ID
+    /// changes. Both report status against the same <c>pyvenv.cfg</c>
+    /// anchor — if the venv is set up, both variants are runnable.
+    /// </summary>
+    private static void RegisterBarkVariant(
+        ModelCatalog catalog,
+        string modelName,
+        string? scriptPath,
+        string? pythonExecutable,
+        int readyTimeoutSeconds,
+        string huggingFaceModelId,
+        string displayName,
+        string parameters,
+        string sourceUrl)
     {
         string resolvedScriptPath = scriptPath
             ?? Path.Combine(AppContext.BaseDirectory, "python", BarkSmallWorkerFilename);
@@ -1249,16 +1302,13 @@ public static class BuiltinModels
             // is the best proxy the catalog can stat for "set up".
             RelativePath: BarkSmallVenvAnchor,
             InputKinds: [DataKind.String],
-            // 24kHz mono WAV bytes. Carried as Image (byte payload) until
-            // DataKind.Audio lands — see project_audio_datakind in roadmap.
+            // PCM_16 mono WAV bytes at the model's configured sample rate
+            // (24kHz for both bark and bark-small). Carried as Image
+            // (byte payload) until DataKind.Audio lands.
             OutputKind: DataKind.Image,
             IsDeterministic: false,
             Loader: ctx =>
             {
-                // Auto-detect a per-model venv at the conventional
-                // {ModelDirectory}/.venv-bark/ location when no explicit
-                // executable was passed; falls back to DATUM_PYTHON / PATH
-                // if the venv isn't present.
                 string? py = pythonExecutable
                     ?? ResolveVenvPython(ctx.ModelDirectory, ".venv-bark");
                 return new PythonBackedModel(
@@ -1268,6 +1318,7 @@ public static class BuiltinModels
                     isDeterministic: false,
                     scriptPath: resolvedScriptPath,
                     pythonExecutable: py,
+                    scriptArgs: ["--model-id", huggingFaceModelId],
                     readyTimeout: TimeSpan.FromSeconds(readyTimeoutSeconds),
                     // PreferredBatchSize=1 streams each clip as soon as it
                     // finishes, matching SDXL-Turbo's interactive cadence.
@@ -1279,11 +1330,11 @@ public static class BuiltinModels
             // Bark picks randomly per call, sometimes producing unhinged
             // speakers. See the Bark speaker library for the full list.
             OptionalArgKinds: [DataKind.String],
-            DisplayName: "Bark Small (TTS, Python-backed)",
-            Parameters: "~100M",
+            DisplayName: displayName,
+            Parameters: parameters,
             License: "MIT",
             LicenseHolder: "Suno",
-            SourceUrl: "https://huggingface.co/suno/bark-small",
+            SourceUrl: sourceUrl,
             Category: "tts",
             Modalities: ["text", "audio"],
             // The venv anchor is what we track for status. The HF model
