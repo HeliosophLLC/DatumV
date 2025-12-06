@@ -1048,6 +1048,34 @@ public sealed class QueryPlanner
             allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
         }
 
+        // LET binding bodies — same shape as the SELECT-column rewrite. Must
+        // run before the statement reconstruction below so the rebuilt
+        // statement carries rewritten LET bindings into PlanCore.
+        IReadOnlyList<LetBinding>? rewrittenLetBindings = statement.LetBindings;
+        if (statement.LetBindings is not null)
+        {
+            List<LetBinding>? letList = null;
+            for (int index = 0; index < statement.LetBindings.Count; index++)
+            {
+                LetBinding binding = statement.LetBindings[index];
+                SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
+                    binding.Expression, outerAliases, this, context, _functionRegistry,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!ReferenceEquals(result.Expression, binding.Expression))
+                {
+                    letList ??= new List<LetBinding>(statement.LetBindings);
+                    letList[index] = binding with { Expression = result.Expression };
+                    allCorrelated.AddRange(result.CorrelatedSubqueries);
+                    allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
+                }
+            }
+            if (letList is not null)
+            {
+                rewrittenLetBindings = letList;
+            }
+        }
+
         IReadOnlyList<JoinClause>? rewrittenJoins = statement.Joins;
         if (statement.Joins is not null)
         {
@@ -1079,24 +1107,20 @@ public sealed class QueryPlanner
             }
         }
 
-        // Reconstruct the statement with rewritten expressions.
-        SelectStatement rewrittenStatement = new(
-            rewrittenColumns is not null ? rewrittenColumns : statement.Columns,
-            statement.From,
-            statement.Into,
-            rewrittenJoins,
-            rewrittenWhere,
-            statement.GroupBy,
-            rewrittenHaving,
-            statement.Qualify,
-            statement.Assertions,
-            statement.Pivot,
-            statement.Unpivot,
-            statement.OrderBy,
-            statement.Limit,
-            statement.Offset,
-            statement.Distinct,
-            statement.CommonTableExpressions);
+        // Reconstruct the statement with rewritten expressions. Use record-with
+        // syntax so all fields not explicitly rewritten (LetBindings,
+        // CrossValidate, GroupBy, Assertions, Pivot, OrderBy, etc.) are
+        // preserved by reference. The previous positional invocation here
+        // silently dropped LetBindings and CrossValidate because it stopped
+        // at CommonTableExpressions.
+        SelectStatement rewrittenStatement = statement with
+        {
+            Columns = rewrittenColumns is not null ? rewrittenColumns : statement.Columns,
+            Joins = rewrittenJoins,
+            Where = rewrittenWhere,
+            Having = rewrittenHaving,
+            LetBindings = rewrittenLetBindings,
+        };
 
         // Build a source transform that injects ScalarSubqueryOperator wrappers,
         // decorrelated LEFT JOINs, and semi-join operators between the source
@@ -1160,6 +1184,22 @@ public sealed class QueryPlanner
             if (ContainsSubquery(column.Expression))
             {
                 return true;
+            }
+        }
+
+        // LET binding bodies can also carry subquery expressions
+        // (`LET avg_price = (SELECT AVG(price) FROM ref)`). Without this
+        // check, a statement whose only subquery sits inside a LET body would
+        // take the no-subquery shortcut, skip SubqueryRewriter entirely, and
+        // crash at evaluation time with "Subquery expression was not rewritten."
+        if (statement.LetBindings is not null)
+        {
+            foreach (LetBinding binding in statement.LetBindings)
+            {
+                if (ContainsSubquery(binding.Expression))
+                {
+                    return true;
+                }
             }
         }
 
