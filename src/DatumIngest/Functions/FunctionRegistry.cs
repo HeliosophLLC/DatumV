@@ -223,6 +223,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
+        registry.RegisterScalar<Scalar.RandomStringFunction>();
+        registry.RegisterScalar<Scalar.RandomStringFromSeedFunction>();
+        registry.RegisterScalar<Scalar.RandomFloat32Function>();
+        registry.RegisterScalar<Scalar.RandomFloat32FromSeedFunction>();
 
         // Image — pipeline functions are still wired through the legacy
         // path; the image rework is out of scope for this rebuild.
