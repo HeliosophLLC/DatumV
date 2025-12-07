@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
@@ -98,6 +100,73 @@ public interface IModel
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Run inference for a single row, yielding the result as a stream of
+    /// chunks. Each yielded <see cref="ValueRef"/> is a fragment of the same
+    /// logical output value — for a string-emitting model, consumers
+    /// concatenate chunks to recover the full response.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Streaming is the wire protocol, not a type change.</strong>
+    /// SQL semantics never see partial values — every <c>SELECT</c>,
+    /// <c>WHERE</c>, <c>GROUP BY</c>, etc. uses <see cref="InferBatchAsync"/>
+    /// (which collects internally for streaming-capable models). Only an
+    /// explicit streaming sink — currently <c>EXEC &lt;model-call&gt;</c> to
+    /// the terminal — consumes chunks incrementally.
+    /// </para>
+    /// <para>
+    /// <strong>Single-row by definition.</strong> Streaming output is
+    /// per-row state (an LLM's KV cache); cross-row batching at the
+    /// streaming layer doesn't compose. Operators that want batched
+    /// throughput stay on <see cref="InferBatchAsync"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Default implementation.</strong> Models that have no useful
+    /// intermediate state (classifiers, vision, image generation) inherit
+    /// the default, which simply runs <see cref="InferBatchAsync"/> for the
+    /// single row and yields the one result. Models that do have
+    /// intermediate state (LLMs) override and yield as the underlying
+    /// runtime produces tokens; their <see cref="InferBatchAsync"/> in
+    /// turn collects over this method so the streaming path is exercised
+    /// even on collected calls.
+    /// </para>
+    /// </remarks>
+    /// <param name="rowInputs">Input columns for this row. Length = arity.</param>
+    /// <param name="rowOverrides">
+    /// Hyperparameter overrides for this row, in the order declared by
+    /// <see cref="ModelCatalogEntry.OptionalArgKinds"/>. An empty list means
+    /// "use defaults for everything."
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cancellation token. Implementations should check between yielded
+    /// chunks at minimum so a Ctrl-C in the shell stops generation
+    /// promptly.
+    /// </param>
+    async IAsyncEnumerable<ValueRef> InferStreamingAsync(
+        IReadOnlyList<ValueRef> rowInputs,
+        IReadOnlyList<ValueRef> rowOverrides,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Default: collapse to a single-chunk stream by running the batch
+        // path for one row. Models without intermediate state (every
+        // non-LLM today) get streaming "for free" without any per-backend
+        // boilerplate. Streaming-capable models override this method and
+        // collect over it from InferBatchAsync.
+        IReadOnlyList<IReadOnlyList<ValueRef>> inputs = [rowInputs];
+        IReadOnlyList<IReadOnlyList<ValueRef>> overrides = rowOverrides.Count > 0
+            ? [rowOverrides]
+            : [];
+
+        IReadOnlyList<ValueRef> result = await InferBatchAsync(
+            inputs, overrides, cancellationToken).ConfigureAwait(false);
+
+        if (result.Count > 0)
+        {
+            yield return result[0];
+        }
+    }
 
     /// <summary>
     /// Optional mini-batch size used by <c>ModelInvocationOperator</c> to

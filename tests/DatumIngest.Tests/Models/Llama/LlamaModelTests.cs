@@ -1,5 +1,7 @@
 namespace DatumIngest.Tests.Models.Llama;
 
+using System.Text;
+
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Models.Llama;
@@ -153,6 +155,46 @@ public sealed class LlamaModelTests : ServiceTestBase
             pool.Backing.TryReturn(inputArena);
             pool.Backing.TryReturn(targetArena);
         }
+    }
+
+    /// <summary>
+    /// Streaming inference: <c>InferStreamingAsync</c> should produce more than
+    /// one chunk for a non-trivial prompt, and the concatenation of those
+    /// chunks should match what a comparable <c>InferBatchAsync</c> call
+    /// would produce (modulo the batch path's outer trim and the model's
+    /// inherent nondeterminism). Asserts the looser invariants — chunk count
+    /// &gt;= 2 and a non-empty concatenation — that survive sampling jitter.
+    /// </summary>
+    [Fact]
+    public async Task InferStreaming_NonTrivialPrompt_YieldsMultipleChunks()
+    {
+        if (!ModelAvailable)
+        {
+            return;
+        }
+
+        using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 32);
+
+        DatumIngest.Functions.ValueRef[] rowInputs =
+        [
+            DatumIngest.Functions.ValueRef.FromString("Count from 1 to 5, one number per line."),
+        ];
+
+        StringBuilder concatenated = new();
+        int chunkCount = 0;
+        await foreach (DatumIngest.Functions.ValueRef chunk in model.InferStreamingAsync(
+            rowInputs, rowOverrides: [], CancellationToken.None))
+        {
+            Assert.False(chunk.IsNull, $"chunk {chunkCount} was null");
+            string chunkText = chunk.AsString();
+            concatenated.Append(chunkText);
+            chunkCount++;
+        }
+
+        Assert.True(chunkCount >= 2, $"expected >= 2 chunks, got {chunkCount}");
+        string full = concatenated.ToString();
+        Assert.False(string.IsNullOrWhiteSpace(full), "concatenated stream was empty");
+        Assert.DoesNotContain("<|eot_id|>", full);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 
 using DatumIngest.Functions;
@@ -19,9 +20,14 @@ namespace DatumIngest.Models.Llama;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Demo 1.5 scope.</strong> One row in → one full response out, after
-/// generation completes. Streaming (token-by-token) is Demo 2 and uses a
-/// different operator shape (table-valued function) — not this model.
+/// <strong>Streaming.</strong> The primary inference path is
+/// <see cref="InferStreamingAsync"/>, which yields tokens (as
+/// <see cref="ValueRef"/> chunks) in the order LlamaSharp emits them.
+/// <see cref="InferBatchAsync"/> is implemented in terms of it — it collects
+/// chunks into a single string per row before returning. This means
+/// SQL <c>SELECT</c> and <c>EXEC</c> share one inference path; the only
+/// difference is whether the consumer collects or forwards chunks to a
+/// streaming sink.
 /// </para>
 /// <para>
 /// <strong>Chat templating.</strong> Llama 3.1 Instruct expects a specific
@@ -253,6 +259,12 @@ public sealed class LlamaModel : IModel, IDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Collects over <see cref="InferStreamingAsync"/> per row, concatenates
+    /// the chunks, and trims trailing whitespace. Every <c>SELECT</c> against
+    /// the LLM goes through the streaming path internally — the streaming
+    /// code is exercised even when the consumer only wants the final string.
+    /// </remarks>
     public async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
@@ -270,52 +282,78 @@ public sealed class LlamaModel : IModel, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IReadOnlyList<ValueRef> rowInputs = inputs[row];
-            if (rowInputs.Count != 1)
-            {
-                throw new InvalidOperationException(
-                    $"LlamaModel expects exactly one input column per row but row {row} has {rowInputs.Count}.");
-            }
-
-            ValueRef prompt = rowInputs[0];
-            if (prompt.IsNull)
-            {
-                throw new InvalidOperationException(
-                    $"LlamaModel received a null prompt at row {row}; filter nulls upstream before invoking the model.");
-            }
-
-            // Resolve per-row hyperparameters from this row's override slice.
-            // Order matches the catalog entry's OptionalArgKinds:
-            //   [0] = temperature (Float64)
-            //   [1] = max_tokens   (Int32)
-            // Missing or null entries fall back to construction-time defaults.
-            // Cheap when overrides is empty (common case for the scalar form).
             IReadOnlyList<ValueRef> rowOverrides = overrides.Count > row
                 ? overrides[row]
                 : [];
-            float temperature = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
-                ? rowOverrides[0].ToFloat()
-                : _temperature;
-            int maxTokens = rowOverrides.Count > 1 && !rowOverrides[1].IsNull
-                ? rowOverrides[1].ToInt32()
-                : _maxTokens;
 
-            string promptText = prompt.AsString();
-            string templated = _template.Format(promptText);
+            StringBuilder sb = new();
+            await foreach (ValueRef chunk in InferStreamingAsync(inputs[row], rowOverrides, cancellationToken).ConfigureAwait(false))
+            {
+                sb.Append(chunk.AsString());
+            }
 
-            string response = await GenerateAsync(templated, temperature, maxTokens, cancellationToken).ConfigureAwait(false);
-            outputs[row] = ValueRef.FromString(response);
+            // Trim outer whitespace to match historical scalar semantics —
+            // tokens often arrive with a leading space and the user expects
+            // a clean string when binding the result into a row.
+            outputs[row] = ValueRef.FromString(sb.ToString().Trim());
         }
 
         return outputs;
     }
 
-    private async Task<string> GenerateAsync(
-        string templatedPrompt,
-        float temperature,
-        int maxTokens,
-        CancellationToken cancellationToken)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Per-row streaming. Yielded chunks are slices of the assistant response
+    /// in token-arrival order, with stop sequences stripped before they reach
+    /// the consumer (see holdback note below). Chunks may span multiple
+    /// LlamaSharp tokens — the implementation holds back the longest stop
+    /// sequence's worth of characters so a partial stop marker can't leak
+    /// out as a visible chunk.
+    /// </para>
+    /// <para>
+    /// <strong>Holdback granularity.</strong> The consumer sees content
+    /// roughly <c>holdback</c> characters behind the underlying token
+    /// stream (10 chars for Llama 3.1's <c>&lt;|eot_id|&gt;</c> stop). For
+    /// a 256-token response this delay is invisible; what the user perceives
+    /// is "tokens stream live."
+    /// </para>
+    /// </remarks>
+    public async IAsyncEnumerable<ValueRef> InferStreamingAsync(
+        IReadOnlyList<ValueRef> rowInputs,
+        IReadOnlyList<ValueRef> rowOverrides,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (rowInputs.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"LlamaModel expects exactly one input column per row but received {rowInputs.Count}.");
+        }
+
+        ValueRef prompt = rowInputs[0];
+        if (prompt.IsNull)
+        {
+            throw new InvalidOperationException(
+                "LlamaModel received a null prompt; filter nulls upstream before invoking the model.");
+        }
+
+        // Resolve per-row hyperparameters from the override slice.
+        // Order matches the catalog entry's OptionalArgKinds:
+        //   [0] = temperature (Float64)
+        //   [1] = max_tokens   (Int32)
+        // Missing or null entries fall back to construction-time defaults.
+        float temperature = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
+            ? rowOverrides[0].ToFloat()
+            : _temperature;
+        int maxTokens = rowOverrides.Count > 1 && !rowOverrides[1].IsNull
+            ? rowOverrides[1].ToInt32()
+            : _maxTokens;
+
+        string promptText = prompt.AsString();
+        string templated = _template.Format(promptText);
+
         // No manual KV-cache reset: StatelessExecutor.Context is only valid
         // *during* InferAsync — the executor builds a fresh context per call
         // and disposes it after. Touching Context.NativeHandle from outside
@@ -336,16 +374,75 @@ public sealed class LlamaModel : IModel, IDisposable
             },
         };
 
-        StringBuilder sb = new();
-        await foreach (string token in _executor.InferAsync(templatedPrompt, inferenceParams, cancellationToken).ConfigureAwait(false))
+        // Hold back the longest stop sequence's worth of characters: the
+        // tail of the buffer might be a partial stop marker that completes
+        // on the next token. AntiPrompts usually catches stops mid-stream,
+        // but defensively we never emit a chunk that could later be revealed
+        // as part of a stop sequence.
+        int holdback = 0;
+        foreach (string stop in _template.StopSequences)
         {
-            sb.Append(token);
+            if (stop.Length > holdback) holdback = stop.Length;
         }
 
-        // Strip any trailing stop sequence the anti-prompt list missed, then
-        // trim. The template's StripTrailingStop knows which markers to scrub
-        // (Llama 3.1 uses <|eot_id|>, Phi-3 uses <|end|>, etc.).
-        return _template.StripTrailingStop(sb.ToString());
+        StringBuilder pending = new();
+
+        await foreach (string token in _executor.InferAsync(templated, inferenceParams, cancellationToken).ConfigureAwait(false))
+        {
+            pending.Append(token);
+
+            // If a complete stop sequence has appeared, yield everything
+            // before it and end the stream.
+            int stopAt = -1;
+            string pendingSnapshot = pending.ToString();
+            foreach (string stop in _template.StopSequences)
+            {
+                int idx = pendingSnapshot.IndexOf(stop, StringComparison.Ordinal);
+                if (idx >= 0 && (stopAt < 0 || idx < stopAt))
+                {
+                    stopAt = idx;
+                }
+            }
+            if (stopAt >= 0)
+            {
+                if (stopAt > 0)
+                {
+                    yield return ValueRef.FromString(pendingSnapshot[..stopAt]);
+                }
+                yield break;
+            }
+
+            // No stop hit: emit everything except the final `holdback`
+            // chars (which might be the start of a stop sequence completed
+            // by the next token).
+            int safe = pending.Length - holdback;
+            if (safe > 0)
+            {
+                yield return ValueRef.FromString(pending.ToString(0, safe));
+                pending.Remove(0, safe);
+            }
+        }
+
+        // Stream ended without an explicit stop marker. Defensively strip a
+        // trailing stop from the residual buffer (mirrors the old
+        // post-collection StripTrailingStop) and emit the remainder.
+        if (pending.Length > 0)
+        {
+            string remainder = pending.ToString();
+            foreach (string stop in _template.StopSequences)
+            {
+                int idx = remainder.IndexOf(stop, StringComparison.Ordinal);
+                if (idx >= 0)
+                {
+                    remainder = remainder[..idx];
+                    break;
+                }
+            }
+            if (remainder.Length > 0)
+            {
+                yield return ValueRef.FromString(remainder);
+            }
+        }
     }
 
     /// <inheritdoc />
