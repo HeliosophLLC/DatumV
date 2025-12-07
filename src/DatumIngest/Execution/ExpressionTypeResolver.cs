@@ -135,14 +135,16 @@ public static class ExpressionTypeResolver
     {
         DataKind? sourceKind = ResolveType(indexAccess.Source, sourceSchema, functions);
 
-        // Typed-array source via an aggregate that ProducesArray. The aggregate's
-        // ValidateArguments returns the per-element kind directly, which is what
-        // ResolveType already gave us via ResolveAggregate. Indexing yields a
-        // scalar of that element kind.
-        if (indexAccess.Source is FunctionCallExpression aggSource
-            && functions.TryGetAggregate(aggSource.FunctionName) is { ProducesArray: true })
+        // Typed-array source via an aggregate or scalar function that ProducesArray.
+        // ValidateArguments returns the per-element kind directly; indexing yields
+        // a scalar of that element kind.
+        if (indexAccess.Source is FunctionCallExpression arrayFnSource)
         {
-            return sourceKind;
+            if (functions.TryGetAggregate(arrayFnSource.FunctionName) is { ProducesArray: true }
+                || functions.TryGetScalar(arrayFnSource.FunctionName) is { ProducesArray: true })
+            {
+                return sourceKind;
+            }
         }
 
         // Typed-array column source: ColumnInfo carries IsArray + Kind=elementKind.

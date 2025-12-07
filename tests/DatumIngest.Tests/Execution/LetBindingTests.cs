@@ -411,7 +411,7 @@ public sealed class LetBindingTests : ServiceTestBase
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteQueryAsync("SELECT LET {a, b} = v, a AS x, b AS y FROM t", catalog));
 
-        Assert.Contains("Vector", ex.Message);
+        Assert.Contains("Array<Float32>", ex.Message);
         Assert.Contains("positional", ex.Message);
     }
 
@@ -517,17 +517,21 @@ public sealed class LetBindingTests : ServiceTestBase
     [Fact]
     public async Task EndToEnd_Memoization_UuidStableAcrossReferences()
     {
+        using Arena store = new();
+        store.AddReference();
+
         TableCatalog catalog = CreateCatalog("t",
             columns: ["x"],
             [1f]);
 
         List<Row> results = await ExecuteQueryAsync(
             "SELECT LET u = uuidv4(), uuid_str(u) AS first, uuid_str(u) AS second FROM t",
-            catalog);
+            catalog,
+            store: store);
 
         Assert.Single(results);
-        string first = results[0]["first"].AsString();
-        string second = results[0]["second"].AsString();
+        string first = results[0]["first"].AsString(store);
+        string second = results[0]["second"].AsString(store);
         Assert.False(string.IsNullOrEmpty(first));
         Assert.Equal(first, second);
     }

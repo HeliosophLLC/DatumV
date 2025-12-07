@@ -145,7 +145,8 @@ public abstract class ServiceTestBase : IDisposable
         AssertionDiagnostics? diagnostics = null,
         int? maxRecursionDepth = null,
         int? batchSize = null,
-        int? maxStratifyClasses = null)
+        int? maxStratifyClasses = null,
+        Arena? store = null)
     {
         Pool pool = GetService<Pool>();
         return new(
@@ -155,7 +156,8 @@ public abstract class ServiceTestBase : IDisposable
             new LocalBufferPool(),
             pool,
             queryMeter: meter,
-            memoryBudgetBytes: memoryBudgetBytes)
+            memoryBudgetBytes: memoryBudgetBytes,
+            store: store)
         {
             AssertionDiagnostics = diagnostics,
             MaxRecursionDepth = maxRecursionDepth ?? 1000,
@@ -195,12 +197,13 @@ public abstract class ServiceTestBase : IDisposable
     protected async Task<List<Row>> ExecuteQueryAsync(
         string sql,
         TableCatalog catalog,
-        AssertionDiagnostics? diagnostics = null)
+        AssertionDiagnostics? diagnostics = null,
+        Arena? store = null)
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
 
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics);
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics, store: store);
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

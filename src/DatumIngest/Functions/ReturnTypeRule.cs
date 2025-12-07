@@ -23,6 +23,13 @@ public abstract class ReturnTypeRule
     /// </summary>
     public abstract DataKind? StaticHint { get; }
 
+    /// <summary>
+    /// Whether the result is a typed array whose element kind is given by
+    /// <see cref="Resolve"/>. Defaults to <see langword="false"/>; set to
+    /// <see langword="true"/> by <see cref="ArrayOf"/>.
+    /// </summary>
+    public virtual bool ProducesArray => false;
+
     /// <summary>Always returns <paramref name="kind"/>.</summary>
     public static ReturnTypeRule Constant(DataKind kind) => new ConstantRule(kind);
 
@@ -36,6 +43,15 @@ public abstract class ReturnTypeRule
     /// </summary>
     public static ReturnTypeRule Custom(Func<ReadOnlySpan<DataKind>, DataKind> resolver, string description) =>
         new CustomRule(resolver, description);
+
+    /// <summary>
+    /// Wraps <paramref name="elementRule"/> to declare that the result is a
+    /// typed array. <see cref="Resolve"/> delegates to the inner rule to
+    /// return the element kind; <see cref="Describe"/> renders as
+    /// <c>Array&lt;elementKind&gt;</c>.
+    /// </summary>
+    public static ReturnTypeRule ArrayOf(ReturnTypeRule elementRule) =>
+        new ArrayOfRule(elementRule);
 
     private sealed class ConstantRule(DataKind kind) : ReturnTypeRule
     {
@@ -68,5 +84,14 @@ public abstract class ReturnTypeRule
         public override DataKind Resolve(ReadOnlySpan<DataKind> argumentKinds) => resolver(argumentKinds);
         public override string Describe() => description;
         public override DataKind? StaticHint => null;
+    }
+
+    private sealed class ArrayOfRule(ReturnTypeRule elementRule) : ReturnTypeRule
+    {
+        public override DataKind Resolve(ReadOnlySpan<DataKind> argumentKinds) =>
+            elementRule.Resolve(argumentKinds);
+        public override string Describe() => $"Array<{elementRule.Describe()}>";
+        public override DataKind? StaticHint => elementRule.StaticHint;
+        public override bool ProducesArray => true;
     }
 }

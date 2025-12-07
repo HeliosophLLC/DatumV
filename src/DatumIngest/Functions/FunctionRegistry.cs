@@ -227,6 +227,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.RandomStringFromSeedFunction>();
         registry.RegisterScalar<Scalar.RandomFloat32Function>();
         registry.RegisterScalar<Scalar.RandomFloat32FromSeedFunction>();
+        registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
+        registry.RegisterScalar<Scalar.Uuid.UuidV7Function>();
+        registry.RegisterScalar<Scalar.Uuid.UuidStrFunction>();
+        registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
+        registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
 
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.

@@ -1,0 +1,43 @@
+using DatumIngest.Execution;
+using DatumIngest.Manifest;
+using DatumIngest.Model;
+
+namespace DatumIngest.Functions.Scalar.Uuid;
+
+/// <summary>
+/// Returns the canonical <c>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</c> string
+/// representation of a UUID. A null input yields a null result.
+/// </summary>
+public sealed class UuidStrFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "uuid_str";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Uuid;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Returns the canonical xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx string representation of a UUID.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters: [new ParameterSpec("value", DataKindMatcher.Exact(DataKind.Uuid))],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.String)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<UuidStrFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    {
+        ValueRef input = arguments[0];
+        if (input.IsNull) return ValueRef.Null(DataKind.String);
+        return ValueRef.FromString(input.AsUuid().ToString("D"));
+    }
+}

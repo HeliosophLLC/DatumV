@@ -10,6 +10,9 @@ public enum FunctionCategory
     /// <summary>Text manipulation, case conversion, search, and path utilities.</summary>
     String,
 
+    /// <summary>UUID generation and inspection.</summary>
+    Uuid,
+
     /// <summary>Date, time, duration, and timestamp construction, extraction, and arithmetic.</summary>
     Temporal,
 
