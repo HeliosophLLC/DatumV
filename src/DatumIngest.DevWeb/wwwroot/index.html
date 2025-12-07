@@ -1261,10 +1261,33 @@
   }
 
   // ===== Run =====
+  // Read the current editor selection. Monaco returns "" for an empty
+  // selection (caret only). The textarea fallback uses selectionStart/End.
+  // Returns the selected text (untrimmed) or "" when nothing is highlighted.
+  function getEditorSelection() {
+    if (monacoEditor) {
+      const sel = monacoEditor.getSelection();
+      if (!sel || sel.isEmpty()) return '';
+      return monacoEditor.getModel().getValueInRange(sel);
+    }
+    if (fallbackTextarea) {
+      const { selectionStart: a, selectionEnd: b, value } = fallbackTextarea;
+      if (typeof a === 'number' && typeof b === 'number' && b > a) {
+        return value.slice(a, b);
+      }
+    }
+    return '';
+  }
+
   async function run() {
     const tab = activeTab();
     if (!tab) return;
-    const sql = tab.sql.trim();
+    // If text is highlighted, run just that fragment; otherwise run the
+    // whole tab. Trim AFTER picking so leading/trailing whitespace in a
+    // selection doesn't make us silently fall back to the full tab.
+    const selection = getEditorSelection();
+    const isPartial = selection.trim().length > 0;
+    const sql = (isPartial ? selection : tab.sql).trim();
     if (!sql) return;
     if (state.queryRunning) return;
 
@@ -1272,7 +1295,7 @@
     const runBtn = document.getElementById('run');
     const status = document.getElementById('status');
     runBtn.disabled = true;
-    status.textContent = 'running…';
+    status.textContent = isPartial ? 'running selection…' : 'running…';
 
     const results = document.getElementById('results-pane');
     results.innerHTML = '<div class="meta">Running…</div>';
@@ -1303,7 +1326,10 @@
 
     tab.lastResult = res;
     tab.lastRunAt = Date.now();
-    tab.sqlOfLastRun = tab.sql;
+    // Only mark the tab "clean" when the whole tab ran. Running a selection
+    // shouldn't clear the dirty dot, since the rest of the tab is still
+    // unsaved-since-last-run.
+    if (!isPartial) tab.sqlOfLastRun = tab.sql;
     renderTabStrip();
     persistWorkspace();
     renderResultsForActiveTab();
