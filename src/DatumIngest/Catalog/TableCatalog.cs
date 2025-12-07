@@ -134,13 +134,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <summary>
     /// Opens a new catalog populated with every <c>.datum</c> file in the given
     /// directory. Each file is registered using its derived table name. Owns its
-    /// own pool.
+    /// own pool. A <see cref="CatalogStore.DefaultFileName"/> file in the directory
+    /// is loaded automatically if present; UDFs created during the session are
+    /// written back to the same file.
     /// </summary>
     /// <param name="path">Path to a directory containing <c>.datum</c> files.</param>
     /// <param name="recursive">When <see langword="true"/>, recursively scans subdirectories.</param>
     public static TableCatalog FromDirectory(string path, bool recursive = false)
     {
-        TableCatalog catalog = new(new Pool(new PoolBacking()));
+        string catalogPath = Path.Combine(path, CatalogStore.DefaultFileName);
+        TableCatalog catalog = new(new Pool(new PoolBacking()), catalogPath);
         SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
         {

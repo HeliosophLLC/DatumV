@@ -75,9 +75,14 @@ if (dataPaths.Count == 0)
     PrintUsage();
     return 1;
 }
+else if (dataPaths.Count != 1)
+{
+    Console.Error.WriteLine("No data paths provided.");
+    PrintUsage();
+    return 1;
+}
 
-Pool pool = new(new PoolBacking());
-TableCatalog catalog = new(pool);
+TableCatalog catalog = TableCatalog.FromDirectory(dataPaths[0]);
 
 ModelCatalog modelCatalog = BuiltinModels.AttachStandardModels(
     catalog, modelsOverride, vramBudgetBytes: vramBudgetOverrideBytes);
@@ -95,46 +100,6 @@ else
 {
     double gb = modelCatalog.VramBudgetBytes / (1024.0 * 1024.0 * 1024.0);
     Console.WriteLine($"VRAM budget: {gb:F1} GB (residency manager evicts LRU when exceeded)");
-}
-
-int datumFilesAdded = 0;
-try
-{
-    foreach (string path in dataPaths)
-    {
-        if (Directory.Exists(path))
-        {
-            foreach (string file in Directory.EnumerateFiles(path, "*.datum", SearchOption.TopDirectoryOnly))
-            {
-                catalog.AddFile(file);
-                datumFilesAdded++;
-            }
-        }
-        else if (File.Exists(path))
-        {
-            catalog.AddFile(path);
-            datumFilesAdded++;
-        }
-        else
-        {
-            Console.Error.WriteLine($"Path not found: {path}");
-            catalog.Dispose();
-            return 1;
-        }
-    }
-}
-catch (Exception ex)
-{
-    Console.Error.WriteLine($"Failed to register tables: {ex.Message}");
-    catalog.Dispose();
-    return 1;
-}
-
-if (datumFilesAdded == 0)
-{
-    Console.Error.WriteLine("No .datum files registered.");
-    catalog.Dispose();
-    return 1;
 }
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -285,7 +250,7 @@ app.MapPost("/api/lang/diagnose", async (HttpRequest request, CancellationToken 
 });
 
 Console.WriteLine($"DatumIngest DevWeb listening on http://localhost:{port}");
-Console.WriteLine($"Tables registered: {datumFilesAdded}");
+Console.WriteLine($"Tables registered: {catalog.Count}");
 await app.RunAsync().ConfigureAwait(false);
 return 0;
 
