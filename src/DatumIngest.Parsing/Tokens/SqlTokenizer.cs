@@ -371,6 +371,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("PRIMARY"), SqlToken.Primary, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("KEY"), SqlToken.Key, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IF"), SqlToken.If, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("FUNCTION"), SqlToken.Function, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
 
             // Type keywords — reserved names for DataKind type literals
             .Match(Span.EqualToIgnoreCase("BOOLEAN"), SqlToken.TypeKeyword, requireDelimiters: true)

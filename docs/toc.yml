@@ -136,6 +136,19 @@
           href: sql/ddl-dml.md#analyze
         - name: Batch Execution
           href: sql/ddl-dml.md#batch-execution
+    - name: User-Defined Functions
+      href: sql/udf.md
+      items:
+        - name: CREATE FUNCTION
+          href: sql/udf.md#create-function
+        - name: DROP FUNCTION
+          href: sql/udf.md#drop-function
+        - name: Composing UDFs
+          href: sql/udf.md#composing-udfs
+        - name: Cycle Detection
+          href: sql/udf.md#cycle-detection
+        - name: Scoping Rules
+          href: sql/udf.md#scoping-rules
 
 - name: Functions
   items:

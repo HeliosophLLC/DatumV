@@ -301,6 +301,12 @@ public enum SqlToken
     /// <summary>The IF keyword (conditional DDL guard).</summary>
     If,
 
+    /// <summary>The FUNCTION keyword (CREATE/DROP FUNCTION DDL).</summary>
+    Function,
+
+    /// <summary>The RETURNS keyword (CREATE FUNCTION return-type annotation).</summary>
+    Returns,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>

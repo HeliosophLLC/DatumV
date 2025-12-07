@@ -1084,6 +1084,54 @@ public sealed record AlterTableAddColumnStatement(
 /// <param name="TableName">The target table name.</param>
 public sealed record AnalyzeTableStatement(string TableName) : Statement;
 
+/// <summary>
+/// A single declared parameter of a user-defined function: <c>name TYPE</c>.
+/// Parameter names are unique within a UDF; the type is referenced by SQL
+/// type name (e.g. <c>String</c>, <c>Int32</c>) and resolved to a
+/// <c>DataKind</c> at registration time.
+/// </summary>
+/// <param name="Name">The parameter name as written, used inside the body.</param>
+/// <param name="TypeName">The SQL type name for the parameter.</param>
+public sealed record UdfParameter(string Name, string TypeName);
+
+/// <summary>
+/// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(p1 TYPE, p2 TYPE) [RETURNS TYPE] AS expression</c>
+/// — registers a user-defined scalar macro that the planner inlines at every
+/// call site. The body is any scalar <see cref="Expression"/>, including model
+/// invocations (<c>models.X(...)</c>) and references to other UDFs (subject to
+/// cycle detection at registration time).
+/// </summary>
+/// <param name="Name">The unqualified UDF name. Call sites use the <c>udf.</c> prefix.</param>
+/// <param name="Parameters">The declared parameters in order.</param>
+/// <param name="ReturnTypeName">
+/// Optional return type annotation (<c>RETURNS TYPE</c>). When <see langword="null"/>,
+/// the inliner trusts the body's natural return type. v1 does not type-check the
+/// body against this annotation; it's stored for later validation passes.
+/// </param>
+/// <param name="Body">The expression evaluated at every call site, with parameter references substituted.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the UDF already exists.</param>
+/// <param name="OrReplace">When <see langword="true"/>, replaces an existing UDF with the same name.</param>
+/// <param name="Span">Source location of the UDF name for diagnostic reporting.</param>
+public sealed record CreateFunctionStatement(
+    string Name,
+    IReadOnlyList<UdfParameter> Parameters,
+    string? ReturnTypeName,
+    Expression Body,
+    bool IfNotExists = false,
+    bool OrReplace = false,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>DROP FUNCTION [IF EXISTS] name</c> — removes a previously registered UDF.
+/// </summary>
+/// <param name="Name">The UDF name to remove.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the UDF does not exist.</param>
+/// <param name="Span">Source location of the UDF name for diagnostic reporting.</param>
+public sealed record DropFunctionStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null) : Statement;
+
 // ───────────────────── ASSERT clause ─────────────────────
 
 /// <summary>

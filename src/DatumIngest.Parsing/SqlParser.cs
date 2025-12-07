@@ -493,10 +493,32 @@ public static class SqlParser
     /// <see cref="FunctionCallExpression"/>'s string-keyed lookup picks the right entry
     /// without an AST change.
     /// </remarks>
+    /// <summary>
+    /// A function-name token (the unqualified part of a <c>namespace.name</c>
+    /// pair, or a bare function name). Mirrors <c>IdentifierOrKeywordAsName</c>
+    /// but returns the <see cref="Token{TKind}"/> rather than the string so
+    /// the call site can compute a <see cref="SourceSpan"/>. UDFs may have
+    /// names that collide with SQL keywords (<c>add</c>, <c>update</c>, etc.)
+    /// — we accept any keyword that can serve as an unquoted name.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Token<SqlToken>> FunctionNameToken =
+        Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.TypeKeyword))
+            .Or(Token.EqualTo(SqlToken.Add))
+            .Or(Token.EqualTo(SqlToken.Set))
+            .Or(Token.EqualTo(SqlToken.Default))
+            .Or(Token.EqualTo(SqlToken.Column))
+            .Or(Token.EqualTo(SqlToken.Table))
+            .Or(Token.EqualTo(SqlToken.Values))
+            .Or(Token.EqualTo(SqlToken.Key))
+            .Or(Token.EqualTo(SqlToken.Primary))
+            .Or(Token.EqualTo(SqlToken.If))
+            .Or(Token.EqualTo(SqlToken.Analyze));
+
     private static readonly TokenListParser<SqlToken, (string? Namespace, Superpower.Model.Token<SqlToken> Name)> NamespacedFunctionName =
         (from ns in Token.EqualTo(SqlToken.Identifier)
          from dot in Token.EqualTo(SqlToken.Dot)
-         from name in Token.EqualTo(SqlToken.Identifier)
+         from name in FunctionNameToken
          select ((string?)GetTokenText(ns), name))
         .Try()
         .Or(Token.EqualTo(SqlToken.Identifier).Select(name => ((string?)null, name)));
@@ -2362,6 +2384,73 @@ public static class SqlParser
         select (Statement)new DropTableStatement(tableName, ifExists);
 
     /// <summary>
+    /// Parses a single UDF parameter declaration: <c>name TYPE</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, UdfParameter> UdfParameterParser =
+        from name in IdentifierOrKeywordAsName
+        from typeName in TypeNameParser
+        select new UdfParameter(name, typeName);
+
+    /// <summary>
+    /// Parses <c>OR REPLACE</c> as an optional modifier for <c>CREATE FUNCTION</c>.
+    /// REPLACE is tokenized as a SQL keyword (used in <c>* REPLACE (...)</c>); we
+    /// reuse the same token here.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> OrReplaceParser =
+        (from orKw in Token.EqualTo(SqlToken.Or)
+         from replaceKw in Token.EqualTo(SqlToken.Replace)
+         select true
+        ).OptionalOrDefault();
+
+    /// <summary>
+    /// Parses
+    /// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(p1 TYPE [, p2 TYPE ...]) [RETURNS TYPE] AS expression</c>.
+    /// The body is any scalar expression and may reference the parameters by
+    /// name, plus any normal column / function names — the planner inlines the
+    /// body at every call site so name resolution happens in the caller's scope.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateFunctionParser =
+        from createKw in Token.EqualTo(SqlToken.Create)
+        from orReplace in OrReplaceParser
+        from functionKw in Token.EqualTo(SqlToken.Function)
+        from ifNotExists in IfNotExistsParser
+        // UDF names are permissive: accept any keyword that can serve as an
+        // unquoted name (so e.g. CREATE FUNCTION add(...) doesn't trip on
+        // ADD being tokenized as a keyword).
+        from name in IdentifierOrKeywordAsName
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from returnType in (
+            from returnsKw in Token.EqualTo(SqlToken.Returns)
+            from typeName in TypeNameParser
+            select typeName
+        ).AsNullable().OptionalOrDefault()
+        from asKw in Token.EqualTo(SqlToken.As)
+        from body in SP.Ref(() => ExpressionParser!)
+        select (Statement)new CreateFunctionStatement(
+            name,
+            parameters,
+            returnType,
+            body,
+            ifNotExists,
+            orReplace,
+            Span: null);
+
+    /// <summary>
+    /// Parses <c>DROP FUNCTION [IF EXISTS] name</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropFunctionParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from functionKw in Token.EqualTo(SqlToken.Function)
+        from ifExists in IfExistsParser
+        from name in IdentifierOrKeywordAsName
+        select (Statement)new DropFunctionStatement(
+            name,
+            ifExists,
+            Span: null);
+
+    /// <summary>
     /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
     /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
     /// </summary>
@@ -2481,7 +2570,9 @@ public static class SqlParser
     /// Parses a single statement: a DDL/DML command or a query expression.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
-        CreateTempTableParser.Try()
+        CreateFunctionParser.Try()
+            .Or(DropFunctionParser.Try())
+            .Or(CreateTempTableParser.Try())
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())

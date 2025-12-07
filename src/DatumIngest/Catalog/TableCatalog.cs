@@ -44,6 +44,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this.Pool = pool;
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
+        this._udfs = new UdfRegistry();
         this.Tables = new();
     }
 
@@ -52,6 +53,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     internal Pool Pool { get; }
     private readonly PoolBacking _backing;
     private readonly FunctionRegistry _functions;
+    private readonly UdfRegistry _udfs;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
 
@@ -62,6 +64,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// language-server manifest).
     /// </summary>
     public FunctionRegistry Functions => _functions;
+
+    /// <summary>
+    /// Registry of user-defined scalar functions (macros) registered against
+    /// this catalog via <c>CREATE FUNCTION</c>. The planner consults this at
+    /// plan time to inline every <c>udf.X(...)</c> call site. Falls through
+    /// to the parent catalog when nested, so a session-level catalog inherits
+    /// global UDFs registered on its root.
+    /// </summary>
+    public UdfRegistry Udfs => _udfs;
 
     /// <summary>
     /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
@@ -114,12 +125,90 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// (<see cref="IQueryPlan.ExecuteAsync"/>). Literal payloads are pre-materialized
     /// (hoisted) into a plan-scoped arena so per-row evaluation skips re-encoding.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Accepts both query expressions (SELECT, compound queries) and DDL that
+    /// the engine knows how to execute (currently <c>CREATE FUNCTION</c> /
+    /// <c>DROP FUNCTION</c>). DDL is applied to the catalog as a side effect
+    /// of <see cref="Plan(string)"/> and produces an empty result plan; this
+    /// keeps the API surface a single entry point for the host.
+    /// </para>
+    /// <para>
+    /// Before planning, every <c>udf.X(...)</c> call site in the parsed AST
+    /// is inlined via <see cref="UdfInliner"/> so the planner sees only the
+    /// substituted bodies. UDFs are macros — by plan time, no UDF call
+    /// remains in the tree.
+    /// </para>
+    /// </remarks>
     public IQueryPlan Plan(string sql)
     {
-        QueryExpression query = SqlParser.Parse(sql);
+        Statement statement = SqlParser.ParseStatement(sql);
+
+        switch (statement)
+        {
+            case QueryStatement queryStatement:
+                return PlanQuery(queryStatement.Query);
+
+            case CreateFunctionStatement create:
+                ApplyCreateFunction(create);
+                return EmptyQueryPlan.Instance;
+
+            case DropFunctionStatement drop:
+                ApplyDropFunction(drop);
+                return EmptyQueryPlan.Instance;
+
+            default:
+                throw new NotSupportedException(
+                    $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
+                    $"Use the dedicated APIs (e.g. AddFile for file registration) or extend Plan to dispatch this statement.");
+        }
+    }
+
+    private IQueryPlan PlanQuery(QueryExpression query)
+    {
+        QueryExpression inlined = UdfInliner.Inline(query, _udfs);
         QueryPlanner planner = new(this, _functions);
-        IQueryOperator op = planner.Plan(query);
+        IQueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, _functions, _backing);
+    }
+
+    private void ApplyCreateFunction(CreateFunctionStatement create)
+    {
+        // Validate the body at registration time by running the inliner on it
+        // against the current registry. This catches references to undefined
+        // UDFs in the body and direct cycles (A -> A) eagerly. Indirect
+        // cycles introduced by later registrations surface at the first call
+        // site that closes the loop, since they require visibility we don't
+        // have here.
+        try
+        {
+            UdfInliner.Inline(create.Body, _udfs);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"CREATE FUNCTION {create.Name}: {ex.Message}", ex);
+        }
+
+        UdfDescriptor descriptor = new(
+            create.Name, create.Parameters, create.ReturnTypeName, create.Body);
+
+        if (create.IfNotExists && _udfs.TryGet(create.Name, out _))
+        {
+            return;
+        }
+
+        _udfs.Register(descriptor, replace: create.OrReplace);
+    }
+
+    private void ApplyDropFunction(DropFunctionStatement drop)
+    {
+        bool removed = _udfs.Unregister(drop.Name);
+        if (!removed && !drop.IfExists)
+        {
+            throw new InvalidOperationException(
+                $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
+        }
     }
 
     /// <summary>

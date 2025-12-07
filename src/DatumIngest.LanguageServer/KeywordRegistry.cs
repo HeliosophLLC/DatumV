@@ -191,10 +191,10 @@ internal static class KeywordRegistry
             ["ALL", "SELECT"],
 
         [CompletionZoneKind.AfterCreate] =
-            ["TEMP", "TEMPORARY", "TABLE", "INDEX"],
+            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "FUNCTION", "OR REPLACE"],
 
         [CompletionZoneKind.AfterDrop] =
-            ["TABLE", "INDEX", "IF EXISTS"],
+            ["TABLE", "INDEX", "FUNCTION", "IF EXISTS"],
 
         [CompletionZoneKind.AfterCreateTableColumns] =
             [.. ColumnTypeKeywords, "PRIMARY KEY", "NOT NULL", "DEFAULT"],
@@ -332,6 +332,8 @@ internal static class KeywordRegistry
         [SqlToken.Primary] = ["PRIMARY KEY"],
         [SqlToken.Key] = [],            // Component: part of PRIMARY KEY
         [SqlToken.If] = ["IF EXISTS"],
+        [SqlToken.Function] = ["FUNCTION"],
+        [SqlToken.Returns] = [],        // Component: part of CREATE FUNCTION ... RETURNS
         [SqlToken.Assert] = ["ASSERT"],
         [SqlToken.Message] = ["MESSAGE"],
         [SqlToken.Define] = ["DEFINE"],
