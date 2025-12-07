@@ -307,6 +307,9 @@ public enum SqlToken
     /// <summary>The RETURNS keyword (CREATE FUNCTION return-type annotation).</summary>
     Returns,
 
+    /// <summary>The EXEC keyword (direct function execution statement).</summary>
+    Exec,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>

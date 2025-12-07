@@ -151,6 +151,8 @@
           href: sql/udf.md#scoping-rules
         - name: Introspection (system_udfs)
           href: sql/udf.md#introspection
+        - name: Persistence
+          href: sql/udf.md#persistence
 
 - name: Functions
   items:

@@ -61,6 +61,9 @@ public static class SqlKeywordRegistry
 
         // DML keywords
         "INSERT", "VALUES", "UPDATE", "SET", "DELETE",
+
+        // Direct execution
+        "EXEC",
     ];
 
     /// <summary>Boolean and null literal keywords.</summary>

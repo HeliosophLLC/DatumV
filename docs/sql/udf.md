@@ -27,6 +27,8 @@ CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(
 DROP FUNCTION [IF EXISTS] name;
 
 SELECT udf.name(arg1, arg2) FROM ...;
+
+EXEC udf.name(arg1, arg2);
 ```
 
 ### CREATE FUNCTION
@@ -112,6 +114,33 @@ SELECT udf.shout('hello') FROM dual;   -- yields 'HELLO'
 
 UDF names are case-insensitive: `udf.Shout` and `udf.SHOUT` resolve to the
 same descriptor.
+
+### Direct execution with EXEC
+
+`EXEC` executes a function as a standalone statement and returns its result as
+a single-row, single-column result set. It is equivalent to writing
+`SELECT udf.name(args)` without a `FROM` clause, but makes the intent — "run
+this function, give me the result" — explicit in multi-statement scripts.
+
+```sql
+EXEC udf.shout('hello');           -- yields 'HELLO'
+EXEC udf.dnd_rewrite_caption(cap); -- yields the LLM-rewritten string
+```
+
+`EXEC` accepts any callable expression that the expression parser recognises,
+including namespace-qualified names (`udf.`, `models.`) and calls with any
+number of arguments:
+
+```sql
+EXEC upper('hello');               -- built-in scalar
+EXEC models.llama31_8b($prompt);   -- model call with a parameter
+```
+
+The full UDF inlining and model-hoisting pipeline applies — there is no
+execution-time difference between `EXEC udf.fn(x)` and
+`SELECT udf.fn(x)`. Non-deterministic primitives in the body (`random_string`,
+`random_float32`, model calls) re-evaluate on each execution, exactly as they
+would inline.
 
 ## Composing UDFs
 
@@ -246,6 +275,54 @@ Schema:
 
 `system_udfs` is auto-registered against every `TableCatalog` — no host
 setup required.
+
+## Persistence
+
+A `TableCatalog` constructed with a catalog-file path persists its UDF
+registry across process restarts. The host opts in by passing the path:
+
+```csharp
+TableCatalog catalog = new(pool, catalogPath: "/data/.datum-catalog.json");
+```
+
+When the path is supplied:
+
+- Existing UDFs are loaded from the file at construction. The directory
+  doesn't have to exist yet — it's created on first save.
+- `CREATE FUNCTION` and `DROP FUNCTION` write through to the same file
+  atomically (write to `.tmp`, rename into place) so a crash mid-save
+  never leaves a partial file.
+- Per-entry failures (a body that no longer parses, an unresolved
+  reference, a future schema feature this binary doesn't recognise) are
+  skipped with a warning collected on
+  `TableCatalog.CatalogLoadReport.Warnings`. A single corrupt entry
+  doesn't take down the session.
+- A catalog file written by a newer binary (higher `version`) is treated
+  as opaque; the registry stays empty. The next save will downgrade the
+  file to the current binary's format.
+
+When no path is supplied (the parameterless constructor), the registry is
+in-memory only — UDFs disappear when the process exits.
+
+The on-disk format is a JSON document with this shape:
+
+```json
+{
+  "version": 1,
+  "udfs": [
+    {
+      "name": "shout",
+      "parameters": [{"name": "name", "type": "STRING"}],
+      "return_type": null,
+      "body": "upper(name)"
+    }
+  ]
+}
+```
+
+The file format is forward-compatible with future catalog sections (bound
+data files, materialised views, fingerprints). New sections are additive;
+existing readers ignore unknown top-level fields.
 
 ## Limitations
 

@@ -1132,6 +1132,16 @@ public sealed record DropFunctionStatement(
     bool IfExists = false,
     SourceSpan? Span = null) : Statement;
 
+/// <summary>
+/// <c>EXEC namespace.functionname(arg1, arg2, ...)</c> — directly executes a function
+/// (typically a UDF via <c>udf.name(...)</c>) as a top-level statement rather than inside
+/// a SELECT. The engine evaluates the call expression and returns its result as a
+/// single-row, single-column result set.
+/// </summary>
+/// <param name="Call">The function call expression to execute.</param>
+/// <param name="Span">Source location of the EXEC keyword for diagnostic reporting.</param>
+public sealed record ExecStatement(Expression Call, SourceSpan? Span = null) : Statement;
+
 // ───────────────────── ASSERT clause ─────────────────────
 
 /// <summary>

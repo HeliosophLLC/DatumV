@@ -152,4 +152,63 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.IsType<CreateFunctionStatement>(batch[0]);
         Assert.IsType<QueryStatement>(batch[1]);
     }
+
+    // ───────────────────── EXEC statement ─────────────────────
+
+    [Fact]
+    public void Exec_NamespacedUdfCall_ProducesExecStatement()
+    {
+        ExecStatement exec = Parse<ExecStatement>("EXEC udf.shout('hello')");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        Assert.Equal("udf.shout", call.FunctionName);
+        Assert.Single(call.Arguments);
+    }
+
+    [Fact]
+    public void Exec_BareFunction_ProducesExecStatement()
+    {
+        ExecStatement exec = Parse<ExecStatement>("EXEC upper('hello')");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        Assert.Equal("upper", call.FunctionName);
+    }
+
+    [Fact]
+    public void Exec_MultipleArgs_ParsesAllArguments()
+    {
+        ExecStatement exec = Parse<ExecStatement>("EXEC udf.add3(1, 2, 3)");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        Assert.Equal("udf.add3", call.FunctionName);
+        Assert.Equal(3, call.Arguments.Count);
+    }
+
+    [Fact]
+    public void Exec_NoArgs_ParsesEmptyArgumentList()
+    {
+        ExecStatement exec = Parse<ExecStatement>("EXEC udf.nullary()");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        Assert.Equal("udf.nullary", call.FunctionName);
+        Assert.Empty(call.Arguments);
+    }
+
+    [Fact]
+    public void Exec_TrailingSemicolon_IsAcceptedByBatch()
+    {
+        IReadOnlyList<Statement> batch = SqlParser.ParseBatch("EXEC udf.shout('hello');");
+
+        Assert.Single(batch);
+        Assert.IsType<ExecStatement>(batch[0]);
+    }
+
+    [Fact]
+    public void Exec_SpanPointsToExecKeyword_NotFunctionName()
+    {
+        ExecStatement exec = Parse<ExecStatement>("EXEC udf.shout('hello')");
+
+        Assert.NotNull(exec.Span);
+        Assert.Equal(1, exec.Span!.Column);
+    }
 }

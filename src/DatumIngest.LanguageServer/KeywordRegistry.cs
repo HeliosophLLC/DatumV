@@ -113,7 +113,7 @@ internal static class KeywordRegistry
     private static readonly Dictionary<CompletionZoneKind, string[]> ZoneKeywords = new()
     {
         [CompletionZoneKind.StatementStart] =
-            ["SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE"],
+            ["SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "EXEC"],
 
         [CompletionZoneKind.AfterSelect] =
         [
@@ -334,6 +334,7 @@ internal static class KeywordRegistry
         [SqlToken.If] = ["IF EXISTS"],
         [SqlToken.Function] = ["FUNCTION"],
         [SqlToken.Returns] = [],        // Component: part of CREATE FUNCTION ... RETURNS
+        [SqlToken.Exec] = ["EXEC"],
         [SqlToken.Assert] = ["ASSERT"],
         [SqlToken.Message] = ["MESSAGE"],
         [SqlToken.Define] = ["DEFINE"],

@@ -39,19 +39,47 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Initializes a new instance of the <see cref="TableCatalog"/> class with the given resource pool.
     /// </summary>
     /// <param name="pool">The resource pool to use for table providers.</param>
-    public TableCatalog(Pool pool)
+    public TableCatalog(Pool pool) : this(pool, catalogPath: null) { }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TableCatalog"/> class with
+    /// the given resource pool and an optional catalog file path. When
+    /// <paramref name="catalogPath"/> is non-null:
+    /// <list type="bullet">
+    ///   <item><description>Existing UDFs are loaded from the file at construction (if it exists).</description></item>
+    ///   <item><description>Subsequent <c>CREATE FUNCTION</c> / <c>DROP FUNCTION</c> writes through to the same file atomically.</description></item>
+    /// </list>
+    /// When the path is <see langword="null"/>, the registry is in-memory only.
+    /// </summary>
+    /// <param name="pool">The resource pool to use for table providers.</param>
+    /// <param name="catalogPath">
+    /// Optional absolute path for the catalog's JSON file. Conventional name is
+    /// <see cref="CatalogStore.DefaultFileName"/>. The directory is created on
+    /// first save if missing.
+    /// </param>
+    public TableCatalog(Pool pool, string? catalogPath)
     {
         this.Pool = pool;
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
         this._udfs = new UdfRegistry();
         this.Tables = new();
+        this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
 
         // system_udfs is auto-registered against the UDF registry so
         // SELECT * FROM system_udfs works without any host setup. Models
         // are different — they require a ModelCatalog injected by the host —
         // but the UDF registry is intrinsic to every TableCatalog.
         Add(new Providers.UdfsTableProvider(pool, _udfs));
+
+        // Replay any persisted UDFs into the registry. Done after the
+        // system_udfs registration so the rehydrated UDFs are immediately
+        // visible to introspection.
+        if (_catalogStore is not null)
+        {
+            CatalogStoreLoadReport report = _catalogStore.Load(_udfs);
+            CatalogLoadReport = report;
+        }
     }
 
 
@@ -60,8 +88,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly PoolBacking _backing;
     private readonly FunctionRegistry _functions;
     private readonly UdfRegistry _udfs;
+    private readonly CatalogStore? _catalogStore;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
+
+    /// <summary>
+    /// Report from the catalog file's load on construction. <see langword="null"/>
+    /// when no <c>catalogPath</c> was supplied. Hosts can surface
+    /// <see cref="CatalogStoreLoadReport.Warnings"/> in their startup logs so a
+    /// user notices a corrupt or skipped UDF instead of silently missing it.
+    /// </summary>
+    public CatalogStoreLoadReport? CatalogLoadReport { get; }
 
     /// <summary>
     /// The function registry used by <see cref="Plan(string)"/> for SQL planning.
@@ -163,11 +200,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyDropFunction(drop);
                 return EmptyQueryPlan.Instance;
 
+            case ExecStatement exec:
+                return PlanExec(exec);
+
             default:
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
                     $"Use the dedicated APIs (e.g. AddFile for file registration) or extend Plan to dispatch this statement.");
         }
+    }
+
+    private IQueryPlan PlanExec(ExecStatement exec)
+    {
+        // Lower EXEC udf.fn(args) to SELECT udf.fn(args) — a tableless query
+        // against the implicit single-row source. UDF inlining and model hoisting
+        // apply exactly as they would for an explicit SELECT, so UDFs, model
+        // invocations, and template strings in the body all work unchanged.
+        SelectStatement syntheticSelect = new(
+            Columns: [new SelectColumn(exec.Call)]);
+        QueryExpression syntheticQuery = new SelectQueryExpression(syntheticSelect);
+        return PlanQuery(syntheticQuery);
     }
 
     private IQueryPlan PlanQuery(QueryExpression query)
@@ -205,6 +257,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         _udfs.Register(descriptor, replace: create.OrReplace);
+        _catalogStore?.Save(_udfs);
     }
 
     private void ApplyDropFunction(DropFunctionStatement drop)
@@ -215,6 +268,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             throw new InvalidOperationException(
                 $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
         }
+
+        if (removed) _catalogStore?.Save(_udfs);
     }
 
     /// <summary>

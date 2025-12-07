@@ -2451,6 +2451,19 @@ public static class SqlParser
             Span: null);
 
     /// <summary>
+    /// Parses <c>EXEC namespace.functionname(arg1, arg2, ...)</c>.
+    /// The function call expression after EXEC is parsed by the same
+    /// <see cref="FunctionCall"/> combinator used for inline expressions,
+    /// so namespaced calls (<c>udf.shout('hello')</c>) and all argument
+    /// forms are supported. OVER and WITHIN GROUP are accepted by the
+    /// combinator but carry no meaning in a statement context.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ExecFunctionParser =
+        from execKw in Token.EqualTo(SqlToken.Exec)
+        from call in FunctionCall
+        select (Statement)new ExecStatement(call, ToSpan(execKw));
+
+    /// <summary>
     /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
     /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
     /// </summary>
@@ -2572,6 +2585,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
         CreateFunctionParser.Try()
             .Or(DropFunctionParser.Try())
+            .Or(ExecFunctionParser.Try())
             .Or(CreateTempTableParser.Try())
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
@@ -2639,6 +2653,7 @@ public static class SqlParser
         SqlToken.Update,
         SqlToken.Delete,
         SqlToken.Alter,
+        SqlToken.Exec,
     ];
 
     // ───────────────────── Public API ─────────────────────
