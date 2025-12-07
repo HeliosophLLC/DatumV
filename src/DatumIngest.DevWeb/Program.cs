@@ -183,6 +183,74 @@ app.MapPost("/api/query", async (HttpRequest request, CancellationToken ct) =>
     }
 });
 
+// Streaming query endpoint. Same request shape as /api/query, but the response
+// is a sequence of NDJSON events (one JSON object per line, terminated by '\n')
+// emitted as the plan produces output. Event types:
+//
+//   {type:"session",        id}
+//   {type:"cell_started",   cell, kind:"select"|"exec", sql}
+//   {type:"schema",         cell, columns:[{name,kind,isArray},...]}    // first batch
+//   {type:"chunk",          cell, model, text}                          // streaming model output (live)
+//   {type:"row",            cell, cells:[JsonCell,...]}                 // per row
+//   {type:"truncated",      cell, rowCount}                             // hit maxRows
+//   {type:"trace",          cell, text}                                 // captured trace
+//   {type:"cell_completed", cell, elapsedMs}
+//   {type:"complete",       elapsedMs}
+//   {type:"error",          cell?, message, detail?}
+//
+// Forward-compat:
+//   - Clients MUST ignore unknown event types.
+//   - Reserved (not yet emitted): cell_started.kind ∈ {"assign","if","while",...},
+//     "breakpoint_hit", "breakpoint_resumed", "step_paused", "scope_changed".
+//   - Multi-cell: today every stream emits exactly one cell. When LET / IF /
+//     WHILE / multi-statement bodies land, multiple cell_started…cell_completed
+//     groups will appear, separated by interleaved events.
+app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
+{
+    // The streaming sink writes chunk lines synchronously from inside the
+    // operator's await chain (the IModelStreamingSink interface is sync).
+    // Allow blocking writes on Response.Body so the sink can flush bytes
+    // immediately rather than marshalling through a channel.
+    Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature? bodyControl =
+        httpCtx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature>();
+    if (bodyControl is not null) bodyControl.AllowSynchronousIO = true;
+
+    CancellationToken ct = httpCtx.RequestAborted;
+
+    QueryRequest? body;
+    try
+    {
+        body = await JsonSerializer.DeserializeAsync<QueryRequest>(
+            httpCtx.Request.Body, jsonOptions, ct).ConfigureAwait(false);
+    }
+    catch (JsonException ex)
+    {
+        httpCtx.Response.StatusCode = 400;
+        await httpCtx.Response.WriteAsJsonAsync(new { error = $"Bad request: {ex.Message}" }, jsonOptions, ct);
+        return;
+    }
+
+    if (body is null || string.IsNullOrWhiteSpace(body.Sql))
+    {
+        httpCtx.Response.StatusCode = 400;
+        await httpCtx.Response.WriteAsJsonAsync(new { error = "sql is required" }, jsonOptions, ct);
+        return;
+    }
+
+    int maxRows = body.MaxRows is > 0 ? body.MaxRows.Value : 1000;
+    string sql = body.Sql;
+
+    await queryLock.WaitAsync(ct).ConfigureAwait(false);
+    try
+    {
+        await ExecuteQueryStreaming(catalog, sql, maxRows, body.Trace == true, jsonOptions, httpCtx);
+    }
+    finally
+    {
+        queryLock.Release();
+    }
+});
+
 // Language services. The LanguageService methods are pure over the (immutable)
 // manifest, so concurrent calls are fine — no lock here. Each endpoint just
 // translates the JSON request body into the matching method call.
@@ -388,6 +456,179 @@ static async Task<IResult> ExecuteQuery(
             traceText),
         jsonOptions);
 }
+
+static async Task ExecuteQueryStreaming(
+    TableCatalog catalog,
+    string sql,
+    int maxRows,
+    bool trace,
+    JsonSerializerOptions jsonOptions,
+    HttpContext httpCtx)
+{
+    CancellationToken ct = httpCtx.RequestAborted;
+    Stopwatch sw = Stopwatch.StartNew();
+
+    StringWriter? traceCapture = trace
+        ? DatumIngest.Diagnostics.ExecutionTracer.BeginCapture()
+        : null;
+
+    // Plan first. Plan errors happen before we've started writing the response
+    // body, so we can still return a regular 400 JSON. After the body opens,
+    // errors must flow inline as NDJSON `error` events.
+    IQueryPlan plan;
+    try
+    {
+        plan = catalog.Plan(sql);
+    }
+    catch (Exception ex)
+    {
+        if (traceCapture is not null) DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        httpCtx.Response.StatusCode = 400;
+        await httpCtx.Response.WriteAsJsonAsync(new { error = ex.Message }, jsonOptions, ct);
+        return;
+    }
+
+    httpCtx.Response.ContentType = "application/x-ndjson";
+    Stream output = httpCtx.Response.Body;
+
+    string sessionId = Guid.NewGuid().ToString("N");
+    string cellId = "c0";
+    string cellKind = sql.TrimStart().StartsWith("EXEC", StringComparison.OrdinalIgnoreCase)
+        ? "exec"
+        : sql.TrimStart().StartsWith("EXPLAIN", StringComparison.OrdinalIgnoreCase)
+            ? "explain"
+            : "select";
+
+    void WriteEvent(object payload)
+    {
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(payload, payload.GetType(), jsonOptions);
+        output.Write(json, 0, json.Length);
+        output.WriteByte((byte)'\n');
+        output.Flush();
+    }
+
+    SidecarRegistry registry = catalog.SidecarRegistry;
+    NdjsonStreamingSink sink = new(output, jsonOptions, cellId);
+
+    bool errorEmitted = false;
+    int rowCount = 0;
+    bool truncated = false;
+    bool schemaEmitted = false;
+
+    try
+    {
+        WriteEvent(new SessionEvent("session", sessionId));
+        WriteEvent(new CellStartedEvent("cell_started", cellId, cellKind, sql));
+
+        await foreach (RowBatch batch in plan.ExecuteAsync(ct, sink).ConfigureAwait(false))
+        {
+            Arena arena = batch.Arena;
+
+            if (!schemaEmitted)
+            {
+                IReadOnlyList<string> names = batch.ColumnLookup.ColumnNames;
+                ColumnDescriptor[] cols = new ColumnDescriptor[names.Count];
+                if (batch.Count > 0)
+                {
+                    Row probe = batch[0];
+                    for (int i = 0; i < names.Count; i++)
+                    {
+                        DataValue cell = probe[i];
+                        cols[i] = new ColumnDescriptor(names[i], cell.Kind.ToString(), cell.IsArray);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < names.Count; i++)
+                    {
+                        cols[i] = new ColumnDescriptor(names[i], DataKind.Unknown.ToString(), false);
+                    }
+                }
+                WriteEvent(new SchemaEvent("schema", cellId, cols));
+                schemaEmitted = true;
+            }
+
+            for (int r = 0; r < batch.Count; r++)
+            {
+                if (rowCount >= maxRows)
+                {
+                    truncated = true;
+                    break;
+                }
+                Row row = batch[r];
+                JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
+                for (int c = 0; c < batch.ColumnLookup.Count; c++)
+                {
+                    cells[c] = WebCellFormatter.Format(row[c], arena, registry);
+                }
+                WriteEvent(new RowEvent("row", cellId, cells));
+                rowCount++;
+            }
+
+            if (truncated) break;
+        }
+
+        if (truncated)
+        {
+            WriteEvent(new TruncatedEvent("truncated", cellId, rowCount));
+        }
+
+        if (traceCapture is not null)
+        {
+            string traceText = DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+            traceCapture = null;
+            if (!string.IsNullOrEmpty(traceText))
+            {
+                WriteEvent(new TraceEvent("trace", cellId, traceText));
+            }
+        }
+
+        sw.Stop();
+        WriteEvent(new CellCompletedEvent("cell_completed", cellId, sw.Elapsed.TotalMilliseconds));
+        WriteEvent(new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds));
+    }
+    catch (OperationCanceledException)
+    {
+        WriteEvent(new ErrorEvent("error", cellId, "cancelled", null));
+        errorEmitted = true;
+    }
+    catch (Exception ex)
+    {
+        WriteEvent(new ErrorEvent("error", cellId, ex.Message, ex.ToString()));
+        errorEmitted = true;
+    }
+    finally
+    {
+        if (traceCapture is not null)
+        {
+            DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+        }
+
+        // Always close the cell + emit complete so the client knows the
+        // stream is done, even on error. Skip if we never opened the cell
+        // (only happens if WriteEvent itself threw, which we don't recover
+        // from anyway).
+        if (errorEmitted)
+        {
+            try
+            {
+                WriteEvent(new CellCompletedEvent("cell_completed", cellId, sw.Elapsed.TotalMilliseconds));
+                WriteEvent(new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds));
+            }
+            catch { /* response stream broken; nothing to do */ }
+        }
+    }
+}
+
+internal sealed record SessionEvent(string Type, string Id);
+internal sealed record CellStartedEvent(string Type, string Cell, string Kind, string Sql);
+internal sealed record SchemaEvent(string Type, string Cell, IReadOnlyList<ColumnDescriptor> Columns);
+internal sealed record RowEvent(string Type, string Cell, IReadOnlyList<JsonCell> Cells);
+internal sealed record TruncatedEvent(string Type, string Cell, int RowCount);
+internal sealed record TraceEvent(string Type, string Cell, string Text);
+internal sealed record CellCompletedEvent(string Type, string Cell, double ElapsedMs);
+internal sealed record CompleteEvent(string Type, double ElapsedMs);
+internal sealed record ErrorEvent(string Type, string? Cell, string Message, string? Detail);
 
 internal sealed record QueryRequest(string Sql, int? MaxRows, bool? Trace);
 

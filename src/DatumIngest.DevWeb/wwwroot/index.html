@@ -199,6 +199,24 @@
   }
   .warn { color: var(--warn); font-size: 12px; margin-bottom: 8px; }
 
+  /* Live token stream pane — appears during streaming model dispatches
+     (EXEC against an LLM) and is replaced by the standard table once the
+     cell completes. */
+  .streaming-output {
+    font-family: var(--mono); font-size: 13px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 6px 0 10px 0;
+    max-height: 360px; overflow: auto;
+    color: var(--fg);
+  }
+  .streaming-output .stream-header {
+    color: var(--muted); font-size: 12px; margin-bottom: 6px;
+  }
+
   table.results {
     border-collapse: collapse;
     font-family: var(--mono); font-size: 13px;
@@ -1300,10 +1318,35 @@
     const results = document.getElementById('results-pane');
     results.innerHTML = '<div class="meta">Running…</div>';
 
+    // Streaming pane: lazily attached when the first `chunk` event arrives,
+    // wiped at end-of-run when renderResultsForActiveTab() re-renders the
+    // pane with the final table. Tracks "is it currently in the DOM" so
+    // we only attach once per run.
+    const streamPane = document.createElement('pre');
+    streamPane.className = 'streaming-output';
+    let streamPaneAttached = false;
+    let streamHeaderModel = null;
+
     const t0 = performance.now();
-    let res;
+    // Result accumulator. Same shape the existing renderer reads, plus
+    // sessionId (for future debugger sidecar calls) and chunks (preserved
+    // for replay). Built up incrementally from NDJSON events; persisted
+    // to IDB as a single object at the end so existing renderers and
+    // saved-result loaders work unchanged.
+    const res = {
+      schema: null,
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: 0,
+      trace: null,
+      error: null,
+      sessionId: null,
+      chunks: [],
+    };
+
     try {
-      const response = await fetch('/api/query', {
+      const response = await fetch('/api/query/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1312,17 +1355,115 @@
           trace: document.getElementById('traceToggle').checked,
         }),
       });
-      res = await response.json();
+
+      if (!response.ok) {
+        // Plan-time errors come back as a regular 400 with a JSON body
+        // (the server hasn't started writing the NDJSON stream yet).
+        try {
+          const errBody = await response.json();
+          res.error = errBody.error || `HTTP ${response.status}`;
+        } catch {
+          res.error = `HTTP ${response.status}`;
+        }
+      } else {
+        // Clear the "Running…" placeholder; events render in place from here.
+        results.innerHTML = '';
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        // NDJSON line loop. Each chunk of bytes from the server is
+        // appended to a buffer, split on '\n'; complete lines parse as
+        // JSON events and dispatch into the accumulator + DOM.
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let event;
+            try { event = JSON.parse(line); } catch { continue; }
+            handleStreamEvent(event);
+          }
+        }
+        if (buf.trim()) {
+          try { handleStreamEvent(JSON.parse(buf)); } catch { /* ignore */ }
+        }
+      }
     } catch (err) {
-      res = { error: `Network error: ${err.message}` };
+      res.error = `Network error: ${err.message}`;
     } finally {
       state.queryRunning = false;
       runBtn.disabled = false;
       status.textContent = '';
     }
 
+    function handleStreamEvent(event) {
+      // Forward-compat: silently ignore unknown event types so future
+      // debugger / scope / breakpoint events on a newer server don't
+      // break older clients. Reserved type names (not yet emitted):
+      //   breakpoint_hit, breakpoint_resumed, step_paused, scope_changed.
+      switch (event.type) {
+        case 'session':
+          res.sessionId = event.id;
+          break;
+        case 'cell_started':
+          // Today there's exactly one cell per run; nothing to do. When
+          // procedures (LET / IF / WHILE) land, this brackets a new
+          // visually-distinct cell group in the UI.
+          break;
+        case 'schema':
+          res.schema = event.columns;
+          break;
+        case 'chunk':
+          res.chunks.push({ model: event.model, text: event.text });
+          if (!streamPaneAttached) {
+            streamHeaderModel = event.model;
+            const header = document.createElement('div');
+            header.className = 'meta stream-header';
+            header.textContent = `streaming from models.${event.model}`;
+            results.appendChild(header);
+            results.appendChild(streamPane);
+            streamPaneAttached = true;
+          }
+          streamPane.appendChild(document.createTextNode(event.text));
+          // Auto-scroll to keep the latest token visible. Cheap because
+          // streamPane is the only thing scrolling — not the parent.
+          streamPane.scrollTop = streamPane.scrollHeight;
+          break;
+        case 'row':
+          res.rows.push(event.cells);
+          res.rowCount = res.rows.length;
+          break;
+        case 'truncated':
+          res.truncated = true;
+          res.rowCount = event.rowCount;
+          break;
+        case 'trace':
+          res.trace = event.text;
+          break;
+        case 'cell_completed':
+          // Per-cell elapsedMs available; we use the wrapping `complete`
+          // event for total elapsed today.
+          break;
+        case 'complete':
+          res.elapsedMs = event.elapsedMs;
+          break;
+        case 'error':
+          res.error = event.message;
+          if (event.detail) res.detail = event.detail;
+          break;
+        default:
+          // Unknown event type — ignore (forward-compat).
+          break;
+      }
+    }
+
     const wallMs = performance.now() - t0;
-    if (typeof res.elapsedMs !== 'number') res.elapsedMs = wallMs;
+    if (typeof res.elapsedMs !== 'number' || !res.elapsedMs) res.elapsedMs = wallMs;
 
     tab.lastResult = res;
     tab.lastRunAt = Date.now();
@@ -1332,6 +1473,9 @@
     if (!isPartial) tab.sqlOfLastRun = tab.sql;
     renderTabStrip();
     persistWorkspace();
+    // Final render replaces the streaming pane with the standard table.
+    // For EXEC the table contains the same text that streamed live; for
+    // SELECT the streaming pane was never attached so this is the only render.
     renderResultsForActiveTab();
 
     // Persist result to IDB. Fire-and-forget — the in-memory cache is what
