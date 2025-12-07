@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Text;
+
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -229,15 +231,17 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
             }
 
-            // Sub-batching for streaming UX. Models with a non-null
-            // PreferredBatchSize stream results back to the user as soon as
-            // each chunk completes, rather than waiting for a full 1024-row
-            // upstream batch to finish. For LLMs (Llama, Phi, Gemma, …) at
-            // ~3s per generation this means first results in seconds, not
-            // hours. PreferredBatchSize == null means "process whatever the
-            // upstream hands me as one batch" — preserves existing behaviour
-            // for cheap models (classifiers, detectors).
-            int subBatchSize = model.PreferredBatchSize ?? rowsThisBatch;
+            // A streaming sink (currently EXEC) forces per-row dispatch:
+            // each row's IAsyncEnumerable<ValueRef> needs to be drained
+            // independently to forward chunks live, and cross-row batching
+            // would interleave chunks from different rows on the same sink.
+            // Without a sink, sub-batching follows PreferredBatchSize so
+            // cheap models batch upstream-rows efficiently and expensive
+            // models stream batch-completed groups for UX.
+            IModelStreamingSink? streamingSink = context.StreamingSink;
+            int subBatchSize = streamingSink is not null
+                ? 1
+                : (model.PreferredBatchSize ?? rowsThisBatch);
             if (subBatchSize <= 0) subBatchSize = rowsThisBatch;
 
             for (int chunkStart = 0; chunkStart < rowsThisBatch; chunkStart += subBatchSize)
@@ -303,16 +307,26 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 IReadOnlyList<ValueRef> modelOutputs;
                 try
                 {
-                    modelOutputs = await model
-                        .InferBatchAsync(
-                            inputs,
-                            overrideValues,
-                            cancellationToken)
-                        .ConfigureAwait(false);
+                    if (streamingSink is null)
+                    {
+                        modelOutputs = await model
+                            .InferBatchAsync(inputs, overrideValues, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // Streaming path: chunkSize is forced to 1 above, so
+                        // we drain a single row's stream, forward chunks to
+                        // the sink, and synthesise the final per-row output.
+                        modelOutputs = await DispatchStreamingAsync(
+                            model, inputs, overrideValues, streamingSink, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
                 }
-                catch (Exception ex) when (tracer is not null)
+                catch (Exception ex)
                 {
-                    tracer.OnDispatchFailed(
+                    streamingSink?.OnFailed(_modelName, ex);
+                    tracer?.OnDispatchFailed(
                         _modelName,
                         chunkSize,
                         System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp),
@@ -320,6 +334,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     throw;
                 }
 
+                streamingSink?.OnCompleted(_modelName);
                 tracer?.OnDispatchCompleted(
                     _modelName,
                     chunkSize,
@@ -365,6 +380,77 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 yield break;
             }
         }
+    }
+
+    /// <summary>
+    /// Streaming-path replacement for <see cref="IModel.InferBatchAsync"/>.
+    /// Drains the model's per-row <see cref="IAsyncEnumerable{ValueRef}"/>,
+    /// forwards each yielded chunk to <paramref name="sink"/> as it arrives,
+    /// and assembles a single output <see cref="ValueRef"/> for the row so
+    /// the operator's scatter step can materialise it into the output batch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Always called with a single-row dispatch — the operator forces
+    /// <c>chunkSize == 1</c> when a streaming sink is attached so each
+    /// row's IAsyncEnumerable is drained independently. Multi-row inputs
+    /// here would mean cross-row interleaving on the sink, which has no
+    /// well-defined output ordering.
+    /// </para>
+    /// <para>
+    /// <strong>Output assembly.</strong> Zero chunks → null. One chunk →
+    /// the chunk passes through (covers non-streaming models that inherit
+    /// the default <c>InferStreamingAsync</c> single-yield). Two or more
+    /// chunks → string concatenation (LLM path; the only producer of
+    /// multi-chunk streams today).
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<ValueRef>> DispatchStreamingAsync(
+        IModel model,
+        ValueRef[][] inputs,
+        ValueRef[][] overrides,
+        IModelStreamingSink sink,
+        CancellationToken cancellationToken)
+    {
+        if (inputs.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"Streaming dispatch expected 1 row but received {inputs.Length}; " +
+                "ModelInvocationOperator should have clamped subBatchSize to 1 when a streaming sink is attached.");
+        }
+
+        ValueRef[] rowInputs = inputs[0];
+        ValueRef[] rowOverrides = overrides.Length > 0 ? overrides[0] : [];
+
+        List<ValueRef> chunks = [];
+        await foreach (ValueRef chunk in model
+            .InferStreamingAsync(rowInputs, rowOverrides, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            sink.OnChunk(_modelName, chunk);
+            chunks.Add(chunk);
+        }
+
+        ValueRef rowOutput;
+        if (chunks.Count == 0)
+        {
+            rowOutput = default;
+        }
+        else if (chunks.Count == 1)
+        {
+            rowOutput = chunks[0];
+        }
+        else
+        {
+            StringBuilder sb = new();
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                sb.Append(chunks[i].AsString());
+            }
+            rowOutput = ValueRef.FromString(sb.ToString());
+        }
+
+        return [rowOutput];
     }
 
 }

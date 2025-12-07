@@ -168,7 +168,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Parses and plans <paramref name="sql"/> against this catalog, returning an
     /// <see cref="IQueryPlan"/> that may be inspected (<see cref="IQueryPlan.ExplainTree"/>),
     /// analyzed (<see cref="IQueryPlan.AnalyzeAsync"/>), or executed
-    /// (<see cref="IQueryPlan.ExecuteAsync"/>). Literal payloads are pre-materialized
+    /// (<see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>). Literal payloads are pre-materialized
     /// (hoisted) into a plan-scoped arena so per-row evaluation skips re-encoding.
     /// </summary>
     /// <remarks>

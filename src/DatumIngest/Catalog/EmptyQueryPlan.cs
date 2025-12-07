@@ -33,8 +33,10 @@ internal sealed class EmptyQueryPlan : IQueryPlan
     /// <inheritdoc />
 #pragma warning disable CS1998 // Async method lacks 'await' operators — empty enumerable, nothing to await.
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        IModelStreamingSink? streamingSink)
     {
+        _ = streamingSink;
         cancellationToken.ThrowIfCancellationRequested();
         yield break;
     }

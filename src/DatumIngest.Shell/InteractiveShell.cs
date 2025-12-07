@@ -263,6 +263,8 @@ internal sealed class InteractiveShell
 
                 bool isExplain = sqlCore.StartsWith("EXPLAIN ", StringComparison.OrdinalIgnoreCase)
                               || sqlCore.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase);
+                bool isExec = sqlCore.StartsWith("EXEC ", StringComparison.OrdinalIgnoreCase)
+                           || sqlCore.Equals("EXEC", StringComparison.OrdinalIgnoreCase);
 
                 if (isExplain)
                 {
@@ -286,6 +288,10 @@ internal sealed class InteractiveShell
 
                     await ExplainAsync(explainBody, analyze).ConfigureAwait(false);
                 }
+                else if (isExec)
+                {
+                    await ExecuteExecAsync(sqlCore).ConfigureAwait(false);
+                }
                 else
                 {
                     await ExecuteAsync(sqlCore).ConfigureAwait(false);
@@ -299,6 +305,117 @@ internal sealed class InteractiveShell
 
         AnsiConsole.MarkupLine("[grey]Goodbye.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Executes an <c>EXEC &lt;expression&gt;</c> statement, forwarding model
+    /// chunks live to the terminal as they arrive and falling back to
+    /// table-formatted row rendering if the EXEC target wasn't a streaming
+    /// model (e.g. <c>EXEC upper('hi')</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// EXEC lowers to a synthetic single-row <c>SELECT</c> in the planner; the
+    /// streaming-aware <see cref="IQueryPlan.ExecuteAsync(CancellationToken, IModelStreamingSink?)"/>
+    /// overload attaches a <see cref="TerminalStreamingSink"/> to the per-query
+    /// context. The model invocation operator branches on the sink's presence:
+    /// when set, it switches to <c>InferStreamingAsync</c> and pushes chunks
+    /// through the sink as the model produces them.
+    /// </para>
+    /// <para>
+    /// <strong>Two outcomes:</strong>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     A streaming model fired chunks → the sink already wrote them to
+    ///     the terminal and printed a "(streamed)" footer. The synthetic
+    ///     SELECT's row is redundant; we skip rendering it.
+    ///   </description></item>
+    ///   <item><description>
+    ///     No streaming model in the call (or a non-streaming function like
+    ///     <c>upper</c>) → no chunks fired. The query still produced a row;
+    ///     buffer its formatted cells and render via
+    ///     <see cref="TableFormatter.RenderPage"/> after draining.
+    ///   </description></item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task ExecuteExecAsync(string sql)
+    {
+        IQueryPlan plan;
+        try
+        {
+            plan = _catalog.Plan(sql);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        using CancellationTokenSource cts = new();
+        _activeQueryCts = cts;
+        Stopwatch? sw = _timerEnabled ? Stopwatch.StartNew() : null;
+
+        TerminalStreamingSink sink = new();
+        SidecarRegistry registry = _catalog.SidecarRegistry;
+
+        // Buffer formatted cells so we can fall back to table rendering when
+        // the EXEC body wasn't a streaming model. Cell strings are copied
+        // out before each MoveNext, so we don't depend on RowBatch lifetime.
+        Schema? schema = null;
+        List<string[]> bufferedRows = [];
+
+        try
+        {
+            await foreach (RowBatch batch in plan.ExecuteAsync(cts.Token, sink).ConfigureAwait(false))
+            {
+                if (sink.ChunksReceived > 0)
+                {
+                    // Streaming already painted the output; the synthetic
+                    // SELECT row is an artefact. Drain and discard.
+                    continue;
+                }
+
+                schema ??= DeriveSchema(batch);
+                Arena arena = batch.Arena;
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    Row row = batch[i];
+                    string[] cells = new string[schema.Columns.Count];
+                    for (int c = 0; c < schema.Columns.Count; c++)
+                    {
+                        DataValue value = row[c];
+                        cells[c] = value.IsNull
+                            ? "NULL"
+                            : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields);
+                    }
+                    bufferedRows.Add(cells);
+                }
+            }
+
+            if (sink.ChunksReceived == 0 && schema is not null && bufferedRows.Count > 0)
+            {
+                TableFormatter.RenderPage(bufferedRows, schema, printHeader: true, Console.Out);
+            }
+            else if (sink.ChunksReceived == 0 && bufferedRows.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[grey](no result)[/]");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AnsiConsole.MarkupLine("[yellow](query cancelled)[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(ex.ToString())}[/]");
+        }
+        finally
+        {
+            _activeQueryCts = null;
+            ReportElapsed(sw);
+        }
     }
 
     private async Task ExecuteAsync(string sql)
@@ -345,7 +462,7 @@ internal sealed class InteractiveShell
     }
 
     /// <summary>
-    /// Drives <see cref="IQueryPlan.ExecuteAsync"/> page by page, prompting the
+    /// Drives <see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/> page by page, prompting the
     /// user between pages when more rows remain. Buffers up to <see cref="PageSize"/>
     /// rows of formatted cell strings per page, so the per-page <see cref="TableFormatter"/>
     /// has the data it needs to compute column widths.

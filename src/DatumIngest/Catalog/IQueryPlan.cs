@@ -31,5 +31,24 @@ public interface IQueryPlan
     /// so consumers must finish using the current batch before requesting
     /// the next one.
     /// </summary>
-    IAsyncEnumerable<RowBatch> ExecuteAsync(CancellationToken cancellationToken);
+    IAsyncEnumerable<RowBatch> ExecuteAsync(CancellationToken cancellationToken)
+        => ExecuteAsync(cancellationToken, streamingSink: null);
+
+    /// <summary>
+    /// Same as <see cref="ExecuteAsync(CancellationToken)"/>, but attaches a
+    /// streaming sink to the per-query <c>ExecutionContext</c>. When non-
+    /// <see langword="null"/>, model invocations switch from their batched
+    /// <c>InferBatchAsync</c> path to the per-row <c>InferStreamingAsync</c>
+    /// path and forward each yielded chunk to <paramref name="streamingSink"/>
+    /// as it arrives.
+    /// </summary>
+    /// <remarks>
+    /// Used by <c>EXEC &lt;model-call&gt;</c> in the interactive shell to
+    /// render LLM tokens live. Plain <c>SELECT</c>/<c>WHERE</c>/<c>GROUP BY</c>
+    /// callers leave <paramref name="streamingSink"/> at <see langword="null"/>
+    /// — they need the full collected value, not chunks.
+    /// </remarks>
+    IAsyncEnumerable<RowBatch> ExecuteAsync(
+        CancellationToken cancellationToken,
+        IModelStreamingSink? streamingSink);
 }
