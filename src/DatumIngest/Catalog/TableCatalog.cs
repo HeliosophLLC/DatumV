@@ -46,6 +46,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._functions = FunctionRegistry.CreateDefault();
         this._udfs = new UdfRegistry();
         this.Tables = new();
+
+        // system_udfs is auto-registered against the UDF registry so
+        // SELECT * FROM system_udfs works without any host setup. Models
+        // are different — they require a ModelCatalog injected by the host —
+        // but the UDF registry is intrinsic to every TableCatalog.
+        Add(new Providers.UdfsTableProvider(pool, _udfs));
     }
 
 

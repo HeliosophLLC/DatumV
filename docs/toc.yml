@@ -149,6 +149,8 @@
           href: sql/udf.md#cycle-detection
         - name: Scoping Rules
           href: sql/udf.md#scoping-rules
+        - name: Introspection (system_udfs)
+          href: sql/udf.md#introspection
 
 - name: Functions
   items:

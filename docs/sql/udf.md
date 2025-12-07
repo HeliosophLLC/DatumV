@@ -222,6 +222,31 @@ effect of `Plan(...)` and return an empty result set. The DDL is
 process-scoped: each `TableCatalog` has its own UDF registry, and
 restarting the host clears them.
 
+## Introspection
+
+The `system_udfs` virtual table surfaces every registered UDF as queryable
+rows. Use it from any session to see what's defined, the parameter list,
+the declared return type, and the formatted body:
+
+```sql
+SELECT name, parameter_count, parameters, return_type, body
+FROM system_udfs
+ORDER BY name;
+```
+
+Schema:
+
+| Column            | Type   | Nullable | Description                                                            |
+|-------------------|--------|----------|------------------------------------------------------------------------|
+| `name`            | String | no       | Unqualified UDF name. Call sites use the `udf.` prefix.                |
+| `parameter_count` | Int32  | no       | Number of declared parameters. `0` for nullary UDFs.                   |
+| `parameters`      | String | no       | Comma-separated `"name TYPE, name TYPE"` rendition. Empty for nullary. |
+| `return_type`     | String | yes      | The `RETURNS` annotation, or NULL when omitted.                        |
+| `body`            | String | no       | Body expression formatted from the AST. Whitespace may differ from input. |
+
+`system_udfs` is auto-registered against every `TableCatalog` — no host
+setup required.
+
 ## Limitations
 
 - **No recursion.** A UDF may not reference itself directly or
@@ -243,3 +268,4 @@ restarting the host clears them.
 - [Models](../models.md) — `models.X(...)` invocations that UDFs commonly wrap
 - [Lambda Expressions](lambda-expressions.md) — how scope shadowing interacts with UDF parameters
 - [Common Table Expressions](cte.md) — for recursive logic that UDFs cannot express
+- [system_udfs](#introspection) — querying registered UDFs from SQL
