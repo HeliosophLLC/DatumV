@@ -130,4 +130,55 @@ public sealed class DiagnosticsProviderTests : ServiceTestBase
         Assert.True(diagnostics[0].EndColumn > diagnostics[0].StartColumn ||
                      diagnostics[0].EndLine > diagnostics[0].StartLine);
     }
+
+    // ───────────────────── Template strings ─────────────────────
+
+    [Fact]
+    public void GetDiagnostics_ValidTemplateString_ReturnsEmpty()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT `Hello ${name}` FROM t");
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void GetDiagnostics_TemplateStringWithoutSplices_ReturnsEmpty()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT `plain string` FROM t");
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void GetDiagnostics_UnterminatedTemplateString_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT `unterminated");
+
+        Assert.NotEmpty(diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostics[0].Severity);
+    }
+
+    [Fact]
+    public void GetDiagnostics_SpliceWithSyntaxError_ReturnsError()
+    {
+        // Splice expression is malformed: `1 +` is not a complete expression.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT `text ${1 +} more`");
+
+        Assert.NotEmpty(diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostics[0].Severity);
+    }
+
+    [Fact]
+    public void GetDiagnostics_EmptySplice_ReturnsError()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT `${}` FROM t");
+
+        Assert.NotEmpty(diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostics[0].Severity);
+    }
 }

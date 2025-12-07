@@ -55,6 +55,12 @@ public static class MonarchGrammarFactory
                 // literal single quote inside a string.
                 new[] { @"'([^'\\]|'')*'", "string" },
 
+                // Backtick-delimited template strings: transition into a sub-state
+                // that highlights the body as a string and ${…} splices as
+                // delimited expression regions. The string class lights up the
+                // theme color even before the closing backtick is typed.
+                new[] { @"`", "string", "@templateString" },
+
                 // Numeric literals: integer, decimal, and scientific notation.
                 new[] { @"\d+(\.\d*)?([eE][+-]?\d+)?", "number" },
 
@@ -116,6 +122,32 @@ public static class MonarchGrammarFactory
             {
                 new[] { @"\*/", "comment", "@pop" },
                 new[] { @".", "comment" },
+            },
+
+            // Template-string body sub-state. Highlights the body as a string,
+            // recognizes \-escapes, and transitions into @templateSplice when
+            // it sees ${. Pops back to root on the closing backtick.
+            templateString = new object[]
+            {
+                new[] { @"\\.", "string.escape" },
+                new[] { @"\$\{", "delimiter.bracket", "@templateSplice" },
+                new[] { @"`", "string", "@pop" },
+                new[] { @"[^`\\$]+", "string" },
+                // Lone $ that isn't followed by { — keep it as part of the
+                // string body so highlighting doesn't break.
+                new[] { @"\$", "string" },
+            },
+
+            // Template-string splice sub-state. Tokenized like normal SQL
+            // (delegates to root) so identifiers, numbers, and operators
+            // pick up their usual colors. Pops back to @templateString on
+            // the closing brace.
+            templateSplice = new object[]
+            {
+                new[] { @"\}", "delimiter.bracket", "@pop" },
+                // Reuse the root tokenizer for splice contents — strings,
+                // numbers, identifiers, operators all behave the same.
+                new { @include = "@root" },
             },
 
             // TABLESAMPLE method sub-state: highlights the method name that follows

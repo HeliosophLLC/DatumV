@@ -173,6 +173,186 @@ public static class SqlParser
         Token.EqualTo(SqlToken.StringLiteral)
             .Select(token => (Expression)new LiteralExpression(UnquoteString(token)));
 
+    /// <summary>
+    /// Backtick-delimited template string with <c>${expression}</c> splices.
+    /// Lowers to a <c>concat(…)</c> call interleaving literal chunks with the
+    /// parsed splice expressions. A template with no splices collapses to a
+    /// single <see cref="LiteralExpression"/>; one with no literal text and a
+    /// single splice still goes through <c>concat(…)</c> so the result is
+    /// guaranteed to be a string regardless of the splice's runtime kind.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> TemplateStringLiteral =
+        Token.EqualTo(SqlToken.TemplateString)
+            .Select(token => LowerTemplateString(token));
+
+    /// <summary>
+    /// Walks the captured text of a <see cref="SqlToken.TemplateString"/> token,
+    /// splitting on <c>${…}</c> boundaries and producing either a
+    /// <see cref="LiteralExpression"/> (no splices) or a <c>concat(…)</c>
+    /// <see cref="FunctionCallExpression"/> interleaving literal chunks with
+    /// parsed splice expressions.
+    /// </summary>
+    /// <remarks>
+    /// Each splice's contents are tokenized and parsed via the existing
+    /// <c>ExpressionParser</c>. A failure to parse the splice surfaces as a
+    /// <see cref="ParseException"/> identifying the splice text — the outer
+    /// recovering parser converts that into a diagnostic anchored at the
+    /// template string's position. Source spans on sub-expressions are
+    /// reported relative to the splice text, not the outer SQL; PR1 accepts
+    /// this approximation for splice diagnostics and leaves precise span
+    /// remapping for a follow-up if it becomes painful in practice.
+    /// </remarks>
+    private static Expression LowerTemplateString(Token<SqlToken> token)
+    {
+        string raw = token.ToStringValue();
+        // Strip surrounding backticks. The tokenizer guarantees the open/close.
+        string body = raw.Length >= 2 ? raw[1..^1] : string.Empty;
+        SourceSpan tokenSpan = ToSpan(token);
+
+        List<Expression> parts = new();
+        System.Text.StringBuilder literalBuffer = new();
+        int i = 0;
+        while (i < body.Length)
+        {
+            char c = body[i];
+
+            // Escape: \`  \$  \\  → emit the escaped character; everything
+            // else passes through with the leading backslash preserved.
+            if (c == '\\' && i + 1 < body.Length)
+            {
+                char next = body[i + 1];
+                if (next is '`' or '$' or '\\')
+                {
+                    literalBuffer.Append(next);
+                    i += 2;
+                    continue;
+                }
+                literalBuffer.Append(c);
+                i++;
+                continue;
+            }
+
+            // Splice start: ${ … }
+            if (c == '$' && i + 1 < body.Length && body[i + 1] == '{')
+            {
+                // Find the matching close brace, tracking nesting and skipping
+                // single-quoted string contents (the tokenizer applies the same
+                // rules; this is a straight mirror so the boundaries agree).
+                int spliceStart = i + 2;
+                int j = spliceStart;
+                int braceDepth = 1;
+                while (j < body.Length && braceDepth > 0)
+                {
+                    char cj = body[j];
+                    if (cj == '\\' && j + 1 < body.Length) { j += 2; continue; }
+                    if (cj == '\'')
+                    {
+                        j++;
+                        while (j < body.Length)
+                        {
+                            if (body[j] == '\'')
+                            {
+                                if (j + 1 < body.Length && body[j + 1] == '\'') { j += 2; continue; }
+                                j++;
+                                break;
+                            }
+                            j++;
+                        }
+                        continue;
+                    }
+                    if (cj == '{') braceDepth++;
+                    else if (cj == '}') braceDepth--;
+                    if (braceDepth == 0) break;
+                    j++;
+                }
+
+                // Flush any pending literal chunk before the splice.
+                if (literalBuffer.Length > 0)
+                {
+                    parts.Add(new LiteralExpression(literalBuffer.ToString()));
+                    literalBuffer.Clear();
+                }
+
+                if (braceDepth != 0)
+                {
+                    // Tokenizer accepted the template (matching backtick) but the
+                    // splice braces don't balance — this should be rare since the
+                    // tokenizer mirrors the same rules, but guard defensively.
+                    throw new ParseException(
+                        "Unterminated ${...} splice in template string.",
+                        new Position(token.Position.Absolute + 1 + i, token.Position.Line, token.Position.Column + 1 + i));
+                }
+
+                string spliceText = body.Substring(spliceStart, j - spliceStart);
+                Expression spliceExpression = ParseSpliceExpression(spliceText, token, spliceStart);
+                parts.Add(spliceExpression);
+
+                i = j + 1; // skip past the closing }
+                continue;
+            }
+
+            literalBuffer.Append(c);
+            i++;
+        }
+
+        // Flush trailing literal chunk.
+        if (literalBuffer.Length > 0)
+        {
+            parts.Add(new LiteralExpression(literalBuffer.ToString()));
+        }
+
+        // No splices → single string literal. Cheap path; also keeps the AST
+        // shape identical to a single-quoted string when the user just wanted
+        // backticks for readability without interpolation.
+        if (parts.Count == 0)
+        {
+            return new LiteralExpression(string.Empty);
+        }
+        if (parts.Count == 1 && parts[0] is LiteralExpression onlyLiteral)
+        {
+            return onlyLiteral;
+        }
+
+        return new FunctionCallExpression("concat", parts, Span: tokenSpan);
+    }
+
+    /// <summary>
+    /// Tokenizes and parses the contents of a single <c>${…}</c> splice as a
+    /// scalar expression. Throws <see cref="ParseException"/> on parse failure
+    /// so the outer recovering parser can surface a diagnostic.
+    /// </summary>
+    private static Expression ParseSpliceExpression(
+        string spliceText,
+        Token<SqlToken> outerToken,
+        int spliceOffsetInBody)
+    {
+        if (string.IsNullOrWhiteSpace(spliceText))
+        {
+            throw new ParseException(
+                "Empty ${...} splice in template string.",
+                new Position(
+                    outerToken.Position.Absolute + 1 + spliceOffsetInBody,
+                    outerToken.Position.Line,
+                    outerToken.Position.Column + 1 + spliceOffsetInBody));
+        }
+
+        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(spliceText);
+        TokenListParserResult<SqlToken, Expression> result =
+            ExpressionParser!.AtEnd().TryParse(tokens);
+
+        if (!result.HasValue)
+        {
+            throw new ParseException(
+                $"Failed to parse splice expression '{spliceText.Trim()}': {result}",
+                new Position(
+                    outerToken.Position.Absolute + 1 + spliceOffsetInBody,
+                    outerToken.Position.Line,
+                    outerToken.Position.Column + 1 + spliceOffsetInBody));
+        }
+
+        return result.Value;
+    }
+
     /// <summary>NULL literal.</summary>
     private static readonly TokenListParser<SqlToken, Expression> NullLiteral =
         Token.EqualTo(SqlToken.Null)
@@ -593,6 +773,7 @@ public static class SqlParser
             .Or(TypeLiteral)
             .Or(NumberLiteral)
             .Or(StringLiteral)
+            .Or(TemplateStringLiteral)
             .Or(NullLiteral)
             .Or(TrueLiteral)
             .Or(FalseLiteral)
@@ -2475,8 +2656,26 @@ public static class SqlParser
         // Fast path: try the full batch parser first. This handles all statement
         // types (SELECT, CREATE, INSERT, UPDATE, DELETE, ALTER, ANALYZE) and
         // semicolon-separated batches. If it succeeds, no recovery needed.
-        TokenListParserResult<SqlToken, IReadOnlyList<Statement>> batchResult =
-            FullBatchParser.TryParse(tokens);
+        // Wrap in try/catch because some parser-side lowerings (template-string
+        // splice parsing) raise DatumIngest ParseException directly rather than
+        // failing through the combinator's HasValue path; recovering callers
+        // (the language server) need a diagnostic, not an exception.
+        TokenListParserResult<SqlToken, IReadOnlyList<Statement>> batchResult;
+        try
+        {
+            batchResult = FullBatchParser.TryParse(tokens);
+        }
+        catch (ParseException ex)
+        {
+            return new ParseResult(
+                query: null,
+                [new ParseError
+                {
+                    Message = ex.Message,
+                    Line = ex.ErrorPosition.Line,
+                    Column = ex.ErrorPosition.Column,
+                }]);
+        }
 
         if (batchResult.HasValue)
         {
@@ -2487,7 +2686,21 @@ public static class SqlParser
         // This only handles SELECT queries — DDL/DML that failed the fast path
         // will produce an "Expected SELECT keyword." error, which is appropriate
         // since the DDL/DML itself was syntactically invalid.
-        return ParseWithRecovery(tokens);
+        try
+        {
+            return ParseWithRecovery(tokens);
+        }
+        catch (ParseException ex)
+        {
+            return new ParseResult(
+                query: null,
+                [new ParseError
+                {
+                    Message = ex.Message,
+                    Line = ex.ErrorPosition.Line,
+                    Column = ex.ErrorPosition.Column,
+                }]);
+        }
     }
 
     /// <summary>

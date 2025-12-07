@@ -55,6 +55,107 @@ public static class SqlTokenizer
         select Unit.Value;
 
     /// <summary>
+    /// Recognizes a backtick-delimited template string literal:
+    /// <c>`text ${expr} more text`</c>.
+    /// <para>
+    /// The tokenizer treats the entire <c>`…`</c> span (including any
+    /// <c>${…}</c> splices) as a single token. The parser later walks the
+    /// captured text, parses each splice's contents as an expression, and
+    /// lowers the whole thing to a <c>concat(…)</c> call.
+    /// </para>
+    /// <para>
+    /// Escapes inside the string body: <c>\`</c> for a literal backtick,
+    /// <c>\$</c> for a literal dollar (suppresses splice detection),
+    /// <c>\\</c> for a literal backslash. Splice braces are tracked with
+    /// nesting, so <c>${ {a: 1}.a }</c> works without prematurely closing.
+    /// An unterminated string causes the parser to fail; the tokenizer is
+    /// not the place to recover from that.
+    /// </para>
+    /// </summary>
+    private static readonly TextParser<Unit> TemplateStringToken = input =>
+    {
+        if (input.Length < 1 || input[0] != '`')
+        {
+            return Result.Empty<Unit>(input, "template string");
+        }
+
+        int i = 1;
+        while (i < input.Length)
+        {
+            char c = input[i];
+
+            if (c == '\\' && i + 1 < input.Length)
+            {
+                // Escape: skip the next character whatever it is.
+                i += 2;
+                continue;
+            }
+
+            if (c == '`')
+            {
+                int consumed = i + 1;
+                return Result.Value(Unit.Value, input, input.Skip(consumed));
+            }
+
+            if (c == '$' && i + 1 < input.Length && input[i + 1] == '{')
+            {
+                // Splice: skip into the body and find the matching close brace,
+                // tracking nesting so struct literals inside splices don't end
+                // the splice prematurely.
+                i += 2;
+                int braceDepth = 1;
+                while (i < input.Length && braceDepth > 0)
+                {
+                    char inner = input[i];
+
+                    if (inner == '\\' && i + 1 < input.Length)
+                    {
+                        i += 2;
+                        continue;
+                    }
+
+                    // Single-quoted string inside the splice — skip its body
+                    // so a stray { or } in a literal doesn't confuse depth.
+                    if (inner == '\'')
+                    {
+                        i++;
+                        while (i < input.Length)
+                        {
+                            if (input[i] == '\'')
+                            {
+                                if (i + 1 < input.Length && input[i + 1] == '\'')
+                                {
+                                    i += 2;
+                                    continue;
+                                }
+                                i++;
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    if (inner == '{')
+                    {
+                        braceDepth++;
+                    }
+                    else if (inner == '}')
+                    {
+                        braceDepth--;
+                    }
+                    i++;
+                }
+                continue;
+            }
+
+            i++;
+        }
+
+        return Result.Empty<Unit>(input, "unterminated template string");
+    };
+
+    /// <summary>
     /// Recognizes a <c>/* ... */</c> block comment. Nesting is not supported.
     /// </summary>
     private static readonly TextParser<Unit> BlockCommentToken = input =>
@@ -137,6 +238,11 @@ public static class SqlTokenizer
 
             // String literals (before keywords and identifiers)
             .Match(StringLiteralToken, SqlToken.StringLiteral)
+
+            // Backtick-delimited template strings: `text ${expr} more`.
+            // The full span (including splices) is captured as one token; the
+            // parser splits on ${…} boundaries and lowers to concat(…).
+            .Match(TemplateStringToken, SqlToken.TemplateString)
 
             // Double-quoted identifiers (before keywords)
             .Match(DoubleQuotedIdentifierToken, SqlToken.Identifier)

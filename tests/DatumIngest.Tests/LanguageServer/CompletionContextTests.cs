@@ -514,4 +514,82 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
     }
+
+    // ───────────────────── Template strings (backticks) ─────────────────────
+
+    [Fact]
+    public void Classify_InsideTemplateBody_ReturnsInsideStringOrComment()
+    {
+        // Cursor sits inside the literal portion of a template — no completions.
+        string sql = "SELECT `hello wor";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterClosedTemplate_DoesNotReturnInsideStringOrComment()
+    {
+        // After the closing backtick we're back in expression context.
+        string sql = "SELECT `hello` ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideOpenSplice_OffersExpressionCompletions()
+    {
+        // Cursor sits inside ${…} — splice contents are expressions, so we
+        // expect an expression-flavoured zone (AfterSelect surfaces columns
+        // and scalar functions).
+        string sql = "SELECT `hello ${";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterSelect, zone.Kind);
+        Assert.Null(zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_InsideSpliceWithPartialIdentifier_HasPrefix()
+    {
+        string sql = "SELECT `hello ${na";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterSelect, zone.Kind);
+        Assert.Equal("na", zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_AfterClosedSplice_BackInTemplateBody()
+    {
+        // Cursor sits in the literal text after a fully-closed splice.
+        string sql = "SELECT `hello ${name} wor";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideSpliceWithNestedBraces_StillInSpliceContext()
+    {
+        // Splice contains a struct literal — cursor inside the struct should
+        // still offer expression completions (we're nested inside the splice).
+        string sql = "SELECT `x = ${ {a: 1, b: ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        // Expression-flavoured (column / function) completions, not InsideStringOrComment.
+        Assert.NotEqual(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_EscapedDollarInTemplate_DoesNotEnterSplice()
+    {
+        // \${ is an escape for a literal dollar — the cursor sits in the
+        // template body, not in a splice.
+        string sql = @"SELECT `literal \${name} wor";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
+    }
 }

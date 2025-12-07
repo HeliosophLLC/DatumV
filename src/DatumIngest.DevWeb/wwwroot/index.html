@@ -948,6 +948,18 @@
   function registerLanguageProviders() {
     if (!window.monaco) return;
 
+    // Replace Monaco's built-in 'sql' tokenizer with the DatumIngest grammar
+    // so backtick template strings, ${…} splices, and dialect-specific
+    // keywords/types render with the right colors. Fetch is async; if it
+    // fails we just keep the default tokenizer (everything still works,
+    // backticks just render as identifiers).
+    fetch('/api/lang/grammar')
+      .then(response => response.ok ? response.json() : null)
+      .then(grammar => {
+        if (grammar) monaco.languages.setMonarchTokensProvider('sql', grammar);
+      })
+      .catch(() => { /* keep built-in tokenizer */ });
+
     monaco.languages.registerCompletionItemProvider('sql', {
       triggerCharacters: [' ', '.', ',', '(', '\n'],
       provideCompletionItems: async (model, position) => {

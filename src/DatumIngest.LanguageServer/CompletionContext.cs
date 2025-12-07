@@ -26,13 +26,28 @@ public static class CompletionContext
         // Only analyze text up to the cursor position.
         string textToCursor = sql[..System.Math.Min(cursorOffset, sql.Length)];
 
-        // If the cursor sits inside an unclosed string literal or comment, no
-        // completions make sense. The tokenizer fails on these inputs and would
-        // otherwise leave us at StatementStart, surfacing DDL keywords (ALTER
-        // first by alphabet) inside the user's typed string.
-        if (IsCursorInsideStringOrComment(textToCursor))
+        // Track whether the cursor sits inside a string, comment, or template
+        // splice. Splices are the interesting case — completion inside a
+        // ${…} block should behave like a free-floating expression context,
+        // so we recursively classify just the splice text.
+        CursorContext context = ClassifyCursorContext(textToCursor);
+        switch (context.Kind)
         {
-            return new CompletionZone(CompletionZoneKind.InsideStringOrComment, Prefix: null, TableQualifier: null);
+            case CursorContextKind.String:
+            case CursorContextKind.Comment:
+                return new CompletionZone(CompletionZoneKind.InsideStringOrComment, Prefix: null, TableQualifier: null);
+
+            case CursorContextKind.Splice:
+                // Re-classify using just the splice's text-to-cursor as if it
+                // were standalone SQL. The splice's content is a scalar
+                // expression — Expression-zone completions (columns, scalar
+                // functions, keywords) are what the user wants.
+                string spliceTextToCursor = textToCursor[context.SpliceStartOffset..];
+                return ClassifyExpressionContext(spliceTextToCursor);
+
+            case CursorContextKind.Code:
+            default:
+                break;
         }
 
         // Tokenize — the tokenizer may fail on incomplete input, which is fine.
@@ -494,13 +509,14 @@ public static class CompletionContext
     }
 
     /// <summary>
-    /// Scans the text from start to cursor and returns <c>true</c> when the
-    /// cursor sits inside an unclosed single-quoted string, line comment, or
-    /// block comment. Mirrors the tokenizer's grammar (<c>''</c> escape inside
-    /// strings, <c>--</c> through end of line, <c>/* ... */</c> block) so that
-    /// what counts as "inside" agrees with how the SQL is parsed.
+    /// Scans the text from start to cursor and reports what lexical context
+    /// the cursor sits in. Mirrors the tokenizer's grammar (<c>''</c> escape
+    /// inside single-quoted strings, <c>--</c> through end of line,
+    /// <c>/* ... */</c> block, <c>`…`</c> template strings with <c>${…}</c>
+    /// splices) so that what counts as "inside" agrees with how the SQL is
+    /// parsed.
     /// </summary>
-    private static bool IsCursorInsideStringOrComment(string text)
+    private static CursorContext ClassifyCursorContext(string text)
     {
         int end = text.Length;
         int i = 0;
@@ -513,7 +529,7 @@ public static class CompletionContext
             {
                 i += 2;
                 while (i < end && text[i] != '\n') i++;
-                if (i >= end) return true;
+                if (i >= end) return CursorContext.InComment;
                 i++; // consume newline
                 continue;
             }
@@ -533,7 +549,7 @@ public static class CompletionContext
                     }
                     i++;
                 }
-                if (!closed) return true;
+                if (!closed) return CursorContext.InComment;
                 continue;
             }
 
@@ -557,13 +573,118 @@ public static class CompletionContext
                     }
                     i++;
                 }
-                if (!closed) return true;
+                if (!closed) return CursorContext.InString;
+                continue;
+            }
+
+            // Backtick-delimited template string. Body is processed character-
+            // by-character, with ${…} splices handled specially: the splice
+            // body is scanned for a matching close brace; if the cursor sits
+            // inside an unclosed splice, we return that location so the
+            // caller can re-classify the splice text as a free expression.
+            if (c == '`')
+            {
+                i++; // consume opening backtick
+                while (i < end)
+                {
+                    char tc = text[i];
+
+                    if (tc == '\\' && i + 1 < end)
+                    {
+                        i += 2;
+                        continue;
+                    }
+
+                    if (tc == '`')
+                    {
+                        i++; // consume closing backtick
+                        goto template_closed;
+                    }
+
+                    if (tc == '$' && i + 1 < end && text[i + 1] == '{')
+                    {
+                        // Splice body. spliceStart points just past the '{'.
+                        int spliceStart = i + 2;
+                        i = spliceStart;
+                        int depth = 1;
+                        while (i < end && depth > 0)
+                        {
+                            char sc = text[i];
+                            if (sc == '\\' && i + 1 < end) { i += 2; continue; }
+                            if (sc == '\'')
+                            {
+                                i++;
+                                while (i < end)
+                                {
+                                    if (text[i] == '\'')
+                                    {
+                                        if (i + 1 < end && text[i + 1] == '\'') { i += 2; continue; }
+                                        i++;
+                                        break;
+                                    }
+                                    i++;
+                                }
+                                continue;
+                            }
+                            if (sc == '{') depth++;
+                            else if (sc == '}') depth--;
+                            if (depth == 0) break; // i still points at the closing '}'
+                            i++;
+                        }
+
+                        if (depth != 0)
+                        {
+                            // Cursor sits inside an unclosed splice — caller
+                            // handles this as expression context using the
+                            // splice text from spliceStart up to the cursor.
+                            return CursorContext.InSplice(spliceStart);
+                        }
+
+                        i++; // skip past the closing '}'
+                        continue;
+                    }
+
+                    i++;
+                }
+
+                // Reached end-of-text without seeing the closing backtick:
+                // cursor is inside the template string body (outside any
+                // splice). Treat as in-string.
+                return CursorContext.InString;
+
+                template_closed: ;
                 continue;
             }
 
             i++;
         }
-        return false;
+        return CursorContext.InCode;
+    }
+
+    /// <summary>
+    /// Re-classifies <paramref name="spliceText"/> as a free-floating scalar
+    /// expression context. Used when the cursor sits inside a template-string
+    /// <c>${…}</c> splice — the splice's contents are scalar SQL, so the
+    /// completions there should be Expression-zone (columns, scalar
+    /// functions, common keywords).
+    /// </summary>
+    /// <remarks>
+    /// We synthesize the splice as the body of a phantom <c>SELECT</c> so the
+    /// existing zone classifier walks back to the SELECT keyword and lands
+    /// on <see cref="CompletionZoneKind.AfterSelect"/> when the splice is
+    /// effectively empty. For a non-empty splice, the regular keyword
+    /// (WHERE, AND, etc.) walking still applies, but the practical case is
+    /// "user is typing an identifier inside the splice" which falls through
+    /// to AfterSelect and surfaces columns/functions.
+    /// </remarks>
+    private static CompletionZone ClassifyExpressionContext(string spliceText)
+    {
+        // Wrap as `SELECT <splice>` so the existing classifier sees a valid
+        // governing keyword. The 7-character "SELECT " prefix is included in
+        // the cursor offset so the recursion lands at the end of the splice.
+        const string prefix = "SELECT ";
+        string synthetic = prefix + spliceText;
+        return Classify(synthetic, synthetic.Length);
     }
 
     private static bool IsSqlSymbol(char character)
@@ -571,6 +692,39 @@ public static class CompletionContext
         return character is '(' or ')' or ',' or '.' or '*' or '=' or '<' or '>' or
                '!' or '+' or '-' or '/' or '%' or '^' or '|' or ';' or '\'';
     }
+}
+
+/// <summary>
+/// Classifies the lexical context a cursor sits in within partial SQL text:
+/// regular code, an unclosed string, an unclosed comment, or inside a
+/// <c>${…}</c> splice of a backtick-delimited template string.
+/// </summary>
+internal enum CursorContextKind
+{
+    /// <summary>Cursor is in regular SQL code.</summary>
+    Code,
+
+    /// <summary>Cursor is inside an unclosed string literal (single-quoted or backtick body).</summary>
+    String,
+
+    /// <summary>Cursor is inside an unclosed line or block comment.</summary>
+    Comment,
+
+    /// <summary>Cursor is inside an unclosed <c>${…}</c> splice of a template string.</summary>
+    Splice,
+}
+
+/// <summary>
+/// Result of <see cref="CompletionContext"/>'s lexical scan: which context
+/// the cursor sits in, plus the splice-start offset when applicable.
+/// </summary>
+internal readonly record struct CursorContext(CursorContextKind Kind, int SpliceStartOffset)
+{
+    public static CursorContext InCode => new(CursorContextKind.Code, 0);
+    public static CursorContext InString => new(CursorContextKind.String, 0);
+    public static CursorContext InComment => new(CursorContextKind.Comment, 0);
+    public static CursorContext InSplice(int spliceStartOffset) =>
+        new(CursorContextKind.Splice, spliceStartOffset);
 }
 
 /// <summary>

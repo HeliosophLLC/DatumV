@@ -257,6 +257,15 @@ app.MapPost("/api/lang/hover", async (HttpRequest request, CancellationToken ct)
     return Results.Json(hover, jsonOptions);
 });
 
+// Monarch grammar for the SQL dialect. Returned as a JSON object the
+// browser feeds into monaco.languages.setMonarchTokensProvider, replacing
+// Monaco's built-in 'sql' tokenizer with one that knows about backtick
+// template strings (and all other DatumIngest extensions).
+app.MapGet("/api/lang/grammar", () =>
+{
+    return Results.Json(MonarchGrammarFactory.Build(), jsonOptions);
+});
+
 app.MapPost("/api/lang/diagnose", async (HttpRequest request, CancellationToken ct) =>
 {
     LangSqlRequest? body;

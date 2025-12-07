@@ -309,6 +309,14 @@ public enum SqlToken
     /// <summary>A single-quoted string literal.</summary>
     StringLiteral,
 
+    /// <summary>
+    /// A backtick-delimited template string literal with optional
+    /// <c>${expression}</c> splices: <c>`Hello ${name}, age ${age}.`</c>.
+    /// The token text includes the surrounding backticks; the parser splits
+    /// on splice boundaries and lowers the result to a <c>concat(...)</c> call.
+    /// </summary>
+    TemplateString,
+
     /// <summary>A numeric literal (integer or floating-point).</summary>
     NumberLiteral,
 

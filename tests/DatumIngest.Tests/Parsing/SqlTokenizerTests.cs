@@ -410,4 +410,103 @@ public class SqlTokenizerTests : ServiceTestBase
              SqlToken.Identifier, SqlToken.From, SqlToken.Identifier],
             kinds);
     }
+
+    // ───────────────────── Template strings (backticks) ─────────────────────
+
+    [Fact]
+    public void EmptyTemplateStringIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("``");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+        Assert.Equal("``", tokens[0].ToStringValue());
+    }
+
+    [Fact]
+    public void TemplateStringWithoutSplicesIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("`hello world`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+        Assert.Equal("`hello world`", tokens[0].ToStringValue());
+    }
+
+    [Fact]
+    public void TemplateStringWithSingleSpliceIsCapturedWhole()
+    {
+        Token<SqlToken>[] tokens = Tokenize("`hello ${name}`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+        Assert.Equal("`hello ${name}`", tokens[0].ToStringValue());
+    }
+
+    [Fact]
+    public void TemplateStringWithMultipleSplicesIsCapturedWhole()
+    {
+        Token<SqlToken>[] tokens = Tokenize("`Tone: ${tone}, Threat: ${threat}`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringWithMultilineBodyIsCapturedWhole()
+    {
+        Token<SqlToken>[] tokens = Tokenize("`line1\n  line2 ${x}\n  line3`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringWithEscapedBacktickIsCapturedWhole()
+    {
+        Token<SqlToken>[] tokens = Tokenize(@"`a \` b`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringWithEscapedDollarSuppressesSplice()
+    {
+        // \${name} should be a literal "${name}" — no splice tokenization.
+        Token<SqlToken>[] tokens = Tokenize(@"`literal \${name} text`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringWithNestedBracesInsideSpliceWorks()
+    {
+        // Splice contains a struct literal — the close brace of the struct
+        // must not be mistaken for the close of the splice.
+        Token<SqlToken>[] tokens = Tokenize("`x = ${ {a: 1, b: 2}.a }`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringWithSingleQuotedStringInsideSpliceWorks()
+    {
+        // A literal '}' inside a single-quoted string must not close the splice.
+        Token<SqlToken>[] tokens = Tokenize("`x = ${ concat('}', a) }`");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.TemplateString, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void TemplateStringInExpressionContextTokenizesCleanly()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT `Hello ${name}` FROM t");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.TemplateString, SqlToken.From, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void UnterminatedTemplateStringFailsTokenization()
+    {
+        // No closing backtick — Superpower throws on the unrecognized input.
+        Assert.ThrowsAny<Exception>(() => Tokenize("`unterminated"));
+    }
 }

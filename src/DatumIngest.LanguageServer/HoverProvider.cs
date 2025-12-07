@@ -52,6 +52,14 @@ public sealed class HoverProvider
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
                 "such as `array_transform` and `array_filter`.",
+            // Splice-aware hover (resolving identifiers inside ${…} as columns/
+            // functions) needs precise multi-line offset accounting that the
+            // current approximate hover positioning doesn't support cleanly.
+            // For now, surface a single descriptive hover on the whole template;
+            // an identifier outside the template still gets per-token hover.
+            SqlToken.TemplateString => "**Template string** — backtick-delimited string with `${expression}` interpolation.\n\n" +
+                "Lowers to a `concat(literal_chunks, splice_exprs…)` call at parse time. " +
+                "Splices may contain any scalar expression, including model invocations and other UDFs.",
             _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text, out docKey),
             _ => null,
         };
