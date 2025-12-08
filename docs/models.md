@@ -355,6 +355,29 @@ multi-paragraph code or HTML pages doesn't truncate. The 7B drops to
 Per-call overrides — `models.qwen25_coder_7b(prompt, 0.7, 4096)` — let
 you tweak both temperature and max_tokens at the call site.
 
+**Streaming output.** LLM responses produce tokens incrementally;
+DatumIngest exposes that stream when the consumer opts in:
+
+- `EXEC models.X('prompt')` in `datum-shell` prints tokens to the terminal
+  as the model produces them, finishing with a dim `(streamed from
+  models.X)` footer.
+- `EXEC models.X('prompt')` in `datum-devweb` fills a live streaming pane
+  in the result panel; chunks arrive over the `/api/query/stream`
+  endpoint as `{"type":"chunk", ...}` events. Press **Esc** to cancel
+  an in-flight call — the browser aborts the fetch, the server's
+  cancellation token propagates through the model, and inference stops
+  promptly.
+- `SELECT models.X(prompt) FROM t` collects the full response into a
+  single string per row before rendering — no live tokens. The
+  underlying streaming path is still exercised internally (LLM
+  `InferBatchAsync` collects over `InferStreamingAsync`), so the same
+  code is on the hot path either way.
+
+The LLM is the only model family that produces multi-chunk streams
+today; other models (classifiers, detectors, captioners, image
+generators) yield a single result and the `EXEC` streaming pane shows
+that one value once inference completes.
+
 **Setup**: each is a single `*.gguf` file dropped into the models
 directory. Filenames must match the catalog defaults
 (see [BuiltinModels.cs](../src/DatumIngest/Models/BuiltinModels.cs))

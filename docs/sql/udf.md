@@ -136,9 +136,12 @@ EXEC upper('hello');               -- built-in scalar
 EXEC models.llama31_8b($prompt);   -- model call with a parameter
 ```
 
-The full UDF inlining and model-hoisting pipeline applies — there is no
-execution-time difference between `EXEC udf.fn(x)` and
-`SELECT udf.fn(x)`. Non-deterministic primitives in the body (`random_string`,
+The full UDF inlining and model-hoisting pipeline applies — `EXEC udf.fn(x)`
+and `SELECT udf.fn(x)` produce the same value. They differ in delivery: when
+the call resolves to a streaming model (an LLM), `EXEC` forwards tokens to
+the terminal (in `datum-shell`) or to a live streaming pane (in `datum-devweb`)
+as the model produces them, while `SELECT` collects the full response before
+rendering. Non-deterministic primitives in the body (`random_string`,
 `random_float32`, model calls) re-evaluate on each execution, exactly as they
 would inline.
 
