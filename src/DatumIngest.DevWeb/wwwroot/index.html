@@ -598,6 +598,7 @@
   const state = {
     workspace: null,            // { tabs, activeTabId }
     queryRunning: false,
+    activeAbortController: null, // AbortController for the in-flight query, if any
   };
 
   // Debounce save so rapid keystrokes don't flog localStorage.
@@ -1310,10 +1311,18 @@
     if (state.queryRunning) return;
 
     state.queryRunning = true;
+    // AbortController for this run. Esc handler (or future Stop button)
+    // calls abort() to cancel the fetch — the browser closes the connection,
+    // the server's RequestAborted token fires, OperationCanceledException
+    // propagates through plan.ExecuteAsync, and the streaming path tears
+    // down cleanly. Cleared in the finally block.
+    const abortController = new AbortController();
+    state.activeAbortController = abortController;
+
     const runBtn = document.getElementById('run');
     const status = document.getElementById('status');
     runBtn.disabled = true;
-    status.textContent = isPartial ? 'running selection…' : 'running…';
+    status.textContent = isPartial ? 'running selection… (Esc to cancel)' : 'running… (Esc to cancel)';
 
     const results = document.getElementById('results-pane');
     results.innerHTML = '<div class="meta">Running…</div>';
@@ -1354,6 +1363,7 @@
           maxRows: parseInt(document.getElementById('maxRows').value, 10) || 200,
           trace: document.getElementById('traceToggle').checked,
         }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -1394,9 +1404,18 @@
         }
       }
     } catch (err) {
-      res.error = `Network error: ${err.message}`;
+      // AbortError is the expected outcome when Esc cancels the run; show
+      // it as "cancelled" rather than a network error. Any other failure
+      // mid-stream (server crash, lost connection) falls through to the
+      // generic message.
+      if (err && err.name === 'AbortError') {
+        if (!res.error) res.error = 'cancelled';
+      } else {
+        res.error = `Network error: ${err.message}`;
+      }
     } finally {
       state.queryRunning = false;
+      state.activeAbortController = null;
       runBtn.disabled = false;
       status.textContent = '';
     }
@@ -1623,6 +1642,19 @@
     renderResultsForActiveTab();
 
     document.getElementById('run').addEventListener('click', run);
+
+    // Esc cancels the in-flight query. The browser aborts the fetch, the
+    // server's RequestAborted token fires through plan.ExecuteAsync, and
+    // the catch block sees AbortError and renders the result as
+    // "cancelled". Gated on state.queryRunning so an idle Esc keeps its
+    // existing meaning (modal close, etc.) for the focused element.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state.queryRunning && state.activeAbortController) {
+        state.activeAbortController.abort();
+        const status = document.getElementById('status');
+        if (status) status.textContent = 'cancelling…';
+      }
+    });
 
     // Persist on visibility change to catch cases where the debounced save
     // hasn't fired yet.
