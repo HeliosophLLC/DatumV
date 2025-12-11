@@ -70,9 +70,58 @@ public class SqlTokenizerTests : ServiceTestBase
     [InlineData("PRECEDING", SqlToken.Preceding)]
     [InlineData("FOLLOWING", SqlToken.Following)]
     [InlineData("CURRENT", SqlToken.Current)]
+    [InlineData("BEGIN", SqlToken.Begin)]
+    [InlineData("begin", SqlToken.Begin)]
+    [InlineData("WHILE", SqlToken.While)]
+    [InlineData("while", SqlToken.While)]
+    [InlineData("DECLARE", SqlToken.Declare)]
+    [InlineData("declare", SqlToken.Declare)]
+    [InlineData("TO", SqlToken.To)]
+    [InlineData("to", SqlToken.To)]
     public void KeywordsAreRecognized(string input, SqlToken expected)
     {
         AssertSingleToken(input, expected);
+    }
+
+    // ───────────────────── Procedural variable references (@var) ─────────────────────
+
+    [Fact]
+    public void VariableReferenceIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("@count");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
+        Assert.Equal("@count", tokens[0].ToStringValue());
+    }
+
+    [Fact]
+    public void VariableReferenceWithUnderscoreAndDigitsIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("@row_index_2");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
+        Assert.Equal("@row_index_2", tokens[0].ToStringValue());
+    }
+
+    [Fact]
+    public void VariableReferenceLeadingUnderscoreIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("@_private");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.Variable, tokens[0].Kind);
+    }
+
+    [Fact]
+    public void VariableReferenceDistinctFromParameter()
+    {
+        // $name and @name share lexical structure but resolve to different
+        // token kinds. This is the foundation for the AST split between
+        // ParameterExpression (immutable, bound from outside) and
+        // VariableExpression (mutable, scoped to BEGIN/END).
+        Token<SqlToken>[] paramTokens = Tokenize("$x");
+        Token<SqlToken>[] varTokens = Tokenize("@x");
+        Assert.Equal(SqlToken.Parameter, paramTokens[0].Kind);
+        Assert.Equal(SqlToken.Variable, varTokens[0].Kind);
     }
 
     // ───────────────────── Identifiers ─────────────────────

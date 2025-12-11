@@ -186,6 +186,18 @@ public static class SqlTokenizer
         select Unit.Value;
 
     /// <summary>
+    /// Recognizes a procedural variable reference: <c>@</c> followed by a C-style
+    /// identifier. The full span (including the <c>@</c> prefix) is captured as a
+    /// single token; the parser strips the prefix when building
+    /// <c>VariableExpression</c>. Mirrors <see cref="ParameterToken"/>.
+    /// </summary>
+    private static readonly TextParser<Unit> VariableToken =
+        from at in Character.EqualTo('@')
+        from first in Character.Letter.Or(Character.EqualTo('_'))
+        from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
+        select Unit.Value;
+
+    /// <summary>
     /// Recognizes a SQL Server-style temporary-table identifier prefix: <c>#</c> followed
     /// by a C-style identifier. The full span (including <c>#</c>) is emitted as a single
     /// <see cref="SqlToken.Identifier"/> token, preserving the prefix in the table name.
@@ -375,6 +387,15 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXEC"), SqlToken.Exec, requireDelimiters: true)
 
+            // Procedural keywords (BEGIN/END/IF/ELSE/WHILE/FOR/DECLARE/SET/TO).
+            // BEGIN, WHILE, DECLARE, TO are added here; END/IF/ELSE/FOR/SET are
+            // already declared above for other uses (CASE, IF NOT EXISTS, FOR/SET
+            // in PIVOT/UPDATE) but reuse the same tokens for procedural code.
+            .Match(Span.EqualToIgnoreCase("BEGIN"), SqlToken.Begin, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("WHILE"), SqlToken.While, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("DECLARE"), SqlToken.Declare, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TO"), SqlToken.To, requireDelimiters: true)
+
             // Type keywords — reserved names for DataKind type literals
             .Match(Span.EqualToIgnoreCase("BOOLEAN"), SqlToken.TypeKeyword, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UINT8"), SqlToken.TypeKeyword, requireDelimiters: true)
@@ -408,6 +429,10 @@ public static class SqlTokenizer
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)
+
+            // Procedural variable references (@name) — same precedence rule
+            // as parameters; the @ prefix would otherwise be unexpected.
+            .Match(VariableToken, SqlToken.Variable)
 
             // Temp-table identifier prefix (#name) — before generic identifiers
             // so the # is captured as part of the name rather than rejected.

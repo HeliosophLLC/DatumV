@@ -310,6 +310,18 @@ public enum SqlToken
     /// <summary>The EXEC keyword (direct function execution statement).</summary>
     Exec,
 
+    /// <summary>The BEGIN keyword (procedural block opener; pairs with END).</summary>
+    Begin,
+
+    /// <summary>The WHILE keyword (procedural loop with predicate).</summary>
+    While,
+
+    /// <summary>The DECLARE keyword (procedural variable declaration).</summary>
+    Declare,
+
+    /// <summary>The TO keyword (counter-FOR loop range, as in <c>FOR @i = 1 TO 10</c>).</summary>
+    To,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>
@@ -384,6 +396,15 @@ public enum SqlToken
 
     /// <summary>A named parameter placeholder such as <c>$threshold</c>.</summary>
     Parameter,
+
+    /// <summary>
+    /// A procedural variable reference such as <c>@count</c>. Distinguished
+    /// from <see cref="Parameter"/> by the <c>@</c> prefix: parameters bind
+    /// from outside the query (immutable for the duration), variables live
+    /// in the procedural scope (mutable via <c>SET</c>, scoped to their
+    /// enclosing <c>BEGIN</c>/<c>END</c> block).
+    /// </summary>
+    Variable,
 
     /// <summary>The ; (semicolon) statement terminator.</summary>
     Semicolon,

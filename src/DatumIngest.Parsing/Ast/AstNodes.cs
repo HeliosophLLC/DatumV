@@ -488,6 +488,17 @@ public sealed record LiteralExpression(object? Value) : Expression;
 public sealed record ParameterExpression(string Name, SourceSpan? Span = null) : Expression;
 
 /// <summary>
+/// A reference to a procedural variable: <c>@name</c>. The leading <c>@</c>
+/// is stripped at parse time; <see cref="Name"/> holds the bare identifier.
+/// Resolved at evaluation time against the active variable scope on
+/// <c>ExecutionContext</c> (introduced by <c>DECLARE</c>; mutated by
+/// <c>SET</c>; pushed/popped on <c>BEGIN</c>/<c>END</c> block boundaries).
+/// </summary>
+/// <param name="Name">Variable name without the <c>@</c> prefix.</param>
+/// <param name="Span">Source location of the <c>@name</c> token.</param>
+public sealed record VariableExpression(string Name, SourceSpan? Span = null) : Expression;
+
+/// <summary>
 /// A binary operation between two expressions (arithmetic or comparison).
 /// </summary>
 public sealed record BinaryExpression(
@@ -1141,6 +1152,127 @@ public sealed record DropFunctionStatement(
 /// <param name="Call">The function call expression to execute.</param>
 /// <param name="Span">Source location of the EXEC keyword for diagnostic reporting.</param>
 public sealed record ExecStatement(Expression Call, SourceSpan? Span = null) : Statement;
+
+// ───────────────────── Procedural statements ─────────────────────
+
+/// <summary>
+/// A <c>BEGIN ... END</c> block — a sequence of statements executed in order
+/// within a single lexical scope. Variables declared inside the block (via
+/// <see cref="DeclareStatement"/>) are visible only until the matching
+/// <c>END</c>; the scope is pushed on entry and popped on exit by the
+/// procedural executor.
+/// </summary>
+/// <param name="Statements">The statements to execute in order. Empty blocks are valid.</param>
+/// <param name="Span">Source location of the <c>BEGIN</c> keyword.</param>
+public sealed record BlockStatement(
+    IReadOnlyList<Statement> Statements,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>IF predicate then-stmt [ELSE else-stmt]</c> — conditional branch. The
+/// predicate is evaluated against the current variable scope; whichever
+/// branch matches runs as a single nested statement (typically a
+/// <see cref="BlockStatement"/>). <c>ELSE IF</c> falls out naturally when
+/// <see cref="Else"/> is itself an <see cref="IfStatement"/> — no special
+/// syntactic form is needed.
+/// </summary>
+/// <param name="Predicate">Boolean-valued expression. NULL is treated as false.</param>
+/// <param name="Then">Statement executed when the predicate is true.</param>
+/// <param name="Else">Statement executed when the predicate is false; <see langword="null"/> for an IF without an ELSE.</param>
+/// <param name="Span">Source location of the <c>IF</c> keyword.</param>
+public sealed record IfStatement(
+    Expression Predicate,
+    Statement Then,
+    Statement? Else = null,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>WHILE predicate body</c> — repeats <see cref="Body"/> while the
+/// predicate evaluates to true. The predicate is re-evaluated against
+/// the current scope before each iteration.
+/// </summary>
+/// <param name="Predicate">Boolean-valued expression checked once per iteration. NULL terminates the loop.</param>
+/// <param name="Body">Statement executed each iteration (typically a <see cref="BlockStatement"/>).</param>
+/// <param name="Span">Source location of the <c>WHILE</c> keyword.</param>
+public sealed record WhileStatement(
+    Expression Predicate,
+    Statement Body,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// Counter-FOR loop: <c>FOR @i = start TO end [STEP step] body</c>. The loop
+/// variable is auto-declared at the loop scope, initialised to
+/// <see cref="Start"/>, incremented by <see cref="Step"/> (defaults to
+/// <c>1</c>) each iteration, and the loop runs while it remains
+/// <c>&lt;= </c><see cref="End"/>. Inclusive on both ends, matching
+/// Pascal/Ada conventions.
+/// </summary>
+/// <param name="VariableName">Loop variable name without the <c>@</c> prefix.</param>
+/// <param name="Start">Inclusive starting value.</param>
+/// <param name="End">Inclusive ending value.</param>
+/// <param name="Step">Increment per iteration; <see langword="null"/> means <c>1</c>.</param>
+/// <param name="Body">Statement executed each iteration.</param>
+/// <param name="Span">Source location of the <c>FOR</c> keyword.</param>
+public sealed record ForCounterStatement(
+    string VariableName,
+    Expression Start,
+    Expression End,
+    Expression? Step,
+    Statement Body,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// Cursor-FOR loop: <c>FOR @row IN (SELECT ...) body</c>. Iterates the rows
+/// produced by <see cref="Source"/>, binding each row to the loop variable
+/// (a struct of the source's columns) and running <see cref="Body"/> per
+/// iteration.
+/// </summary>
+/// <param name="VariableName">Loop variable name without the <c>@</c> prefix.</param>
+/// <param name="Source">Query whose rows the loop iterates over.</param>
+/// <param name="Body">Statement executed each iteration.</param>
+/// <param name="Span">Source location of the <c>FOR</c> keyword.</param>
+public sealed record ForInStatement(
+    string VariableName,
+    QueryExpression Source,
+    Statement Body,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>DECLARE @name TypeName [= initializer]</c> — introduces a new variable
+/// in the current scope. <see cref="TypeName"/> is the textual SQL type
+/// (matching <see cref="ColumnDefinition.TypeName"/>) resolved at execution
+/// time. <see cref="Initializer"/> is evaluated once at declaration; absent
+/// initializers leave the variable NULL.
+/// </summary>
+/// <remarks>
+/// Either <see cref="TypeName"/> or <see cref="Initializer"/> must be
+/// present — when both are absent the declaration is ill-formed (the
+/// executor would have no type to bind). When <see cref="TypeName"/> is
+/// <see langword="null"/>, the type is inferred from <see cref="Initializer"/>.
+/// </remarks>
+/// <param name="VariableName">Variable name without the <c>@</c> prefix.</param>
+/// <param name="TypeName">Declared SQL type, or <see langword="null"/> to infer from the initializer.</param>
+/// <param name="Initializer">Initial value expression, or <see langword="null"/> to default to NULL.</param>
+/// <param name="Span">Source location of the <c>DECLARE</c> keyword.</param>
+public sealed record DeclareStatement(
+    string VariableName,
+    string? TypeName,
+    Expression? Initializer = null,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>SET @name = expression</c> — mutates an existing variable in the
+/// current scope. The variable must have been previously declared via
+/// <see cref="DeclareStatement"/> (in the same scope or an enclosing one);
+/// the executor raises an error if the name is unbound.
+/// </summary>
+/// <param name="VariableName">Variable name without the <c>@</c> prefix.</param>
+/// <param name="Value">New value expression.</param>
+/// <param name="Span">Source location of the <c>SET</c> keyword.</param>
+public sealed record SetStatement(
+    string VariableName,
+    Expression Value,
+    SourceSpan? Span = null) : Statement;
 
 // ───────────────────── ASSERT clause ─────────────────────
 
