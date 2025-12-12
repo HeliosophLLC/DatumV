@@ -376,6 +376,18 @@ public static class SqlParser
                 ToSpan(token)));
 
     /// <summary>
+    /// Procedural variable reference: <c>@count</c>. The leading <c>@</c> is
+    /// stripped so the AST holds the bare name. Resolved at evaluation time
+    /// against the active variable scope; mirrors <see cref="ParameterReference"/>'s
+    /// shape but binds to a different runtime store.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> VariableReference =
+        Token.EqualTo(SqlToken.Variable)
+            .Select(token => (Expression)new VariableExpression(
+                token.ToStringValue()[1..],
+                ToSpan(token)));
+
+    /// <summary>
     /// Type literal: a bare type name (<c>Int32</c>, <c>Float64</c>, <c>String</c>, etc.)
     /// in expression position. Produces a <see cref="TypeLiteralExpression"/> for use with
     /// <c>typeof()</c> comparisons. Also accepts <c>Time</c> which is tokenized as
@@ -800,6 +812,7 @@ public static class SqlParser
             .Or(TrueLiteral)
             .Or(FalseLiteral)
             .Or(ParameterReference)
+            .Or(VariableReference)
             .Or(NegationExpression)
             .Or(ParenExpression)
             .Or(StructLiteral.Try())
@@ -2463,6 +2476,153 @@ public static class SqlParser
         from call in FunctionCall
         select (Statement)new ExecStatement(call, ToSpan(execKw));
 
+    // ───────────────────── Procedural statement parsers ─────────────────────
+    //
+    // BEGIN/END, IF/ELSE, WHILE, FOR (counter and IN forms), DECLARE, SET.
+    // Each is a top-level statement in its own right, dispatched by first
+    // keyword in SingleStatementParser. Bodies recurse via
+    // SP.Ref(() => SingleStatementParser!) — the closure is evaluated lazily
+    // so static-field-init order doesn't matter.
+
+    /// <summary>
+    /// <c>SET @var = expr</c> — assignment to an existing variable. The SET
+    /// token is shared with UPDATE's column-assignment clause; that overlap
+    /// is harmless because UPDATE starts with the UPDATE keyword and only
+    /// consumes SET as an interior token, while SetStatementParser starts
+    /// with SET at the top level.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> SetStatementParser =
+        from setKw in Token.EqualTo(SqlToken.Set)
+        from variable in Token.EqualTo(SqlToken.Variable)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from value in SP.Ref(() => ExpressionParser!)
+        select (Statement)new SetStatement(
+            variable.ToStringValue()[1..],
+            value,
+            ToSpan(setKw));
+
+    /// <summary>
+    /// <c>DECLARE @var TypeName [= initializer]</c>. Type is required at
+    /// parse time; type-inference from initializer is not yet supported.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DeclareStatementParser =
+        from declareKw in Token.EqualTo(SqlToken.Declare)
+        from variable in Token.EqualTo(SqlToken.Variable)
+        from typeName in TypeNameParser
+        from initializer in (
+            from eq in Token.EqualTo(SqlToken.Equals)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AsNullable().OptionalOrDefault()
+        select (Statement)new DeclareStatement(
+            variable.ToStringValue()[1..],
+            typeName,
+            initializer,
+            ToSpan(declareKw));
+
+    /// <summary>
+    /// <c>BEGIN stmt; stmt; ... [;] END</c> — block of statements. Empty
+    /// blocks (<c>BEGIN END</c>) are not supported — at least one statement
+    /// is required, matching T-SQL. Trailing <c>;</c> before <c>END</c> is
+    /// optional.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> BlockStatementParser =
+        from beginKw in Token.EqualTo(SqlToken.Begin)
+        from first in SP.Ref(() => SingleStatementParser!)
+        from rest in (
+            from semi in Token.EqualTo(SqlToken.Semicolon).AtLeastOnce()
+            from stmt in SP.Ref(() => SingleStatementParser!)
+            select stmt
+        ).Try().Many()
+        from trailing in Token.EqualTo(SqlToken.Semicolon).Many()
+        from endKw in Token.EqualTo(SqlToken.End)
+        select (Statement)new BlockStatement(
+            (IReadOnlyList<Statement>)(new[] { first }.Concat(rest).ToArray()),
+            ToSpan(beginKw));
+
+    /// <summary>
+    /// <c>IF predicate then-stmt [ELSE else-stmt]</c>. <c>ELSE IF</c> falls
+    /// out naturally when the else-statement is itself an
+    /// <see cref="IfStatement"/> — no special syntactic form needed.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> IfStatementParser =
+        from ifKw in Token.EqualTo(SqlToken.If)
+        from predicate in SP.Ref(() => ExpressionParser!)
+        from thenStmt in SP.Ref(() => SingleStatementParser!)
+        from elseStmt in (
+            from elseKw in Token.EqualTo(SqlToken.Else)
+            from stmt in SP.Ref(() => SingleStatementParser!)
+            select stmt
+        ).AsNullable().OptionalOrDefault()
+        select (Statement)new IfStatement(
+            predicate,
+            thenStmt,
+            elseStmt,
+            ToSpan(ifKw));
+
+    /// <summary>
+    /// <c>WHILE predicate body</c> — re-evaluates the predicate before each
+    /// iteration. NULL predicate terminates the loop.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> WhileStatementParser =
+        from whileKw in Token.EqualTo(SqlToken.While)
+        from predicate in SP.Ref(() => ExpressionParser!)
+        from body in SP.Ref(() => SingleStatementParser!)
+        select (Statement)new WhileStatement(
+            predicate,
+            body,
+            ToSpan(whileKw));
+
+    /// <summary>
+    /// Counter-FOR: <c>FOR @i = start TO end body</c>. Inclusive on both ends.
+    /// STEP is not yet supported (defaults to 1); add it when a use case
+    /// arises. Distinguished from <see cref="ForInStatementParser"/> by the
+    /// <c>=</c> token after the variable.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ForCounterStatementParser =
+        from forKw in Token.EqualTo(SqlToken.For)
+        from variable in Token.EqualTo(SqlToken.Variable)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from start in SP.Ref(() => ExpressionParser!)
+        from toKw in Token.EqualTo(SqlToken.To)
+        from end in SP.Ref(() => ExpressionParser!)
+        from body in SP.Ref(() => SingleStatementParser!)
+        select (Statement)new ForCounterStatement(
+            variable.ToStringValue()[1..],
+            start,
+            end,
+            Step: null,
+            body,
+            ToSpan(forKw));
+
+    /// <summary>
+    /// Cursor-FOR: <c>FOR @row IN (query) body</c>. The source must be
+    /// parenthesised — keeps disambiguation from counter-FOR cheap and
+    /// matches how subqueries appear elsewhere.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ForInStatementParser =
+        from forKw in Token.EqualTo(SqlToken.For)
+        from variable in Token.EqualTo(SqlToken.Variable)
+        from inKw in Token.EqualTo(SqlToken.In)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from source in SP.Ref(() => QueryExpressionParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from body in SP.Ref(() => SingleStatementParser!)
+        select (Statement)new ForInStatement(
+            variable.ToStringValue()[1..],
+            source,
+            body,
+            ToSpan(forKw));
+
+    /// <summary>
+    /// Dispatcher between counter-FOR and FOR-IN. Both forms share
+    /// <c>FOR @var</c>; the next token (<c>=</c> for counter, <c>IN</c> for
+    /// cursor) decides. <c>.Try()</c> on the counter parser backtracks to
+    /// FOR-IN if the variable is followed by <c>IN</c> instead of <c>=</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ForStatementParser =
+        ForCounterStatementParser.Try().Or(ForInStatementParser);
+
     /// <summary>
     /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
     /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
@@ -2586,6 +2746,15 @@ public static class SqlParser
         CreateFunctionParser.Try()
             .Or(DropFunctionParser.Try())
             .Or(ExecFunctionParser.Try())
+            // Procedural-flow statements: keyword-dispatched, all share the
+            // SP.Ref() lazy-recursion pattern so bodies can themselves be any
+            // statement (including another procedural form).
+            .Or(BlockStatementParser.Try())
+            .Or(IfStatementParser.Try())
+            .Or(WhileStatementParser.Try())
+            .Or(ForStatementParser.Try())
+            .Or(DeclareStatementParser.Try())
+            .Or(SetStatementParser.Try())
             .Or(CreateTempTableParser.Try())
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
