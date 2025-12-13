@@ -384,6 +384,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("KEY"), SqlToken.Key, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IF"), SqlToken.If, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FUNCTION"), SqlToken.Function, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PROCEDURE"), SqlToken.Procedure, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXEC"), SqlToken.Exec, requireDelimiters: true)
 

@@ -2512,6 +2512,47 @@ public static class SqlParser
             Span: null);
 
     /// <summary>
+    /// Parses
+    /// <c>CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>.
+    /// The body is required to be a <c>BEGIN ... END</c> block — procedures
+    /// are about composing multiple statements, so a single-statement body
+    /// would defeat the point. Parameters use the same <see cref="UdfParameterParser"/>
+    /// shape as UDFs, including the <c>@</c>-prefix and optional
+    /// <c>IS NOT NULL</c> annotation.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateProcedureParser =
+        from createKw in Token.EqualTo(SqlToken.Create)
+        from orReplace in OrReplaceParser
+        from procedureKw in Token.EqualTo(SqlToken.Procedure)
+        from ifNotExists in IfNotExistsParser
+        from name in IdentifierOrKeywordAsName
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from asKw in Token.EqualTo(SqlToken.As)
+        from body in SP.Ref(() => BlockStatementParser!)
+        select (Statement)new CreateProcedureStatement(
+            name,
+            parameters,
+            (BlockStatement)body,
+            ifNotExists,
+            orReplace,
+            Span: null);
+
+    /// <summary>
+    /// Parses <c>DROP PROCEDURE [IF EXISTS] name</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropProcedureParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from procedureKw in Token.EqualTo(SqlToken.Procedure)
+        from ifExists in IfExistsParser
+        from name in IdentifierOrKeywordAsName
+        select (Statement)new DropProcedureStatement(
+            name,
+            ifExists,
+            Span: null);
+
+    /// <summary>
     /// Parses <c>EXEC namespace.functionname(arg1, arg2, ...)</c>.
     /// The function call expression after EXEC is parsed by the same
     /// <see cref="FunctionCall"/> combinator used for inline expressions,
@@ -2794,6 +2835,8 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
         CreateFunctionParser.Try()
             .Or(DropFunctionParser.Try())
+            .Or(CreateProcedureParser.Try())
+            .Or(DropProcedureParser.Try())
             .Or(ExecFunctionParser.Try())
             // Procedural-flow statements: keyword-dispatched, all share the
             // SP.Ref() lazy-recursion pattern so bodies can themselves be any

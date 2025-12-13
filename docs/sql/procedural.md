@@ -252,6 +252,161 @@ and never streams; for large source queries, the loop iterates rows
 batch-by-batch but always finishes the inner work before requesting the
 next batch.
 
+## CREATE PROCEDURE
+
+A *procedure* is a named, parameterised procedural batch — the multi-
+statement equivalent of a UDF. Bodies live in the catalog and survive
+process restarts when the catalog is opened with a path (same persistence
+contract as UDFs). Invocation is `EXEC proc.<name>(args)`.
+
+```sql
+CREATE PROCEDURE compute_cohort(@threshold FLOAT64) AS BEGIN
+    DECLARE @kept INT64 = 0
+    DECLARE @sum_score FLOAT64 = 0.0
+
+    FOR @row IN (SELECT id, score FROM model_outputs ORDER BY id) BEGIN
+      IF @row['score'] > @threshold BEGIN
+        SET @kept = @kept + 1
+        SET @sum_score = @sum_score + @row['score']
+      END
+    END
+
+    SELECT @kept AS rows_kept, @sum_score / @kept AS mean_score
+END
+
+EXEC proc.compute_cohort(0.5)
+```
+
+### Syntax
+
+```sql
+CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(
+    @param1 TYPE [IS NOT NULL] [, @param2 TYPE [IS NOT NULL] ...]
+) AS BEGIN
+    ...statements...
+END;
+
+DROP PROCEDURE [IF EXISTS] name;
+
+EXEC proc.name(arg1, arg2);
+```
+
+The body is required to be a `BEGIN ... END` block — a procedure that
+collapses to a single statement is a UDF, not a procedure.
+
+### How procedures differ from UDFs
+
+| | UDF | Procedure |
+| --- | --- | --- |
+| Body shape | Scalar expression | `BEGIN ... END` block |
+| Plan-time treatment | Inlined into call site | **Not inlined.** Invocation resolves the descriptor at runtime, runs the body in a fresh batch context. |
+| Returns | A single scalar value | Whatever rows the body's `SELECT`s produce |
+| Call site | `udf.X(...)` (anywhere a scalar is valid) | `EXEC proc.X(...)` (statement only) |
+| Persistence | Body formatted from AST (whitespace canonicalised) | **Original source text** stored verbatim |
+| Variable scope | Sees call-site columns as bare identifiers | Isolated — parameters are the only bridge from the caller |
+
+### Parameter binding and scoping
+
+Parameters use the same `@`-prefix declaration as UDFs and procedural
+variables, and `IS NOT NULL` works the same way: the call site evaluates
+the argument expression, the runtime checks for null when declared, then
+declares `@param` in the procedure's root frame.
+
+```sql
+CREATE PROCEDURE need_name(@name STRING IS NOT NULL) AS BEGIN
+    SELECT upper(@name)
+END
+
+EXEC proc.need_name('alice')   -- yields 'ALICE'
+EXEC proc.need_name(NULL)
+-- error: Procedure 'proc.need_name' parameter '@name' must not be null.
+```
+
+**Each invocation gets its own scope.** Procedures don't share variable
+state with the caller — parameters carry values across the boundary,
+and that's the only path. A procedure's `SET @v = ...` doesn't leak
+into the caller's `@v` even if they have the same name:
+
+```sql
+CREATE PROCEDURE shadow(@v INT64) AS BEGIN
+    SET @v = 999            -- mutates the procedure's local @v only
+END
+
+DECLARE @counter INT64 = 5
+EXEC proc.shadow(@counter)
+SELECT @counter             -- still 5; the procedure can't see or
+                            -- modify the caller's @counter
+```
+
+Argument expressions evaluate in the *caller's* scope, so they can
+reference the caller's `@vars` and the call-site columns. The result
+is then stabilised across the boundary into the procedure's variable
+store before the parameter is declared.
+
+### Output rows
+
+A procedure body's `SELECT` statements produce rows that flow up to the
+caller's event stream — the cell-numbering machinery treats a
+procedure's statements as if they were inlined at the call site. So a
+procedure that does:
+
+```sql
+CREATE PROCEDURE summarize() AS BEGIN
+    SELECT 'rows so far'
+    SELECT count(*) FROM data
+END
+
+EXEC proc.summarize()
+```
+
+produces two cells in the host (terminal table or DevWeb pane), just as
+if the user had written the two `SELECT`s inline.
+
+### Introspection — `system_procedures`
+
+The `system_procedures` virtual table surfaces every registered
+procedure as queryable rows:
+
+```sql
+SELECT name, parameter_count, parameters, source_text
+FROM system_procedures
+ORDER BY name
+```
+
+Schema:
+
+| Column            | Type   | Nullable | Description                                                              |
+|-------------------|--------|----------|--------------------------------------------------------------------------|
+| `name`            | String | no       | Unqualified procedure name. Call sites use the `proc.` prefix.           |
+| `parameter_count` | Int32  | no       | Number of declared parameters. `0` for nullary procedures.               |
+| `parameters`      | String | no       | Comma-separated `"@name TYPE [IS NOT NULL], @name TYPE"` rendition.      |
+| `source_text`     | String | no       | Original CREATE PROCEDURE source as registered. Whitespace preserved.    |
+
+### Persistence
+
+Procedures persist exactly like UDFs: when the `TableCatalog` is opened
+with a catalog file path, registered procedures are written to the same
+JSON file atomically and rehydrated on the next session. The persisted
+form stores the original `CREATE PROCEDURE` source text verbatim, so
+formatting and comments survive a round-trip. See
+[User-Defined Functions — Persistence](udf.md#persistence) for the file
+layout.
+
+### Limitations
+
+- **Bodies cannot reference parameters across subqueries.** A `SELECT
+  ... WHERE col = @param` inside the body's `FOR @row IN (...)` source
+  query has its `@param` reference resolved against the procedure's
+  variable scope at runtime — same as elsewhere. (This is the same
+  rule that applies to `@vars` in regular procedural batches.)
+- **No recursion limit.** A procedure that `EXEC`s itself (or
+  transitively) will recurse until the inner WHILE/FOR loops cap or
+  the call stack overflows. A formal recursion-depth limit may land
+  later if it becomes a foot-gun.
+- **No nested CREATE PROCEDURE.** A procedure body cannot contain
+  another `CREATE PROCEDURE` or `CREATE FUNCTION`; DDL is rejected at
+  invocation time.
+
 ## EXEC inside a batch
 
 `EXEC` runs a function call as a top-level statement. Inside a

@@ -215,6 +215,18 @@ public sealed class BatchExecutor
                 }
                 case ExecStatement exec:
                 {
+                    // Detect EXEC proc.<name>(args) and route to the
+                    // procedure-invocation path. Anything else (UDF or
+                    // built-in scalar) flows through the existing
+                    // catalog.Plan(exec) machinery.
+                    if (TryGetProcedureCall(exec, out string? procName, out IReadOnlyList<Expression>? args))
+                    {
+                        await ExecuteProcedureCallAsync(
+                            procName, args, batchContext, onEvent, nextCellId, ct)
+                            .ConfigureAwait(false);
+                        break;
+                    }
+
                     IQueryPlan plan = _catalog.Plan(exec);
                     BatchEventStreamingSink sink = new(cellId, onEvent);
                     await foreach (RowBatch batch in plan
@@ -368,6 +380,128 @@ public sealed class BatchExecutor
     {
         DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
         batchContext.VariableScope.Set(set.VariableName, stable);
+    }
+
+    private const string ProcedureNamespacePrefix = "proc.";
+
+    /// <summary>
+    /// Detects whether <paramref name="exec"/> is invoking a stored
+    /// procedure (call name starts with <c>proc.</c>) and, if so, returns
+    /// the unqualified procedure name plus the argument expression list.
+    /// Anything else — UDFs, built-in scalars, model invocations — is
+    /// handled by the standard catalog.Plan path and returns
+    /// <see langword="false"/>.
+    /// </summary>
+    private static bool TryGetProcedureCall(
+        ExecStatement exec,
+        out string? procedureName,
+        out IReadOnlyList<Expression>? arguments)
+    {
+        if (exec.Call is FunctionCallExpression call
+            && call.FunctionName.StartsWith(ProcedureNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            procedureName = call.FunctionName[ProcedureNamespacePrefix.Length..];
+            arguments = call.Arguments;
+            return true;
+        }
+        procedureName = null;
+        arguments = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Invokes a registered procedure: evaluates each argument in the
+    /// caller's scope, opens a fresh <see cref="BatchContext"/> for the
+    /// procedure body, declares each parameter from the corresponding
+    /// argument value (with <c>IS NOT NULL</c> enforcement when declared),
+    /// then runs the body's statements through the same eventful path
+    /// that the rest of the executor uses. Cells produced by the body
+    /// flow up to the caller's <paramref name="onEvent"/> stream so a
+    /// procedure that does <c>SELECT</c>s shows its rows just as if the
+    /// body had been inlined.
+    /// </summary>
+    /// <remarks>
+    /// Each invocation gets its own <see cref="BatchContext"/> with a
+    /// fresh <see cref="VariableScope"/> and procedure-lifetime arena —
+    /// procedures don't share variable state with the caller. Arguments
+    /// are evaluated in the CALLER's scope (so they can reference the
+    /// caller's <c>@vars</c>), then stabilised across the boundary into
+    /// the new context's variable store before the parameter is declared.
+    /// </remarks>
+    private async Task ExecuteProcedureCallAsync(
+        string? procedureName,
+        IReadOnlyList<Expression>? arguments,
+        BatchContext callerContext,
+        Func<BatchEvent, ValueTask> onEvent,
+        Func<string> nextCellId,
+        CancellationToken ct)
+    {
+        if (procedureName is null || arguments is null)
+        {
+            throw new InvalidOperationException(
+                "Internal error: TryGetProcedureCall yielded a null procedure name or argument list.");
+        }
+
+        if (!_catalog.Procedures.TryGet(procedureName, out ProcedureDescriptor? descriptor))
+        {
+            throw new InvalidOperationException(
+                $"Procedure 'proc.{procedureName}' is not registered. " +
+                $"Use CREATE PROCEDURE {procedureName}(...) AS BEGIN ... END to define it.");
+        }
+
+        if (arguments.Count != descriptor.Parameters.Count)
+        {
+            throw new InvalidOperationException(
+                $"Procedure 'proc.{procedureName}' expects {descriptor.Parameters.Count} argument(s), " +
+                $"got {arguments.Count}.");
+        }
+
+        // Evaluate each argument in the caller's scope so the args can
+        // reference the caller's @vars. Capture the value as a managed
+        // CLR object so it survives the boundary; we'll re-pack into the
+        // procedure's variable store on the other side.
+        DataValue[] argValues = new DataValue[arguments.Count];
+        for (int i = 0; i < arguments.Count; i++)
+        {
+            DataValue v = await EvaluateScalarAsync(arguments[i], callerContext, ct).ConfigureAwait(false);
+
+            // Enforce IS NOT NULL on parameters at the call boundary.
+            if (descriptor.Parameters[i].IsNotNull && v.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Procedure 'proc.{procedureName}' parameter '@{descriptor.Parameters[i].Name}' must not be null.");
+            }
+
+            argValues[i] = v;
+        }
+
+        // New BatchContext for the procedure's lifetime. Disposed at end —
+        // the procedure-lifetime arena releases and any variable bindings
+        // become unreachable, matching how a top-level procedural batch
+        // tears down.
+        using BatchContext procContext = new();
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
+        {
+            // Stabilise from the caller's variable store into the
+            // procedure's. The caller's value lives in callerContext.VariableStore
+            // (because EvaluateScalarAsync stabilised it there). Re-stabilise
+            // into procContext.VariableStore so the procedure body's reads
+            // resolve against the right arena.
+            procContext.Declare(
+                descriptor.Parameters[i].Name,
+                argValues[i],
+                callerContext.VariableStore);
+        }
+
+        // Run the body's statements through the same dispatch as any other
+        // procedural batch. Cell IDs continue from the caller's counter so
+        // event consumers see a single coherent stream.
+        foreach (Statement bodyStatement in descriptor.Body.Statements)
+        {
+            ct.ThrowIfCancellationRequested();
+            await ExecuteOneEventfulAsync(bodyStatement, procContext, onEvent, nextCellId, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>

@@ -417,3 +417,4 @@ existing readers ignore unknown top-level fields.
 - [Lambda Expressions](lambda-expressions.md) — how scope shadowing interacts with UDF parameters
 - [Common Table Expressions](cte.md) — for recursive logic that UDFs cannot express
 - [system_udfs](#introspection) — querying registered UDFs from SQL
+- [CREATE PROCEDURE](procedural.md#create-procedure) — the multi-statement equivalent for orchestration that returns rows rather than a scalar

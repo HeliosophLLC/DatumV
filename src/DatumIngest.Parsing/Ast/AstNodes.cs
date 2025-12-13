@@ -1182,6 +1182,48 @@ public sealed record DropFunctionStatement(
     SourceSpan? Span = null) : Statement;
 
 /// <summary>
+/// <c>CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>
+/// — registers a named procedural block. Procedures are not inlined; the
+/// catalog stores the body verbatim and <c>EXEC proc.name(...)</c> resolves
+/// the descriptor at runtime, pushes a fresh batch context with the
+/// parameters declared in its root frame, and runs the body's statements.
+/// </summary>
+/// <remarks>
+/// Reuses <see cref="UdfParameter"/> for the parameter shape: same
+/// <c>@</c>-prefix declaration, same optional <c>IS NOT NULL</c>
+/// runtime null check applied to each argument before the parameter is
+/// declared. Procedures don't return scalar values — output is whatever
+/// rows the body's <c>SELECT</c> statements produce, surfaced to the
+/// caller through the same <see cref="Statement"/> stream the body would
+/// produce if inlined.
+/// </remarks>
+/// <param name="Name">The unqualified procedure name. Call sites use the <c>proc.</c> prefix.</param>
+/// <param name="Parameters">The declared parameters in order.</param>
+/// <param name="Body">The procedural batch the procedure runs on invocation.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the procedure already exists.</param>
+/// <param name="OrReplace">When <see langword="true"/>, replaces an existing procedure with the same name.</param>
+/// <param name="Span">Source location of the procedure name for diagnostic reporting.</param>
+public sealed record CreateProcedureStatement(
+    string Name,
+    IReadOnlyList<UdfParameter> Parameters,
+    BlockStatement Body,
+    bool IfNotExists = false,
+    bool OrReplace = false,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>DROP PROCEDURE [IF EXISTS] name</c> — removes a previously
+/// registered procedure.
+/// </summary>
+/// <param name="Name">The procedure name to remove.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the procedure does not exist.</param>
+/// <param name="Span">Source location of the procedure name for diagnostic reporting.</param>
+public sealed record DropProcedureStatement(
+    string Name,
+    bool IfExists = false,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
 /// <c>EXEC namespace.functionname(arg1, arg2, ...)</c> — directly executes a function
 /// (typically a UDF via <c>udf.name(...)</c>) as a top-level statement rather than inside
 /// a SELECT. The engine evaluates the call expression and returns its result as a

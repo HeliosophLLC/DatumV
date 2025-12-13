@@ -168,6 +168,8 @@
           href: sql/procedural.md#while
         - name: FOR (counter and cursor)
           href: sql/procedural.md#for
+        - name: CREATE PROCEDURE
+          href: sql/procedural.md#create-procedure
 
 - name: Functions
   items:

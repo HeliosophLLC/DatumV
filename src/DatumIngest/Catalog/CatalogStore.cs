@@ -78,20 +78,25 @@ public sealed class CatalogStore
     public string Path => _path;
 
     /// <summary>
-    /// Loads the persisted state into <paramref name="udfs"/>. Returns a
-    /// report describing what loaded and what was skipped. Does not throw
-    /// for a missing file — that's a normal first-time-startup case.
+    /// Loads the persisted state into <paramref name="udfs"/> and
+    /// <paramref name="procedures"/>. Returns a report describing what
+    /// loaded and what was skipped. Does not throw for a missing file —
+    /// that's a normal first-time-startup case.
     /// </summary>
-    /// <param name="udfs">The registry to populate.</param>
+    /// <param name="udfs">The UDF registry to populate.</param>
+    /// <param name="procedures">The procedure registry to populate.</param>
     /// <exception cref="CatalogStoreLoadException">
     /// The file exists but cannot be read or is not valid JSON. Individual
-    /// bad UDF entries are skipped (and reported) rather than throwing.
+    /// bad entries are skipped (and reported) rather than throwing.
     /// </exception>
-    public CatalogStoreLoadReport Load(UdfRegistry udfs)
+    public CatalogStoreLoadReport Load(UdfRegistry udfs, ProcedureRegistry procedures)
     {
         if (!File.Exists(_path))
         {
-            return new CatalogStoreLoadReport(LoadedUdfs: 0, SkippedUdfs: 0, Warnings: []);
+            return new CatalogStoreLoadReport(
+                LoadedUdfs: 0, SkippedUdfs: 0,
+                LoadedProcedures: 0, SkippedProcedures: 0,
+                Warnings: []);
         }
 
         string json;
@@ -118,7 +123,10 @@ public sealed class CatalogStore
 
         if (parsed is null)
         {
-            return new CatalogStoreLoadReport(LoadedUdfs: 0, SkippedUdfs: 0, Warnings: []);
+            return new CatalogStoreLoadReport(
+                LoadedUdfs: 0, SkippedUdfs: 0,
+                LoadedProcedures: 0, SkippedProcedures: 0,
+                Warnings: []);
         }
 
         // Forward-compat: a higher version means the writer is newer than
@@ -129,6 +137,8 @@ public sealed class CatalogStore
             return new CatalogStoreLoadReport(
                 LoadedUdfs: 0,
                 SkippedUdfs: 0,
+                LoadedProcedures: 0,
+                SkippedProcedures: 0,
                 Warnings:
                 [
                     $"Catalog file '{_path}' has version {parsed.Version}; " +
@@ -136,15 +146,17 @@ public sealed class CatalogStore
                 ]);
         }
 
-        int loaded = 0;
-        int skipped = 0;
+        int loadedUdfs = 0;
+        int skippedUdfs = 0;
+        int loadedProcedures = 0;
+        int skippedProcedures = 0;
         List<string> warnings = new();
 
         foreach (CatalogFileUdfEntry entry in parsed.Udfs ?? [])
         {
             if (string.IsNullOrWhiteSpace(entry.Name))
             {
-                skipped++;
+                skippedUdfs++;
                 warnings.Add("Skipping UDF entry with missing or empty 'name'.");
                 continue;
             }
@@ -152,23 +164,96 @@ public sealed class CatalogStore
             UdfDescriptor? descriptor = TryRehydrate(entry, udfs, warnings);
             if (descriptor is null)
             {
-                skipped++;
+                skippedUdfs++;
                 continue;
             }
 
             try
             {
                 udfs.Register(descriptor, replace: false);
-                loaded++;
+                loadedUdfs++;
             }
             catch (InvalidOperationException ex)
             {
-                skipped++;
+                skippedUdfs++;
                 warnings.Add($"Skipping UDF '{entry.Name}': {ex.Message}");
             }
         }
 
-        return new CatalogStoreLoadReport(loaded, skipped, warnings);
+        foreach (CatalogFileProcedureEntry entry in parsed.Procedures ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(entry.Name))
+            {
+                skippedProcedures++;
+                warnings.Add("Skipping procedure entry with missing or empty 'name'.");
+                continue;
+            }
+
+            ProcedureDescriptor? descriptor = TryRehydrateProcedure(entry, warnings);
+            if (descriptor is null)
+            {
+                skippedProcedures++;
+                continue;
+            }
+
+            try
+            {
+                procedures.Register(descriptor, replace: false);
+                loadedProcedures++;
+            }
+            catch (InvalidOperationException ex)
+            {
+                skippedProcedures++;
+                warnings.Add($"Skipping procedure '{entry.Name}': {ex.Message}");
+            }
+        }
+
+        return new CatalogStoreLoadReport(
+            loadedUdfs, skippedUdfs,
+            loadedProcedures, skippedProcedures,
+            warnings);
+    }
+
+    /// <summary>
+    /// Re-parses a persisted procedure entry's source text into a
+    /// <see cref="CreateProcedureStatement"/>, extracts the body, and
+    /// returns a fresh descriptor. Returns <see langword="null"/> when
+    /// the entry can't be rehydrated; <paramref name="warnings"/>
+    /// collects the reason.
+    /// </summary>
+    private static ProcedureDescriptor? TryRehydrateProcedure(
+        CatalogFileProcedureEntry entry, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(entry.SourceText))
+        {
+            warnings.Add($"Skipping procedure '{entry.Name}': source text is missing.");
+            return null;
+        }
+
+        Statement parsed;
+        try
+        {
+            parsed = SqlParser.ParseStatement(entry.SourceText!);
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
+        {
+            warnings.Add(
+                $"Skipping procedure '{entry.Name}': source failed to parse — {ex.Message}");
+            return null;
+        }
+
+        if (parsed is not CreateProcedureStatement create)
+        {
+            warnings.Add(
+                $"Skipping procedure '{entry.Name}': persisted source is not a CREATE PROCEDURE statement.");
+            return null;
+        }
+
+        return new ProcedureDescriptor(
+            create.Name,
+            create.Parameters,
+            create.Body,
+            entry.SourceText!);
     }
 
     /// <summary>
@@ -237,12 +322,12 @@ public sealed class CatalogStore
     }
 
     /// <summary>
-    /// Atomically persists the current state of <paramref name="udfs"/> to
-    /// the file. Writes to a sibling <c>.tmp</c> path and renames into
-    /// place so a crash never leaves a half-written file at the canonical
-    /// location.
+    /// Atomically persists the current state of <paramref name="udfs"/>
+    /// and <paramref name="procedures"/> to the file. Writes to a sibling
+    /// <c>.tmp</c> path and renames into place so a crash never leaves a
+    /// half-written file at the canonical location.
     /// </summary>
-    public void Save(UdfRegistry udfs)
+    public void Save(UdfRegistry udfs, ProcedureRegistry procedures)
     {
         // Snapshot under the write lock so a concurrent CREATE / DROP
         // doesn't observe a partial state mid-serialisation.
@@ -268,6 +353,14 @@ public sealed class CatalogStore
                         ReturnType = e.ReturnTypeName,
                         ReturnIsNotNull = e.ReturnIsNotNull,
                         Body = QueryExplainer.FormatExpression(e.Body),
+                    })
+                    .ToList(),
+                Procedures = procedures.Entries.Values
+                    .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => new CatalogFileProcedureEntry
+                    {
+                        Name = e.Name,
+                        SourceText = e.SourceText,
                     })
                     .ToList(),
             };
@@ -303,6 +396,7 @@ internal sealed class CatalogFile
 {
     public int Version { get; set; }
     public List<CatalogFileUdfEntry>? Udfs { get; set; }
+    public List<CatalogFileProcedureEntry>? Procedures { get; set; }
 }
 
 /// <summary>One UDF entry in the persisted catalog.</summary>
@@ -324,6 +418,17 @@ internal sealed class CatalogFileUdfParameterEntry
 }
 
 /// <summary>
+/// One procedure entry in the persisted catalog. Stores the original
+/// CREATE PROCEDURE source verbatim so the user's formatting and
+/// comments survive a round-trip.
+/// </summary>
+internal sealed class CatalogFileProcedureEntry
+{
+    public string? Name { get; set; }
+    public string? SourceText { get; set; }
+}
+
+/// <summary>
 /// Source-generated JSON serializer context for the catalog file. Required
 /// for trimming/AOT support — reflection-based serialization is gated by the
 /// project's IL trim warnings.
@@ -331,8 +436,10 @@ internal sealed class CatalogFileUdfParameterEntry
 [JsonSerializable(typeof(CatalogFile))]
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
 [JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
+[JsonSerializable(typeof(CatalogFileProcedureEntry))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
+[JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,
@@ -342,18 +449,23 @@ internal sealed partial class CatalogJsonContext : JsonSerializerContext
 }
 
 /// <summary>
-/// Result of a <see cref="CatalogStore.Load"/> call: how many UDFs loaded,
-/// how many were skipped, and any per-entry warnings the host can surface.
+/// Result of a <see cref="CatalogStore.Load"/> call: how many entries
+/// of each kind loaded, how many were skipped, and any per-entry
+/// warnings the host can surface.
 /// </summary>
 /// <param name="LoadedUdfs">Number of UDFs successfully registered.</param>
 /// <param name="SkippedUdfs">Number of UDFs that could not be loaded.</param>
+/// <param name="LoadedProcedures">Number of procedures successfully registered.</param>
+/// <param name="SkippedProcedures">Number of procedures that could not be loaded.</param>
 /// <param name="Warnings">
-/// Human-readable reasons each skipped UDF was rejected. May also include
-/// version-mismatch notices.
+/// Human-readable reasons each skipped entry was rejected. May also
+/// include version-mismatch notices.
 /// </param>
 public sealed record CatalogStoreLoadReport(
     int LoadedUdfs,
     int SkippedUdfs,
+    int LoadedProcedures,
+    int SkippedProcedures,
     IReadOnlyList<string> Warnings);
 
 /// <summary>

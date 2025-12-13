@@ -63,21 +63,25 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
         this._udfs = new UdfRegistry();
+        this._procedures = new ProcedureRegistry();
         this.Tables = new();
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
 
-        // system_udfs is auto-registered against the UDF registry so
-        // SELECT * FROM system_udfs works without any host setup. Models
-        // are different — they require a ModelCatalog injected by the host —
-        // but the UDF registry is intrinsic to every TableCatalog.
+        // system_udfs / system_procedures are auto-registered against the
+        // catalog's registries so `SELECT * FROM system_udfs` (and the
+        // procedure equivalent) work without any host setup. Models are
+        // different — they require a ModelCatalog injected by the host —
+        // but the UDF and procedure registries are intrinsic to every
+        // TableCatalog.
         Add(new Providers.UdfsTableProvider(pool, _udfs));
+        Add(new Providers.ProceduresTableProvider(pool, _procedures));
 
-        // Replay any persisted UDFs into the registry. Done after the
-        // system_udfs registration so the rehydrated UDFs are immediately
-        // visible to introspection.
+        // Replay any persisted UDFs / procedures into the registries.
+        // Done after the system table registrations so the rehydrated
+        // entries are immediately visible to introspection.
         if (_catalogStore is not null)
         {
-            CatalogStoreLoadReport report = _catalogStore.Load(_udfs);
+            CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
             CatalogLoadReport = report;
         }
     }
@@ -88,6 +92,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly PoolBacking _backing;
     private readonly FunctionRegistry _functions;
     private readonly UdfRegistry _udfs;
+    private readonly ProcedureRegistry _procedures;
     private readonly CatalogStore? _catalogStore;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
@@ -116,6 +121,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// global UDFs registered on its root.
     /// </summary>
     public UdfRegistry Udfs => _udfs;
+
+    /// <summary>
+    /// Registry of named procedural blocks registered against this catalog
+    /// via <c>CREATE PROCEDURE</c>. Consulted by the procedural batch
+    /// executor on every <c>EXEC proc.X(...)</c> call site to find the
+    /// descriptor whose body should run.
+    /// </summary>
+    public ProcedureRegistry Procedures => _procedures;
 
     /// <summary>
     /// Opens a new catalog containing a single <c>.datum</c> file. Owns its own pool
@@ -189,6 +202,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public IQueryPlan Plan(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
+
+        // CREATE PROCEDURE is dispatched here (not in Plan(Statement)) so the
+        // original SQL text can be captured verbatim for catalog persistence
+        // and introspection — preserving the user's formatting and comments
+        // through round-trips. Any other statement type funnels through the
+        // standard AST-only path.
+        if (statement is CreateProcedureStatement create)
+        {
+            ApplyCreateProcedure(create, sql);
+            return EmptyQueryPlan.Instance;
+        }
+
         return Plan(statement);
     }
 
@@ -199,6 +224,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// (e.g. the procedural batch executor synthesising
     /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
     /// </summary>
+    /// <remarks>
+    /// <see cref="CreateProcedureStatement"/> is rejected here because the
+    /// original source text is required for catalog persistence and only
+    /// reaches the catalog through <see cref="Plan(string)"/>. Programmatic
+    /// callers that build a procedure AST should serialize it themselves
+    /// and call <see cref="Plan(string)"/>.
+    /// </remarks>
     public IQueryPlan Plan(Statement statement)
     {
         switch (statement)
@@ -212,6 +244,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
             case DropFunctionStatement drop:
                 ApplyDropFunction(drop);
+                return EmptyQueryPlan.Instance;
+
+            case CreateProcedureStatement:
+                throw new InvalidOperationException(
+                    "CREATE PROCEDURE must be planned via Plan(string) so the " +
+                    "original source text can be captured for catalog persistence. " +
+                    "Build the SQL string and call Plan(sql) instead of constructing " +
+                    "the AST manually.");
+
+            case DropProcedureStatement drop:
+                ApplyDropProcedure(drop);
                 return EmptyQueryPlan.Instance;
 
             case ExecStatement exec:
@@ -275,7 +318,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         _udfs.Register(descriptor, replace: create.OrReplace);
-        _catalogStore?.Save(_udfs);
+        _catalogStore?.Save(_udfs, _procedures);
     }
 
     private void ApplyDropFunction(DropFunctionStatement drop)
@@ -287,7 +330,102 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
         }
 
-        if (removed) _catalogStore?.Save(_udfs);
+        if (removed) _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    private void ApplyCreateProcedure(CreateProcedureStatement create, string sourceText)
+    {
+        // Validate referenced UDFs exist by inlining each expression in the
+        // body's statement tree against the current registry. Catches things
+        // like a typo'd udf.foo() before the user runs the procedure.
+        try
+        {
+            ValidateProcedureBody(create.Body);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"CREATE PROCEDURE {create.Name}: {ex.Message}", ex);
+        }
+
+        ProcedureDescriptor descriptor = new(
+            create.Name,
+            create.Parameters,
+            create.Body,
+            sourceText);
+
+        if (create.IfNotExists && _procedures.TryGet(create.Name, out _))
+        {
+            return;
+        }
+
+        _procedures.Register(descriptor, replace: create.OrReplace);
+        _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    private void ApplyDropProcedure(DropProcedureStatement drop)
+    {
+        bool removed = _procedures.Unregister(drop.Name);
+        if (!removed && !drop.IfExists)
+        {
+            throw new InvalidOperationException(
+                $"Procedure '{drop.Name}' is not registered. " +
+                "Use DROP PROCEDURE IF EXISTS to make this a no-op.");
+        }
+
+        if (removed) _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    /// <summary>
+    /// Walks every expression in a procedure body's statement tree and
+    /// runs the UDF inliner against it, so unresolved <c>udf.X(...)</c>
+    /// references surface at <c>CREATE PROCEDURE</c> time rather than at
+    /// the first <c>EXEC</c>. Doesn't substitute parameters — those are
+    /// resolved at runtime when the procedure is invoked.
+    /// </summary>
+    private void ValidateProcedureBody(Statement statement)
+    {
+        switch (statement)
+        {
+            case BlockStatement block:
+                foreach (Statement child in block.Statements) ValidateProcedureBody(child);
+                break;
+            case IfStatement ifs:
+                _ = UdfInliner.Inline(ifs.Predicate, _udfs);
+                ValidateProcedureBody(ifs.Then);
+                if (ifs.Else is not null) ValidateProcedureBody(ifs.Else);
+                break;
+            case WhileStatement loop:
+                _ = UdfInliner.Inline(loop.Predicate, _udfs);
+                ValidateProcedureBody(loop.Body);
+                break;
+            case ForCounterStatement forC:
+                _ = UdfInliner.Inline(forC.Start, _udfs);
+                _ = UdfInliner.Inline(forC.End, _udfs);
+                if (forC.Step is not null) _ = UdfInliner.Inline(forC.Step, _udfs);
+                ValidateProcedureBody(forC.Body);
+                break;
+            case ForInStatement forIn:
+                _ = UdfInliner.Inline(forIn.Source, _udfs);
+                ValidateProcedureBody(forIn.Body);
+                break;
+            case DeclareStatement decl:
+                if (decl.Initializer is not null) _ = UdfInliner.Inline(decl.Initializer, _udfs);
+                break;
+            case SetStatement set:
+                _ = UdfInliner.Inline(set.Value, _udfs);
+                break;
+            case QueryStatement q:
+                _ = UdfInliner.Inline(q.Query, _udfs);
+                break;
+            case ExecStatement exec:
+                _ = UdfInliner.Inline(exec.Call, _udfs);
+                break;
+            // Nested CREATE PROCEDURE / CREATE FUNCTION inside a procedure
+            // body isn't supported; defer the error to invocation time.
+            default:
+                break;
+        }
     }
 
     /// <summary>

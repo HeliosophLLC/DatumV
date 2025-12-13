@@ -144,6 +144,78 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         Assert.Equal(2, second.CatalogLoadReport!.LoadedUdfs);
     }
 
+    // ───────────────────── Procedures ─────────────────────
+
+    [Fact]
+    public void CreateProcedure_PersistsToFile()
+    {
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan("CREATE PROCEDURE noop() AS BEGIN SELECT 1 END");
+
+        Assert.True(File.Exists(_catalogPath));
+        string contents = File.ReadAllText(_catalogPath);
+        Assert.Contains("\"name\": \"noop\"", contents);
+        Assert.Contains("\"source_text\":", contents);
+    }
+
+    [Fact]
+    public void Reopen_LoadsPersistedProcedures()
+    {
+        TableCatalog first = OpenCatalog();
+        first.Plan("CREATE PROCEDURE foo(@x INT32) AS BEGIN DECLARE @y INT32 = @x + 1 END");
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Procedures.TryGet("foo", out ProcedureDescriptor? proc));
+        Assert.Equal("foo", proc!.Name);
+        Assert.Single(proc.Parameters);
+        Assert.Equal("x", proc.Parameters[0].Name);
+        Assert.Equal(1, second.CatalogLoadReport!.LoadedProcedures);
+    }
+
+    [Fact]
+    public void Reopen_PreservesProcedureSourceTextVerbatim()
+    {
+        const string sql = "CREATE PROCEDURE multi_line(@x INT32) AS BEGIN\n  SET @x = @x + 1\nEND";
+        TableCatalog first = OpenCatalog();
+        first.Plan(sql);
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Procedures.TryGet("multi_line", out ProcedureDescriptor? proc));
+        Assert.Equal(sql, proc!.SourceText);
+    }
+
+    [Fact]
+    public void DropProcedure_PersistsRemoval()
+    {
+        TableCatalog first = OpenCatalog();
+        first.Plan("CREATE PROCEDURE keep() AS BEGIN SELECT 1 END");
+        first.Plan("CREATE PROCEDURE remove() AS BEGIN SELECT 1 END");
+        first.Plan("DROP PROCEDURE remove");
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.Single(second.Procedures.Entries);
+        Assert.True(second.Procedures.TryGet("keep", out _));
+        Assert.False(second.Procedures.TryGet("remove", out _));
+    }
+
+    [Fact]
+    public void Reopen_LoadsBothUdfsAndProcedures()
+    {
+        TableCatalog first = OpenCatalog();
+        first.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        first.Plan("CREATE PROCEDURE noop() AS BEGIN SELECT 1 END");
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.Single(second.Udfs.Entries);
+        Assert.Single(second.Procedures.Entries);
+        Assert.Equal(1, second.CatalogLoadReport!.LoadedUdfs);
+        Assert.Equal(1, second.CatalogLoadReport.LoadedProcedures);
+    }
+
     // ───────────────────── Failure handling ─────────────────────
 
     [Fact]

@@ -304,6 +304,9 @@ public enum SqlToken
     /// <summary>The FUNCTION keyword (CREATE/DROP FUNCTION DDL).</summary>
     Function,
 
+    /// <summary>The PROCEDURE keyword (CREATE/DROP PROCEDURE DDL).</summary>
+    Procedure,
+
     /// <summary>The RETURNS keyword (CREATE FUNCTION return-type annotation).</summary>
     Returns,
 
