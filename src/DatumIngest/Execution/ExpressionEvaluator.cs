@@ -531,12 +531,24 @@ public sealed class ExpressionEvaluator
 
         if (left.IsNull || right.IsNull)
         {
-            return binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
+            if (binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
                 or BinaryOperator.LessThan or BinaryOperator.GreaterThan
                 or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual
                 or BinaryOperator.Like or BinaryOperator.ILike or BinaryOperator.Regexp
-                ? ValueRef.Null(DataKind.Boolean)
-                : ValueRef.Null(DataKind.Float32);
+                or BinaryOperator.And or BinaryOperator.Or)
+            {
+                return ValueRef.Null(DataKind.Boolean);
+            }
+
+            // Arithmetic NULL propagation. Use the promoted result kind so the
+            // null carries the same type tag the non-null path would have. For
+            // a NULL operand we still know the OTHER operand's kind (or both
+            // kinds if both are typed-NULL), so promotion is well-defined.
+            // Falls back to Float32 when promotion can't be determined — same
+            // shape the old code always emitted.
+            DataKind nullKind = TryPromoteArithmeticKind(left.Kind, right.Kind, binary.Operator)
+                ?? DataKind.Float32;
+            return ValueRef.Null(nullKind);
         }
 
         return binary.Operator switch
@@ -545,12 +557,12 @@ public sealed class ExpressionEvaluator
                 => ValueRef.FromDuration(left.AsDuration() + right.AsDuration()),
             BinaryOperator.Subtract when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
                 => ValueRef.FromDuration(left.AsDuration() - right.AsDuration()),
-            BinaryOperator.Add => ArithmeticOpValueRef(left, right, static (a, b) => a + b),
-            BinaryOperator.Subtract => ArithmeticOpValueRef(left, right, static (a, b) => a - b),
-            BinaryOperator.Multiply => ArithmeticOpValueRef(left, right, static (a, b) => a * b),
-            BinaryOperator.Divide => ArithmeticOpValueRef(left, right, static (a, b) => b != 0f ? a / b : float.NaN),
-            BinaryOperator.Modulo => ArithmeticOpValueRef(left, right, static (a, b) => b != 0f ? a % b : float.NaN),
-            BinaryOperator.Power => ArithmeticOpValueRef(left, right, static (a, b) => MathF.Pow(a, b)),
+            BinaryOperator.Add => DispatchArithmetic(left, right, BinaryOperator.Add),
+            BinaryOperator.Subtract => DispatchArithmetic(left, right, BinaryOperator.Subtract),
+            BinaryOperator.Multiply => DispatchArithmetic(left, right, BinaryOperator.Multiply),
+            BinaryOperator.Divide => DispatchArithmetic(left, right, BinaryOperator.Divide),
+            BinaryOperator.Modulo => DispatchArithmetic(left, right, BinaryOperator.Modulo),
+            BinaryOperator.Power => DispatchArithmetic(left, right, BinaryOperator.Power),
             BinaryOperator.Equal => CompareValuesValueRef(left, right, 0),
             BinaryOperator.NotEqual => CompareValuesValueRef(left, right, 0, negate: true),
             BinaryOperator.LessThan => CompareValuesValueRef(left, right, -1),
@@ -580,17 +592,50 @@ public sealed class ExpressionEvaluator
         {
             return unary.Operator == UnaryOperator.Not
                 ? ValueRef.Null(DataKind.Boolean)
-                : ValueRef.Null(DataKind.Float32);
+                : ValueRef.Null(NegateResultKind(operand.Kind));
         }
 
         return unary.Operator switch
         {
             UnaryOperator.Not => ValueRef.FromBoolean(!EvaluateAsBoolean(unary.Operand, frame)),
-            UnaryOperator.Negate => ValueRef.FromFloat32(-ToFloatValueRef(operand)),
+            UnaryOperator.Negate => NegatePreservingKind(operand),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
         };
     }
+
+    /// <summary>
+    /// Result kind of unary <c>-</c> on <paramref name="operandKind"/>.
+    /// Mirrors the binary-arithmetic widening rules: small integers
+    /// widen to Int32, Int64/UInt64 stay at Int64, 128-bit operands
+    /// stay at Int128, floats and Decimal preserve their kind. Non-
+    /// numeric operands fall back to Float32 (matches the prior
+    /// "always Float32" shape so legacy callers don't surprise).
+    /// </summary>
+    private static DataKind NegateResultKind(DataKind operandKind) => operandKind switch
+    {
+        DataKind.Int8 or DataKind.UInt8
+            or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32
+            or DataKind.Boolean
+            => DataKind.Int32,
+        DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64 => DataKind.Int64,
+        DataKind.Int128 or DataKind.UInt128 => DataKind.Int128,
+        DataKind.Float16 or DataKind.Float32 => DataKind.Float32,
+        DataKind.Float64 => DataKind.Float64,
+        DataKind.Decimal => DataKind.Decimal,
+        _ => DataKind.Float32,
+    };
+
+    private static ValueRef NegatePreservingKind(ValueRef operand) => NegateResultKind(operand.Kind) switch
+    {
+        DataKind.Int32 => ValueRef.FromInt32(unchecked(-ToInt32Promoted(operand))),
+        DataKind.Int64 => ValueRef.FromInt64(unchecked(-ToInt64Promoted(operand))),
+        DataKind.Int128 => ValueRef.FromInt128(unchecked(-ToInt128Promoted(operand))),
+        DataKind.Float64 => ValueRef.FromFloat64(-ToDoubleValueRef(operand)),
+        DataKind.Decimal => ValueRef.FromDecimal(-ToDecimalPromoted(operand)),
+        _ => ValueRef.FromFloat32(-ToFloatValueRef(operand)),
+    };
 
     private DataValue EvaluateFunction(FunctionCallExpression function, in EvaluationFrame frame) =>
         ToDataValue(EvaluateFunctionAsValueRef(function, frame), frame);
@@ -1141,11 +1186,376 @@ public sealed class ExpressionEvaluator
     // ──────────────────── Arithmetic helpers ────────────────────
 
     /// <summary>
-    /// ValueRef arithmetic. Result is always an inline Float32 — no arena interaction.
+    /// Evaluates a binary arithmetic operator (<c>+ - * / % **</c>) with
+    /// runtime kind promotion. Picks a target kind from the operand kinds
+    /// + operator (so <c>Int64 + Int64 → Int64</c>, <c>Decimal × Float → Float64</c>,
+    /// <c>5 / 2 → Float32</c> for SQL ergonomics) and applies the op in
+    /// that type. Result is always inline; the only allocation is the
+    /// returned <see cref="ValueRef"/> struct.
     /// </summary>
-    private static ValueRef ArithmeticOpValueRef(ValueRef left, ValueRef right, Func<float, float, float> operation)
+    /// <remarks>
+    /// <para>
+    /// <strong>Why per-row dispatch.</strong> The planner doesn't yet
+    /// resolve binary-expression result kinds at plan time, so the
+    /// evaluator decides per row. Branch prediction makes the cost of a
+    /// few switch arms negligible compared to the previous "everything
+    /// to Float32" path that lost precision on Int64 sums and tripped
+    /// hard errors on Int128 / Decimal.
+    /// </para>
+    /// <para>
+    /// <strong>Promotion rules.</strong> See
+    /// <see cref="PromoteArithmeticKind"/>. The short version: Power and
+    /// Divide always return float (preserving the SQL "5 / 2 → 2.5"
+    /// expectation); Decimal beats float; integer + integer stays
+    /// integer at the wider operand's bit width (Int8 + Int8 widens to
+    /// Int32 in C# style; Int64 stays Int64); strings get parsed as
+    /// Float64 the same way they did before.
+    /// </para>
+    /// </remarks>
+    private static ValueRef DispatchArithmetic(ValueRef left, ValueRef right, BinaryOperator op)
     {
-        return ValueRef.FromFloat32(operation(ToFloatValueRef(left), ToFloatValueRef(right)));
+        DataKind target = PromoteArithmeticKind(left.Kind, right.Kind, op);
+        return target switch
+        {
+            DataKind.Int32 => ApplyInt32(left, right, op),
+            DataKind.Int64 => ApplyInt64(left, right, op),
+            DataKind.Int128 => ApplyInt128(left, right, op),
+            DataKind.Float32 => ApplyFloat32(left, right, op),
+            DataKind.Float64 => ApplyFloat64(left, right, op),
+            DataKind.Decimal => ApplyDecimal(left, right, op),
+            _ => throw new InvalidOperationException(
+                $"Internal error: PromoteArithmeticKind returned unsupported target {target} " +
+                $"for {left.Kind} {op} {right.Kind}."),
+        };
+    }
+
+    /// <summary>
+    /// Pure-function variant of <see cref="PromoteArithmeticKind"/> that
+    /// returns null when promotion is undefined. Used by the NULL
+    /// short-circuit in binary evaluation so the propagated null carries
+    /// the same kind the non-null path would have produced. Defers to
+    /// the throwing version's logic; the only branch that matters is the
+    /// "neither side resolves" fallback, where we'd rather return null
+    /// than crash.
+    /// </summary>
+    private static DataKind? TryPromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
+    {
+        try { return PromoteArithmeticKind(left, right, op); }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    /// <summary>
+    /// Computes the promoted result kind for a binary arithmetic
+    /// operator. Mirrors C# numeric promotion with SQL-ergonomic
+    /// adjustments — Divide always returns float so <c>5 / 2 → 2.5</c>
+    /// matches user expectation; integer arithmetic widens to Int32
+    /// (matching <c>byte + byte → int</c> in C#) so small literals
+    /// don't pin everything to Int8.
+    /// </summary>
+    private static DataKind PromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
+    {
+        // String coercion: parse to Float64 (preserves prior behaviour).
+        if (left == DataKind.String || right == DataKind.String)
+        {
+            return DataKind.Float64;
+        }
+
+        // Power is intrinsically float-y (MathF.Pow / Math.Pow).
+        if (op == BinaryOperator.Power)
+        {
+            return AnyFloat64(left, right) || AnyDecimal(left, right)
+                ? DataKind.Float64
+                : DataKind.Float32;
+        }
+
+        // Divide: SQL ergonomics — always float so int / int → real number.
+        // Users wanting truncated integer division can cast first.
+        if (op == BinaryOperator.Divide)
+        {
+            if (AnyDecimal(left, right)) return DataKind.Decimal;
+            return AnyFloat64(left, right) ? DataKind.Float64 : DataKind.Float32;
+        }
+
+        // Decimal precedence over floats and integers (preserves precision).
+        if (AnyDecimal(left, right))
+        {
+            return DataKind.Decimal;
+        }
+
+        // Float promotion: pick the wider float when any operand is float.
+        if (AnyFloat64(left, right)) return DataKind.Float64;
+        if (left == DataKind.Float32 || right == DataKind.Float32) return DataKind.Float32;
+        if (left == DataKind.Float16 || right == DataKind.Float16)
+        {
+            // Float16 + integer → Float32 for safety; Float16 + Float16 also
+            // bumps to Float32 because the binary op outputs land in the
+            // wider container.
+            return DataKind.Float32;
+        }
+
+        // Time / Duration arithmetic falls back to float seconds for the
+        // mixed cases (Duration + Duration is special-cased in the caller).
+        if (left == DataKind.Time || right == DataKind.Time
+            || left == DataKind.Duration || right == DataKind.Duration)
+        {
+            return DataKind.Float32;
+        }
+
+        // 128-bit integer preservation: any 128-bit operand pulls the result
+        // into Int128. Mixed signed/unsigned 128-bit lands in Int128 too —
+        // UInt128.MaxValue won't fit, but no realistic workload hits that.
+        if (left is DataKind.Int128 or DataKind.UInt128
+            || right is DataKind.Int128 or DataKind.UInt128)
+        {
+            return DataKind.Int128;
+        }
+
+        // 64-bit preservation: Int64 / UInt64 / UInt32 (which doesn't fit
+        // signed 32-bit) all land in Int64.
+        if (left is DataKind.Int64 or DataKind.UInt64 or DataKind.UInt32
+            || right is DataKind.Int64 or DataKind.UInt64 or DataKind.UInt32)
+        {
+            return DataKind.Int64;
+        }
+
+        // Smaller integers + booleans: widen to Int32 (matches C# semantics).
+        if (IsSmallIntegerOrBool(left) && IsSmallIntegerOrBool(right))
+        {
+            return DataKind.Int32;
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot perform {op} on operands of kinds {left} and {right}.");
+    }
+
+    private static bool AnyFloat64(DataKind l, DataKind r)
+        => l == DataKind.Float64 || r == DataKind.Float64;
+
+    private static bool AnyDecimal(DataKind l, DataKind r)
+        => l == DataKind.Decimal || r == DataKind.Decimal;
+
+    private static bool IsSmallIntegerOrBool(DataKind k) => k is
+        DataKind.Boolean
+        or DataKind.Int8 or DataKind.UInt8
+        or DataKind.Int16 or DataKind.UInt16
+        or DataKind.Int32;
+
+    // ──────────────────── Per-target-kind apply helpers ────────────────────
+
+    private static ValueRef ApplyInt32(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        int a = ToInt32Promoted(left);
+        int b = ToInt32Promoted(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromInt32(unchecked(a + b)),
+            BinaryOperator.Subtract => ValueRef.FromInt32(unchecked(a - b)),
+            BinaryOperator.Multiply => ValueRef.FromInt32(unchecked(a * b)),
+            BinaryOperator.Modulo => b != 0
+                ? ValueRef.FromInt32(a % b)
+                : ValueRef.Null(DataKind.Int32),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Int32 dispatch hit for {op} (Divide/Power should have promoted to float)."),
+        };
+    }
+
+    private static ValueRef ApplyInt64(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        long a = ToInt64Promoted(left);
+        long b = ToInt64Promoted(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromInt64(unchecked(a + b)),
+            BinaryOperator.Subtract => ValueRef.FromInt64(unchecked(a - b)),
+            BinaryOperator.Multiply => ValueRef.FromInt64(unchecked(a * b)),
+            BinaryOperator.Modulo => b != 0
+                ? ValueRef.FromInt64(a % b)
+                : ValueRef.Null(DataKind.Int64),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Int64 dispatch hit for {op}."),
+        };
+    }
+
+    private static ValueRef ApplyInt128(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        Int128 a = ToInt128Promoted(left);
+        Int128 b = ToInt128Promoted(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromInt128(unchecked(a + b)),
+            BinaryOperator.Subtract => ValueRef.FromInt128(unchecked(a - b)),
+            BinaryOperator.Multiply => ValueRef.FromInt128(unchecked(a * b)),
+            BinaryOperator.Modulo => b != Int128.Zero
+                ? ValueRef.FromInt128(a % b)
+                : ValueRef.Null(DataKind.Int128),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Int128 dispatch hit for {op}."),
+        };
+    }
+
+    private static ValueRef ApplyFloat32(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        float a = ToFloatValueRef(left);
+        float b = ToFloatValueRef(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromFloat32(a + b),
+            BinaryOperator.Subtract => ValueRef.FromFloat32(a - b),
+            BinaryOperator.Multiply => ValueRef.FromFloat32(a * b),
+            BinaryOperator.Divide => ValueRef.FromFloat32(b != 0f ? a / b : float.NaN),
+            BinaryOperator.Modulo => ValueRef.FromFloat32(b != 0f ? a % b : float.NaN),
+            BinaryOperator.Power => ValueRef.FromFloat32(MathF.Pow(a, b)),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Float32 dispatch hit for {op}."),
+        };
+    }
+
+    private static ValueRef ApplyFloat64(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        double a = ToDoubleValueRef(left);
+        double b = ToDoubleValueRef(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromFloat64(a + b),
+            BinaryOperator.Subtract => ValueRef.FromFloat64(a - b),
+            BinaryOperator.Multiply => ValueRef.FromFloat64(a * b),
+            BinaryOperator.Divide => ValueRef.FromFloat64(b != 0.0 ? a / b : double.NaN),
+            BinaryOperator.Modulo => ValueRef.FromFloat64(b != 0.0 ? a % b : double.NaN),
+            BinaryOperator.Power => ValueRef.FromFloat64(Math.Pow(a, b)),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Float64 dispatch hit for {op}."),
+        };
+    }
+
+    private static ValueRef ApplyDecimal(ValueRef left, ValueRef right, BinaryOperator op)
+    {
+        decimal a = ToDecimalPromoted(left);
+        decimal b = ToDecimalPromoted(right);
+        return op switch
+        {
+            BinaryOperator.Add => ValueRef.FromDecimal(a + b),
+            BinaryOperator.Subtract => ValueRef.FromDecimal(a - b),
+            BinaryOperator.Multiply => ValueRef.FromDecimal(a * b),
+            BinaryOperator.Divide => b != 0m
+                ? ValueRef.FromDecimal(a / b)
+                : ValueRef.Null(DataKind.Decimal),
+            BinaryOperator.Modulo => b != 0m
+                ? ValueRef.FromDecimal(a % b)
+                : ValueRef.Null(DataKind.Decimal),
+            _ => throw new InvalidOperationException(
+                $"Internal error: Decimal dispatch hit for {op}."),
+        };
+    }
+
+    /// <summary>
+    /// Coerces a ValueRef to <see cref="int"/> for the Int32 arithmetic
+    /// path. Promotion has already filtered out everything wider than 32
+    /// bits, so the only kinds reaching here are Int8/UInt8/Int16/UInt16/
+    /// Int32 and Boolean.
+    /// </summary>
+    private static int ToInt32Promoted(ValueRef v) => v.Kind switch
+    {
+        DataKind.Boolean => v.AsBoolean() ? 1 : 0,
+        DataKind.Int8 => v.AsInt8(),
+        DataKind.UInt8 => v.AsUInt8(),
+        DataKind.Int16 => v.AsInt16(),
+        DataKind.UInt16 => v.AsUInt16(),
+        DataKind.Int32 => v.AsInt32(),
+        _ => throw new InvalidOperationException(
+            $"Cannot extract Int32 from {v.Kind} in promoted Int32 arithmetic."),
+    };
+
+    /// <summary>
+    /// Coerces a ValueRef to <see cref="long"/> for the Int64 arithmetic
+    /// path. Accepts every integer kind up to UInt64 (with the UInt64 →
+    /// long cast wrapping at 2^63 — workloads that need full UInt64
+    /// range should run through Int128 or float).
+    /// </summary>
+    private static long ToInt64Promoted(ValueRef v) => v.Kind switch
+    {
+        DataKind.Boolean => v.AsBoolean() ? 1L : 0L,
+        DataKind.Int8 => v.AsInt8(),
+        DataKind.UInt8 => v.AsUInt8(),
+        DataKind.Int16 => v.AsInt16(),
+        DataKind.UInt16 => v.AsUInt16(),
+        DataKind.Int32 => v.AsInt32(),
+        DataKind.UInt32 => v.AsUInt32(),
+        DataKind.Int64 => v.AsInt64(),
+        DataKind.UInt64 => unchecked((long)v.AsUInt64()),
+        _ => throw new InvalidOperationException(
+            $"Cannot extract Int64 from {v.Kind} in promoted Int64 arithmetic."),
+    };
+
+    private static Int128 ToInt128Promoted(ValueRef v) => v.Kind switch
+    {
+        DataKind.Boolean => v.AsBoolean() ? (Int128)1 : (Int128)0,
+        DataKind.Int8 => v.AsInt8(),
+        DataKind.UInt8 => v.AsUInt8(),
+        DataKind.Int16 => v.AsInt16(),
+        DataKind.UInt16 => v.AsUInt16(),
+        DataKind.Int32 => v.AsInt32(),
+        DataKind.UInt32 => v.AsUInt32(),
+        DataKind.Int64 => v.AsInt64(),
+        DataKind.UInt64 => v.AsUInt64(),
+        DataKind.Int128 => v.AsInt128(),
+        DataKind.UInt128 => unchecked((Int128)v.AsUInt128()),
+        _ => throw new InvalidOperationException(
+            $"Cannot extract Int128 from {v.Kind} in promoted Int128 arithmetic."),
+    };
+
+    private static decimal ToDecimalPromoted(ValueRef v) => v.Kind switch
+    {
+        DataKind.Boolean => v.AsBoolean() ? 1m : 0m,
+        DataKind.Int8 => v.AsInt8(),
+        DataKind.UInt8 => v.AsUInt8(),
+        DataKind.Int16 => v.AsInt16(),
+        DataKind.UInt16 => v.AsUInt16(),
+        DataKind.Int32 => v.AsInt32(),
+        DataKind.UInt32 => v.AsUInt32(),
+        DataKind.Int64 => v.AsInt64(),
+        DataKind.UInt64 => v.AsUInt64(),
+        DataKind.Float16 => (decimal)(double)v.AsFloat16(),
+        DataKind.Float32 => (decimal)v.AsFloat32(),
+        DataKind.Float64 => (decimal)v.AsFloat64(),
+        DataKind.Decimal => v.AsDecimal(),
+        _ => throw new InvalidOperationException(
+            $"Cannot extract Decimal from {v.Kind} in promoted Decimal arithmetic."),
+    };
+
+    private static double ToDoubleValueRef(ValueRef value)
+    {
+        switch (value.Kind)
+        {
+            case DataKind.Boolean: return value.AsBoolean() ? 1.0 : 0.0;
+            case DataKind.UInt8: return value.AsUInt8();
+            case DataKind.Int8: return value.AsInt8();
+            case DataKind.Int16: return value.AsInt16();
+            case DataKind.UInt16: return value.AsUInt16();
+            case DataKind.Int32: return value.AsInt32();
+            case DataKind.UInt32: return value.AsUInt32();
+            case DataKind.Int64: return value.AsInt64();
+            case DataKind.UInt64: return value.AsUInt64();
+            case DataKind.Int128: return (double)value.AsInt128();
+            case DataKind.UInt128: return (double)value.AsUInt128();
+            case DataKind.Float16: return (double)value.AsFloat16();
+            case DataKind.Float32: return value.AsFloat32();
+            case DataKind.Float64: return value.AsFloat64();
+            case DataKind.Decimal: return (double)value.AsDecimal();
+            case DataKind.Duration: return value.AsDuration().TotalSeconds;
+            case DataKind.Time:
+            {
+                TimeOnly t = value.AsTime();
+                return t.Hour * 3600 + t.Minute * 60 + t.Second + t.Millisecond / 1000.0;
+            }
+            case DataKind.String:
+                if (double.TryParse(value.AsString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
+                {
+                    return parsed;
+                }
+                throw new InvalidOperationException($"Cannot convert string '{value.AsString()}' to number.");
+            default:
+                throw new InvalidOperationException($"Cannot use {value.Kind} in arithmetic.");
+        }
     }
 
     private static float ToFloatValueRef(ValueRef value)
