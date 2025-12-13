@@ -388,7 +388,8 @@ EXEC proc.compute_cohort(0.5)
 
 ```sql
 CREATE [OR REPLACE | OR ALTER] PROCEDURE [IF NOT EXISTS] name(
-    @param1 TYPE [IS NOT NULL] [, @param2 TYPE [IS NOT NULL] ...]
+    @param1 TYPE [IS NOT NULL] [= default-expr]
+    [, @param2 TYPE [IS NOT NULL] [= default-expr] ...]
 ) AS BEGIN
     ...statements...
 END;
@@ -432,6 +433,24 @@ EXEC proc.need_name('alice')   -- yields 'ALICE'
 EXEC proc.need_name(NULL)
 -- error: Procedure 'proc.need_name' parameter '@name' must not be null.
 ```
+
+**Default parameter values** behave the same as on UDFs: declare with
+`= expr`, omit trailing arguments to fall back to the default. Defaults
+must be contiguous at the tail of the parameter list, and `IS NOT NULL`
+appears before `=` to avoid grammar ambiguity:
+
+```sql
+CREATE PROCEDURE summarize(@table STRING IS NOT NULL, @limit INT64 = 100)
+AS BEGIN
+    -- ...
+END
+
+EXEC proc.summarize('orders')          -- @limit takes 100
+EXEC proc.summarize('orders', 1000)    -- @limit explicit
+```
+
+The default expression evaluates in the caller's scope, so it can
+reference earlier arguments and the surrounding `@vars`.
 
 **Each invocation gets its own scope.** Procedures don't share variable
 state with the caller — parameters carry values across the boundary,

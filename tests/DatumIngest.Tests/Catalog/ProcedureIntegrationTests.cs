@@ -483,7 +483,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // should still fire when the caller omits the argument.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
-            "CREATE PROCEDURE need_one(@a INT64 = NULL IS NOT NULL) AS BEGIN SELECT @a END");
+            "CREATE PROCEDURE need_one(@a INT64 IS NOT NULL = NULL) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunBatchAsync("EXEC proc.need_one()", catalog));

@@ -139,10 +139,11 @@ public class UdfDdlParsingTests : ServiceTestBase
     [Fact]
     public void Create_ParamWithDefault_AndIsNotNull_BothFlagsSet()
     {
-        // Default first, IS NOT NULL last — keeps the constraint as the
-        // trailing modifier the parser already expects.
+        // IS NOT NULL precedes the default because `expr IS NOT NULL` is
+        // itself a valid scalar predicate; placing the modifier last would
+        // be ambiguous with the default expression.
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
-            "CREATE FUNCTION add(@x INT32 = 0 IS NOT NULL, @y INT32 = 0 IS NOT NULL) AS @x + @y");
+            "CREATE FUNCTION add(@x INT32 IS NOT NULL = 0, @y INT32 IS NOT NULL = 0) AS @x + @y");
 
         Assert.Equal(2, create.Parameters.Count);
         Assert.NotNull(create.Parameters[0].Default);

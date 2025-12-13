@@ -108,6 +108,36 @@ valued logic propagates NULL" to "fail loud, fail early." Use it for
 parameters where a NULL would either crash the body in a confusing way
 or silently return a wrong answer.
 
+#### Default parameter values
+
+A parameter declared with `= expr` becomes optional at the call site.
+Omitted trailing arguments fall back to the default expression, which is
+evaluated in the call site's scope (so it can reference earlier
+arguments and the surrounding `@vars`).
+
+```sql
+CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b;
+
+SELECT udf.add(2);     -- 2 + 5 = 7
+SELECT udf.add(2, 10); -- 2 + 10 = 12
+SELECT udf.add();      -- error: expects 1–2 argument(s), got 0
+```
+
+Defaults must be **contiguous at the tail** of the parameter list — once
+a parameter has a default, every later parameter must as well. Argument
+binding is positional, so a required parameter after a defaulted one
+would make the call-site arity ambiguous; the catalog rejects the shape
+at registration time.
+
+`IS NOT NULL` precedes `=`:
+
+```sql
+CREATE FUNCTION shout(@name STRING IS NOT NULL = 'world') AS upper(@name);
+```
+
+The order disambiguates the grammar: `expr IS NOT NULL` is itself a
+valid scalar predicate, so trailing `IS NOT NULL` would be greedy.
+
 #### RETURNS
 
 The optional `RETURNS TYPE` annotation enforces the declared kind: the
