@@ -787,6 +787,7 @@ public static class QueryExplainer
             ColumnReference col => col.TableName is not null
                 ? $"{col.TableName}.{col.ColumnName}"
                 : col.ColumnName,
+            VariableExpression v => $"@{v.Name}",
             LiteralExpression lit => FormatLiteral(lit.Value),
             BinaryExpression bin => $"{FormatExpression(bin.Left)} {FormatBinaryOp(bin.Operator)} {FormatExpression(bin.Right)}",
             LikeExpression like => $"{FormatExpression(like.Expression)} {(like.CaseInsensitive ? "ILIKE" : "LIKE")} {FormatExpression(like.Pattern)} ESCAPE {FormatExpression(like.EscapeCharacter)}",

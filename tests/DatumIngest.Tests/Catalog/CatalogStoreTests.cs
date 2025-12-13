@@ -60,7 +60,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void CreateFunction_PersistsToFile()
     {
         TableCatalog catalog = OpenCatalog();
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         Assert.True(File.Exists(_catalogPath));
         string contents = File.ReadAllText(_catalogPath);
@@ -72,8 +72,8 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void Reopen_LoadsPersistedUdfs()
     {
         TableCatalog first = OpenCatalog();
-        first.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
-        first.Plan("CREATE FUNCTION whisper(name STRING) AS lower(name)");
+        first.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+        first.Plan("CREATE FUNCTION whisper(@name STRING) AS lower(@name)");
 
         TableCatalog second = OpenCatalog();
 
@@ -87,7 +87,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void Reopen_PreservesParametersAndReturnType()
     {
         TableCatalog first = OpenCatalog();
-        first.Plan("CREATE FUNCTION sq(x INT32) RETURNS INT32 AS x * x");
+        first.Plan("CREATE FUNCTION sq(@x INT32) RETURNS INT32 AS @x * @x");
 
         TableCatalog second = OpenCatalog();
 
@@ -103,8 +103,8 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void DropFunction_PersistsRemoval()
     {
         TableCatalog first = OpenCatalog();
-        first.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
-        first.Plan("CREATE FUNCTION whisper(name STRING) AS lower(name)");
+        first.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+        first.Plan("CREATE FUNCTION whisper(@name STRING) AS lower(@name)");
         first.Plan("DROP FUNCTION shout");
 
         TableCatalog second = OpenCatalog();
@@ -118,8 +118,8 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void OrReplace_PersistsNewBody()
     {
         TableCatalog first = OpenCatalog();
-        first.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
-        first.Plan("CREATE OR REPLACE FUNCTION shout(name STRING) AS lower(name)");
+        first.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+        first.Plan("CREATE OR REPLACE FUNCTION shout(@name STRING) AS lower(@name)");
 
         TableCatalog second = OpenCatalog();
 
@@ -135,8 +135,8 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         // is loaded first (alphabetical order does this for "inner_macro"
         // before "outer_macro"), the dependent rehydrates cleanly.
         TableCatalog first = OpenCatalog();
-        first.Plan("CREATE FUNCTION inner_macro(s STRING) AS upper(s)");
-        first.Plan("CREATE FUNCTION outer_macro(s STRING) AS udf.inner_macro(s)");
+        first.Plan("CREATE FUNCTION inner_macro(@s STRING) AS upper(@s)");
+        first.Plan("CREATE FUNCTION outer_macro(@s STRING) AS udf.inner_macro(@s)");
 
         TableCatalog second = OpenCatalog();
         Assert.True(second.Udfs.TryGet("inner_macro", out _));
@@ -235,7 +235,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         // Default constructor (no path) → in-memory only. No file should
         // be created when the catalog path is null.
         TableCatalog catalog = new(GetService<DatumIngest.Pooling.Pool>());
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         Assert.False(File.Exists(_catalogPath));
         Assert.Null(catalog.CatalogLoadReport);
@@ -251,7 +251,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         Assert.False(Directory.Exists(nestedDir));
 
         TableCatalog catalog = new(GetService<DatumIngest.Pooling.Pool>(), nestedPath);
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         Assert.True(File.Exists(nestedPath));
     }
@@ -262,7 +262,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     public void Save_DoesNotLeaveTempFile()
     {
         TableCatalog catalog = OpenCatalog();
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         string tempPath = _catalogPath + ".tmp";
         Assert.False(File.Exists(tempPath));
@@ -275,7 +275,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         TableCatalog catalog = OpenCatalog();
         for (int i = 0; i < 5; i++)
         {
-            catalog.Plan($"CREATE FUNCTION fn_{i}(x INT32) AS x + {i}");
+            catalog.Plan($"CREATE FUNCTION fn_{i}(@x INT32) AS @x + {i}");
         }
 
         string contents = File.ReadAllText(_catalogPath);

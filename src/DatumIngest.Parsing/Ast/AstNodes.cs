@@ -1111,17 +1111,31 @@ public sealed record AlterTableAddColumnStatement(
 public sealed record AnalyzeTableStatement(string TableName) : Statement;
 
 /// <summary>
-/// A single declared parameter of a user-defined function: <c>name TYPE</c>.
-/// Parameter names are unique within a UDF; the type is referenced by SQL
-/// type name (e.g. <c>String</c>, <c>Int32</c>) and resolved to a
-/// <c>DataKind</c> at registration time.
+/// A single declared parameter of a user-defined function:
+/// <c>@name TYPE [IS NOT NULL]</c>. Parameter names use the <c>@</c>-
+/// prefix at the call site declaration but are stored without it on
+/// this record (so the <c>Name</c> field is the bare identifier —
+/// matching <see cref="VariableExpression.Name"/> in the body). The
+/// type is referenced by SQL type name (e.g. <c>String</c>,
+/// <c>Int32</c>) and resolved to a <c>DataKind</c> at registration time.
 /// </summary>
-/// <param name="Name">The parameter name as written, used inside the body.</param>
+/// <param name="Name">The parameter name without the <c>@</c> prefix, used inside the body.</param>
 /// <param name="TypeName">The SQL type name for the parameter.</param>
-public sealed record UdfParameter(string Name, string TypeName);
+/// <param name="IsNotNull">
+/// When <see langword="true"/>, the inliner wraps the substituted
+/// argument with a runtime null assertion — passing a NULL at the call
+/// site throws an <see cref="InvalidOperationException"/> with the
+/// parameter name in the message. Defaults to <see langword="false"/>
+/// (NULL is allowed and propagates through the body's normal three-
+/// valued logic).
+/// </param>
+public sealed record UdfParameter(
+    string Name,
+    string TypeName,
+    bool IsNotNull = false);
 
 /// <summary>
-/// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(p1 TYPE, p2 TYPE) [RETURNS TYPE] AS expression</c>
+/// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], @p2 TYPE [IS NOT NULL]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>
 /// — registers a user-defined scalar macro that the planner inlines at every
 /// call site. The body is any scalar <see cref="Expression"/>, including model
 /// invocations (<c>models.X(...)</c>) and references to other UDFs (subject to
@@ -1130,9 +1144,17 @@ public sealed record UdfParameter(string Name, string TypeName);
 /// <param name="Name">The unqualified UDF name. Call sites use the <c>udf.</c> prefix.</param>
 /// <param name="Parameters">The declared parameters in order.</param>
 /// <param name="ReturnTypeName">
-/// Optional return type annotation (<c>RETURNS TYPE</c>). When <see langword="null"/>,
-/// the inliner trusts the body's natural return type. v1 does not type-check the
-/// body against this annotation; it's stored for later validation passes.
+/// Optional return-type annotation (<c>RETURNS TYPE</c>). When non-
+/// <see langword="null"/>, the inliner wraps the substituted body with
+/// an implicit <c>CAST</c> to the declared type, so the call site sees
+/// the declared kind regardless of the body's natural type. When
+/// <see langword="null"/>, the body's natural return type wins.
+/// </param>
+/// <param name="ReturnIsNotNull">
+/// When <see langword="true"/>, the inliner wraps the substituted body
+/// with a runtime null assertion in addition to any declared CAST. A
+/// NULL return value at the call site throws with the UDF name in the
+/// message. Defaults to <see langword="false"/>.
 /// </param>
 /// <param name="Body">The expression evaluated at every call site, with parameter references substituted.</param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the UDF already exists.</param>
@@ -1145,7 +1167,8 @@ public sealed record CreateFunctionStatement(
     Expression Body,
     bool IfNotExists = false,
     bool OrReplace = false,
-    SourceSpan? Span = null) : Statement;
+    SourceSpan? Span = null,
+    bool ReturnIsNotNull = false) : Statement;
 
 /// <summary>
 /// <c>DROP FUNCTION [IF EXISTS] name</c> — removes a previously registered UDF.

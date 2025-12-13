@@ -21,8 +21,8 @@ exactly as they would if the user had typed the body inline.
 
 ```sql
 CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(
-    param1 TYPE [, param2 TYPE ...]
-) [RETURNS TYPE] AS expression;
+    @param1 TYPE [IS NOT NULL] [, @param2 TYPE [IS NOT NULL] ...]
+) [RETURNS TYPE [IS NOT NULL]] AS expression;
 
 DROP FUNCTION [IF EXISTS] name;
 
@@ -38,20 +38,28 @@ unresolved UDF references and direct cycles, and stored on the catalog.
 Subsequent queries that reference `udf.name` see the inlined body.
 
 ```sql
-CREATE FUNCTION shout(name STRING) AS upper(name);
+CREATE FUNCTION shout(@name STRING) AS upper(@name);
 
 SELECT udf.shout(first_name) FROM users;
 -- equivalent to: SELECT upper(first_name) FROM users
 ```
 
-The body sees parameter names as regular identifiers in scope:
+Parameters use the `@`-prefix at the declaration site and are referenced
+the same way inside the body — the same notation as procedural variables
+(see [Procedural Statements](procedural.md#variables)). The inliner
+substitutes each `@param` reference with the corresponding call-site
+argument expression at plan time:
 
 ```sql
-CREATE FUNCTION add(a INT32, b INT32) AS a + b;
+CREATE FUNCTION add(@a INT32, @b INT32) AS @a + @b;
 
 SELECT udf.add(price, tax) FROM orders;
 -- equivalent to: SELECT price + tax FROM orders
 ```
+
+A bare identifier in the body (no `@`-prefix, not a built-in function)
+resolves against the columns available at the call site — see
+[Scoping Rules](#scoping-rules).
 
 #### OR REPLACE
 
@@ -60,7 +68,7 @@ Without `OR REPLACE`, redefinition is rejected. Useful while iterating on
 prompt templates and call shapes from a session.
 
 ```sql
-CREATE OR REPLACE FUNCTION shout(name STRING) AS lower(name);
+CREATE OR REPLACE FUNCTION shout(@name STRING) AS lower(@name);
 ```
 
 #### IF NOT EXISTS
@@ -70,18 +78,63 @@ already registered. The original definition wins; no error is raised. Use
 this when a setup script may run more than once.
 
 ```sql
-CREATE FUNCTION IF NOT EXISTS shout(name STRING) AS upper(name);
+CREATE FUNCTION IF NOT EXISTS shout(@name STRING) AS upper(@name);
 ```
+
+#### IS NOT NULL on parameters
+
+Append `IS NOT NULL` to a parameter type to declare that the call site
+must pass a non-null argument. The inliner wraps the substituted argument
+with a runtime null check; passing a NULL throws an
+`InvalidOperationException` naming the parameter so the user can locate
+the offending call site.
+
+```sql
+CREATE FUNCTION shout(@name STRING IS NOT NULL) AS upper(@name);
+
+SELECT udf.shout(first_name) FROM users WHERE first_name IS NOT NULL;
+-- works fine
+
+SELECT udf.shout(NULL) FROM dual;
+-- error: UDF 'udf.shout' parameter '@name' must not be null.
+```
+
+`IS NOT NULL` on a parameter shifts the null check from "body's three-
+valued logic propagates NULL" to "fail loud, fail early." Use it for
+parameters where a NULL would either crash the body in a confusing way
+or silently return a wrong answer.
 
 #### RETURNS
 
-The optional `RETURNS TYPE` annotation records the declared return type on
-the descriptor. The body's runtime type is whatever the substituted
-expression evaluates to.
+The optional `RETURNS TYPE` annotation enforces the declared kind: the
+inliner wraps the substituted body with an implicit `CAST` to the
+declared type, so the call site sees the declared kind regardless of
+the body's natural type.
 
 ```sql
-CREATE FUNCTION sq(x INT32) RETURNS INT32 AS x * x;
+CREATE FUNCTION truncated(@x FLOAT64) RETURNS INT32 AS @x;
+
+SELECT udf.truncated(3.7) FROM dual;
+-- yields 3 as Int32
 ```
+
+Add `IS NOT NULL` to the return type to enforce that the body produces
+a non-null value:
+
+```sql
+CREATE FUNCTION parsed(@s STRING) RETURNS INT32 IS NOT NULL
+AS try_cast(@s, INT32);
+
+SELECT udf.parsed('42') FROM dual;
+-- yields 42
+
+SELECT udf.parsed('not a number') FROM dual;
+-- error: UDF 'udf.parsed' return value must not be null.
+```
+
+The two annotations stack: the declared `CAST` runs first, then the
+null assertion checks the cast result. Either annotation alone is also
+valid.
 
 ### DROP FUNCTION
 
@@ -152,8 +205,8 @@ calls children-first, so the resulting plan has no UDF references at any
 depth.
 
 ```sql
-CREATE FUNCTION first_token(s STRING)  AS split(s, ' ')[0];
-CREATE FUNCTION shout_first(s STRING)  AS upper(udf.first_token(s));
+CREATE FUNCTION first_token(@s STRING)  AS split(@s, ' ')[0];
+CREATE FUNCTION shout_first(@s STRING)  AS upper(udf.first_token(@s));
 
 SELECT udf.shout_first(headline) FROM articles;
 -- expanded plan: upper(split(headline, ' ')[0])
@@ -164,18 +217,18 @@ factor a recurring prompt-building expression out of every consumer SQL.
 
 ```sql
 CREATE FUNCTION dnd_rewrite_prompt(
-    caption STRING,
-    tone STRING,
-    threat STRING
+    @caption STRING,
+    @tone STRING,
+    @threat STRING
 ) AS `Rewrite this caption in D&D style.
-Tone: ${tone}, Core Threat: ${threat}
-Caption: ${caption}
+Tone: ${@tone}, Core Threat: ${@threat}
+Caption: ${@caption}
 Return only the new caption.`;
 
-CREATE FUNCTION dnd_rewrite_caption(caption STRING) AS
+CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
     models.llama31_8b(
         udf.dnd_rewrite_prompt(
-            caption,
+            @caption,
             random_string('gothic', 'folk horror', 'cosmic horror'),
             random_string('possession', 'curse', 'time loop')
         ),
@@ -198,42 +251,50 @@ registration — `B` may not exist when `A` is created — so they surface at
 the first call site that closes the loop:
 
 ```sql
-CREATE FUNCTION a(x INT32) AS udf.b(x);
-CREATE FUNCTION b(x INT32) AS udf.a(x);  -- registers cleanly
+CREATE FUNCTION a(@x INT32) AS udf.b(@x);
+CREATE FUNCTION b(@x INT32) AS udf.a(@x);  -- registers cleanly
 SELECT udf.a(1) FROM dual;
 -- error: Cyclic UDF reference detected: a → b → a.
 ```
 
 ## Scoping Rules
 
-UDF bodies execute in the call site's scope. A bare identifier in the body
-that doesn't match a parameter name is resolved against the columns
-available at the call site:
+UDF parameters and the body's column references live in different
+namespaces:
+
+- **`@param`** — substituted with the call-site argument expression at
+  inline time. The body sees no `@param` references in the planner's
+  operator tree.
+- **Bare identifiers** in the body — column references resolved against
+  the columns available at the call site.
 
 ```sql
-CREATE FUNCTION boost(score FLOAT32) AS score * weight;
---                                                ^ not a parameter
+CREATE FUNCTION boost(@score FLOAT32) AS @score * weight;
+--                                                 ^ not a parameter
 
 -- 'weight' resolves to the column at the call site:
 SELECT udf.boost(raw_score) FROM models WHERE weight IS NOT NULL;
 ```
 
-This is "macro-style" scoping. It enables small composition tricks (a UDF
-that adapts to the surrounding query's schema) but means a UDF's behavior
-isn't fully determined by its declaration alone — readers need to know
-the calling context.
+This is "macro-style" scoping for the bare-identifier path. It enables
+small composition tricks (a UDF that adapts to the surrounding query's
+schema) but means a UDF's behavior isn't fully determined by its
+declaration alone — readers need to know the calling context. When a
+body needs to be self-contained, every column reference should arrive
+through a parameter.
 
-### Lambda and SCAN Shadowing
+### Lambda and SCAN Bindings
 
-Substitution honors lambda and SCAN accumulator scopes: a parameter name
-that collides with a bound name inside a lambda or SCAN body does not
-capture the inner reference. The lambda/SCAN's own binding wins.
+Lambda parameters and SCAN accumulator names bind bare identifiers, not
+`@`-prefixed variables. They live in a separate namespace from UDF
+parameters, so a lambda parameter named `x` and a UDF parameter named
+`@x` don't interact:
 
 ```sql
-CREATE FUNCTION sum_doubled(arr ARRAY) AS
-    array_reduce(arr, (a, b) -> a + b, 0);
--- Even though the body's outer reference 'arr' is the UDF parameter,
--- the lambda's 'a' and 'b' parameters are not affected by substitution.
+CREATE FUNCTION sum_doubled(@arr ARRAY) AS
+    array_reduce(@arr, (a, b) -> a + b, 0);
+-- @arr is substituted at inline time; the lambda's 'a' and 'b' bind
+-- bare names that the inliner never touches.
 ```
 
 ## Execution Model
@@ -268,13 +329,13 @@ ORDER BY name;
 
 Schema:
 
-| Column            | Type   | Nullable | Description                                                            |
-|-------------------|--------|----------|------------------------------------------------------------------------|
-| `name`            | String | no       | Unqualified UDF name. Call sites use the `udf.` prefix.                |
-| `parameter_count` | Int32  | no       | Number of declared parameters. `0` for nullary UDFs.                   |
-| `parameters`      | String | no       | Comma-separated `"name TYPE, name TYPE"` rendition. Empty for nullary. |
-| `return_type`     | String | yes      | The `RETURNS` annotation, or NULL when omitted.                        |
-| `body`            | String | no       | Body expression formatted from the AST. Whitespace may differ from input. |
+| Column            | Type   | Nullable | Description                                                                          |
+|-------------------|--------|----------|--------------------------------------------------------------------------------------|
+| `name`            | String | no       | Unqualified UDF name. Call sites use the `udf.` prefix.                              |
+| `parameter_count` | Int32  | no       | Number of declared parameters. `0` for nullary UDFs.                                 |
+| `parameters`      | String | no       | Comma-separated `"@name TYPE [IS NOT NULL], @name TYPE"` rendition. Empty for nullary. |
+| `return_type`     | String | yes      | The `RETURNS` annotation including any `IS NOT NULL` suffix, or NULL when omitted.   |
+| `body`            | String | no       | Body expression formatted from the AST. Whitespace may differ from input.            |
 
 `system_udfs` is auto-registered against every `TableCatalog` — no host
 setup required.
@@ -315,13 +376,18 @@ The on-disk format is a JSON document with this shape:
   "udfs": [
     {
       "name": "shout",
-      "parameters": [{"name": "name", "type": "STRING"}],
-      "return_type": null,
-      "body": "upper(name)"
+      "parameters": [{"name": "name", "type": "STRING", "isNotNull": false}],
+      "returnType": null,
+      "returnIsNotNull": false,
+      "body": "upper(@name)"
     }
   ]
 }
 ```
+
+The `name` field on a parameter stores the bare identifier without the
+`@`-prefix; the body string round-trips with the prefix because the
+parser re-applies it on load.
 
 The file format is forward-compatible with future catalog sections (bound
 data files, materialised views, fingerprints). New sections are additive;
@@ -337,10 +403,12 @@ existing readers ignore unknown top-level fields.
   is not supported. Re-define an existing UDF with `CREATE OR REPLACE`.
 - **No compiled code.** UDFs are SQL expression macros. Authoring UDFs
   in C# or another host language is not supported through this surface.
-- **Body can't reference subquery scopes.** Substitution does not enter
-  subquery select lists; a UDF parameter named the same as an outer
-  column won't capture references inside a `SELECT (...)` subquery in
-  the body.
+- **Subquery bodies don't see parameters.** Parameter substitution does
+  not walk into subqueries embedded in the body; a `@param` reference
+  inside `(SELECT ... WHERE col = @param)` survives inlining as a
+  `VariableExpression` and is resolved at evaluation time against the
+  procedural variable scope (if any). Pass arguments through the outer
+  expression instead.
 
 ## See Also
 

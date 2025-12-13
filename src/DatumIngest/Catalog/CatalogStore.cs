@@ -211,10 +211,15 @@ public sealed class CatalogStore
             ? []
             : entry.Parameters
                 .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
-                .Select(p => new UdfParameter(p.Name!, p.Type!))
+                .Select(p => new UdfParameter(p.Name!, p.Type!, p.IsNotNull))
                 .ToList();
 
-        UdfDescriptor descriptor = new(entry.Name!, parameters, entry.ReturnType, body);
+        UdfDescriptor descriptor = new(
+            entry.Name!,
+            parameters,
+            entry.ReturnType,
+            body,
+            entry.ReturnIsNotNull);
 
         // Validate against the partially-loaded registry. This catches
         // unresolved UDF references in the body and direct cycles.
@@ -253,9 +258,15 @@ public sealed class CatalogStore
                     {
                         Name = e.Name,
                         Parameters = e.Parameters
-                            .Select(p => new CatalogFileUdfParameterEntry { Name = p.Name, Type = p.TypeName })
+                            .Select(p => new CatalogFileUdfParameterEntry
+                            {
+                                Name = p.Name,
+                                Type = p.TypeName,
+                                IsNotNull = p.IsNotNull,
+                            })
                             .ToList(),
                         ReturnType = e.ReturnTypeName,
+                        ReturnIsNotNull = e.ReturnIsNotNull,
                         Body = QueryExplainer.FormatExpression(e.Body),
                     })
                     .ToList(),
@@ -300,6 +311,7 @@ internal sealed class CatalogFileUdfEntry
     public string? Name { get; set; }
     public List<CatalogFileUdfParameterEntry>? Parameters { get; set; }
     public string? ReturnType { get; set; }
+    public bool ReturnIsNotNull { get; set; }
     public string? Body { get; set; }
 }
 
@@ -308,6 +320,7 @@ internal sealed class CatalogFileUdfParameterEntry
 {
     public string? Name { get; set; }
     public string? Type { get; set; }
+    public bool IsNotNull { get; set; }
 }
 
 /// <summary>

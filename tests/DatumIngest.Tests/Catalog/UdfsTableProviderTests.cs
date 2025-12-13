@@ -110,7 +110,7 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task RegisterUdf_AppearsInScan()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
         List<SystemUdfRow> rows = await ScanProviderAsync(provider);
@@ -124,9 +124,9 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task RegisterMultipleUdfs_OrderedByName()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION zebra(x INT32) AS x");
-        catalog.Plan("CREATE FUNCTION alpha(x INT32) AS x + 1");
-        catalog.Plan("CREATE FUNCTION bravo(x INT32) AS x * 2");
+        catalog.Plan("CREATE FUNCTION zebra(@x INT32) AS @x");
+        catalog.Plan("CREATE FUNCTION alpha(@x INT32) AS @x + 1");
+        catalog.Plan("CREATE FUNCTION bravo(@x INT32) AS @x * 2");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
         List<SystemUdfRow> rows = await ScanProviderAsync(provider);
@@ -141,8 +141,8 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task DropUdf_RemovedFromScan()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
-        catalog.Plan("CREATE FUNCTION whisper(name STRING) AS lower(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+        catalog.Plan("CREATE FUNCTION whisper(@name STRING) AS lower(@name)");
         catalog.Plan("DROP FUNCTION shout");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
@@ -156,13 +156,13 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task ParameterCountAndList_RenderedCorrectly()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION add3(a INT32, b INT32, c INT32) AS a + b + c");
+        catalog.Plan("CREATE FUNCTION add3(@a INT32, @b INT32, @c INT32) AS @a + @b + @c");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
         List<SystemUdfRow> rows = await ScanProviderAsync(provider);
 
         Assert.Equal(3, rows[0].ParameterCount);
-        Assert.Equal("a INT32, b INT32, c INT32", rows[0].Parameters, ignoreCase: true);
+        Assert.Equal("@a INT32, @b INT32, @c INT32", rows[0].Parameters, ignoreCase: true);
     }
 
     [Fact]
@@ -182,8 +182,8 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task ReturnType_NullWhenAbsent_PopulatedWhenDeclared()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION no_return(x INT32) AS x");
-        catalog.Plan("CREATE FUNCTION typed(x INT32) RETURNS INT32 AS x * 2");
+        catalog.Plan("CREATE FUNCTION no_return(@x INT32) AS @x");
+        catalog.Plan("CREATE FUNCTION typed(@x INT32) RETURNS INT32 AS @x * 2");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
         List<SystemUdfRow> rows = await ScanProviderAsync(provider);
@@ -199,7 +199,7 @@ public class UdfsTableProviderTests : ServiceTestBase
     public async Task Body_FormattedFromAst()
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE FUNCTION shout(name STRING) AS upper(name)");
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
         List<SystemUdfRow> rows = await ScanProviderAsync(provider);

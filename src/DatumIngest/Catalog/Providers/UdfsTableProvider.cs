@@ -143,7 +143,11 @@ public sealed class UdfsTableProvider : ITableProvider
         cells[2] = DataValue.FromString(FormatParameters(descriptor.Parameters), arena);
         cells[3] = descriptor.ReturnTypeName is null
             ? DataValue.Null(DataKind.String)
-            : DataValue.FromString(descriptor.ReturnTypeName, arena);
+            : DataValue.FromString(
+                descriptor.ReturnIsNotNull
+                    ? descriptor.ReturnTypeName + " IS NOT NULL"
+                    : descriptor.ReturnTypeName,
+                arena);
         cells[4] = DataValue.FromString(QueryExplainer.FormatExpression(descriptor.Body), arena);
     }
 
@@ -161,9 +165,14 @@ public sealed class UdfsTableProvider : ITableProvider
         for (int i = 0; i < parameters.Count; i++)
         {
             if (i > 0) sb.Append(", ");
+            sb.Append('@');
             sb.Append(parameters[i].Name);
             sb.Append(' ');
             sb.Append(parameters[i].TypeName);
+            if (parameters[i].IsNotNull)
+            {
+                sb.Append(" IS NOT NULL");
+            }
         }
         return sb.ToString();
     }

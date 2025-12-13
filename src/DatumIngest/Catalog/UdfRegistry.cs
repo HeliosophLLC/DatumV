@@ -15,22 +15,33 @@ namespace DatumIngest.Catalog;
 /// <c>udf.</c> prefix — <c>udf.foo(...)</c> — but the registry keys are
 /// stored without the prefix.
 /// </param>
-/// <param name="Parameters">The declared parameters in order.</param>
+/// <param name="Parameters">
+/// The declared parameters in order. Each parameter's <see cref="UdfParameter.IsNotNull"/>
+/// flag controls whether the inliner wraps the substituted argument with a runtime
+/// null assertion.
+/// </param>
 /// <param name="ReturnTypeName">
-/// Optional return-type annotation from <c>RETURNS TYPE</c>. v1 stores this
-/// for introspection but does not type-check the body against it.
+/// Optional return-type annotation from <c>RETURNS TYPE</c>. When non-
+/// <see langword="null"/>, the inliner wraps the substituted body with
+/// an implicit <c>CAST</c> to the declared type, so the call site
+/// sees the declared kind regardless of the body's natural type.
+/// </param>
+/// <param name="ReturnIsNotNull">
+/// When <see langword="true"/>, the inliner wraps the substituted body
+/// with a runtime null assertion (in addition to any declared CAST).
 /// </param>
 /// <param name="Body">
 /// The parsed scalar expression evaluated at every call site, with parameter
 /// references in scope. Substitution at inlining time replaces
-/// <see cref="ColumnReference"/> nodes whose name matches a parameter with
+/// <see cref="VariableExpression"/> nodes whose name matches a parameter with
 /// the corresponding call-site argument expression.
 /// </param>
 public sealed record UdfDescriptor(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string? ReturnTypeName,
-    Expression Body);
+    Expression Body,
+    bool ReturnIsNotNull = false);
 
 /// <summary>
 /// Process-scoped registry of user-defined scalar functions for a single

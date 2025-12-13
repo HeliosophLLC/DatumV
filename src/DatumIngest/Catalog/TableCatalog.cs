@@ -263,7 +263,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         UdfDescriptor descriptor = new(
-            create.Name, create.Parameters, create.ReturnTypeName, create.Body);
+            create.Name,
+            create.Parameters,
+            create.ReturnTypeName,
+            create.Body,
+            create.ReturnIsNotNull);
 
         if (create.IfNotExists && _udfs.TryGet(create.Name, out _))
         {

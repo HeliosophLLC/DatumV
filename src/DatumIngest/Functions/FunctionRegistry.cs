@@ -237,6 +237,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.CastFunction>();
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
+        registry.RegisterScalar<Scalar.AssertNotNullFunction>();
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
         registry.RegisterScalar<Scalar.RandomStringFunction>();
         registry.RegisterScalar<Scalar.RandomStringFromSeedFunction>();

@@ -25,13 +25,22 @@ namespace DatumIngest.Execution;
 /// detection therefore lives at inlining time.
 /// </para>
 /// <para>
-/// Parameter shadowing — substitution targets bare
-/// <see cref="ColumnReference"/> nodes whose name matches a UDF parameter.
-/// Lambda parameters and SCAN accumulator names are honoured: a
-/// <see cref="LambdaExpression"/> or <see cref="ScanExpression"/> inside
-/// the body removes its bound names from the substitution map for the
-/// duration of the nested walk, so a UDF parameter accidentally named
-/// the same as a lambda parameter does not capture the inner reference.
+/// Parameter substitution — UDF parameters are written as <c>@name</c>
+/// at the declaration site and referenced as <c>@name</c> inside the
+/// body, so substitution targets <see cref="VariableExpression"/> nodes
+/// whose name matches a parameter. Non-parameter <c>VariableExpression</c>
+/// nodes (e.g. references to a procedural variable in the calling
+/// batch) are left alone and resolved at evaluation time.
+/// </para>
+/// <para>
+/// Validation wrapping — parameters declared with <c>IS NOT NULL</c>
+/// have their substituted argument expression wrapped with
+/// <c>__assert_not_null(arg, '@name')</c>; the entire substituted body
+/// is wrapped with <c>cast(body, ReturnType)</c> when <c>RETURNS T</c>
+/// is set, and with <c>__assert_not_null(body, 'return value of fn')</c>
+/// when <c>RETURNS T IS NOT NULL</c> is set. The wrappers compose: a
+/// declared-and-not-null return becomes
+/// <c>__assert_not_null(cast(body, T), '...')</c>.
 /// </para>
 /// </remarks>
 public static class UdfInliner
@@ -253,17 +262,43 @@ public static class UdfInliner
                 }
             }
 
-            // Build the parameter → call-site-arg substitution map.
+            // Build the parameter → call-site-arg substitution map. Each
+            // argument is wrapped with __assert_not_null when the matching
+            // parameter is declared IS NOT NULL — the wrapper fires at
+            // evaluation time, after the argument has been computed but
+            // before the body sees it.
             Dictionary<string, Expression> paramToArg = new(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < udf.Parameters.Count; i++)
             {
-                paramToArg[udf.Parameters[i].Name] = call.Arguments[i];
+                UdfParameter param = udf.Parameters[i];
+                Expression arg = call.Arguments[i];
+                if (param.IsNotNull)
+                {
+                    arg = WrapNotNull(
+                        arg,
+                        $"UDF '{call.FunctionName}' parameter '@{param.Name}' must not be null.");
+                }
+                paramToArg[param.Name] = arg;
             }
 
             // Substitute parameters in the body. The body's AST may itself
             // contain udf.* calls that need recursive inlining; that happens
             // after substitution so the result is fully resolved.
             Expression substituted = SubstituteParameters(udf.Body, paramToArg);
+
+            // Apply return-type and not-null annotations. CAST runs first
+            // so the not-null check sees the declared kind; this mirrors
+            // how a hand-written body would have stacked the same calls.
+            if (udf.ReturnTypeName is not null)
+            {
+                substituted = new CastExpression(substituted, udf.ReturnTypeName, Span: null);
+            }
+            if (udf.ReturnIsNotNull)
+            {
+                substituted = WrapNotNull(
+                    substituted,
+                    $"UDF '{call.FunctionName}' return value must not be null.");
+            }
 
             _inliningStack.Push(name);
             try
@@ -277,11 +312,27 @@ public static class UdfInliner
         }
 
         /// <summary>
-        /// Walks <paramref name="body"/> and replaces each bare
-        /// <see cref="ColumnReference"/> whose name matches a key in
+        /// Wraps <paramref name="value"/> with a call to the internal
+        /// <c>__assert_not_null</c> scalar function, embedding
+        /// <paramref name="message"/> as a string-literal second argument.
+        /// At evaluation time, the function returns the value when non-null
+        /// and throws with the message when null.
+        /// </summary>
+        private static Expression WrapNotNull(Expression value, string message) =>
+            new FunctionCallExpression(
+                "__assert_not_null",
+                [value, new LiteralExpression(message)]);
+
+        /// <summary>
+        /// Walks <paramref name="body"/> and replaces each
+        /// <see cref="VariableExpression"/> whose name matches a key in
         /// <paramref name="paramToArg"/> with the corresponding argument
-        /// expression. Honours lambda and SCAN-accumulator scopes by
-        /// removing shadowed names for the duration of the inner walk.
+        /// expression. <c>VariableExpression</c> nodes whose names don't
+        /// match a UDF parameter (e.g. references to a procedural variable
+        /// in the calling batch) survive substitution and resolve at
+        /// evaluation time. Lambda and SCAN-accumulator scopes don't
+        /// interact with parameter substitution because they bind bare
+        /// identifiers, not <c>@</c>-prefixed variables.
         /// </summary>
         private static Expression SubstituteParameters(
             Expression body,
@@ -293,8 +344,8 @@ public static class UdfInliner
             {
                 switch (expr)
                 {
-                    case ColumnReference col when col.TableName is null
-                        && activeParams.TryGetValue(col.ColumnName, out Expression? arg):
+                    case VariableExpression v
+                        when activeParams.TryGetValue(v.Name, out Expression? arg):
                         return arg;
 
                     case LambdaExpression lam:

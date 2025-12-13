@@ -2425,12 +2425,24 @@ public static class SqlParser
         select (Statement)new DropTableStatement(tableName, ifExists);
 
     /// <summary>
-    /// Parses a single UDF parameter declaration: <c>name TYPE</c>.
+    /// Parses a single UDF parameter declaration:
+    /// <c>@name TYPE [IS NOT NULL]</c>. The <c>@</c>-prefix matches how
+    /// the parameter is referenced inside the body and lines up with
+    /// procedural variable syntax.
     /// </summary>
     private static readonly TokenListParser<SqlToken, UdfParameter> UdfParameterParser =
-        from name in IdentifierOrKeywordAsName
+        from variable in Token.EqualTo(SqlToken.Variable)
         from typeName in TypeNameParser
-        select new UdfParameter(name, typeName);
+        from isNotNull in (
+            from isKw in Token.EqualTo(SqlToken.Is)
+            from notKw in Token.EqualTo(SqlToken.Not)
+            from nullKw in Token.EqualTo(SqlToken.Null)
+            select true
+        ).OptionalOrDefault()
+        select new UdfParameter(
+            variable.ToStringValue()[1..],
+            typeName,
+            isNotNull);
 
     /// <summary>
     /// Parses <c>OR REPLACE</c> as an optional modifier for <c>CREATE FUNCTION</c>.
@@ -2445,10 +2457,11 @@ public static class SqlParser
 
     /// <summary>
     /// Parses
-    /// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(p1 TYPE [, p2 TYPE ...]) [RETURNS TYPE] AS expression</c>.
-    /// The body is any scalar expression and may reference the parameters by
-    /// name, plus any normal column / function names — the planner inlines the
-    /// body at every call site so name resolution happens in the caller's scope.
+    /// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL] [, @p2 TYPE [IS NOT NULL] ...]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>.
+    /// The body is any scalar expression and may reference the parameters as
+    /// <c>@name</c>, plus any normal column / function names — the planner
+    /// inlines the body at every call site so name resolution happens in the
+    /// caller's scope.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> CreateFunctionParser =
         from createKw in Token.EqualTo(SqlToken.Create)
@@ -2462,21 +2475,28 @@ public static class SqlParser
         from open in Token.EqualTo(SqlToken.LeftParen)
         from parameters in UdfParameterParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
-        from returnType in (
+        from returnAnnotation in (
             from returnsKw in Token.EqualTo(SqlToken.Returns)
             from typeName in TypeNameParser
-            select typeName
-        ).AsNullable().OptionalOrDefault()
+            from isNotNull in (
+                from isKw in Token.EqualTo(SqlToken.Is)
+                from notKw in Token.EqualTo(SqlToken.Not)
+                from nullKw in Token.EqualTo(SqlToken.Null)
+                select true
+            ).OptionalOrDefault()
+            select (TypeName: (string?)typeName, IsNotNull: isNotNull)
+        ).OptionalOrDefault((TypeName: (string?)null, IsNotNull: false))
         from asKw in Token.EqualTo(SqlToken.As)
         from body in SP.Ref(() => ExpressionParser!)
         select (Statement)new CreateFunctionStatement(
             name,
             parameters,
-            returnType,
+            returnAnnotation.TypeName,
             body,
             ifNotExists,
             orReplace,
-            Span: null);
+            Span: null,
+            ReturnIsNotNull: returnAnnotation.IsNotNull);
 
     /// <summary>
     /// Parses <c>DROP FUNCTION [IF EXISTS] name</c>.
