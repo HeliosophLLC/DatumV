@@ -88,8 +88,10 @@ public static class BuiltinModels
         // Image generation. SD-Turbo is the closing leg of the
         // image-in → caption → LLM-narrative → image-out pipeline.
         // SDXL-Turbo is the higher-quality sibling for hero outputs.
+        // Juggernaut XL Lightning is the high-realism alternative.
         RegisterSdTurbo(modelCatalog);
         RegisterSdxlTurbo(modelCatalog);
+        RegisterJuggernautXlLightning(modelCatalog);
 
         // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
         // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
@@ -811,7 +813,8 @@ public static class BuiltinModels
         ModelCatalog catalog,
         string modelName = "sd_turbo",
         string folder = SdTurboFolder,
-        int? seed = null)
+        int? seed = null,
+        int steps = 4)
     {
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
@@ -827,7 +830,7 @@ public static class BuiltinModels
             Loader: ctx =>
             {
                 string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
-                return new StableDiffusionTurboModel(modelName, modelDirectory, seed);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion Turbo",
             Parameters: "865M",
@@ -883,7 +886,8 @@ public static class BuiltinModels
         ModelCatalog catalog,
         string modelName = "sdxl_turbo",
         string folder = SdxlTurboFolder,
-        int? seed = null)
+        int? seed = null,
+        int steps = 4)
     {
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
@@ -895,13 +899,13 @@ public static class BuiltinModels
             Loader: ctx =>
             {
                 string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
-                return new SdxlTurboModel(modelName, modelDirectory, seed);
+                return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
             },
             DisplayName: "Stable Diffusion XL Turbo",
             Parameters: "2.6B (UNet) + 1.4B (text encoders)",
             License: "Stability AI Community",
             LicenseHolder: "Stability AI",
-            SourceUrl: "https://huggingface.co/stabilityai/sdxl-turbo",
+            SourceUrl: "https://huggingface.co/onnxruntime/sdxl-turbo",
             Category: "generator",
             Modalities: ["text", "image"],
             Files:
@@ -911,6 +915,70 @@ public static class BuiltinModels
                 $"{folder}/text_encoder_2/model.onnx_data",   // OpenCLIP-G is large; uses external data
                 $"{folder}/unet/model.onnx",
                 $"{folder}/unet/model.onnx_data",             // UNet is huge (~2.6B params); external data
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/tokenizer_2/vocab.json",
+                $"{folder}/tokenizer_2/merges.txt",
+                $"{folder}/tokenizer_2/special_tokens_map.json",
+                $"{folder}/tokenizer_2/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for Juggernaut XL Lightning's diffusers ONNX layout.</summary>
+    public const string JuggernautXlLightningFolder = "juggernaut-xl-lightning-onnx";
+
+    /// <summary>
+    /// Registers Juggernaut XL Lightning under the catalog name
+    /// <paramref name="modelName"/> (defaults to
+    /// <c>"juggernaut_xl_lightning"</c>). Generates 1024×1024 images.
+    /// Uses the same SDXL pipeline as <see cref="RegisterSdxlTurbo"/>
+    /// — dual text encoders, UNet, VAE decoder — with RunDiffusion's
+    /// Juggernaut XL weights distilled via ByteDance SDXL-Lightning.
+    /// </summary>
+    /// <remarks>
+    /// Lightning distillation is optimised for 4–8 denoising steps; the
+    /// single-step Euler path we use here produces results but noticeably
+    /// better quality emerges with multi-step support (future follow-up).
+    /// </remarks>
+    public static void RegisterJuggernautXlLightning(
+        ModelCatalog catalog,
+        string modelName = "juggernaut_xl_lightning",
+        string folder = JuggernautXlLightningFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new SdxlTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "Juggernaut XL Lightning",
+            Parameters: "2.6B (UNet) + 1.4B (text encoders)",
+            License: "Stability AI Community",
+            LicenseHolder: "RunDiffusion / Stability AI",
+            SourceUrl: "https://huggingface.co/RunDiffusion/Juggernaut-XL-Lightning",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx_data",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
                 $"{folder}/vae_decoder/model.onnx",
                 $"{folder}/vae_encoder/model.onnx",
                 $"{folder}/tokenizer/vocab.json",

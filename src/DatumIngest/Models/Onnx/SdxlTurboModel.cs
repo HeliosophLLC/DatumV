@@ -47,35 +47,32 @@ namespace DatumIngest.Models.Onnx;
 ///   </description></item>
 /// </list>
 /// <para>
-/// Same single-step Euler scheduler at sigma_max as SD-Turbo. SDXL-Turbo
-/// supports up to 4 inference steps for higher quality; we expose the
-/// 1-step path for the lowest latency. Adding multi-step support is a
-/// follow-up if needed.
+/// The denoising loop uses the Euler discrete scheduler with a Karras
+/// sigma sequence (ρ=7). <c>steps</c> controls quality: 1 step is fastest
+/// (acceptable for abstract scenes), 4 steps is the recommended minimum
+/// for faces and fine detail, 8 steps for hero outputs. SDXL-Turbo was
+/// distilled for 1–4 steps; Juggernaut/Lightning models work best at 4–8.
 /// </para>
 /// </remarks>
 public sealed class SdxlTurboModel : IModel, IDisposable
 {
-    // SDXL-Turbo dimensions.
+    // SDXL dimensions.
     private const int LatentChannels = 4;
     private const int ImageHeight = 1024;
     private const int ImageWidth = 1024;
     private const int LatentHeight = ImageHeight / 8;  // 128
     private const int LatentWidth = ImageWidth / 8;    // 128
 
-    // Text encoder hidden dimensions (after concat fed to UNet).
-    private const int Encoder1HiddenDim = 768;   // CLIP-L
-    private const int Encoder2HiddenDim = 1280;  // OpenCLIP-G
-
     // CLIP tokenizer constants (shared with SD-Turbo).
     private const int CLIPMaxTokens = 77;
     private const int BosTokenId = 49406;
     private const int EosTokenId = 49407;
 
-    // SDXL-specific scheduler constants.
-    // Same beta schedule as SD-Turbo, so sigma_max at t=999 is identical.
-    private const float SigmaMax = 14.6146f;
     private const float VaeScaleFactor = 0.13025f;  // SDXL's VAE — different from SD's 0.18215
-    private const float TimestepValue = 999f;
+
+    // fp16 max. Float32 values outside this range become ±Inf when cast,
+    // which produces NaN inside attention softmax, group norm, etc.
+    private const float Fp16Max = 65504f;
 
     private readonly InferenceSession _textEncoder1Session;
     private readonly InferenceSession _textEncoder2Session;
@@ -84,9 +81,17 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     private readonly BpeTokenizer _tokenizer;
     private readonly Random _rng;
 
-    // The pooled-output tensor from text encoder 2 lives at a specific
-    // output name. Diffusers ONNX export tags it consistently.
+    // The pooled-output tensor from text encoder 2.
     private readonly string _encoder2PooledOutputName;
+
+    // Euler+Karras denoising schedule precomputed in the constructor.
+    private readonly int _steps;
+    private readonly float[] _sigmas;      // length _steps+1; last entry is 0
+    private readonly float[] _timesteps;   // length _steps; values in [0, 999]
+
+    // Whether the UNet's "timestep" input is rank-1 [1] or scalar [].
+    // Varies by export: optimum-cli → scalar; Microsoft onnxruntime build → [1].
+    private readonly int[] _timestepShape;
 
     /// <inheritdoc />
     public string Name { get; }
@@ -101,30 +106,30 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     public DataKind OutputKind => DataKind.Image;
 
     /// <inheritdoc />
-    /// <remarks>
-    /// SDXL-Turbo at 1 step generates one image in ~3-5s on a consumer
-    /// GPU. <c>PreferredBatchSize = 1</c> streams each image as soon as
-    /// it's done.
-    /// </remarks>
     public int? PreferredBatchSize => 1;
 
     /// <summary>
-    /// Loads SDXL-Turbo from a directory in HuggingFace diffusers layout.
-    /// Expects subfolders <c>text_encoder/</c>, <c>text_encoder_2/</c>,
-    /// <c>unet/</c>, <c>vae_decoder/</c>, <c>tokenizer/</c>.
+    /// Loads an SDXL-based model from a directory in HuggingFace diffusers
+    /// layout. Expects subfolders <c>text_encoder/</c>,
+    /// <c>text_encoder_2/</c>, <c>unet/</c>, <c>vae_decoder/</c>,
+    /// <c>tokenizer/</c>.
     /// </summary>
     /// <param name="name">Catalog-visible name.</param>
     /// <param name="modelDirectory">
-    /// Absolute path to the SDXL-Turbo directory. The diffusers-standard
-    /// folder layout produced by <c>optimum-cli export onnx
-    /// --model stabilityai/sdxl-turbo</c>.
+    /// Absolute path to the model directory.
     /// </param>
     /// <param name="seed">
     /// Optional RNG seed for reproducible generation.
     /// </param>
-    public SdxlTurboModel(string name, string modelDirectory, int? seed = null)
+    /// <param name="steps">
+    /// Number of Euler denoising steps (default 4). Use 1 for maximum
+    /// speed at the cost of face/detail quality; 4 is the recommended
+    /// minimum for recognisable faces; 8 for hero outputs.
+    /// </param>
+    public SdxlTurboModel(string name, string modelDirectory, int? seed = null, int steps = 4)
     {
         Name = name;
+        _steps = steps;
 
         string textEncoder1Path = Path.Combine(modelDirectory, "text_encoder", "model.onnx");
         string textEncoder2Path = Path.Combine(modelDirectory, "text_encoder_2", "model.onnx");
@@ -140,7 +145,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             if (!File.Exists(path))
             {
                 throw new FileNotFoundException(
-                    $"SDXL-Turbo component '{Path.GetFileName(path)}' not found at expected location. " +
+                    $"SDXL model component '{Path.GetFileName(path)}' not found at expected location. " +
                     "The model directory must follow HuggingFace diffusers layout: text_encoder/, " +
                     "text_encoder_2/, unet/, vae_decoder/, tokenizer/.",
                     path);
@@ -156,25 +161,23 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         using FileStream mergesStream = File.OpenRead(mergesPath);
         _tokenizer = BpeTokenizer.Create(vocabStream, mergesStream);
 
-        // Text encoder 2 has multiple outputs: the per-token hidden states
-        // (used for cross-attention concat) and the pooled output (used for
-        // SDXL's added_cond_kwargs.text_embeds). The latter is exposed
-        // under the "text_embeds" output by diffusers ONNX exports — check
-        // the metadata to find the right name.
+        // Text encoder 2 has multiple outputs: per-token hidden states
+        // (cross-attention concat) and the pooled output
+        // (added_cond_kwargs.text_embeds). The latter is consistently
+        // tagged "text_embeds" or "pooled" by diffusers ONNX exports.
         _encoder2PooledOutputName = _textEncoder2Session.OutputMetadata.Keys
             .FirstOrDefault(n => n.Contains("text_embeds", StringComparison.OrdinalIgnoreCase)
                               || n.Contains("pooled", StringComparison.OrdinalIgnoreCase))
-            ?? _textEncoder2Session.OutputMetadata.Keys.Last(); // fallback: pooled is typically the last output
+            ?? _textEncoder2Session.OutputMetadata.Keys.Last();
 
         _rng = seed.HasValue ? new Random(seed.Value) : new Random();
 
-        // Diagnostic: print output names so we can verify correct selection.
-        Console.Error.WriteLine("[SDXL diag] text_encoder_1 outputs: " +
-            string.Join(", ", _textEncoder1Session.OutputMetadata.Keys));
-        Console.Error.WriteLine("[SDXL diag] text_encoder_2 outputs: " +
-            string.Join(", ", _textEncoder2Session.OutputMetadata.Keys));
-        Console.Error.WriteLine("[SDXL diag] vae_decoder outputs: " +
-            string.Join(", ", _vaeDecoderSession.OutputMetadata.Keys));
+        // Timestep tensor shape varies by export: optimum-cli → scalar [],
+        // Microsoft onnxruntime/sdxl-turbo build → rank-1 [1]. Read once.
+        _timestepShape = _unetSession.InputMetadata["timestep"].Dimensions.Length == 1
+            ? [1] : [];
+
+        (_sigmas, _timesteps) = ComputeSchedule(steps);
     }
 
     /// <inheritdoc />
@@ -201,7 +204,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
                 if (promptRef.IsNull)
                 {
                     throw new InvalidOperationException(
-                        $"SDXL-Turbo received a null prompt at row {i}; filter nulls upstream.");
+                        $"SDXL model received a null prompt at row {i}; filter nulls upstream.");
                 }
                 string prompt = promptRef.AsString();
                 byte[] pngBytes = GenerateImage(prompt, cancellationToken);
@@ -213,88 +216,86 @@ public sealed class SdxlTurboModel : IModel, IDisposable
 
     private byte[] GenerateImage(string prompt, CancellationToken cancellationToken)
     {
-        // 1. Tokenize once. The same input_ids feed both text encoders.
+        // 1. Tokenize once — the same input_ids feed both text encoders.
         long[] inputIds = TokenizePrompt(prompt);
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 2. Run both text encoders. Encoder 1 → [1, 77, 768] hidden states.
+        // 2. Run both text encoders.
+        //    Encoder 1 → [1, 77, 768] hidden states.
         //    Encoder 2 → [1, 77, 1280] hidden states + [1, 1280] pooled.
         DenseTensor<float> textEmbeds1 = RunTextEncoder1(inputIds);
-        AssertFinite(textEmbeds1, "text_encoder_1 output");
+        ThrowIfNotFinite(textEmbeds1, "text_encoder_1 output");
         (DenseTensor<float> textEmbeds2, DenseTensor<float> pooledTextEmbeds) =
             RunTextEncoder2(inputIds);
-        AssertFinite(textEmbeds2, "text_encoder_2 hidden output");
-        AssertFinite(pooledTextEmbeds, "text_encoder_2 pooled output");
+        ThrowIfNotFinite(textEmbeds2, "text_encoder_2 hidden output");
+        ThrowIfNotFinite(pooledTextEmbeds, "text_encoder_2 pooled output");
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 3. Concatenate the two encoder outputs along the hidden dim →
-        //    [1, 77, 2048]. This is the encoder_hidden_states fed to the UNet.
+        // 3. Concatenate encoder outputs along the hidden dim → [1, 77, 2048].
         DenseTensor<float> combinedTextEmbeds = ConcatenateLastDim(
             textEmbeds1, textEmbeds2, CLIPMaxTokens);
 
-        // 4. Sample initial latent noise, scale to sigma_max.
-        float[] noise = SampleNoise(LatentChannels * LatentHeight * LatentWidth);
-        DenseTensor<float> noisyLatents = new(
-            noise.Select(n => n * SigmaMax).ToArray(),
-            [1, LatentChannels, LatentHeight, LatentWidth]);
-
-        // 5. Scale model input — Euler scheduler convention.
-        float scaleDivisor = MathF.Sqrt(SigmaMax * SigmaMax + 1f);
-        float[] scaledLatentBuffer = new float[noisyLatents.Length];
-        for (int i = 0; i < noisyLatents.Length; i++)
-        {
-            scaledLatentBuffer[i] = noisyLatents.Buffer.Span[i] / scaleDivisor;
-        }
-        DenseTensor<float> scaledLatents = new(
-            scaledLatentBuffer,
-            [1, LatentChannels, LatentHeight, LatentWidth]);
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // 6. SDXL's added_cond_kwargs:
-        //    - text_embeds = pooled output from encoder 2 [1, 1280]
-        //    - time_ids = [orig_h, orig_w, crop_top, crop_left, target_h, target_w]
-        //                 conventionally [1024, 1024, 0, 0, 1024, 1024] for full-frame.
+        // 4. SDXL's added_cond_kwargs.time_ids:
+        //    [orig_h, orig_w, crop_top, crop_left, target_h, target_w].
         DenseTensor<float> timeIds = new(
             new float[] { ImageHeight, ImageWidth, 0f, 0f, ImageHeight, ImageWidth },
             [1, 6]);
 
-        // 7. Run UNet.
-        DenseTensor<float> noisePred = RunUnet(
-            scaledLatents, combinedTextEmbeds, pooledTextEmbeds, timeIds);
-        AssertFinite(noisePred, "UNet noise_pred output");
+        // 5. Initial noisy latent scaled to sigma_max.
+        float sigmaMax = _sigmas[0];
+        float[] latentBuffer = new float[LatentChannels * LatentHeight * LatentWidth];
+        float[] rawNoise = SampleNoise(latentBuffer.Length);
+        for (int i = 0; i < latentBuffer.Length; i++)
+            latentBuffer[i] = rawNoise[i] * sigmaMax;
 
-        // 8. Single Euler step from sigma_max to 0.
-        float[] cleanLatentBuffer = new float[noisyLatents.Length];
-        for (int i = 0; i < noisyLatents.Length; i++)
+        // 6. Multi-step Euler denoising with Karras sigma schedule.
+        //
+        //    Each step:
+        //      a. Scale model input by c_in = 1/sqrt(sigma^2+1)
+        //      b. Run UNet at the training timestep nearest to this sigma
+        //      c. Euler update: x_next = x + (sigma_next - sigma) * noise_pred
+        //         sigma_next < sigma, so delta < 0 (removes noise each step)
+        for (int step = 0; step < _steps; step++)
         {
-            cleanLatentBuffer[i] = noisyLatents.Buffer.Span[i]
-                - SigmaMax * noisePred.Buffer.Span[i];
+            cancellationToken.ThrowIfCancellationRequested();
+
+            float sigma = _sigmas[step];
+            float sigmaNext = _sigmas[step + 1];
+            float scale = 1f / MathF.Sqrt(sigma * sigma + 1f);
+
+            float[] scaledBuffer = new float[latentBuffer.Length];
+            for (int i = 0; i < latentBuffer.Length; i++)
+                scaledBuffer[i] = latentBuffer[i] * scale;
+            DenseTensor<float> scaledLatents = new(
+                scaledBuffer, [1, LatentChannels, LatentHeight, LatentWidth]);
+
+            DenseTensor<float> noisePred = RunUnet(
+                scaledLatents, combinedTextEmbeds, pooledTextEmbeds, timeIds,
+                timestep: _timesteps[step]);
+            ThrowIfNotFinite(noisePred, $"UNet noise_pred (step {step + 1}/{_steps})");
+
+            float delta = sigmaNext - sigma;
+            ReadOnlySpan<float> pred = noisePred.Buffer.Span;
+            for (int i = 0; i < latentBuffer.Length; i++)
+                latentBuffer[i] += delta * pred[i];
         }
 
-        // 9. Scale latents for VAE decoding (SDXL's scale factor).
-        for (int i = 0; i < cleanLatentBuffer.Length; i++)
-        {
-            cleanLatentBuffer[i] /= VaeScaleFactor;
-        }
+        // 7. Scale latents for VAE decoding.
+        for (int i = 0; i < latentBuffer.Length; i++)
+            latentBuffer[i] /= VaeScaleFactor;
         DenseTensor<float> cleanLatents = new(
-            cleanLatentBuffer,
-            [1, LatentChannels, LatentHeight, LatentWidth]);
-
-        // fp16 max is 65504; after /vae_scale_factor (0.13025) the latent
-        // values must stay below ~8532 or they will overflow to Inf when
-        // cast to fp16 at the VAE decoder boundary, producing all-NaN output.
-        AssertFinite(cleanLatents, "clean_latents (before VAE)");
+            latentBuffer, [1, LatentChannels, LatentHeight, LatentWidth]);
+        ThrowIfNotFinite(cleanLatents, "clean_latents (before VAE)");
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 10. VAE decode → RGB image in [-1, 1].
+        // 8. VAE decode → RGB image in [-1, 1].
         DenseTensor<float> rgbImage = RunVaeDecoder(cleanLatents);
-        AssertFinite(rgbImage, "VAE decoder output");
+        ThrowIfNotFinite(rgbImage, "VAE decoder output");
 
-        // 11. Convert to PNG.
+        // 9. Encode as PNG.
         return EncodeAsPng(rgbImage);
     }
 
@@ -325,8 +326,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
             _textEncoder1Session.Run([input]);
 
-        // optimum fp16 export order: [last_hidden_state, pooler_output, hidden_states.0..N]
-        // Named lookup is explicit; fallback to index 0 in case the name differs.
+        // Named lookup explicit; fallback to index 0 for portability.
         DisposableNamedOnnxValue hidden =
             outputs.FirstOrDefault(o => o.Name.Equals("last_hidden_state", StringComparison.OrdinalIgnoreCase))
             ?? outputs[0];
@@ -347,8 +347,6 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
             _textEncoder2Session.Run([input]);
 
-        // optimum fp16 export order: [text_embeds, last_hidden_state, hidden_states.0..N]
-        // Explicit named lookups; fallback to first non-pooled position for portability.
         DisposableNamedOnnxValue? pooled = outputs.FirstOrDefault(o => o.Name == _encoder2PooledOutputName);
         DisposableNamedOnnxValue? hidden =
             outputs.FirstOrDefault(o => o.Name.Equals("last_hidden_state", StringComparison.OrdinalIgnoreCase))
@@ -384,9 +382,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
 
         for (int t = 0; t < sequenceLength; t++)
         {
-            // Copy A's hidden_a values for this position.
             aSpan.Slice(t * hiddenA, hiddenA).CopyTo(combined.AsSpan(t * totalHidden, hiddenA));
-            // Copy B's hidden_b values immediately after.
             bSpan.Slice(t * hiddenB, hiddenB)
                 .CopyTo(combined.AsSpan(t * totalHidden + hiddenA, hiddenB));
         }
@@ -398,15 +394,10 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         DenseTensor<float> scaledLatents,
         DenseTensor<float> combinedTextEmbeds,
         DenseTensor<float> pooledTextEmbeds,
-        DenseTensor<float> timeIds)
+        DenseTensor<float> timeIds,
+        float timestep)
     {
-        // Timestep shape varies by export: optimum-cli exports use scalar [],
-        // Microsoft's onnxruntime/sdxl-turbo export uses rank-1 [1].
-        // Read the metadata so either model works without code changes.
-        int[] timestepShape = _unetSession.InputMetadata["timestep"].Dimensions.Length == 1
-            ? [1]
-            : [];
-        DenseTensor<float> timestepTensor = new(new float[] { TimestepValue }, timestepShape);
+        DenseTensor<float> timestepTensor = new(new float[] { timestep }, _timestepShape);
 
         var inputs = new List<NamedOnnxValue>
         {
@@ -432,7 +423,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     }
 
     /// <summary>
-    /// Box-Muller Gaussian sampler. Same impl as SD-Turbo.
+    /// Box-Muller Gaussian sampler.
     /// </summary>
     private float[] SampleNoise(int count)
     {
@@ -489,13 +480,65 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         return encoded.ToArray();
     }
 
-    // fp16 can represent values up to ±65504. Float32 values outside this
-    // range silently become ±Inf when cast to Float16, which then produces
-    // NaN inside any layer that does Inf-Inf arithmetic (attention softmax,
-    // group norm, etc.).
-    private const float Fp16Max = 65504f;
+    /// <summary>
+    /// Precomputes the denoising schedule for <paramref name="numSteps"/>
+    /// Euler steps, matching the <c>EulerDiscreteScheduler</c> config used
+    /// by SDXL-Turbo, SD-Turbo, and SDXL-Lightning models.
+    /// </summary>
+    /// <remarks>
+    /// Both ADD-distilled (SDXL-Turbo / SD-Turbo) and Lightning-distilled
+    /// (Juggernaut XL Lightning) models use <c>timestep_spacing="trailing"</c>:
+    /// timesteps are spaced evenly from the high-noise end of the training
+    /// schedule.
+    ///
+    /// For 4 steps this gives <c>[999, 749, 499, 249]</c>; for 8 steps
+    /// <c>[999, 874, 749, 624, 499, 374, 249, 124]</c>. These are the
+    /// specific noise levels the models were distilled to denoise in N steps,
+    /// so using any other spacing (e.g., Karras ρ-space) sends intermediate
+    /// queries outside the distillation distribution and causes degenerate
+    /// output (multiple overlapping faces, blurry noise clouds).
+    /// </remarks>
+    internal static (float[] Sigmas, float[] Timesteps) ComputeSchedule(int numSteps)
+    {
+        const float BetaStart = 0.00085f;
+        const float BetaEnd = 0.012f;
+        const int NumTrainSteps = 1000;
 
-    private static void AssertFinite(DenseTensor<float> tensor, string label)
+        // Precompute sigma for every training timestep from SDXL's
+        // scaled-linear beta schedule.
+        float[] alphasCumprod = new float[NumTrainSteps];
+        float cumAlpha = 1f;
+        for (int i = 0; i < NumTrainSteps; i++)
+        {
+            float t = (float)i / (NumTrainSteps - 1);
+            float sqrtBeta = MathF.Sqrt(BetaStart) + t * (MathF.Sqrt(BetaEnd) - MathF.Sqrt(BetaStart));
+            cumAlpha *= 1f - sqrtBeta * sqrtBeta;
+            alphasCumprod[i] = cumAlpha;
+        }
+
+        float[] trainSigmas = new float[NumTrainSteps];
+        for (int i = 0; i < NumTrainSteps; i++)
+            trainSigmas[i] = MathF.Sqrt((1f - alphasCumprod[i]) / alphasCumprod[i]);
+
+        // "trailing" timestep spacing: np.arange(1000, 0, -1000/N) - 1
+        // For N=4: [999, 749, 499, 249]
+        // For N=1: [999]
+        float stepRatio = (float)NumTrainSteps / numSteps;
+        float[] timesteps = new float[numSteps];
+        float[] sigmas = new float[numSteps + 1];
+        for (int i = 0; i < numSteps; i++)
+        {
+            int t = (int)MathF.Round(NumTrainSteps - i * stepRatio) - 1;
+            t = Math.Clamp(t, 0, NumTrainSteps - 1);
+            timesteps[i] = t;
+            sigmas[i] = trainSigmas[t];
+        }
+        sigmas[numSteps] = 0f;
+
+        return (sigmas, timesteps);
+    }
+
+    private static void ThrowIfNotFinite(DenseTensor<float> tensor, string label)
     {
         ReadOnlySpan<float> span = tensor.Buffer.Span;
         int nanCount = 0, infCount = 0, fp16OverflowCount = 0;
@@ -509,12 +552,6 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             if (v > max) max = v;
             if (v > Fp16Max || v < -Fp16Max) fp16OverflowCount++;
         }
-
-        // Always print to stderr so ranges are visible in the terminal
-        // even when the check passes.
-        Console.Error.WriteLine(
-            $"[SDXL diag] {label} shape=[{string.Join(',', tensor.Dimensions.ToArray())}] " +
-            $"range=[{min:G5}, {max:G5}] nan={nanCount} inf={infCount} fp16_overflow={fp16OverflowCount}");
 
         if (nanCount > 0 || infCount > 0)
             throw new InvalidOperationException(

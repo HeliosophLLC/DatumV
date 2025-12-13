@@ -75,18 +75,18 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
     private const int EosTokenId = 49407;  // <|endoftext|>
     // Pad with EOS to reach CLIPMaxTokens — standard CLIP convention.
 
-    // Diffusion-specific constants from the SD-Turbo scheduler config.
-    // These are stable across SD-Turbo's release; if a future model needs
-    // different values, parse them from scheduler/scheduler_config.json.
-    private const float SigmaMax = 14.6146f;       // sigma at t=999, scaled_linear beta schedule
     private const float VaeScaleFactor = 0.18215f; // SD 2.x VAE scaling
-    private const float TimestepValue = 999f;      // single-step inference target
 
     private readonly InferenceSession _textEncoderSession;
     private readonly InferenceSession _unetSession;
     private readonly InferenceSession _vaeDecoderSession;
     private readonly BpeTokenizer _tokenizer;
     private readonly Random _rng;
+
+    // Euler+Karras denoising schedule precomputed in the constructor.
+    private readonly int _steps;
+    private readonly float[] _sigmas;      // length _steps+1; last entry is 0
+    private readonly float[] _timesteps;   // length _steps; values in [0, 999]
 
     /// <summary>The catalog name this model is registered under.</summary>
     public string Name { get; }
@@ -124,9 +124,15 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
     /// (different output every call); non-null produces reproducible
     /// outputs from the same prompt.
     /// </param>
-    public StableDiffusionTurboModel(string name, string modelDirectory, int? seed = null)
+    /// <param name="steps">
+    /// Number of Euler denoising steps (default 4). Use 1 for maximum
+    /// speed; 4 for good face/detail quality. SD-Turbo was distilled for
+    /// 1–4 steps; beyond 4 quality gains are minimal.
+    /// </param>
+    public StableDiffusionTurboModel(string name, string modelDirectory, int? seed = null, int steps = 4)
     {
         Name = name;
+        _steps = steps;
 
         string textEncoderPath = Path.Combine(modelDirectory, "text_encoder", "model.onnx");
         string unetPath = Path.Combine(modelDirectory, "unet", "model.onnx");
@@ -156,6 +162,7 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
         _tokenizer = BpeTokenizer.Create(vocabStream, mergesStream);
 
         _rng = seed.HasValue ? new Random(seed.Value) : new Random();
+        (_sigmas, _timesteps) = SdxlTurboModel.ComputeSchedule(steps);
     }
 
     /// <inheritdoc />
@@ -213,53 +220,49 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 3. Sample initial latent noise scaled to sigma_max.
-        float[] noise = SampleNoise(LatentChannels * LatentHeight * LatentWidth);
-        DenseTensor<float> noisyLatents = new(
-            noise.Select(n => n * SigmaMax).ToArray(),
-            [1, LatentChannels, LatentHeight, LatentWidth]);
+        // 3. Initial noisy latent scaled to sigma_max.
+        float sigmaMax = _sigmas[0];
+        float[] latentBuffer = new float[LatentChannels * LatentHeight * LatentWidth];
+        float[] rawNoise = SampleNoise(latentBuffer.Length);
+        for (int i = 0; i < latentBuffer.Length; i++)
+            latentBuffer[i] = rawNoise[i] * sigmaMax;
 
-        // 4. Scale model input — Euler scheduler convention: divide by sqrt(sigma^2 + 1).
-        //    For SD-Turbo's single step at sigma_max, this is a constant divisor.
-        float scaleDivisor = MathF.Sqrt(SigmaMax * SigmaMax + 1f);
-        float[] scaledLatentBuffer = new float[noisyLatents.Length];
-        for (int i = 0; i < noisyLatents.Length; i++)
+        // 4. Multi-step Euler denoising with Karras sigma schedule.
+        //    Each step: scale by c_in, run UNet at sigma's timestep, Euler update.
+        for (int step = 0; step < _steps; step++)
         {
-            scaledLatentBuffer[i] = noisyLatents.Buffer.Span[i] / scaleDivisor;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            float sigma = _sigmas[step];
+            float sigmaNext = _sigmas[step + 1];
+            float scale = 1f / MathF.Sqrt(sigma * sigma + 1f);
+
+            float[] scaledBuffer = new float[latentBuffer.Length];
+            for (int i = 0; i < latentBuffer.Length; i++)
+                scaledBuffer[i] = latentBuffer[i] * scale;
+            DenseTensor<float> scaledLatents = new(
+                scaledBuffer, [1, LatentChannels, LatentHeight, LatentWidth]);
+
+            DenseTensor<float> noisePred = RunUnet(scaledLatents, textEmbeds, _timesteps[step]);
+
+            float delta = sigmaNext - sigma;
+            ReadOnlySpan<float> pred = noisePred.Buffer.Span;
+            for (int i = 0; i < latentBuffer.Length; i++)
+                latentBuffer[i] += delta * pred[i];
         }
-        DenseTensor<float> scaledLatents = new(
-            scaledLatentBuffer,
-            [1, LatentChannels, LatentHeight, LatentWidth]);
 
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // 5. Run UNet. Predicts the noise component of the noisy latent.
-        DenseTensor<float> noisePred = RunUnet(scaledLatents, textEmbeds);
-
-        // 6. Single Euler step: from sigma_max to sigma=0 in one move.
-        //    clean_latent = noisy_latent - sigma_max × noise_pred
-        float[] cleanLatentBuffer = new float[noisyLatents.Length];
-        for (int i = 0; i < noisyLatents.Length; i++)
-        {
-            cleanLatentBuffer[i] = noisyLatents.Buffer.Span[i]
-                - SigmaMax * noisePred.Buffer.Span[i];
-        }
-
-        // 7. Scale latents back for VAE decoding (diffusers convention).
-        for (int i = 0; i < cleanLatentBuffer.Length; i++)
-        {
-            cleanLatentBuffer[i] /= VaeScaleFactor;
-        }
+        // 5. Scale latents for VAE decoding.
+        for (int i = 0; i < latentBuffer.Length; i++)
+            latentBuffer[i] /= VaeScaleFactor;
         DenseTensor<float> cleanLatents = new(
-            cleanLatentBuffer,
-            [1, LatentChannels, LatentHeight, LatentWidth]);
+            latentBuffer, [1, LatentChannels, LatentHeight, LatentWidth]);
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 8. VAE decode → RGB image in [-1, 1].
+        // 6. VAE decode → RGB image in [-1, 1].
         DenseTensor<float> rgbImage = RunVaeDecoder(cleanLatents);
 
-        // 9. Convert [-1, 1] floats to [0, 255] uint8 RGBA bytes and PNG-encode.
+        // 7. Convert [-1, 1] floats to [0, 255] uint8 RGBA bytes and PNG-encode.
         return EncodeAsPng(rgbImage);
     }
 
@@ -298,14 +301,12 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
     }
 
     private DenseTensor<float> RunUnet(
-        DenseTensor<float> scaledLatents, DenseTensor<float> textEmbeds)
+        DenseTensor<float> scaledLatents, DenseTensor<float> textEmbeds, float timestep)
     {
-        // UNet input names: "sample", "timestep", "encoder_hidden_states".
-        // The diffusers ONNX export expects timestep as a *scalar* (rank-0
-        // tensor) of type Float — shape [], not [1]. Passing [1] produces
-        // a Split-node failure deep in the time-projection block where the
-        // sinusoidal embedding expansion fans out from a 1-D tensor.
-        DenseTensor<float> timestepTensor = new(new float[] { TimestepValue }, []);
+        // SD-Turbo's diffusers ONNX export expects timestep as a *scalar*
+        // (rank-0 tensor, shape []) — not rank-1 [1]. Passing [1] triggers
+        // a Split-node failure in the sinusoidal time-projection block.
+        DenseTensor<float> timestepTensor = new(new float[] { timestep }, []);
 
         var inputs = new List<NamedOnnxValue>
         {
