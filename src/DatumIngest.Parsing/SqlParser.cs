@@ -2445,19 +2445,21 @@ public static class SqlParser
             isNotNull);
 
     /// <summary>
-    /// Parses <c>OR REPLACE</c> as an optional modifier for <c>CREATE FUNCTION</c>.
-    /// REPLACE is tokenized as a SQL keyword (used in <c>* REPLACE (...)</c>); we
-    /// reuse the same token here.
+    /// Parses <c>OR REPLACE</c> or <c>OR ALTER</c> as an optional overwrite
+    /// modifier for <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c>. Both
+    /// spellings are accepted as synonyms — <c>OR REPLACE</c> follows the
+    /// PostgreSQL convention, <c>OR ALTER</c> follows the T-SQL convention.
     /// </summary>
     private static readonly TokenListParser<SqlToken, bool> OrReplaceParser =
         (from orKw in Token.EqualTo(SqlToken.Or)
-         from replaceKw in Token.EqualTo(SqlToken.Replace)
+         from overwriteKw in Token.EqualTo(SqlToken.Replace)
+                                  .Or(Token.EqualTo(SqlToken.Alter))
          select true
         ).OptionalOrDefault();
 
     /// <summary>
     /// Parses
-    /// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL] [, @p2 TYPE [IS NOT NULL] ...]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>.
+    /// <c>CREATE [OR REPLACE | OR ALTER] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL] [, @p2 TYPE [IS NOT NULL] ...]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>.
     /// The body is any scalar expression and may reference the parameters as
     /// <c>@name</c>, plus any normal column / function names — the planner
     /// inlines the body at every call site so name resolution happens in the
@@ -2513,7 +2515,7 @@ public static class SqlParser
 
     /// <summary>
     /// Parses
-    /// <c>CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>.
+    /// <c>CREATE [OR REPLACE | OR ALTER] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>.
     /// The body is required to be a <c>BEGIN ... END</c> block — procedures
     /// are about composing multiple statements, so a single-statement body
     /// would defeat the point. Parameters use the same <see cref="UdfParameterParser"/>

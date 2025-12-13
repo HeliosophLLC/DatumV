@@ -71,6 +71,18 @@ public class ProcedureIntegrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateProcedure_OrAlter_OverwritesExisting()
+    {
+        // OR ALTER is a T-SQL synonym for OR REPLACE — should behave identically.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE foo() AS BEGIN SELECT 1 END");
+        catalog.Plan("CREATE OR ALTER PROCEDURE foo() AS BEGIN SELECT 99 END");
+
+        Assert.True(catalog.Procedures.TryGet("foo", out ProcedureDescriptor? proc));
+        Assert.Contains("99", proc!.SourceText);
+    }
+
+    [Fact]
     public void CreateProcedure_IfNotExists_NoOpWhenAlreadyRegistered()
     {
         TableCatalog catalog = CreateCatalog();

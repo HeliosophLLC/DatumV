@@ -61,14 +61,18 @@ A bare identifier in the body (no `@`-prefix, not a built-in function)
 resolves against the columns available at the call site — see
 [Scoping Rules](#scoping-rules).
 
-#### OR REPLACE
+#### OR REPLACE / OR ALTER
 
 `CREATE OR REPLACE FUNCTION` overwrites an existing UDF with the same name.
-Without `OR REPLACE`, redefinition is rejected. Useful while iterating on
-prompt templates and call shapes from a session.
+Without it, redefinition is rejected. Useful while iterating on prompt
+templates and call shapes from a session. `CREATE OR ALTER FUNCTION` is
+accepted as a synonym for users coming from T-SQL.
 
 ```sql
 CREATE OR REPLACE FUNCTION shout(@name STRING) AS lower(@name);
+
+-- T-SQL spelling — identical effect:
+CREATE OR ALTER FUNCTION shout(@name STRING) AS lower(@name);
 ```
 
 #### IF NOT EXISTS
@@ -400,7 +404,8 @@ existing readers ignore unknown top-level fields.
 - **Scalar only.** UDFs return a single value per call. Table-valued
   functions are not supported.
 - **One signature per name.** Overloading by parameter count or types
-  is not supported. Re-define an existing UDF with `CREATE OR REPLACE`.
+  is not supported. Re-define an existing UDF with `CREATE OR REPLACE`
+  (or `CREATE OR ALTER`).
 - **No compiled code.** UDFs are SQL expression macros. Authoring UDFs
   in C# or another host language is not supported through this surface.
 - **Subquery bodies don't see parameters.** Parameter substitution does

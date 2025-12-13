@@ -54,7 +54,8 @@ public sealed class ProcedureRegistry
     /// Registers <paramref name="descriptor"/>. By default, throws if a
     /// procedure with the same name already exists. Pass
     /// <paramref name="replace"/> to overwrite — used by
-    /// <c>CREATE OR REPLACE PROCEDURE</c>.
+    /// <c>CREATE OR REPLACE PROCEDURE</c> and the T-SQL synonym
+    /// <c>CREATE OR ALTER PROCEDURE</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// A procedure with the same name is already registered and
@@ -72,7 +73,7 @@ public sealed class ProcedureRegistry
         {
             throw new InvalidOperationException(
                 $"Procedure '{descriptor.Name}' is already registered. " +
-                "Use CREATE OR REPLACE PROCEDURE to overwrite.");
+                "Use CREATE OR REPLACE PROCEDURE (or CREATE OR ALTER PROCEDURE) to overwrite.");
         }
     }
 

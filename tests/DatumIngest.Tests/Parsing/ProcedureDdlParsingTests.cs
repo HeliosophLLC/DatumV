@@ -75,6 +75,16 @@ public class ProcedureDdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void Create_OrAlter_SetsFlag()
+    {
+        // T-SQL spelling — accepted as a synonym for OR REPLACE.
+        CreateProcedureStatement create = Parse<CreateProcedureStatement>(
+            "CREATE OR ALTER PROCEDURE noop() AS BEGIN SELECT 1 END");
+
+        Assert.True(create.OrReplace);
+    }
+
+    [Fact]
     public void Create_IfNotExists_SetsFlag()
     {
         CreateProcedureStatement create = Parse<CreateProcedureStatement>(

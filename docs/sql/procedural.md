@@ -280,7 +280,7 @@ EXEC proc.compute_cohort(0.5)
 ### Syntax
 
 ```sql
-CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(
+CREATE [OR REPLACE | OR ALTER] PROCEDURE [IF NOT EXISTS] name(
     @param1 TYPE [IS NOT NULL] [, @param2 TYPE [IS NOT NULL] ...]
 ) AS BEGIN
     ...statements...
@@ -290,6 +290,10 @@ DROP PROCEDURE [IF EXISTS] name;
 
 EXEC proc.name(arg1, arg2);
 ```
+
+`OR REPLACE` (PostgreSQL convention) and `OR ALTER` (T-SQL convention)
+are accepted as synonyms — both overwrite an existing procedure with the
+same name.
 
 The body is required to be a `BEGIN ... END` block — a procedure that
 collapses to a single statement is a UDF, not a procedure.

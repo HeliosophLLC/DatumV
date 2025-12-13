@@ -67,6 +67,20 @@ public class UdfIntegrationTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateFunction_OrAlter_OverwritesExisting()
+    {
+        // OR ALTER is a T-SQL synonym for OR REPLACE — should behave identically.
+        TableCatalog catalog = CreateCatalog();
+
+        catalog.Plan("CREATE FUNCTION shout(@s STRING) AS upper(@s)");
+        catalog.Plan("CREATE OR ALTER FUNCTION shout(@s STRING) AS lower(@s)");
+
+        Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
+        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.Body);
+        Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CreateFunction_IfNotExists_NoOpWhenAlreadyRegistered()
     {
         TableCatalog catalog = CreateCatalog();

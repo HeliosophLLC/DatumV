@@ -105,6 +105,17 @@ public class UdfDdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void Create_OrAlter_SetsFlag()
+    {
+        // T-SQL spelling — accepted as a synonym for OR REPLACE.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE OR ALTER FUNCTION shout(@name STRING) AS upper(@name)");
+
+        Assert.True(create.OrReplace);
+        Assert.False(create.IfNotExists);
+    }
+
+    [Fact]
     public void Create_IfNotExists_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(

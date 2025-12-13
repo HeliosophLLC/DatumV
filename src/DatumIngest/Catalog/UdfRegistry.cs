@@ -57,7 +57,8 @@ public sealed class UdfRegistry
     /// <summary>
     /// Registers <paramref name="descriptor"/>. By default, throws if a UDF
     /// with the same name already exists. Pass <paramref name="replace"/> to
-    /// overwrite — used by <c>CREATE OR REPLACE FUNCTION</c>.
+    /// overwrite — used by <c>CREATE OR REPLACE FUNCTION</c> and the T-SQL
+    /// synonym <c>CREATE OR ALTER FUNCTION</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// A UDF with the same name is already registered and <paramref name="replace"/> is <see langword="false"/>.
@@ -73,7 +74,7 @@ public sealed class UdfRegistry
         if (!_entries.TryAdd(descriptor.Name, descriptor))
         {
             throw new InvalidOperationException(
-                $"UDF '{descriptor.Name}' is already registered. Use CREATE OR REPLACE FUNCTION to overwrite.");
+                $"UDF '{descriptor.Name}' is already registered. Use CREATE OR REPLACE FUNCTION (or CREATE OR ALTER FUNCTION) to overwrite.");
         }
     }
 
