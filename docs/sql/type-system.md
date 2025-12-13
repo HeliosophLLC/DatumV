@@ -285,6 +285,39 @@ SELECT try_cast(raw_value, Float64) AS parsed FROM t
 SELECT * FROM t WHERE can_cast(score, Int32) AND cast(score, Int32) > 0
 ```
 
+#### Arithmetic kind promotion
+
+Binary arithmetic (`+ - * % / **`) and unary negate pick a result kind
+from the operand kinds. The rules mirror C# integer-promotion semantics
+plus a SQL-ergonomic adjustment for division:
+
+| Operands | `+ - * %` | `/` | `**` |
+| --- | --- | --- | --- |
+| Two integers ≤ 32 bits (or with `Boolean`) | `Int32` | `Float32` | `Float32` |
+| Any `UInt32` / `Int64` / `UInt64` operand | `Int64` | `Float32` | `Float32` |
+| Any `Int128` / `UInt128` operand | `Int128` | `Float32` | `Float32` |
+| Any `Decimal` operand | `Decimal` | `Decimal` | `Float64` |
+| Any `Float64` operand | `Float64` | `Float64` | `Float64` |
+| Any `Float32` operand (no `Float64`) | `Float32` | `Float32` | `Float32` |
+| Any `Float16` operand (no wider float) | `Float32` | `Float32` | `Float32` |
+| `Duration + Duration`, `Duration - Duration` | `Duration` | n/a | n/a |
+| Any other `Time` / `Duration` mix | `Float32` | `Float32` | `Float32` |
+| Any `String` operand | parsed → `Float64` | parsed → `Float64` | parsed → `Float64` |
+
+So `Int64 + Int64 → Int64` (the wider integer is preserved),
+`Decimal × Float → Float64`, `5 / 2 → Float32` (always float for SQL
+ergonomics so users get `2.5`, not `2`), and `Int128 ± Int32 → Int128`.
+
+If you want truncated integer division, cast the result:
+
+```sql
+SELECT CAST(a / b AS Int64) FROM t
+```
+
+The promoted result kind also flows through to schema introspection —
+`SELECT a + b` reports the same kind in its output schema that the row
+actually carries.
+
 ### Transaction-Stable Temporal Constants
 
 PostgreSQL-compatible keywords that return the current date/time. All references within a statement batch resolve to the **same value** (the batch start time), matching PostgreSQL's transaction-stable semantics.

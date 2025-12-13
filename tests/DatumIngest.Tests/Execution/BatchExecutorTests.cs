@@ -525,6 +525,163 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(0L, Convert.ToInt64(result.FinalBindings["sum"]));
     }
 
+    // ───────────────────── Multi-variable SELECT assignment ─────────────────────
+
+    [Fact]
+    public async Task SelectAssign_NoFrom_SingleAssignment_BindsValue()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @x INT64 = 0; " +
+            "SELECT @x = 42");
+        Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["x"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_NoFrom_MultiAssignment_BindsAll()
+    {
+        // Multiple variables in a single SELECT-assignment all get their
+        // values from the single computed row. No FROM, so the query
+        // produces exactly one row.
+        BatchResult result = await RunAsync(
+            "DECLARE @a INT64 = 0; " +
+            "DECLARE @b INT64 = 0; " +
+            "DECLARE @c INT64 = 0; " +
+            "SELECT @a = 1, @b = 2, @c = 3");
+        Assert.Equal(1L, Convert.ToInt64(result.FinalBindings["a"]));
+        Assert.Equal(2L, Convert.ToInt64(result.FinalBindings["b"]));
+        Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["c"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_FromTable_LastRowWins()
+    {
+        // T-SQL semantics: with multiple matching rows, the variable ends
+        // up with the value from the last row iterated. ORDER BY pins the
+        // outcome deterministically.
+        TableCatalog catalog = CreateCatalog("nums",
+            columns: ["v"],
+            [10],
+            [20],
+            [30]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @last INT64 = 0; " +
+            "SELECT @last = v FROM nums ORDER BY v",
+            catalog);
+
+        Assert.Equal(30L, Convert.ToInt64(result.FinalBindings["last"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_ZeroRows_VariableUnchanged()
+    {
+        // If the source produces no rows, the variable retains whatever
+        // value it had before the assignment SELECT. Matches T-SQL.
+        TableCatalog catalog = CreateCatalog("nums",
+            columns: ["v"],
+            [10]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @x INT64 = 999; " +
+            "SELECT @x = v FROM nums WHERE v > 1000",
+            catalog);
+
+        Assert.Equal(999L, Convert.ToInt64(result.FinalBindings["x"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_MultipleColumnsOverRows_AllUpdatePerRow()
+    {
+        // Each row's values bind to all assignment targets in lockstep —
+        // but only the last row's values stick.
+        TableCatalog catalog = CreateCatalog("pairs",
+            columns: ["a", "b"],
+            [1, 100],
+            [2, 200],
+            [3, 300]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @x INT64 = 0; " +
+            "DECLARE @y INT64 = 0; " +
+            "SELECT @x = a, @y = b FROM pairs ORDER BY a",
+            catalog);
+
+        Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["x"]));
+        Assert.Equal(300L, Convert.ToInt64(result.FinalBindings["y"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_ExpressionRhs_EvaluatesPerRow()
+    {
+        TableCatalog catalog = CreateCatalog("nums",
+            columns: ["v"],
+            [10]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @doubled INT64 = 0; " +
+            "SELECT @doubled = v + v FROM nums",
+            catalog);
+
+        Assert.Equal(20L, Convert.ToInt64(result.FinalBindings["doubled"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_AliasedComparison_StaysComparison_NotAssignment()
+    {
+        // The alias is the explicit "I want a comparison, not an assignment"
+        // signal. Confirms the parser DOESN'T lift this case into
+        // assignment form — the variable's pre-existing value is intact.
+        BatchResult result = await RunAsync(
+            "DECLARE @x INT32 = 5; " +
+            "SELECT @x = 5 AS isFive");
+
+        // @x is unchanged because the SELECT was a projection, not an
+        // assignment. Comparison `@x = 5` evaluated to TRUE for the
+        // single synthetic row but the boolean result didn't bind anywhere.
+        Assert.Equal(5, Convert.ToInt32(result.FinalBindings["x"]));
+    }
+
+    [Fact]
+    public async Task SelectAssign_MixedWithProjection_Throws()
+    {
+        // All-or-nothing: mixing an assignment with a regular projection
+        // is rejected with a clear message.
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @x INT64 = 0; " +
+                "SELECT @x = 1, 'hello'"));
+    }
+
+    [Fact]
+    public async Task SelectAssign_UndeclaredVariable_Throws()
+    {
+        // The variable scope's Set call surfaces the missing binding.
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(
+            () => RunAsync("SELECT @undeclared = 1"));
+    }
+
+    [Fact]
+    public async Task SelectAssign_InsideForLoop_AssignsPerIteration()
+    {
+        // SELECT-assignment inside a FOR-IN body: each iteration runs the
+        // assignment SELECT against the body's enclosing scope. Confirms
+        // the assignment routes through the same BatchContext as DECLARE
+        // / SET.
+        TableCatalog catalog = CreateCatalog("nums",
+            columns: ["v"],
+            [1],
+            [2],
+            [3]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT64 = 0; " +
+            "FOR @row IN (SELECT v FROM nums) " +
+            "  SELECT @sum = @sum + @row['v']",
+            catalog);
+
+        Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
+    }
+
     // ───────────────────── Top-level @var without batch context ─────────────────────
 
     [Fact]

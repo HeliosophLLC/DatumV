@@ -186,7 +186,9 @@ Follows the PostgreSQL convention — no `TABLE` keyword required.
 
 ### Batch Execution
 
-Multiple statements can be separated by semicolons:
+Multiple statements can be combined into a single batch. Statements
+execute sequentially; on failure, execution stops and no further
+statements run.
 
 ```sql
 DROP TABLE IF EXISTS features;
@@ -197,10 +199,16 @@ UPDATE features SET risk = 0.9 WHERE churn_score > 0.8;
 ANALYZE features
 ```
 
-Statements execute sequentially. On failure, execution stops and no further statements run.
+Semicolons between statements are optional — statement parsers are
+keyword-anchored, so consecutive statements without a separator
+disambiguate cleanly. Trailing semicolons are silently ignored.
+
+For procedural batches — variables, conditionals, loops, multi-variable
+`SELECT` assignment — see [Procedural Statements](procedural.md).
 
 ## See Also
 
 - [Schema Introspection](schema-introspection.md)
 - [Type System](type-system.md)
 - [SELECT](select.md)
+- [Procedural Statements](procedural.md)

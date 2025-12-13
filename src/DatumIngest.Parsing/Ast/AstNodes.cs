@@ -121,8 +121,23 @@ public enum MaterializationHint
 /// <summary>
 /// A single column in the SELECT list, representing either a named expression
 /// or a wildcard (* or table.*).
+/// <para>
+/// <see cref="AssignedVariableName"/> is non-<see langword="null"/> when this
+/// column is a procedural-variable assignment of the form
+/// <c>@var = expression</c> at the top level of a SELECT list (with no
+/// alias). The parser rewrites the matching shape so <see cref="Expression"/>
+/// holds the right-hand-side value and <see cref="AssignedVariableName"/>
+/// holds the bare variable name (no <c>@</c> prefix). The procedural batch
+/// executor uses this to route the SELECT into the variable-assignment
+/// path instead of yielding rows; comparing <c>@var</c> to a value
+/// remains expressible by adding an alias (<c>SELECT @a = 5 AS isFive</c>)
+/// or wrapping it (<c>SELECT (@a = 5) AS isFive</c>).
+/// </para>
 /// </summary>
-public record SelectColumn(Expression Expression, string? Alias = null);
+public record SelectColumn(
+    Expression Expression,
+    string? Alias = null,
+    string? AssignedVariableName = null);
 
 /// <summary>
 /// A column replacement entry in a <c>REPLACE (expr AS name, ...)</c> clause.

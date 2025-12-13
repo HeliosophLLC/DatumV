@@ -153,6 +153,21 @@
           href: sql/udf.md#introspection
         - name: Persistence
           href: sql/udf.md#persistence
+    - name: Procedural Statements
+      href: sql/procedural.md
+      items:
+        - name: Variables (DECLARE / SET)
+          href: sql/procedural.md#variables
+        - name: Multi-variable SELECT assignment
+          href: sql/procedural.md#multi-variable-select-assignment
+        - name: Block Scoping (BEGIN / END)
+          href: sql/procedural.md#block-scoping
+        - name: Conditional Branch (IF / ELSE)
+          href: sql/procedural.md#conditional-branch-if--else
+        - name: WHILE
+          href: sql/procedural.md#while
+        - name: FOR (counter and cursor)
+          href: sql/procedural.md#for
 
 - name: Functions
   items:

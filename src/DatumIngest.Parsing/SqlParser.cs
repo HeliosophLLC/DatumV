@@ -1255,7 +1255,16 @@ public static class SqlParser
         from replaced in ReplaceColumnsClause.Try().AsNullable().OptionalOrDefault()
         select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star), excluded, replaced);
 
-    /// <summary>A single expression column with optional AS alias.</summary>
+    /// <summary>
+    /// A single expression column with optional <c>AS</c> alias. After
+    /// parsing, the result is post-processed: a no-alias column whose
+    /// expression is <c>@var = rhs</c> at the top level is rewritten into
+    /// an assignment-form <see cref="SelectColumn"/> (the RHS becomes the
+    /// projected expression, the variable name is lifted onto
+    /// <see cref="SelectColumn.AssignedVariableName"/>). Adding an alias
+    /// or extra parens disables the lift, so the comparison form remains
+    /// reachable when the user actually wants it.
+    /// </summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ExpressionColumn =
         from expression in ExpressionParser
         from alias in (
@@ -1264,7 +1273,26 @@ public static class SqlParser
             select GetTokenText(name)
         ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
-        select new SelectColumn(expression, alias);
+        select MakeSelectColumn(expression, alias);
+
+    /// <summary>
+    /// Lifts a bare <c>@var = rhs</c> shape (no alias) into the assignment
+    /// form. Anything else passes through unchanged.
+    /// </summary>
+    private static SelectColumn MakeSelectColumn(Expression expression, string? alias)
+    {
+        if (alias is null
+            && expression is BinaryExpression
+            {
+                Operator: BinaryOperator.Equal,
+                Left: VariableExpression v,
+                Right: Expression rhs,
+            })
+        {
+            return new SelectColumn(rhs, Alias: null, AssignedVariableName: v.Name);
+        }
+        return new SelectColumn(expression, alias);
+    }
 
     /// <summary>A single column in the SELECT list.</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ColumnItem =
