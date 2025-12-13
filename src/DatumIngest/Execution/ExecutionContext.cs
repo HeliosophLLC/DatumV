@@ -319,6 +319,33 @@ public sealed class ExecutionContext
     public IModelStreamingSink? StreamingSink { get; init; }
 
     /// <summary>
+    /// Borrowed reference to the enclosing batch's variable-payload arena.
+    /// When this query is running inside a procedural batch, the procedural
+    /// executor sets this from <see cref="BatchContext.VariableStore"/> so
+    /// the evaluator can resolve <c>VariableExpression</c> reads against
+    /// the procedure-lifetime arena rather than the per-query
+    /// <see cref="Store"/>. <see langword="null"/> for top-level queries
+    /// outside any procedural batch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Borrowed, not owned.</strong> The <see cref="BatchContext"/>
+    /// holds the baseline reference; this property is a read-only handle.
+    /// The per-query <see cref="Store"/> rent/return cycle never touches
+    /// its refcount, so it survives every child query's lifetime.
+    /// </para>
+    /// </remarks>
+    public Arena? VariableStore { get; init; }
+
+    /// <summary>
+    /// Borrowed reference to the enclosing batch's variable scope chain.
+    /// Walked by the evaluator (innermost frame first) when resolving
+    /// <c>VariableExpression</c> reads. <see langword="null"/> for
+    /// top-level queries outside any procedural batch.
+    /// </summary>
+    public VariableScope? VariableScope { get; init; }
+
+    /// <summary>
     /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each
     /// <see cref="DatumFile.Sidecar.IBlobSource"/> in the catalog has a unique
     /// <c>storeId</c> byte stamped onto its DataValues at decode time; image
