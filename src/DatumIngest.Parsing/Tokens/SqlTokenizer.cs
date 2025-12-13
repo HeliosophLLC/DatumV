@@ -388,14 +388,20 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXEC"), SqlToken.Exec, requireDelimiters: true)
 
-            // Procedural keywords (BEGIN/END/IF/ELSE/WHILE/FOR/DECLARE/SET/TO).
-            // BEGIN, WHILE, DECLARE, TO are added here; END/IF/ELSE/FOR/SET are
-            // already declared above for other uses (CASE, IF NOT EXISTS, FOR/SET
-            // in PIVOT/UPDATE) but reuse the same tokens for procedural code.
+            // Procedural keywords (BEGIN/END/IF/ELSE/WHILE/FOR/DECLARE/SET/TO/BREAK/CONTINUE).
+            // BEGIN, WHILE, DECLARE, TO, BREAK, CONTINUE are added here; END/IF/ELSE/FOR/SET
+            // are already declared above for other uses (CASE, IF NOT EXISTS, FOR/SET in
+            // PIVOT/UPDATE) but reuse the same tokens for procedural code.
             .Match(Span.EqualToIgnoreCase("BEGIN"), SqlToken.Begin, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("WHILE"), SqlToken.While, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DECLARE"), SqlToken.Declare, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("TO"), SqlToken.To, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("BREAK"), SqlToken.Break, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("CONTINUE"), SqlToken.Continue, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PRINT"), SqlToken.Print, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TRY"), SqlToken.Try, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("CATCH"), SqlToken.Catch, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("FINALLY"), SqlToken.Finally, requireDelimiters: true)
 
             // Type keywords — reserved names for DataKind type literals
             .Match(Span.EqualToIgnoreCase("BOOLEAN"), SqlToken.TypeKeyword, requireDelimiters: true)

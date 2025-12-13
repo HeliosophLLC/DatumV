@@ -257,6 +257,17 @@ public sealed class CatalogStore
     }
 
     /// <summary>
+    /// Parses a serialised expression fragment back into an AST by wrapping
+    /// it in a synthetic <c>SELECT</c> and pulling the first column —
+    /// the same trick used to round-trip UDF bodies.
+    /// </summary>
+    private static Expression ParseExpressionFragment(string fragment)
+    {
+        QueryExpression q = SqlParser.Parse($"SELECT {fragment}");
+        return ((SelectQueryExpression)q).Statement.Columns[0].Expression;
+    }
+
+    /// <summary>
     /// Re-parses the entry's body into an AST and validates it via the
     /// inliner against the partially-loaded registry, so cycles introduced
     /// in the file surface here. Returns <see langword="null"/> when the
@@ -292,12 +303,26 @@ public sealed class CatalogStore
             return null;
         }
 
-        IReadOnlyList<UdfParameter> parameters = entry.Parameters is null
-            ? []
-            : entry.Parameters
-                .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
-                .Select(p => new UdfParameter(p.Name!, p.Type!, p.IsNotNull))
-                .ToList();
+        IReadOnlyList<UdfParameter> parameters;
+        try
+        {
+            parameters = entry.Parameters is null
+                ? []
+                : entry.Parameters
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
+                    .Select(p => new UdfParameter(
+                        p.Name!,
+                        p.Type!,
+                        p.IsNotNull,
+                        p.Default is null ? null : ParseExpressionFragment(p.Default)))
+                    .ToList();
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
+        {
+            warnings.Add(
+                $"Skipping UDF '{entry.Name}': default-value expression failed to parse — {ex.Message}");
+            return null;
+        }
 
         UdfDescriptor descriptor = new(
             entry.Name!,
@@ -348,6 +373,9 @@ public sealed class CatalogStore
                                 Name = p.Name,
                                 Type = p.TypeName,
                                 IsNotNull = p.IsNotNull,
+                                Default = p.Default is null
+                                    ? null
+                                    : QueryExplainer.FormatExpression(p.Default),
                             })
                             .ToList(),
                         ReturnType = e.ReturnTypeName,
@@ -415,6 +443,15 @@ internal sealed class CatalogFileUdfParameterEntry
     public string? Name { get; set; }
     public string? Type { get; set; }
     public bool IsNotNull { get; set; }
+
+    /// <summary>
+    /// Persisted default-value expression, rendered as a SQL fragment via
+    /// <see cref="QueryExplainer.FormatExpression"/>. Re-parsed on load
+    /// using the same trick as <see cref="CatalogFileUdfEntry.Body"/>:
+    /// wrap in a synthetic <c>SELECT</c> and pull the first column.
+    /// <see langword="null"/> when the parameter has no default.
+    /// </summary>
+    public string? Default { get; set; }
 }
 
 /// <summary>

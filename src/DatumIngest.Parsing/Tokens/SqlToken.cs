@@ -325,6 +325,24 @@ public enum SqlToken
     /// <summary>The TO keyword (counter-FOR loop range, as in <c>FOR @i = 1 TO 10</c>).</summary>
     To,
 
+    /// <summary>The BREAK keyword (early exit from the innermost WHILE/FOR loop).</summary>
+    Break,
+
+    /// <summary>The CONTINUE keyword (skip to the next iteration of the innermost WHILE/FOR loop).</summary>
+    Continue,
+
+    /// <summary>The PRINT keyword (emits a string value to the batch event stream).</summary>
+    Print,
+
+    /// <summary>The TRY keyword (procedural exception-handling guard).</summary>
+    Try,
+
+    /// <summary>The CATCH keyword (procedural exception handler, paired with TRY).</summary>
+    Catch,
+
+    /// <summary>The FINALLY keyword (cleanup block that always runs after TRY/CATCH).</summary>
+    Finally,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>

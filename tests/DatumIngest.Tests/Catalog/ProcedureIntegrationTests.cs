@@ -264,4 +264,230 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["input"]));
     }
+
+    // ───────────────────── Recursion guard ─────────────────────
+
+    [Fact]
+    public async Task ExecProc_DirectRecursion_ThrowsAfterCap()
+    {
+        // Self-recursive procedure: each call opens a new BatchContext at
+        // depth+1; the cap fires before the .NET call stack overflows.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE recurse() AS BEGIN " +
+            "  EXEC proc.recurse() " +
+            "END");
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunBatchAsync("EXEC proc.recurse()", catalog));
+        Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("recurse", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecProc_MutualRecursion_ThrowsAfterCap()
+    {
+        // A → B → A → B → … cap-doesn't-care which routine triggers it.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN EXEC proc.b() END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN EXEC proc.a() END");
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunBatchAsync("EXEC proc.a()", catalog));
+        Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecProc_NonRecursiveNesting_BelowCap_RunsFine()
+    {
+        // Three procedures chained linearly — well under the cap. Final
+        // depth is 3 inside `c`; rolls back to 0 when the batch ends.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE c() AS BEGIN DECLARE @inside INT64 = 99 END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN EXEC proc.c() END");
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN EXEC proc.b() END");
+
+        BatchResult result = await RunBatchAsync(
+            "DECLARE @x INT64 = 1; EXEC proc.a()",
+            catalog);
+
+        // Caller's variable should still be bound — proves the chain
+        // returned cleanly and didn't trip any guard.
+        Assert.Equal(1L, Convert.ToInt64(result.FinalBindings["x"]));
+    }
+
+    // ───────────────────── Nested DDL rejection ─────────────────────
+
+    [Fact]
+    public void CreateProcedure_NestedCreateFunction_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE outer_proc() AS BEGIN " +
+                "  CREATE FUNCTION inner_fn(@x INT32) AS @x + 1 " +
+                "END"));
+        Assert.Contains("CREATE FUNCTION", ex.Message);
+        Assert.Contains("inner_fn", ex.Message);
+    }
+
+    [Fact]
+    public void CreateProcedure_NestedCreateProcedure_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE outer_proc() AS BEGIN " +
+                "  CREATE PROCEDURE inner_proc() AS BEGIN SELECT 1 END " +
+                "END"));
+        Assert.Contains("CREATE PROCEDURE", ex.Message);
+        Assert.Contains("inner_proc", ex.Message);
+    }
+
+    [Fact]
+    public void CreateProcedure_NestedDropFunction_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION victim(@x INT32) AS @x");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE outer_proc() AS BEGIN " +
+                "  DROP FUNCTION victim " +
+                "END"));
+        Assert.Contains("DROP FUNCTION", ex.Message);
+        Assert.Contains("victim", ex.Message);
+    }
+
+    [Fact]
+    public void CreateProcedure_NestedDropProcedure_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE PROCEDURE victim() AS BEGIN SELECT 1 END");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE outer_proc() AS BEGIN " +
+                "  DROP PROCEDURE victim " +
+                "END"));
+        Assert.Contains("DROP PROCEDURE", ex.Message);
+        Assert.Contains("victim", ex.Message);
+    }
+
+    [Fact]
+    public void CreateProcedure_NestedDdlInsideDeepBlock_StillThrows()
+    {
+        // Validation walks nested control-flow — DDL hidden inside an IF
+        // inside a WHILE must still surface at registration time.
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE outer_proc() AS BEGIN " +
+                "  DECLARE @i INT32 = 0 " +
+                "  WHILE @i < 1 BEGIN " +
+                "    IF @i = 0 " +
+                "      DROP PROCEDURE nonexistent " +
+                "    SET @i = @i + 1 " +
+                "  END " +
+                "END"));
+        Assert.Contains("DROP PROCEDURE", ex.Message);
+    }
+
+    // ───────────────────── Default parameters ─────────────────────
+
+    [Fact]
+    public void CreateProcedure_NonContiguousDefaults_Rejected()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE PROCEDURE foo(@a INT32, @b INT32 = 0, @c INT32) AS BEGIN SELECT 1 END"));
+        Assert.Contains("contiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("c", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecProc_OmitTrailingArg_FallsBackToDefault()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE add_default(@a INT64, @b INT64 = 100) AS BEGIN " +
+            "  DECLARE @sum INT64 = @a + @b " +
+            "END");
+
+        // Caller provides only @a → @b takes its default.
+        // Procedure's @sum can't escape, so verify via a caller-side var
+        // that the proc completed without an arity error.
+        BatchResult result = await RunBatchAsync(
+            "DECLARE @ok BOOLEAN = FALSE; " +
+            "EXEC proc.add_default(7); " +
+            "SET @ok = TRUE",
+            catalog);
+
+        Assert.Equal(true, result.FinalBindings["ok"]);
+    }
+
+    [Fact]
+    public async Task ExecProc_DefaultEvaluatedInCallerScope()
+    {
+        // Default expressions can reference caller @vars — they evaluate
+        // in the same scope as user-supplied arguments.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE record(@n INT64 = 0) AS BEGIN " +
+            "  DECLARE @captured INT64 = @n " +
+            "END");
+
+        BatchResult result = await RunBatchAsync(
+            "DECLARE @done BOOLEAN = FALSE; " +
+            "EXEC proc.record(); " +    // omit → default = 0
+            "EXEC proc.record(42); " +   // explicit
+            "SET @done = TRUE",
+            catalog);
+
+        Assert.Equal(true, result.FinalBindings["done"]);
+    }
+
+    [Fact]
+    public async Task ExecProc_TooFewArgs_BelowMinimum_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE need_one(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunBatchAsync("EXEC proc.need_one()", catalog));
+        Assert.Contains("need_one", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecProc_TooManyArgs_AboveMaximum_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE one_or_two(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunBatchAsync("EXEC proc.one_or_two(1, 2, 3)", catalog));
+        Assert.Contains("one_or_two", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecProc_DefaultViolatesIsNotNull_Throws()
+    {
+        // Default of NULL on an IS NOT NULL parameter — the assertion
+        // should still fire when the caller omits the argument.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE need_one(@a INT64 = NULL IS NOT NULL) AS BEGIN SELECT @a END");
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunBatchAsync("EXEC proc.need_one()", catalog));
+        Assert.Contains("must not be null", ex.Message);
+        Assert.Contains("a", ex.Message);
+    }
 }

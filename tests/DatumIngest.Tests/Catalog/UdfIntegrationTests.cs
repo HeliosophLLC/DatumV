@@ -188,6 +188,60 @@ public class UdfIntegrationTests : ServiceTestBase
             "CREATE FUNCTION a(@x INT32) AS @x; CREATE FUNCTION b(@y INT32) AS @y"));
     }
 
+    // ───────────────────── Default parameters ─────────────────────
+
+    [Fact]
+    public void CreateFunction_NonContiguousDefaults_RejectedAtRegistration()
+    {
+        // A required parameter after a defaulted one would make positional
+        // argument matching ambiguous. The catalog rejects the shape eagerly.
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan(
+                "CREATE FUNCTION mid(@a INT32, @b INT32 = 0, @c INT32) AS @a + @b + @c"));
+        Assert.Contains("contiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("c", ex.Message);
+    }
+
+    [Fact]
+    public void CreateFunction_DefaultsAtTail_AcceptedAndQueryable()
+    {
+        // `udf.add(2)` should fill `@b` from its default of 5 → 7. We can't
+        // execute against an empty catalog, but we can verify a SELECT
+        // referencing the partial-arity call plans without complaint.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b");
+
+        // Plan a SELECT that calls the UDF with only the required arg.
+        // Inlining happens at plan time, so a malformed default would
+        // throw here.
+        catalog.Plan("SELECT udf.add(2)");
+        catalog.Plan("SELECT udf.add(2, 10)");
+    }
+
+    [Fact]
+    public void CreateFunction_TooFewArgs_BelowMinimum_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 0) AS @a + @b");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan("SELECT udf.add()"));
+        Assert.Contains("add", ex.Message);
+    }
+
+    [Fact]
+    public void CreateFunction_TooManyArgs_AboveMaximum_Throws()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 0) AS @a + @b");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan("SELECT udf.add(1, 2, 3)"));
+        Assert.Contains("add", ex.Message);
+    }
+
     private static string ExplainToText(ExplainPlanNode node)
     {
         System.Text.StringBuilder sb = new();

@@ -77,6 +77,19 @@ public sealed class BatchContext : IDisposable
     public VariableScope VariableScope { get; }
 
     /// <summary>
+    /// Number of procedure-call frames currently above this context's
+    /// invocation. The top-level batch is depth 0; the body of an
+    /// <c>EXEC proc.X(...)</c> runs in a fresh <see cref="BatchContext"/>
+    /// at depth 1; any <c>EXEC proc.Y(...)</c> inside that body opens a
+    /// further context at depth 2; and so on. The procedure executor
+    /// rejects new calls once the depth would exceed
+    /// <see cref="BatchExecutor.MaxProcedureCallDepth"/> so a self- or
+    /// mutually recursive procedure fails fast with a clear message
+    /// instead of running until the call stack overflows.
+    /// </summary>
+    public int ProcedureCallDepth { get; init; }
+
+    /// <summary>
     /// Stabilises <paramref name="value"/> from <paramref name="sourceStore"/>
     /// into <see cref="VariableStore"/> and binds it to <paramref name="name"/>
     /// in the topmost frame of <see cref="VariableScope"/>. Throws if the

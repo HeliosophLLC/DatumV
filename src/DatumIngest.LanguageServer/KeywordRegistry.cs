@@ -345,6 +345,22 @@ internal static class KeywordRegistry
         [SqlToken.Time] = [],           // Component: part of AT TIME ZONE
         [SqlToken.Zone] = [],           // Component: part of AT TIME ZONE
         [SqlToken.TypeKeyword] = [],    // Type keywords are handled via ColumnTypeKeywords, not as SqlToken completions
+
+        // Procedural keywords — not currently surfaced as standalone keyword
+        // completions because there is no procedural-statement-start zone yet.
+        // Mapped to empty arrays so the coverage test sees an entry without
+        // demanding a zone slot. Promote to non-empty entries when a
+        // ProcedureBody / LoopBody completion zone is added.
+        [SqlToken.Begin] = [],
+        [SqlToken.While] = [],
+        [SqlToken.Declare] = [],
+        [SqlToken.To] = [],
+        [SqlToken.Break] = [],
+        [SqlToken.Continue] = [],
+        [SqlToken.Print] = [],
+        [SqlToken.Try] = [],
+        [SqlToken.Catch] = [],
+        [SqlToken.Finally] = [],
     };
 
     // ───────────────────── Public API ─────────────────────

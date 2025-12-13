@@ -100,6 +100,26 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public void Reopen_PreservesParameterDefaults()
+    {
+        TableCatalog first = OpenCatalog();
+        first.Plan("CREATE FUNCTION add(@a INT32, @b INT32 = 5) AS @a + @b");
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Udfs.TryGet("add", out UdfDescriptor? udf));
+        Assert.Equal(2, udf!.Parameters.Count);
+        Assert.Null(udf.Parameters[0].Default);
+        Assert.NotNull(udf.Parameters[1].Default);
+
+        // The reloaded default expression should round-trip into the same
+        // formatted text — confirms the JSON path captured an evaluable form.
+        string formatted = DatumIngest.Execution.QueryExplainer.FormatExpression(
+            udf.Parameters[1].Default!);
+        Assert.Equal("5", formatted);
+    }
+
+    [Fact]
     public void DropFunction_PersistsRemoval()
     {
         TableCatalog first = OpenCatalog();

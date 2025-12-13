@@ -289,6 +289,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     private void ApplyCreateFunction(CreateFunctionStatement create)
     {
+        // Defaults must be contiguous at the tail of the parameter list so
+        // call-site arity stays unambiguous (positional matching only).
+        ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
+
         // Validate the body at registration time by running the inliner on it
         // against the current registry. This catches references to undefined
         // UDFs in the body and direct cycles (A -> A) eagerly. Indirect
@@ -335,6 +339,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     private void ApplyCreateProcedure(CreateProcedureStatement create, string sourceText)
     {
+        // Defaults must be contiguous at the tail of the parameter list so
+        // call-site arity stays unambiguous (positional matching only).
+        ValidateDefaultsContiguous(create.Parameters, $"CREATE PROCEDURE {create.Name}");
+
         // Validate referenced UDFs exist by inlining each expression in the
         // body's statement tree against the current registry. Catches things
         // like a typo'd udf.foo() before the user runs the procedure.
@@ -374,6 +382,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         if (removed) _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    /// <summary>
+    /// Enforces that any parameters with <see cref="UdfParameter.Default"/>
+    /// values appear contiguously at the tail of the parameter list. Without
+    /// this constraint a call site like <c>foo(1, 2)</c> against
+    /// <c>foo(@a, @b = 0, @c)</c> would be ambiguous — does the second
+    /// argument bind to <c>@b</c> or (with default <c>@b</c>) to <c>@c</c>?
+    /// Disallowing the shape removes the ambiguity at registration time.
+    /// </summary>
+    private static void ValidateDefaultsContiguous(
+        IReadOnlyList<UdfParameter> parameters, string contextLabel)
+    {
+        bool sawDefault = false;
+        foreach (UdfParameter p in parameters)
+        {
+            if (p.Default is not null)
+            {
+                sawDefault = true;
+            }
+            else if (sawDefault)
+            {
+                throw new InvalidOperationException(
+                    $"{contextLabel}: parameter '@{p.Name}' has no default but follows a parameter " +
+                    "with a default. Defaults must be contiguous at the end of the parameter list.");
+            }
+        }
     }
 
     /// <summary>
@@ -421,8 +456,30 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             case ExecStatement exec:
                 _ = UdfInliner.Inline(exec.Call, _udfs);
                 break;
-            // Nested CREATE PROCEDURE / CREATE FUNCTION inside a procedure
-            // body isn't supported; defer the error to invocation time.
+            case BreakStatement:
+            case ContinueStatement:
+                // No expressions to validate; legality (must sit inside a
+                // loop) is enforced at invocation time by the executor.
+                break;
+            // Nested routine DDL inside a procedure body is rejected here so
+            // the user sees the error at CREATE PROCEDURE rather than at the
+            // first EXEC. Nested DML and table DDL are intentionally allowed
+            // — procedures should be able to mutate data and shape temp
+            // tables.
+            case CreateFunctionStatement createFn:
+                throw new InvalidOperationException(
+                    $"Nested CREATE FUNCTION '{createFn.Name}' is not allowed inside a " +
+                    "procedure body. Define UDFs at the top level before the procedure.");
+            case CreateProcedureStatement createProc:
+                throw new InvalidOperationException(
+                    $"Nested CREATE PROCEDURE '{createProc.Name}' is not allowed inside a " +
+                    "procedure body.");
+            case DropFunctionStatement dropFn:
+                throw new InvalidOperationException(
+                    $"Nested DROP FUNCTION '{dropFn.Name}' is not allowed inside a procedure body.");
+            case DropProcedureStatement dropProc:
+                throw new InvalidOperationException(
+                    $"Nested DROP PROCEDURE '{dropProc.Name}' is not allowed inside a procedure body.");
             default:
                 break;
         }

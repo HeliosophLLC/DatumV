@@ -57,6 +57,21 @@ binds `@sum` as `INT64` even though the literal `0` parses as the narrowest
 integer kind that fits — the cast prevents arithmetic from accidentally
 running in a smaller type.
 
+The initializer can also be a parenthesised scalar subquery — useful for
+preamble values like row counts and aggregates. The same form works in
+`SET`:
+
+```sql
+DECLARE @count INT64 = (SELECT count(*) FROM orders)
+DECLARE @threshold INT64 = (SELECT max(score) FROM events) + 100
+
+SET @recent = (SELECT count(*) FROM orders WHERE ts > @cutoff)
+```
+
+The subquery must produce exactly one row; zero rows yield `NULL`,
+multiple rows raise an error. References to enclosing `@vars` resolve
+inside the subquery exactly as they do at top level.
+
 Declaring a name that's already bound in the same block is an error;
 declaring a name that's bound in an *enclosing* block shadows the outer
 binding for the lifetime of the inner block.
@@ -145,6 +160,75 @@ variables. `DECLARE` always binds in the innermost frame, so an inner
 Empty blocks (`BEGIN END`) are not supported — at least one statement
 is required, matching T-SQL.
 
+## PRINT
+
+Emits a diagnostic string to the batch's event stream — distinct from
+`SELECT` so callers can route procedural tracing (progress markers,
+intermediate values, "what's happening" chatter) to a separate channel
+without confusing it with user-facing query rows.
+
+```sql
+PRINT 'starting batch'
+
+DECLARE @cohort_size INT64 = (SELECT count(*) FROM cohort)
+PRINT @cohort_size
+
+FOR @i = 1 TO 5 BEGIN
+  PRINT 'iteration ' || cast(@i AS STRING)
+  -- ... work ...
+END
+```
+
+The expression is evaluated against the current variable scope and
+rendered to a string: numbers use invariant culture, booleans render as
+lowercase `true` / `false` (matching SQL convention), strings pass
+through unchanged. `NULL` produces a null event payload so consumers can
+distinguish a missing value from the literal text `"null"`.
+
+Print events surface as `CellPrintBatchEvent` on the `RunWithEventsAsync`
+stream — a debug pane, stderr, or a log can route them anywhere; the
+non-streaming `ExecuteAsync` path silently discards them.
+
+## Error Handling (TRY / CATCH / FINALLY)
+
+Procedural exception handling, IF-flavored: each body is a single
+statement; pair with `BEGIN ... END` for multi-statement bodies. The
+catch's `@err` variable is auto-declared in a fresh frame and bound to
+the exception's message — visible only inside the catch body.
+
+```sql
+TRY
+  EXEC models.flaky_llm(@prompt)
+CATCH @err
+  PRINT 'model call failed: ' || @err
+  SET @result = 'fallback'
+FINALLY
+  SET @attempt_count = @attempt_count + 1
+```
+
+`FINALLY` is optional. When present, it runs unconditionally after
+TRY/CATCH — on success, on caught error, on `BREAK` / `CONTINUE` exiting
+the try, and on cancellation. A throw from `FINALLY` supersedes any
+pending exception (matches C# / Java semantics).
+
+`BREAK` and `CONTINUE` are not caught by `CATCH` — they pass through to
+their enclosing loop, running `FINALLY` on the way. Cancellation behaves
+the same way. Recursion-depth and other procedural runtime errors *are*
+catchable; downstream code can treat them as fallback paths.
+
+```sql
+FOR @row IN (SELECT prompt FROM queue) BEGIN
+  TRY BEGIN
+    DECLARE @reply STRING = (SELECT models.gpt_4(@row['prompt']))
+    INSERT INTO replies (prompt, reply) VALUES (@row['prompt'], @reply)
+  END
+  CATCH @err
+    PRINT 'skipping prompt: ' || @err
+  FINALLY
+    SET @processed = @processed + 1
+END
+```
+
 ## Conditional Branch (IF / ELSE)
 
 Conditional branch on a boolean predicate. The single-statement form
@@ -190,8 +274,31 @@ END
 ```
 
 Loops have a runtime cap of one million iterations; exceeding it throws
-to surface accidentally infinite predicates. There is no `BREAK` /
-`CONTINUE` — set the predicate variable to terminate.
+to surface accidentally infinite predicates.
+
+### BREAK / CONTINUE
+
+`BREAK` exits the innermost enclosing `WHILE` / `FOR @i = ... TO ...` /
+`FOR @row IN (...)` loop immediately. `CONTINUE` skips the rest of the
+current iteration; the predicate (or counter / row source) advances
+normally.
+
+```sql
+DECLARE @i INT32 = 0
+DECLARE @sum INT32 = 0
+
+WHILE @i < 10 BEGIN
+  SET @i = @i + 1
+  IF @i % 2 = 0 CONTINUE     -- skip even values
+  IF @i > 7 BREAK            -- stop once @i passes 7
+  SET @sum = @sum + @i        -- accumulates 1 + 3 + 5 + 7 = 16
+END
+```
+
+Both keywords break only the innermost loop; an outer loop continues
+unchanged. Using `BREAK` or `CONTINUE` outside any loop (at batch top
+level or directly inside an `IF` not nested within a loop) raises an
+error.
 
 ## FOR
 
@@ -403,13 +510,15 @@ layout.
   query has its `@param` reference resolved against the procedure's
   variable scope at runtime — same as elsewhere. (This is the same
   rule that applies to `@vars` in regular procedural batches.)
-- **No recursion limit.** A procedure that `EXEC`s itself (or
-  transitively) will recurse until the inner WHILE/FOR loops cap or
-  the call stack overflows. A formal recursion-depth limit may land
-  later if it becomes a foot-gun.
-- **No nested CREATE PROCEDURE.** A procedure body cannot contain
-  another `CREATE PROCEDURE` or `CREATE FUNCTION`; DDL is rejected at
-  invocation time.
+- **Recursion is capped at 32 nested calls.** A procedure that `EXEC`s
+  itself (directly or transitively) raises a clear error once the call
+  depth exceeds the limit, instead of silently overflowing the .NET
+  call stack. Procedural recursion is intentionally not a supported
+  pattern — rewrite as a recursive CTE or an iterative loop.
+- **Nested routine DDL is rejected at registration time.** A procedure
+  body cannot contain `CREATE FUNCTION`, `CREATE PROCEDURE`,
+  `DROP FUNCTION`, or `DROP PROCEDURE`. DML and table DDL (`CREATE
+  TEMP TABLE`, `INSERT`, `UPDATE`, `DELETE`) are allowed.
 
 ## EXEC inside a batch
 

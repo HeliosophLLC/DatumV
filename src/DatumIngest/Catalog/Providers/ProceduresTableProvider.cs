@@ -150,13 +150,19 @@ public sealed class ProceduresTableProvider : ITableProvider
         for (int i = 0; i < parameters.Count; i++)
         {
             if (i > 0) sb.Append(", ");
+            UdfParameter p = parameters[i];
             sb.Append('@');
-            sb.Append(parameters[i].Name);
+            sb.Append(p.Name);
             sb.Append(' ');
-            sb.Append(parameters[i].TypeName);
-            if (parameters[i].IsNotNull)
+            sb.Append(p.TypeName);
+            if (p.IsNotNull)
             {
                 sb.Append(" IS NOT NULL");
+            }
+            if (p.Default is not null)
+            {
+                sb.Append(" = ");
+                sb.Append(DatumIngest.Execution.QueryExplainer.FormatExpression(p.Default));
             }
         }
         return sb.ToString();

@@ -126,6 +126,43 @@ public class UdfDdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void Create_ParamWithDefault_CapturesDefaultExpression()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION shout(@name STRING = 'world') AS upper(@name)");
+
+        Assert.Single(create.Parameters);
+        Assert.NotNull(create.Parameters[0].Default);
+        Assert.False(create.Parameters[0].IsNotNull);
+    }
+
+    [Fact]
+    public void Create_ParamWithDefault_AndIsNotNull_BothFlagsSet()
+    {
+        // Default first, IS NOT NULL last — keeps the constraint as the
+        // trailing modifier the parser already expects.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION add(@x INT32 = 0 IS NOT NULL, @y INT32 = 0 IS NOT NULL) AS @x + @y");
+
+        Assert.Equal(2, create.Parameters.Count);
+        Assert.NotNull(create.Parameters[0].Default);
+        Assert.True(create.Parameters[0].IsNotNull);
+        Assert.NotNull(create.Parameters[1].Default);
+        Assert.True(create.Parameters[1].IsNotNull);
+    }
+
+    [Fact]
+    public void Create_MixOfRequiredAndDefault_CapturesBoth()
+    {
+        // Required @a; defaulted @b — minimum arity is 1.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION add(@a INT32, @b INT32 = 1) AS @a + @b");
+
+        Assert.Null(create.Parameters[0].Default);
+        Assert.NotNull(create.Parameters[1].Default);
+    }
+
+    [Fact]
     public void Create_BodyIsTemplateString_ParsesAsConcatCall()
     {
         // Validates that the new template-string syntax composes with UDF DDL.

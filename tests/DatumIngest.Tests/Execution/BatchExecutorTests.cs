@@ -63,6 +63,121 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Null(result.FinalBindings["x"]);
     }
 
+    // ───────────────────── DECLARE-with-subquery ─────────────────────
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_AggregateCount()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @count INT64 = (SELECT count(*) FROM orders)",
+            catalog);
+
+        Assert.Equal(5L, Convert.ToInt64(result.FinalBindings["count"]));
+    }
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_FilteredAggregate()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["amount"],
+            [10], [20], [30], [40], [50]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @total INT64 = (SELECT sum(amount) FROM orders WHERE amount > 20)",
+            catalog);
+
+        // 30 + 40 + 50 = 120
+        Assert.Equal(120L, Convert.ToInt64(result.FinalBindings["total"]));
+    }
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_SingleRowSingleColumn()
+    {
+        // Bare value-pulling subquery — pull max(id) for use as a downstream
+        // variable. Common pattern for procedure preambles.
+        TableCatalog catalog = CreateCatalog("events",
+            columns: ["seq"],
+            [10], [20], [30]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @max_seq INT64 = (SELECT max(seq) FROM events)",
+            catalog);
+
+        Assert.Equal(30L, Convert.ToInt64(result.FinalBindings["max_seq"]));
+    }
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_ReferencesOuterVariable()
+    {
+        // The subquery's WHERE references an earlier-declared @cap; resolves
+        // through the same variable scope.
+        TableCatalog catalog = CreateCatalog("amounts",
+            columns: ["v"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @cap INT64 = 3; " +
+            "DECLARE @kept INT64 = (SELECT count(*) FROM amounts WHERE v <= @cap)",
+            catalog);
+
+        Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["kept"]));
+    }
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_EmptyAggregateReturnsTypedNull()
+    {
+        // Aggregates over an empty result return NULL; declaring without a
+        // NOT-NULL constraint binds the typed null cleanly.
+        TableCatalog catalog = CreateCatalog("amounts",
+            columns: ["v"],
+            [1], [2], [3]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @max_big INT64 = (SELECT max(v) FROM amounts WHERE v > 100)",
+            catalog);
+
+        Assert.Null(result.FinalBindings["max_big"]);
+    }
+
+    [Fact]
+    public async Task Declare_SubqueryInitializer_InsideArithmetic()
+    {
+        // Subquery as one operand of a binary expression — the prefolder
+        // recurses through BinaryExpression so the result is stitched back
+        // in as a literal before the synthesised SELECT runs.
+        TableCatalog catalog = CreateCatalog("amounts",
+            columns: ["v"],
+            [10], [20], [30]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @total INT64 = (SELECT sum(v) FROM amounts) + 100",
+            catalog);
+
+        // 60 + 100
+        Assert.Equal(160L, Convert.ToInt64(result.FinalBindings["total"]));
+    }
+
+    [Fact]
+    public async Task Set_SubqueryInitializer_UpdatesVariable()
+    {
+        // SET goes through the same EvaluateScalarAsync path, so a subquery
+        // initializer there should also work without extra wiring.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @count INT64 = 0; " +
+            "SET @count = (SELECT count(*) FROM orders)",
+            catalog);
+
+        Assert.Equal(3L, Convert.ToInt64(result.FinalBindings["count"]));
+    }
+
     // ───────────────────── @var resolution ─────────────────────
 
     [Fact]
@@ -457,6 +572,525 @@ public sealed class BatchExecutorTests : ServiceTestBase
 
         // (1 + 100) + (2 + 100) = 203
         Assert.Equal(203, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    // ───────────────────── PRINT ─────────────────────
+
+    private async Task<List<CellPrintBatchEvent>> CollectPrintsAsync(string sql, TableCatalog? catalog = null)
+    {
+        catalog ??= CreateCatalog();
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(sql);
+        BatchExecutor exec = new(catalog);
+        List<CellPrintBatchEvent> prints = [];
+        await exec.RunWithEventsAsync(
+            stmts,
+            evt =>
+            {
+                if (evt is CellPrintBatchEvent print) prints.Add(print);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+        return prints;
+    }
+
+    [Fact]
+    public async Task Print_StringLiteral_EmitsTextEvent()
+    {
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync("PRINT 'hello world'");
+        Assert.Single(prints);
+        Assert.Equal("hello world", prints[0].Text);
+    }
+
+    [Fact]
+    public async Task Print_IntegerExpression_RendersInvariantCulture()
+    {
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync("PRINT 2 + 3 * 4");
+        Assert.Single(prints);
+        Assert.Equal("14", prints[0].Text);
+    }
+
+    [Fact]
+    public async Task Print_BooleanLiteral_RendersLowercase()
+    {
+        // SQL convention is lowercase booleans, even though .NET defaults
+        // to "True" / "False". PRINT normalises so debug output looks the
+        // same as a SELECT projection of a boolean column.
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "PRINT TRUE; PRINT FALSE");
+        Assert.Equal(["true", "false"], prints.Select(p => p.Text));
+    }
+
+    [Fact]
+    public async Task Print_VariableReference_EmitsBoundValue()
+    {
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "DECLARE @msg STRING = 'hello world from a long-enough literal'; " +
+            "PRINT @msg");
+        Assert.Single(prints);
+        Assert.Equal("hello world from a long-enough literal", prints[0].Text);
+    }
+
+    [Fact]
+    public async Task Print_NullValue_EmitsNullText()
+    {
+        // NULL prints as a null Text so consumers can render however they
+        // like. Distinct from the literal string "null" so accidental NULL
+        // exposure stays observably different from the rendered literal.
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "DECLARE @x INT32; PRINT @x");
+        Assert.Single(prints);
+        Assert.Null(prints[0].Text);
+    }
+
+    [Fact]
+    public async Task Print_InsideLoop_EmitsOneEventPerIteration()
+    {
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "FOR @i = 1 TO 5 PRINT @i");
+        Assert.Equal(["1", "2", "3", "4", "5"], prints.Select(p => p.Text));
+    }
+
+    [Fact]
+    public async Task Print_FunctionCall_RendersResult()
+    {
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "PRINT upper('hello')");
+        Assert.Single(prints);
+        Assert.Equal("HELLO", prints[0].Text);
+    }
+
+    [Fact]
+    public async Task Print_DistinctFromSelect_DoesNotProduceRowEvent()
+    {
+        // Verify a PRINT cell emits a print event, not a row-batch event.
+        TableCatalog catalog = CreateCatalog();
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch("PRINT 'tracing'");
+        BatchExecutor exec = new(catalog);
+        List<BatchEvent> events = [];
+        await exec.RunWithEventsAsync(
+            stmts,
+            evt => { events.Add(evt); return ValueTask.CompletedTask; },
+            CancellationToken.None);
+
+        Assert.DoesNotContain(events, e => e is CellRowBatchEvent);
+        Assert.Contains(events, e => e is CellPrintBatchEvent);
+    }
+
+    [Fact]
+    public async Task Print_InsideProcedure_EventsFlowThroughExec()
+    {
+        // The proc body's PRINT should surface in the same event stream
+        // the EXEC cell drives.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PROCEDURE trace(@n INT32) AS BEGIN " +
+            "  PRINT 'enter trace' " +
+            "  FOR @i = 1 TO @n PRINT @i " +
+            "  PRINT 'exit trace' " +
+            "END");
+
+        List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
+            "EXEC proc.trace(3)", catalog);
+
+        Assert.Equal(
+            ["enter trace", "1", "2", "3", "exit trace"],
+            prints.Select(p => p.Text));
+    }
+
+    // ───────────────────── TRY / CATCH / FINALLY ─────────────────────
+
+    [Fact]
+    public async Task Try_NoError_RunsTryBody_SkipsCatch()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @ran_try BOOLEAN = FALSE; " +
+            "DECLARE @ran_catch BOOLEAN = FALSE; " +
+            "TRY SET @ran_try = TRUE " +
+            "CATCH @e SET @ran_catch = TRUE");
+
+        Assert.Equal(true, result.FinalBindings["ran_try"]);
+        Assert.Equal(false, result.FinalBindings["ran_catch"]);
+    }
+
+    [Fact]
+    public async Task Try_ErrorInTry_RunsCatch_BindsErrorMessage()
+    {
+        // Trigger a runtime error inside TRY (calling a non-existent
+        // procedure) so the catch path takes over. The message is bound
+        // to @err — capture by writing it into an outer-scope variable.
+        TableCatalog catalog = CreateCatalog();
+        BatchResult result = await RunAsync(
+            "DECLARE @msg STRING = ''; " +
+            "TRY EXEC proc.does_not_exist() " +
+            "CATCH @err SET @msg = @err",
+            catalog);
+
+        Assert.NotEqual(string.Empty, (string?)result.FinalBindings["msg"]);
+        Assert.Contains("does_not_exist", (string)result.FinalBindings["msg"]!);
+    }
+
+    [Fact]
+    public async Task Try_ErrorVariable_ScopedToCatchBlock_NotVisibleAfter()
+    {
+        // @err disappears after CATCH ends — referencing it later raises.
+        TableCatalog catalog = CreateCatalog();
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @msg STRING = ''; " +
+                "TRY EXEC proc.does_not_exist() " +
+                "CATCH @err SET @msg = @err; " +
+                "SET @msg = @err",  // @err out of scope here
+                catalog));
+        Assert.Contains("err", ex.Message);
+    }
+
+    [Fact]
+    public async Task Try_BlockBody_RunsAllStatements()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "TRY BEGIN " +
+            "  SET @sum = @sum + 1 " +
+            "  SET @sum = @sum + 2 " +
+            "  SET @sum = @sum + 3 " +
+            "END " +
+            "CATCH @e SET @sum = -1");
+
+        Assert.Equal(6, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task Try_Finally_RunsAfterSuccessfulTry()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @ran_try BOOLEAN = FALSE; " +
+            "DECLARE @ran_finally BOOLEAN = FALSE; " +
+            "TRY SET @ran_try = TRUE " +
+            "CATCH @e SET @ran_try = FALSE " +
+            "FINALLY SET @ran_finally = TRUE");
+
+        Assert.Equal(true, result.FinalBindings["ran_try"]);
+        Assert.Equal(true, result.FinalBindings["ran_finally"]);
+    }
+
+    [Fact]
+    public async Task Try_Finally_RunsAfterCaughtError()
+    {
+        TableCatalog catalog = CreateCatalog();
+        BatchResult result = await RunAsync(
+            "DECLARE @ran_catch BOOLEAN = FALSE; " +
+            "DECLARE @ran_finally BOOLEAN = FALSE; " +
+            "TRY EXEC proc.does_not_exist() " +
+            "CATCH @e SET @ran_catch = TRUE " +
+            "FINALLY SET @ran_finally = TRUE",
+            catalog);
+
+        Assert.Equal(true, result.FinalBindings["ran_catch"]);
+        Assert.Equal(true, result.FinalBindings["ran_finally"]);
+    }
+
+    [Fact]
+    public async Task Try_FinallyOnly_RunsEvenWithoutHandlerNeed()
+    {
+        // No FINALLY-without-CATCH form — TRY always pairs with CATCH —
+        // but FINALLY runs whether CATCH fired or not. Confirm the
+        // simple "no error" case fires FINALLY.
+        BatchResult result = await RunAsync(
+            "DECLARE @cleanup BOOLEAN = FALSE; " +
+            "TRY DECLARE @x INT32 = 1 " +
+            "CATCH @e SET @cleanup = FALSE " +
+            "FINALLY SET @cleanup = TRUE");
+
+        Assert.Equal(true, result.FinalBindings["cleanup"]);
+    }
+
+    [Fact]
+    public async Task Try_NoFinally_OptionalClause()
+    {
+        // FINALLY is optional; bare TRY/CATCH parses and runs.
+        BatchResult result = await RunAsync(
+            "DECLARE @done BOOLEAN = FALSE; " +
+            "TRY SET @done = TRUE " +
+            "CATCH @e SET @done = FALSE");
+
+        Assert.Equal(true, result.FinalBindings["done"]);
+    }
+
+    [Fact]
+    public async Task Try_FinallyThrows_SupersedesPendingException()
+    {
+        // FINALLY raising its own error should win over the original;
+        // matches C# / Java try/finally semantics. Use EXEC of a missing
+        // procedure inside FINALLY to provoke a fresh throw.
+        TableCatalog catalog = CreateCatalog();
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "TRY EXEC proc.original_error() " +
+                "CATCH @e EXEC proc.catch_error() " +
+                "FINALLY EXEC proc.finally_error()",
+                catalog));
+        Assert.Contains("finally_error", ex.Message);
+    }
+
+    [Fact]
+    public async Task Try_CatchThrows_FinallyStillRuns_ExceptionPropagates()
+    {
+        // If CATCH itself throws and FINALLY is clean, the catch error
+        // should propagate after FINALLY runs.
+        TableCatalog catalog = CreateCatalog();
+        BatchResult? result = null;
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            // Wrap the executor so we can introspect after-the-fact;
+            // FinalBindings inside RunAsync would still be unreachable
+            // because the exception escapes — instead verify via the message.
+            result = await RunAsync(
+                "TRY EXEC proc.original_error() " +
+                "CATCH @e EXEC proc.catch_error() " +
+                "FINALLY DECLARE @cleanup BOOLEAN = TRUE",
+                catalog);
+        });
+
+        Assert.Contains("catch_error", ex.Message);
+    }
+
+    [Fact]
+    public async Task Try_BreakInsideTry_RoutesThroughFinallyThenExitsLoop()
+    {
+        // BREAK inside a TRY inside a loop: FINALLY must run, then the
+        // loop must exit. CATCH is bypassed (control-flow signals don't
+        // hit CATCH).
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "DECLARE @cleanup_count INT32 = 0; " +
+            "DECLARE @catch_count INT32 = 0; " +
+            "FOR @i = 1 TO 10 BEGIN " +
+            "  TRY BEGIN " +
+            "    IF @i = 4 BREAK " +
+            "    SET @sum = @sum + @i " +
+            "  END " +
+            "  CATCH @e SET @catch_count = @catch_count + 1 " +
+            "  FINALLY SET @cleanup_count = @cleanup_count + 1 " +
+            "END");
+
+        // Iterations: i=1,2,3 run cleanly; i=4 hits BREAK before sum updates.
+        // FINALLY runs all four times (1, 2, 3, 4). CATCH never fires.
+        Assert.Equal(6, Convert.ToInt32(result.FinalBindings["sum"]));      // 1+2+3
+        Assert.Equal(4, Convert.ToInt32(result.FinalBindings["cleanup_count"]));
+        Assert.Equal(0, Convert.ToInt32(result.FinalBindings["catch_count"]));
+    }
+
+    [Fact]
+    public async Task Try_ContinueInsideTry_RoutesThroughFinallyThenNextIteration()
+    {
+        // CONTINUE inside a TRY inside a loop: FINALLY runs, then the
+        // loop advances to the next iteration. CATCH bypassed.
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "DECLARE @cleanup_count INT32 = 0; " +
+            "FOR @i = 1 TO 5 BEGIN " +
+            "  TRY BEGIN " +
+            "    IF @i % 2 = 0 CONTINUE " +
+            "    SET @sum = @sum + @i " +
+            "  END " +
+            "  CATCH @e SET @sum = -1 " +
+            "  FINALLY SET @cleanup_count = @cleanup_count + 1 " +
+            "END");
+
+        // Odd values accumulate: 1+3+5 = 9. FINALLY fires on every iter (5).
+        Assert.Equal(9, Convert.ToInt32(result.FinalBindings["sum"]));
+        Assert.Equal(5, Convert.ToInt32(result.FinalBindings["cleanup_count"]));
+    }
+
+    [Fact]
+    public async Task Try_NestedTry_InnerCatchHandlesInnerError()
+    {
+        // Outer TRY has an inner TRY that catches; outer CATCH should not fire.
+        TableCatalog catalog = CreateCatalog();
+        BatchResult result = await RunAsync(
+            "DECLARE @inner_caught BOOLEAN = FALSE; " +
+            "DECLARE @outer_caught BOOLEAN = FALSE; " +
+            "TRY BEGIN " +
+            "  TRY EXEC proc.does_not_exist() " +
+            "  CATCH @inner SET @inner_caught = TRUE " +
+            "END " +
+            "CATCH @outer SET @outer_caught = TRUE",
+            catalog);
+
+        Assert.Equal(true, result.FinalBindings["inner_caught"]);
+        Assert.Equal(false, result.FinalBindings["outer_caught"]);
+    }
+
+    [Fact]
+    public async Task Try_NestedTry_InnerCatchRethrows_OuterCatchFires()
+    {
+        // Inner CATCH rethrows by triggering a new error; outer CATCH
+        // handles. Confirms exceptions propagate through nested TRYs as
+        // expected.
+        TableCatalog catalog = CreateCatalog();
+        BatchResult result = await RunAsync(
+            "DECLARE @outer_caught BOOLEAN = FALSE; " +
+            "TRY BEGIN " +
+            "  TRY EXEC proc.first_error() " +
+            "  CATCH @inner EXEC proc.second_error() " +
+            "END " +
+            "CATCH @outer SET @outer_caught = TRUE",
+            catalog);
+
+        Assert.Equal(true, result.FinalBindings["outer_caught"]);
+    }
+
+    // ───────────────────── BREAK / CONTINUE ─────────────────────
+
+    [Fact]
+    public async Task While_Break_ExitsLoopImmediately()
+    {
+        // Loop would naturally run i=0..9; BREAK fires when i=5, so the
+        // accumulator stops at 0+1+2+3+4=10 and i is left at 5 (BREAK
+        // bypasses the SET @i = @i + 1 line).
+        BatchResult result = await RunAsync(
+            "DECLARE @i INT32 = 0; " +
+            "DECLARE @sum INT32 = 0; " +
+            "WHILE @i < 10 BEGIN " +
+            "  IF @i = 5 BREAK; " +
+            "  SET @sum = @sum + @i; " +
+            "  SET @i = @i + 1; " +
+            "END");
+
+        Assert.Equal(10, Convert.ToInt32(result.FinalBindings["sum"]));
+        Assert.Equal(5, Convert.ToInt32(result.FinalBindings["i"]));
+    }
+
+    [Fact]
+    public async Task While_Continue_SkipsRestOfIterationButReevaluatesPredicate()
+    {
+        // Predicate is on @i, but @i only advances inside the body before
+        // CONTINUE. The classic shape: increment first, then conditionally
+        // skip — sums only the odd numbers in 1..10.
+        BatchResult result = await RunAsync(
+            "DECLARE @i INT32 = 0; " +
+            "DECLARE @sum INT32 = 0; " +
+            "WHILE @i < 10 BEGIN " +
+            "  SET @i = @i + 1; " +
+            "  IF @i % 2 = 0 CONTINUE; " +
+            "  SET @sum = @sum + @i; " +
+            "END");
+
+        // 1 + 3 + 5 + 7 + 9 = 25
+        Assert.Equal(25, Convert.ToInt32(result.FinalBindings["sum"]));
+        Assert.Equal(10, Convert.ToInt32(result.FinalBindings["i"]));
+    }
+
+    [Fact]
+    public async Task ForCounter_Break_ExitsLoopImmediately()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @i = 1 TO 100 BEGIN " +
+            "  IF @i > 5 BREAK; " +
+            "  SET @sum = @sum + @i; " +
+            "END");
+
+        // 1 + 2 + 3 + 4 + 5 = 15
+        Assert.Equal(15, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task ForCounter_Continue_SkipsRestOfIteration()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @i = 1 TO 10 BEGIN " +
+            "  IF @i % 2 = 0 CONTINUE; " +
+            "  SET @sum = @sum + @i; " +
+            "END");
+
+        // 1 + 3 + 5 + 7 + 9 = 25
+        Assert.Equal(25, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task ForIn_Break_ExitsLoopOnFirstHit()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @first INT32 = 0; " +
+            "FOR @row IN (SELECT id FROM orders) BEGIN " +
+            "  SET @first = @row['id']; " +
+            "  BREAK; " +
+            "END",
+            catalog);
+
+        Assert.Equal(1, Convert.ToInt32(result.FinalBindings["first"]));
+    }
+
+    [Fact]
+    public async Task ForIn_Continue_SkipsRestOfIteration()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @row IN (SELECT id FROM orders) BEGIN " +
+            "  IF @row['id'] % 2 = 0 CONTINUE; " +
+            "  SET @sum = @sum + @row['id']; " +
+            "END",
+            catalog);
+
+        // 1 + 3 + 5 = 9
+        Assert.Equal(9, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task Break_BreaksOnlyInnermostLoop()
+    {
+        // Nested FOR; inner BREAK fires when j > i. Outer loop continues
+        // after each inner BREAK, so @sum collects only j ≤ i for each
+        // (i, j) pair: i=1 → j=1; i=2 → j=1,2; i=3 → j=1,2,3.
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @i = 1 TO 3 BEGIN " +
+            "  FOR @j = 1 TO 10 BEGIN " +
+            "    IF @j > @i BREAK; " +
+            "    SET @sum = @sum + 1; " +
+            "  END " +
+            "END");
+
+        // 1 + 2 + 3 = 6 inner-iterations counted.
+        Assert.Equal(6, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task Break_OutsideLoop_AtBatchTopLevel_Throws()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync("BREAK"));
+        Assert.Contains("BREAK", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Continue_OutsideLoop_AtBatchTopLevel_Throws()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync("CONTINUE"));
+        Assert.Contains("CONTINUE", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Break_OutsideLoop_InsideIfBranch_Throws()
+    {
+        // BREAK inside an IF that itself isn't inside a loop — IF doesn't
+        // count as a loop, so the signal escapes to the entry point.
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @x INT32 = 1; " +
+                "IF @x = 1 BREAK"));
+        Assert.Contains("BREAK", ex.Message, StringComparison.Ordinal);
     }
 
     // ───────────────────── Optional ; between statements ─────────────────────

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
@@ -57,6 +58,16 @@ public sealed record CellFailedBatchEvent(string CellId, Exception Error) : Batc
 public sealed record CellChunkBatchEvent(string CellId, string ModelName, string Text) : BatchEvent;
 
 /// <summary>
+/// Diagnostic message emitted by a <c>PRINT</c> statement. Distinct from
+/// <see cref="CellRowBatchEvent"/> so consumers can route procedural
+/// tracing to a separate channel (a debug pane, stderr, a log) without
+/// confusing it with user-facing query rows. <see cref="Text"/> is the
+/// stringified result of the expression evaluated by <c>PRINT</c>;
+/// <see langword="null"/> when the expression evaluated to NULL.
+/// </summary>
+public sealed record CellPrintBatchEvent(string CellId, string? Text) : BatchEvent;
+
+/// <summary>
 /// Executes a parsed procedural batch — a list of <see cref="Statement"/>s
 /// — against a <see cref="TableCatalog"/>, threading a single
 /// <see cref="BatchContext"/> through every child statement so procedural
@@ -84,6 +95,39 @@ public sealed record CellChunkBatchEvent(string CellId, string ModelName, string
 /// </remarks>
 public sealed class BatchExecutor
 {
+    /// <summary>
+    /// Maximum nested procedure-call depth before the executor refuses to
+    /// open a new frame. Recursive procedures (direct or mutual) are not
+    /// supported; this cap prevents the call stack from overflowing and
+    /// gives the user a clear error instead. Matches the T-SQL convention
+    /// of 32 levels of nested stored-procedure calls.
+    /// </summary>
+    public const int MaxProcedureCallDepth = 32;
+
+    /// <summary>
+    /// Internal control-flow signal raised by <see cref="BreakStatement"/>.
+    /// Caught by the innermost enclosing loop. If it escapes all loops the
+    /// batch / procedure entry points convert it to a clear
+    /// <see cref="InvalidOperationException"/>. Singleton for zero allocation.
+    /// </summary>
+    private sealed class LoopBreakSignal : Exception
+    {
+        public static readonly LoopBreakSignal Instance = new();
+        private LoopBreakSignal() : base("BREAK outside of a loop.") { }
+    }
+
+    /// <summary>
+    /// Internal control-flow signal raised by <see cref="ContinueStatement"/>.
+    /// Caught by the innermost enclosing loop's per-iteration wrapper. If it
+    /// escapes all loops the batch / procedure entry points convert it to a
+    /// clear <see cref="InvalidOperationException"/>.
+    /// </summary>
+    private sealed class LoopContinueSignal : Exception
+    {
+        public static readonly LoopContinueSignal Instance = new();
+        private LoopContinueSignal() : base("CONTINUE outside of a loop.") { }
+    }
+
     private readonly TableCatalog _catalog;
 
     /// <summary>
@@ -164,11 +208,24 @@ public sealed class BatchExecutor
         CancellationToken ct)
     {
         int counter = 0;
-        foreach (Statement stmt in statements)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await ExecuteOneEventfulAsync(stmt, batchContext, onEvent, () => $"c{counter++}", ct)
-                .ConfigureAwait(false);
+            foreach (Statement stmt in statements)
+            {
+                ct.ThrowIfCancellationRequested();
+                await ExecuteOneEventfulAsync(stmt, batchContext, onEvent, () => $"c{counter++}", ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (LoopBreakSignal)
+        {
+            throw new InvalidOperationException(
+                "BREAK is only valid inside a WHILE or FOR loop.");
+        }
+        catch (LoopContinueSignal)
+        {
+            throw new InvalidOperationException(
+                "CONTINUE is only valid inside a WHILE or FOR loop.");
         }
     }
 
@@ -275,7 +332,8 @@ public sealed class BatchExecutor
                 {
                     const int IterationCap = 1_000_000;
                     int iter = 0;
-                    while (true)
+                    bool broke = false;
+                    while (!broke)
                     {
                         ct.ThrowIfCancellationRequested();
                         if (iter++ >= IterationCap)
@@ -286,8 +344,20 @@ public sealed class BatchExecutor
                         bool keepGoing = await EvaluatePredicateAsync(loop.Predicate, batchContext, ct)
                             .ConfigureAwait(false);
                         if (!keepGoing) break;
-                        await ExecuteOneEventfulAsync(loop.Body, batchContext, onEvent, nextCellId, ct)
-                            .ConfigureAwait(false);
+                        try
+                        {
+                            await ExecuteOneEventfulAsync(loop.Body, batchContext, onEvent, nextCellId, ct)
+                                .ConfigureAwait(false);
+                        }
+                        catch (LoopContinueSignal)
+                        {
+                            // Skip the rest of this iteration; predicate
+                            // re-evaluates on the next pass.
+                        }
+                        catch (LoopBreakSignal)
+                        {
+                            broke = true;
+                        }
                     }
                     break;
                 }
@@ -305,6 +375,24 @@ public sealed class BatchExecutor
                 case SetStatement set:
                     await ExecuteSetAsync(set, batchContext, ct).ConfigureAwait(false);
                     break;
+                case BreakStatement:
+                    throw LoopBreakSignal.Instance;
+                case ContinueStatement:
+                    throw LoopContinueSignal.Instance;
+                case PrintStatement print:
+                {
+                    DataValue value = await EvaluateScalarAsync(print.Value, batchContext, ct)
+                        .ConfigureAwait(false);
+                    string? text = RenderForPrint(value, batchContext.VariableStore);
+                    await onEvent(new CellPrintBatchEvent(cellId, text)).ConfigureAwait(false);
+                    break;
+                }
+                case TryStatement tryStmt:
+                {
+                    await ExecuteTryAsync(tryStmt, batchContext, onEvent, nextCellId, ct)
+                        .ConfigureAwait(false);
+                    break;
+                }
                 default:
                     throw new NotSupportedException(
                         $"Procedural statement type '{stmt.GetType().Name}' is not yet supported. " +
@@ -314,6 +402,22 @@ public sealed class BatchExecutor
 
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
                 .ConfigureAwait(false);
+        }
+        catch (LoopBreakSignal)
+        {
+            // BREAK / CONTINUE are control flow, not failures. Fire the
+            // completed event for this cell and let the signal bubble up
+            // to the enclosing loop (or to the entry point, which converts
+            // a stray signal to a clear "outside of a loop" error).
+            await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
+                .ConfigureAwait(false);
+            throw;
+        }
+        catch (LoopContinueSignal)
+        {
+            await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
+                .ConfigureAwait(false);
+            throw;
         }
         catch (Exception ex)
         {
@@ -333,8 +437,33 @@ public sealed class BatchExecutor
         SetStatement => "set",
         ForCounterStatement => "for",
         ForInStatement => "for",
+        BreakStatement => "break",
+        ContinueStatement => "continue",
+        PrintStatement => "print",
+        TryStatement => "try",
         _ => stmt.GetType().Name.ToLowerInvariant(),
     };
+
+    /// <summary>
+    /// Renders a <see cref="DataValue"/> to a string for <c>PRINT</c> output.
+    /// Booleans render as lowercase <c>"true"</c>/<c>"false"</c> (SQL style);
+    /// numerics use invariant culture so locale doesn't affect diagnostic
+    /// output. NULL yields a <see langword="null"/> string so consumers can
+    /// distinguish "missing" from the literal text "null".
+    /// </summary>
+    private static string? RenderForPrint(DataValue value, IValueStore store)
+    {
+        if (value.IsNull) return null;
+        object? managed = Materialize(value, store);
+        return managed switch
+        {
+            null => null,
+            bool b => b ? "true" : "false",
+            string s => s,
+            IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+            _ => managed.ToString(),
+        };
+    }
 
     private async Task ExecuteDeclareAsync(
         DeclareStatement decl, BatchContext batchContext, CancellationToken ct)
@@ -380,6 +509,24 @@ public sealed class BatchExecutor
     {
         DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
         batchContext.VariableScope.Set(set.VariableName, stable);
+    }
+
+    /// <summary>
+    /// Returns the minimum required argument count for a procedure call:
+    /// the count of leading parameters that have no default. The
+    /// registration-time validation in <see cref="TableCatalog"/>
+    /// guarantees defaults are contiguous at the tail, so the prefix
+    /// length is the minimum legal arity.
+    /// </summary>
+    private static int ProcedureMinArity(IReadOnlyList<UdfParameter> parameters)
+    {
+        int min = 0;
+        foreach (UdfParameter p in parameters)
+        {
+            if (p.Default is not null) break;
+            min++;
+        }
+        return min;
     }
 
     private const string ProcedureNamespacePrefix = "proc.";
@@ -449,27 +596,51 @@ public sealed class BatchExecutor
                 $"Use CREATE PROCEDURE {procedureName}(...) AS BEGIN ... END to define it.");
         }
 
-        if (arguments.Count != descriptor.Parameters.Count)
+        // Trailing arguments may be omitted when the matching parameters
+        // carry defaults; fill them in below from each parameter's Default
+        // expression.
+        int minRequired = ProcedureMinArity(descriptor.Parameters);
+        if (arguments.Count < minRequired || arguments.Count > descriptor.Parameters.Count)
         {
             throw new InvalidOperationException(
-                $"Procedure 'proc.{procedureName}' expects {descriptor.Parameters.Count} argument(s), " +
-                $"got {arguments.Count}.");
+                minRequired == descriptor.Parameters.Count
+                    ? $"Procedure 'proc.{procedureName}' expects {descriptor.Parameters.Count} argument(s), got {arguments.Count}."
+                    : $"Procedure 'proc.{procedureName}' expects {minRequired}–{descriptor.Parameters.Count} argument(s), got {arguments.Count}.");
+        }
+
+        // Cap nested-call depth before opening the new frame. Catches direct
+        // recursion (proc A calls itself) and mutual recursion (A calls B
+        // calls A) the same way — both produce ever-deeper contexts.
+        int newDepth = callerContext.ProcedureCallDepth + 1;
+        if (newDepth > MaxProcedureCallDepth)
+        {
+            throw new InvalidOperationException(
+                $"Procedure call depth exceeded {MaxProcedureCallDepth} levels at " +
+                $"'proc.{procedureName}'. Procedural recursion is not supported — " +
+                "rewrite as a recursive CTE or an iterative loop.");
         }
 
         // Evaluate each argument in the caller's scope so the args can
         // reference the caller's @vars. Capture the value as a managed
         // CLR object so it survives the boundary; we'll re-pack into the
-        // procedure's variable store on the other side.
-        DataValue[] argValues = new DataValue[arguments.Count];
-        for (int i = 0; i < arguments.Count; i++)
+        // procedure's variable store on the other side. When the caller
+        // omits a trailing argument, fall back to the parameter's Default
+        // expression — also evaluated in the caller's scope so defaults
+        // can reference earlier @vars consistently.
+        DataValue[] argValues = new DataValue[descriptor.Parameters.Count];
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
-            DataValue v = await EvaluateScalarAsync(arguments[i], callerContext, ct).ConfigureAwait(false);
+            UdfParameter param = descriptor.Parameters[i];
+            Expression argExpr = i < arguments.Count
+                ? arguments[i]
+                : param.Default!;  // arity check above guarantees a default is present
+            DataValue v = await EvaluateScalarAsync(argExpr, callerContext, ct).ConfigureAwait(false);
 
             // Enforce IS NOT NULL on parameters at the call boundary.
-            if (descriptor.Parameters[i].IsNotNull && v.IsNull)
+            if (param.IsNotNull && v.IsNull)
             {
                 throw new InvalidOperationException(
-                    $"Procedure 'proc.{procedureName}' parameter '@{descriptor.Parameters[i].Name}' must not be null.");
+                    $"Procedure 'proc.{procedureName}' parameter '@{param.Name}' must not be null.");
             }
 
             argValues[i] = v;
@@ -478,8 +649,9 @@ public sealed class BatchExecutor
         // New BatchContext for the procedure's lifetime. Disposed at end —
         // the procedure-lifetime arena releases and any variable bindings
         // become unreachable, matching how a top-level procedural batch
-        // tears down.
-        using BatchContext procContext = new();
+        // tears down. Carries the bumped call depth so any further
+        // EXECs the body issues see the running total.
+        using BatchContext procContext = new() { ProcedureCallDepth = newDepth };
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {
             // Stabilise from the caller's variable store into the
@@ -496,11 +668,24 @@ public sealed class BatchExecutor
         // Run the body's statements through the same dispatch as any other
         // procedural batch. Cell IDs continue from the caller's counter so
         // event consumers see a single coherent stream.
-        foreach (Statement bodyStatement in descriptor.Body.Statements)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await ExecuteOneEventfulAsync(bodyStatement, procContext, onEvent, nextCellId, ct)
-                .ConfigureAwait(false);
+            foreach (Statement bodyStatement in descriptor.Body.Statements)
+            {
+                ct.ThrowIfCancellationRequested();
+                await ExecuteOneEventfulAsync(bodyStatement, procContext, onEvent, nextCellId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (LoopBreakSignal)
+        {
+            throw new InvalidOperationException(
+                $"BREAK in procedure 'proc.{procedureName}' is only valid inside a WHILE or FOR loop.");
+        }
+        catch (LoopContinueSignal)
+        {
+            throw new InvalidOperationException(
+                $"CONTINUE in procedure 'proc.{procedureName}' is only valid inside a WHILE or FOR loop.");
         }
     }
 
@@ -614,6 +799,104 @@ public sealed class BatchExecutor
     /// runs. The counter is bound as <see cref="DataKind.Int64"/>: any
     /// numeric kind from the bounds expressions is coerced.
     /// </summary>
+    /// <summary>
+    /// Runs a <see cref="TryStatement"/> with C#-style try/catch/finally
+    /// semantics: execute the try body; if it throws (other than control-flow
+    /// signals or cancellation) bind the exception's message to
+    /// <c>@&lt;ErrorVariableName&gt;</c> in a fresh scope frame and run the catch
+    /// body; finally, run the finally body unconditionally — even when an
+    /// exception is bubbling up from try, catch, a control-flow signal, or
+    /// cancellation. A throw from finally supersedes any pending exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>What gets caught.</strong> Catch only handles "user errors" —
+    /// anything that escapes the try body that isn't a
+    /// <see cref="LoopBreakSignal"/>, <see cref="LoopContinueSignal"/>, or
+    /// <see cref="OperationCanceledException"/>. Loop control flow and
+    /// cancellation pass straight through to their proper destinations
+    /// (the enclosing loop, the cancellation token's owner) — finally still
+    /// runs on the way out.
+    /// </para>
+    /// <para>
+    /// <strong>Error scope.</strong> A fresh frame is pushed before
+    /// <c>@&lt;ErrorVariableName&gt;</c> is declared, so the binding is visible
+    /// only inside the catch body and disappears when the frame pops. The
+    /// message string is stabilised into <see cref="BatchContext.VariableStore"/>
+    /// so it remains valid across any inner query / arena recycle.
+    /// </para>
+    /// </remarks>
+    private async Task ExecuteTryAsync(
+        TryStatement tryStmt,
+        BatchContext batchContext,
+        Func<BatchEvent, ValueTask> onEvent,
+        Func<string> nextCellId,
+        CancellationToken ct)
+    {
+        ExceptionDispatchInfo? pending = null;
+
+        try
+        {
+            try
+            {
+                await ExecuteOneEventfulAsync(tryStmt.TryBody, batchContext, onEvent, nextCellId, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (LoopBreakSignal) { throw; }
+            catch (LoopContinueSignal) { throw; }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                // Bind the exception message into a fresh frame so the catch
+                // body can reference @<ErrorVariableName>; pop on exit so the
+                // binding doesn't leak to the surrounding scope or to FINALLY.
+                batchContext.VariableScope.PushFrame();
+                try
+                {
+                    DataValue messageValue = DataValue.FromString(
+                        ex.Message ?? string.Empty, batchContext.VariableStore);
+                    batchContext.VariableScope.Declare(tryStmt.ErrorVariableName, messageValue);
+                    try
+                    {
+                        await ExecuteOneEventfulAsync(tryStmt.CatchBody, batchContext, onEvent, nextCellId, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (LoopBreakSignal) { throw; }
+                    catch (LoopContinueSignal) { throw; }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception catchEx)
+                    {
+                        // Catch body itself threw — defer to finally, then
+                        // propagate. Use ExceptionDispatchInfo so the original
+                        // stack trace is preserved.
+                        pending = ExceptionDispatchInfo.Capture(catchEx);
+                    }
+                }
+                finally
+                {
+                    batchContext.VariableScope.PopFrame();
+                }
+            }
+        }
+        finally
+        {
+            // Always run the finally body, regardless of how try/catch exited.
+            // If finally itself throws, that exception supersedes the pending
+            // one (matches C#'s try/finally behaviour). The exception unwinding
+            // out of this method is whichever throw won.
+            if (tryStmt.FinallyBody is not null)
+            {
+                await ExecuteOneEventfulAsync(tryStmt.FinallyBody, batchContext, onEvent, nextCellId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        // If the catch body threw and finally completed cleanly, surface the
+        // catch exception now (try-block exceptions handled in catch don't
+        // re-throw; we only get here if catch ran and itself threw).
+        pending?.Throw();
+    }
+
     private async Task ExecuteForCounterAsync(
         ForCounterStatement forC,
         BatchContext batchContext,
@@ -642,8 +925,19 @@ public sealed class BatchExecutor
                 {
                     batchContext.VariableScope.Set(forC.VariableName, iValue);
                 }
-                await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, ct)
-                    .ConfigureAwait(false);
+                try
+                {
+                    await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (LoopContinueSignal)
+                {
+                    // Skip the rest of this iteration; the counter advances normally.
+                }
+                catch (LoopBreakSignal)
+                {
+                    return;
+                }
             }
         }
         finally
@@ -690,11 +984,13 @@ public sealed class BatchExecutor
         IQueryPlan plan = _catalog.Plan(sourceQuery);
 
         IReadOnlyList<string>? fieldNames = null;
+        bool broke = false;
 
         await foreach (RowBatch batch in plan
             .ExecuteAsync(ct, streamingSink: null, batchContext)
             .ConfigureAwait(false))
         {
+            if (broke) break;
             // Field names are stable across batches in a single query plan,
             // so capture once on the first batch and reuse for every row.
             fieldNames ??= batch.ColumnLookup.ColumnNames;
@@ -721,13 +1017,26 @@ public sealed class BatchExecutor
                 {
                     batchContext.VariableScope.Declare(
                         forIn.VariableName, rowStruct, fieldNames);
-                    await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, ct)
-                        .ConfigureAwait(false);
+                    try
+                    {
+                        await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (LoopContinueSignal)
+                    {
+                        // Skip the rest of this row's body; outer for-loop advances.
+                    }
+                    catch (LoopBreakSignal)
+                    {
+                        broke = true;
+                    }
                 }
                 finally
                 {
                     batchContext.VariableScope.PopFrame();
                 }
+
+                if (broke) break;
             }
         }
     }
@@ -763,6 +1072,237 @@ public sealed class BatchExecutor
     }
 
     /// <summary>
+    /// Walks <paramref name="expression"/> and replaces every
+    /// <see cref="SubqueryExpression"/> with a <see cref="LiteralExpression"/>
+    /// holding the result of executing the inner SELECT. Each inner SELECT is
+    /// run through the catalog's normal plan path with <paramref name="batchContext"/>
+    /// threaded so <c>@var</c> references inside the subquery resolve against
+    /// the procedural variable scope. Recurses through the common composable
+    /// expression types so subqueries hidden inside arithmetic, casts, or
+    /// function arguments still get folded.
+    /// </summary>
+    /// <remarks>
+    /// Currently descends through <see cref="BinaryExpression"/>,
+    /// <see cref="UnaryExpression"/>, <see cref="CastExpression"/>,
+    /// <see cref="IsNullExpression"/>, <see cref="FunctionCallExpression"/>,
+    /// <see cref="InExpression"/>, <see cref="BetweenExpression"/>, and
+    /// <see cref="CaseExpression"/>. Other shapes pass through unchanged —
+    /// extend the walker as new procedural patterns demand it.
+    /// </remarks>
+    private async Task<Expression> PrefoldSubqueriesAsync(
+        Expression expression, BatchContext batchContext, CancellationToken ct)
+    {
+        switch (expression)
+        {
+            case SubqueryExpression subquery:
+                return await FoldOneSubqueryAsync(subquery, batchContext, ct).ConfigureAwait(false);
+
+            case CastExpression cast:
+            {
+                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, batchContext, ct)
+                    .ConfigureAwait(false);
+                return ReferenceEquals(inner, cast.Expression)
+                    ? cast
+                    : new CastExpression(inner, cast.TargetType, cast.Span);
+            }
+
+            case BinaryExpression binary:
+            {
+                Expression left = await PrefoldSubqueriesAsync(binary.Left, batchContext, ct)
+                    .ConfigureAwait(false);
+                Expression right = await PrefoldSubqueriesAsync(binary.Right, batchContext, ct)
+                    .ConfigureAwait(false);
+                return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
+                    ? binary
+                    : new BinaryExpression(left, binary.Operator, right);
+            }
+
+            case UnaryExpression unary:
+            {
+                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, batchContext, ct)
+                    .ConfigureAwait(false);
+                return ReferenceEquals(operand, unary.Operand)
+                    ? unary
+                    : new UnaryExpression(unary.Operator, operand);
+            }
+
+            case IsNullExpression isNull:
+            {
+                Expression inner = await PrefoldSubqueriesAsync(isNull.Expression, batchContext, ct)
+                    .ConfigureAwait(false);
+                return ReferenceEquals(inner, isNull.Expression)
+                    ? isNull
+                    : new IsNullExpression(inner, isNull.Negated);
+            }
+
+            case FunctionCallExpression fn:
+            {
+                Expression[]? rewrittenArgs = null;
+                for (int i = 0; i < fn.Arguments.Count; i++)
+                {
+                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], batchContext, ct)
+                        .ConfigureAwait(false);
+                    if (!ReferenceEquals(rewritten, fn.Arguments[i]))
+                    {
+                        rewrittenArgs ??= [.. fn.Arguments];
+                        rewrittenArgs[i] = rewritten;
+                    }
+                }
+                return rewrittenArgs is null
+                    ? fn
+                    : new FunctionCallExpression(fn.FunctionName, rewrittenArgs, fn.OrderBy, fn.Distinct, fn.Span);
+            }
+
+            case InExpression inExpr:
+            {
+                Expression target = await PrefoldSubqueriesAsync(inExpr.Expression, batchContext, ct)
+                    .ConfigureAwait(false);
+                Expression[]? rewrittenValues = null;
+                for (int i = 0; i < inExpr.Values.Count; i++)
+                {
+                    Expression rewritten = await PrefoldSubqueriesAsync(inExpr.Values[i], batchContext, ct)
+                        .ConfigureAwait(false);
+                    if (!ReferenceEquals(rewritten, inExpr.Values[i]))
+                    {
+                        rewrittenValues ??= [.. inExpr.Values];
+                        rewrittenValues[i] = rewritten;
+                    }
+                }
+                return ReferenceEquals(target, inExpr.Expression) && rewrittenValues is null
+                    ? inExpr
+                    : new InExpression(target, rewrittenValues ?? inExpr.Values, inExpr.Negated);
+            }
+
+            case BetweenExpression between:
+            {
+                Expression target = await PrefoldSubqueriesAsync(between.Expression, batchContext, ct)
+                    .ConfigureAwait(false);
+                Expression low = await PrefoldSubqueriesAsync(between.Low, batchContext, ct)
+                    .ConfigureAwait(false);
+                Expression high = await PrefoldSubqueriesAsync(between.High, batchContext, ct)
+                    .ConfigureAwait(false);
+                return ReferenceEquals(target, between.Expression)
+                    && ReferenceEquals(low, between.Low)
+                    && ReferenceEquals(high, between.High)
+                    ? between
+                    : new BetweenExpression(target, low, high, between.Negated);
+            }
+
+            case CaseExpression caseExpr:
+            {
+                Expression? operand = caseExpr.Operand;
+                if (operand is not null)
+                {
+                    operand = await PrefoldSubqueriesAsync(operand, batchContext, ct)
+                        .ConfigureAwait(false);
+                }
+                WhenClause[]? rewrittenClauses = null;
+                for (int i = 0; i < caseExpr.WhenClauses.Count; i++)
+                {
+                    WhenClause clause = caseExpr.WhenClauses[i];
+                    Expression cond = await PrefoldSubqueriesAsync(clause.Condition, batchContext, ct)
+                        .ConfigureAwait(false);
+                    Expression result = await PrefoldSubqueriesAsync(clause.Result, batchContext, ct)
+                        .ConfigureAwait(false);
+                    if (!ReferenceEquals(cond, clause.Condition) || !ReferenceEquals(result, clause.Result))
+                    {
+                        rewrittenClauses ??= [.. caseExpr.WhenClauses];
+                        rewrittenClauses[i] = new WhenClause(cond, result);
+                    }
+                }
+                Expression? elseResult = caseExpr.ElseResult;
+                if (elseResult is not null)
+                {
+                    elseResult = await PrefoldSubqueriesAsync(elseResult, batchContext, ct)
+                        .ConfigureAwait(false);
+                }
+                bool unchanged = ReferenceEquals(operand, caseExpr.Operand)
+                    && rewrittenClauses is null
+                    && ReferenceEquals(elseResult, caseExpr.ElseResult);
+                return unchanged
+                    ? caseExpr
+                    : new CaseExpression(operand, rewrittenClauses ?? caseExpr.WhenClauses, elseResult, caseExpr.Span);
+            }
+
+            default:
+                return expression;
+        }
+    }
+
+    /// <summary>
+    /// Plans + executes the inner SELECT of a <see cref="SubqueryExpression"/>
+    /// and returns a <see cref="LiteralExpression"/> wrapping its single-row
+    /// single-column result. Mirrors SQL standard scalar-subquery semantics:
+    /// zero rows → NULL literal, more than one row → error.
+    /// </summary>
+    private async Task<Expression> FoldOneSubqueryAsync(
+        SubqueryExpression subquery, BatchContext batchContext, CancellationToken ct)
+    {
+        QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
+        IQueryPlan innerPlan = _catalog.Plan(innerStatement);
+
+        DataValue captured = default;
+        bool haveValue = false;
+        bool tooManyRows = false;
+        await foreach (RowBatch batch in innerPlan
+            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ConfigureAwait(false))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (haveValue)
+                {
+                    tooManyRows = true;
+                    break;
+                }
+                Row row = batch[i];
+                if (row.FieldCount != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Scalar subquery must return exactly one column, but returned {row.FieldCount}.");
+                }
+                // Stabilise into the procedure-lifetime store before the
+                // producing arena recycles on the next iteration.
+                captured = DataValueRetention.Stabilize(
+                    row[0], batch.Arena, batchContext.VariableStore);
+                haveValue = true;
+            }
+            if (tooManyRows) break;
+        }
+
+        if (tooManyRows)
+        {
+            throw new InvalidOperationException(
+                "Scalar subquery returned more than one row.");
+        }
+
+        if (!haveValue || captured.IsNull)
+        {
+            return new LiteralExpression(null);
+        }
+
+        // Materialise the DataValue into a CLR object suitable for
+        // LiteralExpression. The synthesise-SELECT path will re-pack via
+        // the literal lowerer, so primitives flow back through the engine
+        // without needing arena access.
+        object literal = captured.Kind switch
+        {
+            DataKind.Int8 => (object)(sbyte)captured.AsInt8(),
+            DataKind.Int16 => captured.AsInt16(),
+            DataKind.Int32 => captured.AsInt32(),
+            DataKind.Int64 => captured.AsInt64(),
+            DataKind.UInt8 => (sbyte)captured.AsUInt8(),
+            DataKind.Float32 => captured.AsFloat32(),
+            DataKind.Float64 => captured.AsFloat64(),
+            DataKind.String => captured.AsString(),
+            DataKind.Boolean => captured.AsBoolean(),
+            _ => captured.ToFloat(),
+        };
+        return new LiteralExpression(literal);
+    }
+
+    /// <summary>
     /// Evaluates <paramref name="expression"/> by synthesising
     /// <c>SELECT &lt;expression&gt;</c>, planning it through the catalog,
     /// and reading the single resulting cell. The value is stabilised
@@ -770,12 +1310,25 @@ public sealed class BatchExecutor
     /// after the synthetic query's per-batch arena recycles. Throws if
     /// the expression doesn't yield exactly one row.
     /// </summary>
+    /// <remarks>
+    /// Any <see cref="SubqueryExpression"/> nodes in <paramref name="expression"/>
+    /// are pre-folded into <see cref="LiteralExpression"/> nodes before the
+    /// synthesise step. The catalog's sync planner doesn't run the
+    /// scalar-subquery rewriter, so a surviving <c>SubqueryExpression</c>
+    /// would crash at evaluation time. Pre-folding handles common procedural
+    /// shapes — <c>DECLARE @c INT64 = (SELECT count(*) FROM t)</c>,
+    /// <c>SET @x = (SELECT max(v) FROM t) + 1</c>, etc. — by running each
+    /// inner SELECT through the same engine the user query path uses.
+    /// </remarks>
     private async Task<DataValue> EvaluateScalarAsync(
         Expression expression, BatchContext batchContext, CancellationToken ct)
     {
+        Expression rewritten = await PrefoldSubqueriesAsync(expression, batchContext, ct)
+            .ConfigureAwait(false);
+
         QueryStatement synthetic = new(
             new SelectQueryExpression(
-                new SelectStatement(Columns: [new SelectColumn(expression)])));
+                new SelectStatement(Columns: [new SelectColumn(rewritten)])));
         IQueryPlan plan = _catalog.Plan(synthetic);
 
         DataValue stable = default;

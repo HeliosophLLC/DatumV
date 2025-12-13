@@ -243,11 +243,16 @@ public static class UdfInliner
                     $"Register it via CREATE FUNCTION {name}(...) AS ... before referencing it.");
             }
 
-            if (call.Arguments.Count != udf.Parameters.Count)
+            // Allow trailing arguments to be omitted when the matching
+            // parameters carry defaults. The minimum legal arity is the
+            // count of leading parameters with no default.
+            int minRequired = MinRequiredArity(udf.Parameters);
+            if (call.Arguments.Count < minRequired || call.Arguments.Count > udf.Parameters.Count)
             {
                 throw new InvalidOperationException(
-                    $"UDF '{call.FunctionName}' expects {udf.Parameters.Count} argument(s), " +
-                    $"got {call.Arguments.Count}.");
+                    minRequired == udf.Parameters.Count
+                        ? $"UDF '{call.FunctionName}' expects {udf.Parameters.Count} argument(s), got {call.Arguments.Count}."
+                        : $"UDF '{call.FunctionName}' expects {minRequired}–{udf.Parameters.Count} argument(s), got {call.Arguments.Count}.");
             }
 
             // Cycle detection — case-insensitive on UDF names.
@@ -266,12 +271,18 @@ public static class UdfInliner
             // argument is wrapped with __assert_not_null when the matching
             // parameter is declared IS NOT NULL — the wrapper fires at
             // evaluation time, after the argument has been computed but
-            // before the body sees it.
+            // before the body sees it. Missing trailing arguments are
+            // filled in from each parameter's Default expression — that
+            // expression is inlined into the body just like a real argument
+            // (so any UDF references inside the default get resolved by the
+            // outer rewrite pass below).
             Dictionary<string, Expression> paramToArg = new(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < udf.Parameters.Count; i++)
             {
                 UdfParameter param = udf.Parameters[i];
-                Expression arg = call.Arguments[i];
+                Expression arg = i < call.Arguments.Count
+                    ? call.Arguments[i]
+                    : param.Default!;  // checked above: missing slot → has default
                 if (param.IsNotNull)
                 {
                     arg = WrapNotNull(
@@ -309,6 +320,24 @@ public static class UdfInliner
             {
                 _inliningStack.Pop();
             }
+        }
+
+        /// <summary>
+        /// Returns the minimum required argument count for a parameter list:
+        /// the count of leading parameters that have no default. Once a
+        /// parameter has a default, every later parameter must also have one
+        /// (validated at registration time), so the prefix length is the
+        /// minimum legal arity.
+        /// </summary>
+        private static int MinRequiredArity(IReadOnlyList<UdfParameter> parameters)
+        {
+            int min = 0;
+            foreach (UdfParameter p in parameters)
+            {
+                if (p.Default is not null) break;
+                min++;
+            }
+            return min;
         }
 
         /// <summary>

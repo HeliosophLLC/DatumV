@@ -1129,10 +1129,22 @@ public sealed record AnalyzeTableStatement(string TableName) : Statement;
 /// (NULL is allowed and propagates through the body's normal three-
 /// valued logic).
 /// </param>
+/// <param name="Default">
+/// Optional default-value expression. When non-<see langword="null"/>,
+/// callers may omit this argument (and any subsequent ones that also
+/// have defaults); the executor evaluates the default in the call site's
+/// scope and binds it as if the caller had passed it. The default expression
+/// must appear in source order — once a parameter has a default, every
+/// later parameter must as well, so the call-site arity is unambiguous.
+/// Source-level syntax is <c>@name TYPE [IS NOT NULL] [= default-expr]</c>;
+/// <c>IS NOT NULL</c> precedes <c>= expr</c> because <c>expr IS NOT NULL</c>
+/// is itself a valid scalar predicate.
+/// </param>
 public sealed record UdfParameter(
     string Name,
     string TypeName,
-    bool IsNotNull = false);
+    bool IsNotNull = false,
+    Expression? Default = null);
 
 /// <summary>
 /// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], @p2 TYPE [IS NOT NULL]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>
@@ -1352,6 +1364,70 @@ public sealed record DeclareStatement(
 public sealed record SetStatement(
     string VariableName,
     Expression Value,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>BREAK</c> — terminates the innermost enclosing <see cref="WhileStatement"/>,
+/// <see cref="ForCounterStatement"/>, or <see cref="ForInStatement"/> immediately.
+/// Outside of any loop the executor raises an error.
+/// </summary>
+/// <param name="Span">Source location of the <c>BREAK</c> keyword.</param>
+public sealed record BreakStatement(
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>CONTINUE</c> — skips the rest of the current iteration of the innermost
+/// enclosing <see cref="WhileStatement"/>, <see cref="ForCounterStatement"/>, or
+/// <see cref="ForInStatement"/> and proceeds to the next iteration.
+/// Outside of any loop the executor raises an error.
+/// </summary>
+/// <param name="Span">Source location of the <c>CONTINUE</c> keyword.</param>
+public sealed record ContinueStatement(
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>PRINT expression</c> — evaluates <see cref="Value"/>, coerces the result
+/// to a string, and emits it to the batch's event stream as a dedicated print
+/// event. Intended for procedural diagnostics: progress markers, intermediate
+/// values, and "what's happening" tracing during long procedures. Distinct
+/// from a <c>SELECT</c> so callers can separate user-facing output rows from
+/// diagnostic chatter.
+/// </summary>
+/// <param name="Value">Expression whose value is rendered as a string.</param>
+/// <param name="Span">Source location of the <c>PRINT</c> keyword.</param>
+public sealed record PrintStatement(
+    Expression Value,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>TRY try-stmt CATCH @err catch-stmt [FINALLY finally-stmt]</c> —
+/// procedural exception handling. The <c>TRY</c> body runs first; any
+/// thrown exception (other than control-flow signals or cancellation)
+/// causes the <c>CATCH</c> body to run with <see cref="ErrorVariableName"/>
+/// auto-declared in a fresh scope frame and bound to the exception's
+/// message. The optional <c>FINALLY</c> body runs unconditionally after
+/// the try (and catch, if any), with standard try/finally semantics:
+/// it executes on success, on caught error, and even when an exception
+/// or control-flow signal is bubbling up — and a throw inside <c>FINALLY</c>
+/// supersedes any pending exception.
+/// </summary>
+/// <remarks>
+/// <c>BREAK</c> / <c>CONTINUE</c> / cancellation signals are not caught
+/// by <c>CATCH</c> — they pass through (running <c>FINALLY</c> on the way)
+/// to their respective handlers. Recursion-depth and other procedural
+/// runtime errors <em>are</em> catchable; downstream code can surface
+/// them as fallback paths.
+/// </remarks>
+/// <param name="TryBody">Statement executed first; typically a <see cref="BlockStatement"/>.</param>
+/// <param name="ErrorVariableName">Variable name (without <c>@</c>) bound to the exception message in the catch frame.</param>
+/// <param name="CatchBody">Statement executed when the try throws.</param>
+/// <param name="FinallyBody">Optional cleanup statement; runs unconditionally after try/catch.</param>
+/// <param name="Span">Source location of the <c>TRY</c> keyword.</param>
+public sealed record TryStatement(
+    Statement TryBody,
+    string ErrorVariableName,
+    Statement CatchBody,
+    Statement? FinallyBody = null,
     SourceSpan? Span = null) : Statement;
 
 // ───────────────────── ASSERT clause ─────────────────────

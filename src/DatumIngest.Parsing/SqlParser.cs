@@ -2426,9 +2426,13 @@ public static class SqlParser
 
     /// <summary>
     /// Parses a single UDF parameter declaration:
-    /// <c>@name TYPE [IS NOT NULL]</c>. The <c>@</c>-prefix matches how
-    /// the parameter is referenced inside the body and lines up with
-    /// procedural variable syntax.
+    /// <c>@name TYPE [IS NOT NULL] [= default-expr]</c>. The <c>@</c>-prefix
+    /// matches how the parameter is referenced inside the body and lines up
+    /// with procedural variable syntax. <c>IS NOT NULL</c> appears before the
+    /// default expression because <c>expr IS NOT NULL</c> is itself a valid
+    /// scalar predicate — placing the modifier after the default would create
+    /// an ambiguity (does <c>= 0 IS NOT NULL</c> mean "default 0, must not
+    /// be null" or "default to the literal predicate <c>0 IS NOT NULL</c>"?).
     /// </summary>
     private static readonly TokenListParser<SqlToken, UdfParameter> UdfParameterParser =
         from variable in Token.EqualTo(SqlToken.Variable)
@@ -2439,10 +2443,16 @@ public static class SqlParser
             from nullKw in Token.EqualTo(SqlToken.Null)
             select true
         ).OptionalOrDefault()
+        from defaultValue in (
+            from eq in Token.EqualTo(SqlToken.Equals)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AsNullable().OptionalOrDefault()
         select new UdfParameter(
             variable.ToStringValue()[1..],
             typeName,
-            isNotNull);
+            isNotNull,
+            defaultValue);
 
     /// <summary>
     /// Parses <c>OR REPLACE</c> or <c>OR ALTER</c> as an optional overwrite
@@ -2716,6 +2726,58 @@ public static class SqlParser
         ForCounterStatementParser.Try().Or(ForInStatementParser);
 
     /// <summary>
+    /// <c>BREAK</c> — keyword-only statement; legality (must be inside a loop)
+    /// is enforced at execution time, not parse time.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> BreakStatementParser =
+        from breakKw in Token.EqualTo(SqlToken.Break)
+        select (Statement)new BreakStatement(ToSpan(breakKw));
+
+    /// <summary>
+    /// <c>CONTINUE</c> — keyword-only statement; legality (must be inside a loop)
+    /// is enforced at execution time, not parse time.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ContinueStatementParser =
+        from continueKw in Token.EqualTo(SqlToken.Continue)
+        select (Statement)new ContinueStatement(ToSpan(continueKw));
+
+    /// <summary>
+    /// <c>PRINT expression</c> — emits a diagnostic string to the batch event
+    /// stream. The expression is parsed eagerly, so anything valid in a SELECT
+    /// projection works (literal, variable reference, scalar subquery,
+    /// function call, etc.).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> PrintStatementParser =
+        from printKw in Token.EqualTo(SqlToken.Print)
+        from value in SP.Ref(() => ExpressionParser!)
+        select (Statement)new PrintStatement(value, ToSpan(printKw));
+
+    /// <summary>
+    /// <c>TRY stmt CATCH @err stmt [FINALLY stmt]</c> — procedural exception
+    /// handling, IF-flavored. Each body is a single statement; pair with
+    /// <c>BEGIN ... END</c> for multi-statement bodies. The <c>@err</c>
+    /// variable is auto-declared in the catch body's scope and holds the
+    /// caught exception's message.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> TryStatementParser =
+        from tryKw in Token.EqualTo(SqlToken.Try)
+        from tryBody in SP.Ref(() => SingleStatementParser!)
+        from catchKw in Token.EqualTo(SqlToken.Catch)
+        from errorVar in Token.EqualTo(SqlToken.Variable)
+        from catchBody in SP.Ref(() => SingleStatementParser!)
+        from finallyBody in (
+            from finallyKw in Token.EqualTo(SqlToken.Finally)
+            from body in SP.Ref(() => SingleStatementParser!)
+            select body
+        ).AsNullable().OptionalOrDefault()
+        select (Statement)new TryStatement(
+            tryBody,
+            errorVar.ToStringValue()[1..],
+            catchBody,
+            finallyBody,
+            ToSpan(tryKw));
+
+    /// <summary>
     /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
     /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
     /// </summary>
@@ -2847,6 +2909,10 @@ public static class SqlParser
             .Or(IfStatementParser.Try())
             .Or(WhileStatementParser.Try())
             .Or(ForStatementParser.Try())
+            .Or(BreakStatementParser.Try())
+            .Or(ContinueStatementParser.Try())
+            .Or(PrintStatementParser.Try())
+            .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
             .Or(SetStatementParser.Try())
             .Or(CreateTempTableParser.Try())
