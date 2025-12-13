@@ -189,6 +189,60 @@ Print events surface as `CellPrintBatchEvent` on the `RunWithEventsAsync`
 stream — a debug pane, stderr, or a log can route them anywhere; the
 non-streaming `ExecuteAsync` path silently discards them.
 
+## ASSERT and RAISE
+
+Procedural invariant checks (`ASSERT`) and explicit error throwing
+(`RAISE`) — both produce the same shape of exception that `TRY ... CATCH`
+handles uniformly, and both render their messages with the same rules
+as `PRINT`.
+
+### ASSERT
+
+Evaluates a predicate; if false (or NULL — three-valued logic), throws
+with the supplied message. Useful for "this should never happen" checks
+inside procedure bodies.
+
+```sql
+ASSERT @count > 0 MESSAGE 'cohort cannot be empty'
+```
+
+The `MESSAGE` clause is optional. When omitted, the default message
+embeds the formatted predicate so failures self-locate:
+
+```sql
+ASSERT @threshold IS NOT NULL
+-- error: Assertion failed: @threshold IS NOT NULL
+```
+
+The procedural `ASSERT` statement is distinct from the SELECT-clause
+[`ASSERT`](query.md) used in `DEFINE` blocks and after `QUALIFY`. The
+SELECT-clause form checks per-row invariants during query execution and
+supports `ON FAIL ABORT/SKIP/WARN`. The procedural form fires once at
+its position in the statement stream and only aborts — the SKIP/WARN
+modes have no meaning in a sequential stream.
+
+### RAISE
+
+Throws an explicit error with a user-supplied message:
+
+```sql
+IF @balance < @amount
+  RAISE 'insufficient funds'
+```
+
+The argument is any expression. Strings pass through; numbers and
+booleans render with the same rules as `PRINT` (invariant culture,
+lowercase booleans). Inside a `CATCH` block, `RAISE @err` rethrows the
+caught error to a surrounding handler:
+
+```sql
+TRY EXEC models.flaky_llm(@prompt)
+CATCH @err BEGIN
+  PRINT `model failed: ${@err}`
+  RAISE @err  -- propagate to the outer handler
+END
+```
+
 ## Error Handling (TRY / CATCH / FINALLY)
 
 Procedural exception handling, IF-flavored: each body is a single

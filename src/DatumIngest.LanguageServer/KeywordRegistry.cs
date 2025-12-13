@@ -361,6 +361,7 @@ internal static class KeywordRegistry
         [SqlToken.Try] = [],
         [SqlToken.Catch] = [],
         [SqlToken.Finally] = [],
+        [SqlToken.Raise] = [],
     };
 
     // ───────────────────── Public API ─────────────────────

@@ -697,6 +697,145 @@ public sealed class BatchExecutorTests : ServiceTestBase
             prints.Select(p => p.Text));
     }
 
+    // ───────────────────── ASSERT / RAISE ─────────────────────
+
+    [Fact]
+    public async Task Assert_PredicateTrue_ContinuesNormally()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @x INT32 = 5; " +
+            "ASSERT @x > 1; " +
+            "DECLARE @after INT32 = 99");
+
+        Assert.Equal(99, Convert.ToInt32(result.FinalBindings["after"]));
+    }
+
+    [Fact]
+    public async Task Assert_PredicateFalse_ThrowsWithMessage()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @x INT32 = 0; " +
+                "ASSERT @x > 1 MESSAGE 'x must be positive'"));
+        Assert.Equal("x must be positive", ex.Message);
+    }
+
+    [Fact]
+    public async Task Assert_PredicateFalse_NoMessage_DefaultsToFormattedPredicate()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @x INT32 = 0; " +
+                "ASSERT @x > 1"));
+        Assert.Contains("Assertion failed", ex.Message);
+        Assert.Contains("@x", ex.Message);
+    }
+
+    [Fact]
+    public async Task Assert_PredicateNull_ThrowsLikeFalse()
+    {
+        // NULL is "unknown" — same as false for control-flow purposes,
+        // matches IF/WHILE three-valued semantics.
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @x INT32; " +
+                "ASSERT @x > 1 MESSAGE 'unknown is not safe'"));
+        Assert.Equal("unknown is not safe", ex.Message);
+    }
+
+    [Fact]
+    public async Task Assert_MessageIsExpression_EvaluatesAtCallSite()
+    {
+        // The MESSAGE clause accepts any expression — including a variable
+        // reference. Useful for surfacing the violating value in the error.
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @msg STRING = 'x was too small'; " +
+                "DECLARE @x INT32 = 7; " +
+                "ASSERT @x > 100 MESSAGE @msg"));
+        Assert.Equal("x was too small", ex.Message);
+    }
+
+    [Fact]
+    public async Task Assert_InsideTry_IsCaught()
+    {
+        // ASSERT failures route through the standard exception channel,
+        // so an enclosing TRY/CATCH catches them like any other error.
+        BatchResult result = await RunAsync(
+            "DECLARE @msg STRING = ''; " +
+            "TRY ASSERT 1 = 2 MESSAGE 'arithmetic broke' " +
+            "CATCH @err SET @msg = @err");
+
+        Assert.Equal("arithmetic broke", result.FinalBindings["msg"]);
+    }
+
+    [Fact]
+    public async Task Raise_StringLiteral_Throws()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync("RAISE 'something went wrong'"));
+        Assert.Equal("something went wrong", ex.Message);
+    }
+
+    [Fact]
+    public async Task Raise_ExpressionRendersToMessage()
+    {
+        // RAISE accepts any expression; non-strings are rendered with the
+        // same rules as PRINT (numbers in invariant culture, booleans
+        // lowercase). Here we raise an INT32 directly to confirm the
+        // renderer kicks in.
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "DECLARE @code INT32 = 42; " +
+                "RAISE @code"));
+        Assert.Equal("42", ex.Message);
+    }
+
+    [Fact]
+    public async Task Raise_InsideCatch_RethrowsViaErrorVariable()
+    {
+        // Standard pattern: log the failure then propagate. Outer TRY
+        // catches the rethrown error; the message survives the round-trip.
+        BatchResult result = await RunAsync(
+            "DECLARE @outer_msg STRING = ''; " +
+            "TRY BEGIN " +
+            "  TRY ASSERT 1 = 2 MESSAGE 'inner failure' " +
+            "  CATCH @inner RAISE @inner " +
+            "END " +
+            "CATCH @outer SET @outer_msg = @outer");
+
+        Assert.Equal("inner failure", result.FinalBindings["outer_msg"]);
+    }
+
+    [Fact]
+    public async Task Raise_InsideLoop_AbortsLoop()
+    {
+        // RAISE is not control flow — it throws. Without a TRY around the
+        // RAISE, the loop terminates and the exception propagates.
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(
+                "FOR @i = 1 TO 10 BEGIN " +
+                "  IF @i = 5 RAISE 'hit five' " +
+                "END"));
+        Assert.Equal("hit five", ex.Message);
+    }
+
+    [Fact]
+    public async Task Raise_InsideTry_FinallyStillRuns()
+    {
+        // RAISE inside a TRY behaves like any other thrown error: CATCH
+        // handles it, FINALLY runs.
+        BatchResult result = await RunAsync(
+            "DECLARE @caught BOOLEAN = FALSE; " +
+            "DECLARE @cleaned BOOLEAN = FALSE; " +
+            "TRY RAISE 'oops' " +
+            "CATCH @err SET @caught = TRUE " +
+            "FINALLY SET @cleaned = TRUE");
+
+        Assert.Equal(true, result.FinalBindings["caught"]);
+        Assert.Equal(true, result.FinalBindings["cleaned"]);
+    }
+
     // ───────────────────── TRY / CATCH / FINALLY ─────────────────────
 
     [Fact]

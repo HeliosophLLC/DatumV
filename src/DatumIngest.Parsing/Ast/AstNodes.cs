@@ -1400,6 +1400,42 @@ public sealed record PrintStatement(
     SourceSpan? Span = null) : Statement;
 
 /// <summary>
+/// <c>ASSERT predicate [MESSAGE message-expr]</c> — procedural invariant
+/// check. Evaluates the predicate; if false or NULL, throws with the
+/// rendered message. When <see cref="Message"/> is omitted, the message
+/// defaults to <c>"Assertion failed: &lt;predicate&gt;"</c> using the
+/// formatted source of the predicate. Catchable by enclosing
+/// <see cref="TryStatement"/>.
+/// </summary>
+/// <remarks>
+/// Distinct from the SELECT-clause <c>ASSERT</c> (<see cref="AssertClause"/>),
+/// which checks a per-row invariant during query execution and supports
+/// SKIP semantics. The procedural form always aborts: in a sequential
+/// statement stream the alternative ("skip the next statement") is
+/// meaningless.
+/// </remarks>
+/// <param name="Predicate">Boolean-valued expression. NULL is treated as false.</param>
+/// <param name="Message">Optional message expression; rendered to a string when the assertion fires.</param>
+/// <param name="Span">Source location of the <c>ASSERT</c> keyword.</param>
+public sealed record AssertStatement(
+    Expression Predicate,
+    Expression? Message = null,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>RAISE expression</c> — explicitly throws an error from procedural
+/// code. The expression is evaluated and rendered to a string for the
+/// exception message; an enclosing <see cref="TryStatement"/> catches it
+/// the same way as any other thrown error. Inside a catch block,
+/// <c>RAISE @err</c> rethrows the caught error.
+/// </summary>
+/// <param name="Message">Expression whose rendered value becomes the exception message.</param>
+/// <param name="Span">Source location of the <c>RAISE</c> keyword.</param>
+public sealed record RaiseStatement(
+    Expression Message,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
 /// <c>TRY try-stmt CATCH @err catch-stmt [FINALLY finally-stmt]</c> —
 /// procedural exception handling. The <c>TRY</c> body runs first; any
 /// thrown exception (other than control-flow signals or cancellation)

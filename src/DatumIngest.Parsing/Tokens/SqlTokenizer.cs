@@ -402,6 +402,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("TRY"), SqlToken.Try, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CATCH"), SqlToken.Catch, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FINALLY"), SqlToken.Finally, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RAISE"), SqlToken.Raise, requireDelimiters: true)
 
             // Type keywords — reserved names for DataKind type literals
             .Match(Span.EqualToIgnoreCase("BOOLEAN"), SqlToken.TypeKeyword, requireDelimiters: true)

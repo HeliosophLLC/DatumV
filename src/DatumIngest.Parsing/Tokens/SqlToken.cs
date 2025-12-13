@@ -343,6 +343,9 @@ public enum SqlToken
     /// <summary>The FINALLY keyword (cleanup block that always runs after TRY/CATCH).</summary>
     Finally,
 
+    /// <summary>The RAISE keyword (explicitly throws an error from procedural code).</summary>
+    Raise,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>

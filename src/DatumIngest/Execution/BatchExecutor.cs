@@ -393,6 +393,36 @@ public sealed class BatchExecutor
                         .ConfigureAwait(false);
                     break;
                 }
+                case AssertStatement assert:
+                {
+                    bool holds = await EvaluatePredicateAsync(assert.Predicate, batchContext, ct)
+                        .ConfigureAwait(false);
+                    if (!holds)
+                    {
+                        string message;
+                        if (assert.Message is not null)
+                        {
+                            DataValue m = await EvaluateScalarAsync(assert.Message, batchContext, ct)
+                                .ConfigureAwait(false);
+                            message = RenderForPrint(m, batchContext.VariableStore)
+                                ?? "Assertion failed.";
+                        }
+                        else
+                        {
+                            message = $"Assertion failed: {QueryExplainer.FormatExpression(assert.Predicate)}";
+                        }
+                        throw new InvalidOperationException(message);
+                    }
+                    break;
+                }
+                case RaiseStatement raise:
+                {
+                    DataValue messageValue = await EvaluateScalarAsync(raise.Message, batchContext, ct)
+                        .ConfigureAwait(false);
+                    string message = RenderForPrint(messageValue, batchContext.VariableStore)
+                        ?? "RAISE: <null>";
+                    throw new InvalidOperationException(message);
+                }
                 default:
                     throw new NotSupportedException(
                         $"Procedural statement type '{stmt.GetType().Name}' is not yet supported. " +
@@ -441,6 +471,8 @@ public sealed class BatchExecutor
         ContinueStatement => "continue",
         PrintStatement => "print",
         TryStatement => "try",
+        AssertStatement => "assert",
+        RaiseStatement => "raise",
         _ => stmt.GetType().Name.ToLowerInvariant(),
     };
 

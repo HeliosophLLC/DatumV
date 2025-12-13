@@ -2753,6 +2753,34 @@ public static class SqlParser
         select (Statement)new PrintStatement(value, ToSpan(printKw));
 
     /// <summary>
+    /// <c>ASSERT predicate [MESSAGE message-expr]</c> — procedural invariant
+    /// check. Distinct from the SELECT-clause <c>ASSERT</c>: this form is a
+    /// standalone statement, always aborts on failure, and does not support
+    /// the per-row SKIP/ABORT mode. Catchable by an enclosing
+    /// <c>TRY ... CATCH</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> AssertStatementParser =
+        from assertKw in Token.EqualTo(SqlToken.Assert)
+        from predicate in SP.Ref(() => ExpressionParser!)
+        from message in (
+            from msgKw in Token.EqualTo(SqlToken.Message)
+            from msgExpr in SP.Ref(() => ExpressionParser!)
+            select msgExpr
+        ).AsNullable().Try().OptionalOrDefault()
+        select (Statement)new AssertStatement(predicate, message, ToSpan(assertKw));
+
+    /// <summary>
+    /// <c>RAISE expression</c> — explicitly throws an error from procedural
+    /// code. The expression is evaluated and rendered to a string for the
+    /// exception message; <c>RAISE @err</c> inside a catch rethrows the
+    /// caught error.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> RaiseStatementParser =
+        from raiseKw in Token.EqualTo(SqlToken.Raise)
+        from message in SP.Ref(() => ExpressionParser!)
+        select (Statement)new RaiseStatement(message, ToSpan(raiseKw));
+
+    /// <summary>
     /// <c>TRY stmt CATCH @err stmt [FINALLY stmt]</c> — procedural exception
     /// handling, IF-flavored. Each body is a single statement; pair with
     /// <c>BEGIN ... END</c> for multi-statement bodies. The <c>@err</c>
@@ -2912,6 +2940,8 @@ public static class SqlParser
             .Or(BreakStatementParser.Try())
             .Or(ContinueStatementParser.Try())
             .Or(PrintStatementParser.Try())
+            .Or(AssertStatementParser.Try())
+            .Or(RaiseStatementParser.Try())
             .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
             .Or(SetStatementParser.Try())
