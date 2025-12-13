@@ -75,7 +75,22 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
-    /// Registers a table-valued function.
+    /// Registers a table-valued function described by <typeparamref name="T"/>'s
+    /// static-abstract metadata. Reads <c>T.Name</c>, <c>T.Category</c>, and
+    /// <c>T.Description</c> at registration time.
+    /// </summary>
+    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
+    public void RegisterTableValued<T>() where T : ITableValuedFunctionMetadata, ITableValuedFunction, new()
+    {
+        T instance = new();
+        if (!_tableValuedFunctions.TryAdd(T.Name, instance))
+        {
+            throw new ArgumentException($"Table-valued function '{T.Name}' is already registered.");
+        }
+    }
+
+    /// <summary>
+    /// Registers a table-valued function instance directly.
     /// </summary>
     /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
     public void RegisterTableValued(ITableValuedFunction function)
@@ -248,7 +263,7 @@ public sealed class FunctionRegistry
         // ── Table-valued ──────────────────────────────────────────────────
         // UNNEST retired pending the reference-type-array consolidation; will be
         // rebuilt on the new typed-array surface when a demand actually requires it.
-        registry.RegisterTableValued(new TableValued.RangeFunction());
+        registry.RegisterTableValued<TableValued.RangeFunction>();
 
         // ── Aggregate ─────────────────────────────────────────────────────
         registry.RegisterAggregate(new Aggregates.CountFunction());

@@ -196,6 +196,13 @@ public sealed class BatchExecutor
             {
                 case QueryStatement q:
                 {
+                    if (TryGetAssignmentForm(q, out IReadOnlyList<string?>? assignTargets))
+                    {
+                        await ExecuteAssignmentSelectAsync(q, assignTargets!, batchContext, ct)
+                            .ConfigureAwait(false);
+                        break;
+                    }
+
                     IQueryPlan plan = _catalog.Plan(q);
                     BatchEventStreamingSink sink = new(cellId, onEvent);
                     await foreach (RowBatch batch in plan
@@ -361,6 +368,107 @@ public sealed class BatchExecutor
     {
         DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
         batchContext.VariableScope.Set(set.VariableName, stable);
+    }
+
+    /// <summary>
+    /// Detects whether <paramref name="statement"/> is an assignment-form
+    /// SELECT — every top-level <see cref="SelectColumn"/> carries an
+    /// <see cref="SelectColumn.AssignedVariableName"/>. Mixed projections
+    /// + assignments throw eagerly so the user sees a clear error rather
+    /// than half-bound variables and half-rendered rows. UNION /
+    /// INTERSECT / EXCEPT (CompoundQueryExpression) compositions of an
+    /// assignment-form SELECT are also rejected — set ops over assignment
+    /// columns are nonsensical.
+    /// </summary>
+    private static bool TryGetAssignmentForm(
+        QueryStatement statement,
+        out IReadOnlyList<string?>? assignTargets)
+    {
+        if (statement.Query is not SelectQueryExpression select)
+        {
+            assignTargets = null;
+            return false;
+        }
+
+        IReadOnlyList<SelectColumn> columns = select.Statement.Columns;
+        if (columns.Count == 0)
+        {
+            assignTargets = null;
+            return false;
+        }
+
+        int assignmentCount = 0;
+        foreach (SelectColumn col in columns)
+        {
+            if (col.AssignedVariableName is not null)
+            {
+                assignmentCount++;
+            }
+        }
+
+        if (assignmentCount == 0)
+        {
+            assignTargets = null;
+            return false;
+        }
+
+        if (assignmentCount != columns.Count)
+        {
+            throw new InvalidOperationException(
+                "SELECT mixes variable assignments with projection columns. " +
+                "All columns must use the `@var = expression` form, or none of them should. " +
+                "Add an alias (`AS name`) to a column to opt it out of assignment and treat it " +
+                "as a comparison instead.");
+        }
+
+        string?[] targets = new string?[columns.Count];
+        for (int i = 0; i < columns.Count; i++)
+        {
+            targets[i] = columns[i].AssignedVariableName;
+        }
+        assignTargets = targets;
+        return true;
+    }
+
+    /// <summary>
+    /// Executes an assignment-form SELECT — a statement where every
+    /// column is <c>@var = expression</c>. The plan runs as a normal
+    /// projection (the assignment expressions are the projected columns);
+    /// each row's values are stabilised into
+    /// <see cref="BatchContext.VariableStore"/> and pushed through
+    /// <see cref="VariableScope.Set"/>. Multiple matching rows update the
+    /// variables in iteration order — the last row's values are what
+    /// remain, matching T-SQL semantics. Zero rows leave the variables
+    /// unchanged. The statement produces no <see cref="CellRowBatchEvent"/>s
+    /// upstream — assignment-form SELECTs are silent at the
+    /// <see cref="BatchEvent"/> wire level.
+    /// </summary>
+    private async Task ExecuteAssignmentSelectAsync(
+        QueryStatement statement,
+        IReadOnlyList<string?> assignTargets,
+        BatchContext batchContext,
+        CancellationToken ct)
+    {
+        IQueryPlan plan = _catalog.Plan(statement);
+
+        await foreach (RowBatch batch in plan
+            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ConfigureAwait(false))
+        {
+            for (int rowIdx = 0; rowIdx < batch.Count; rowIdx++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Row row = batch[rowIdx];
+                for (int colIdx = 0; colIdx < assignTargets.Count; colIdx++)
+                {
+                    string? variableName = assignTargets[colIdx];
+                    if (variableName is null) continue; // defensive — shouldn't happen post-validation
+                    DataValue stable = DataValueRetention.Stabilize(
+                        row[colIdx], batch.Arena, batchContext.VariableStore);
+                    batchContext.VariableScope.Set(variableName, stable);
+                }
+            }
+        }
     }
 
     /// <summary>

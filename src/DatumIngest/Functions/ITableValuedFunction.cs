@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Functions;
 
@@ -12,12 +13,28 @@ public interface ITableValuedFunction
     string Name { get; }
 
     /// <summary>
-    /// Executes the function and yields rows asynchronously.
+    /// Validates argument kinds and returns the output schema. Mirrors
+    /// <see cref="IScalarFunction.ValidateArguments"/> for TVFs: implementations
+    /// throw <see cref="FunctionArgumentException"/> on kind mismatches so the
+    /// planner and language server surface errors before execution.
     /// </summary>
-    /// <param name="arguments">The argument values.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="argumentKinds">The data kinds of the call-site arguments.</param>
+    /// <returns>The schema describing the columns each output row will contain.</returns>
+    /// <exception cref="FunctionArgumentException">
+    /// The argument kinds do not satisfy this function's requirements.
+    /// </exception>
+    Schema ValidateArguments(ReadOnlySpan<DataKind> argumentKinds);
+
+    /// <summary>
+    /// Executes the function and yields rows asynchronously. Arguments are
+    /// pre-evaluated once by the operator before this call; implementations
+    /// should rent output batches via <paramref name="context"/>.
+    /// </summary>
+    /// <param name="arguments">The evaluated argument values.</param>
+    /// <param name="context">
+    /// The execution context supplying the pool, cancellation token, and
+    /// query-level arena for batch rental.
+    /// </param>
     /// <returns>An async stream of row batches produced by the function.</returns>
-    IAsyncEnumerable<RowBatch> ExecuteAsync(
-        DataValue[] arguments,
-        CancellationToken cancellationToken);
+    IAsyncEnumerable<RowBatch> ExecuteAsync(ValueRef[] arguments, ExecutionContext context);
 }

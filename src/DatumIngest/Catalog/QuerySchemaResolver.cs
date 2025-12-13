@@ -347,19 +347,15 @@ public sealed class QuerySchemaResolver
     }
 
     /// <summary>
-    /// Resolves a table-valued function source. If the function implements
-    /// <see cref="ISchemaAwareTableFunction"/>, returns its output schema;
-    /// otherwise returns an empty column list.
+    /// Resolves a table-valued function source by calling
+    /// <see cref="ITableValuedFunction.ValidateArguments"/> with the inferred
+    /// argument kinds. Returns an empty column list if the function is unknown
+    /// or if argument validation fails.
     /// </summary>
     private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(FunctionSource functionSource)
     {
         ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
         if (function is null)
-        {
-            return [];
-        }
-
-        if (function is not ISchemaAwareTableFunction schemaAware)
         {
             return [];
         }
@@ -376,13 +372,16 @@ public sealed class QuerySchemaResolver
             argumentKinds[index] = kind ?? DataKind.Float32;
         }
 
-        // The element-kind-aware dispatch (formerly used by UNNEST) was retired
-        // alongside UnnestFunction. Restore it as part of the reference-type-array
-        // consolidation when typed-array TVFs reappear.
-        Schema outputSchema = schemaAware.GetOutputSchema(argumentKinds);
-
-        string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
-        return ToResolvedColumns(outputSchema, sourceIdentifier);
+        try
+        {
+            Schema outputSchema = function.ValidateArguments(argumentKinds);
+            string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
+            return ToResolvedColumns(outputSchema, sourceIdentifier);
+        }
+        catch (FunctionArgumentException)
+        {
+            return [];
+        }
     }
 
     /// <summary>

@@ -160,6 +160,14 @@ internal static class DataValueComparer
             or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
             or DataKind.Boolean;
 
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="kind"/> is any signed or
+    /// unsigned integer scalar kind (excludes floats, boolean, and all other types).
+    /// </summary>
+    internal static bool IsIntegerKind(DataKind kind) =>
+        kind is DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128;
+
     // ───────────────────── Cast compatibility ─────────────────────
 
     /// <summary>

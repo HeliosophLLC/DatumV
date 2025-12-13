@@ -54,16 +54,15 @@ public sealed class FunctionSourceOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context);
-        Row emptyRow = new([], []);
+        EvaluationFrame frame = new(Row.Empty, context.Store, context.Store, context.OuterRow, context.SidecarRegistry);
 
-        DataValue[] evaluatedArguments = new DataValue[_arguments.Count];
+        ValueRef[] evaluatedArguments = new ValueRef[_arguments.Count];
         for (int index = 0; index < _arguments.Count; index++)
         {
-            evaluatedArguments[index] = evaluator.Evaluate(_arguments[index], emptyRow);
+            evaluatedArguments[index] = evaluator.EvaluateAsValueRef(_arguments[index], frame);
         }
 
-        await foreach (RowBatch batch in _function.ExecuteAsync(
-            evaluatedArguments, context.CancellationToken).ConfigureAwait(false))
+        await foreach (RowBatch batch in _function.ExecuteAsync(evaluatedArguments, context).ConfigureAwait(false))
         {
             yield return batch;
         }

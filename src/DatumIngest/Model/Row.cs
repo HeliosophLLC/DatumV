@@ -19,6 +19,13 @@ namespace DatumIngest.Model;
 /// </remarks>
 public readonly struct Row
 {
+    /// <summary>
+    /// Am empty row with no columns. Useful as a placeholder for operators that require a non-null
+    /// row but have no actual data to provide, such as the initial frame for a source operator's
+    /// argument evaluation.
+    /// </summary>
+    public readonly static Row Empty = new(ColumnLookup.Empty, Array.Empty<DataValue>());
+
     private readonly DataValue[] _values;
     private readonly ColumnLookup _columnLookup;
 
