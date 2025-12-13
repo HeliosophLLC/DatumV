@@ -49,6 +49,24 @@ public sealed class ExpressionEvaluator
     private readonly Schema? _sourceSchema;
 
     /// <summary>
+    /// Procedural variable scope chain — the visibility side of the variable
+    /// substrate. Walked innermost-first when resolving a
+    /// <c>VariableExpression</c> at evaluation time. <see langword="null"/>
+    /// when the evaluator runs outside a procedural batch (every existing
+    /// query path); referencing <c>@var</c> in that case throws.
+    /// </summary>
+    private readonly VariableScope? _variableScope;
+
+    /// <summary>
+    /// Borrowed reference to the procedure-lifetime arena holding bound
+    /// variable payloads. Source store for the stabilise that copies
+    /// variable values out into the active <see cref="EvaluationFrame.Target"/>
+    /// arena on read. Paired with <see cref="_variableScope"/> — both are
+    /// non-null inside a procedural batch, both null outside it.
+    /// </summary>
+    private readonly IValueStore? _variableStore;
+
+    /// <summary>
     /// Maps LET binding names to their source expressions. Used by
     /// <see cref="EvaluateStructFieldAccess"/> when the schema doesn't carry struct
     /// field metadata for a hidden <c>__destructure_N</c> binding: if the binding's
@@ -134,7 +152,26 @@ public sealed class ExpressionEvaluator
     /// frame and the per-call <see cref="InvocationFrame"/> built for scalar dispatch so image /
     /// byte-array functions can resolve sidecar-backed values.
     /// </param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null, IValueStore? store = null, SidecarRegistry? sidecarRegistry = null)
+    /// <param name="variableScope">
+    /// Optional procedural variable scope chain. When non-<see langword="null"/>,
+    /// <see cref="VariableExpression"/> references resolve via this chain;
+    /// otherwise referencing <c>@var</c> throws.
+    /// </param>
+    /// <param name="variableStore">
+    /// Optional procedure-lifetime store paired with <paramref name="variableScope"/>:
+    /// the source arena from which bound variable payloads are stabilised on read.
+    /// Both must be supplied (or both omitted) for the variable path to work.
+    /// </param>
+    public ExpressionEvaluator(
+        FunctionRegistry functions,
+        QueryMeter? meter = null,
+        Row? outerRow = null,
+        Schema? sourceSchema = null,
+        IReadOnlyDictionary<string, Expression>? letBindingExpressions = null,
+        IValueStore? store = null,
+        SidecarRegistry? sidecarRegistry = null,
+        VariableScope? variableScope = null,
+        IValueStore? variableStore = null)
     {
         _functions = functions;
         _meter = meter;
@@ -143,6 +180,8 @@ public sealed class ExpressionEvaluator
         _sourceSchema = sourceSchema;
         _letBindingExpressions = letBindingExpressions;
         _sidecarRegistry = sidecarRegistry;
+        _variableScope = variableScope;
+        _variableStore = variableStore;
     }
 
     /// <summary>
@@ -165,7 +204,9 @@ public sealed class ExpressionEvaluator
             sourceSchema,
             letBindingExpressions,
             context.Store,
-            context.SidecarRegistry)
+            context.SidecarRegistry,
+            context.VariableScope,
+            context.VariableStore)
     {
     }
 
@@ -242,6 +283,7 @@ public sealed class ExpressionEvaluator
                 CurrentTimestampExpression ct => EvaluateTemporalConstant(ct),
                 ParameterExpression parameter => throw new InvalidOperationException(
                     $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
+                VariableExpression variable => EvaluateVariable(variable, frame),
                 LambdaExpression => throw new InvalidOperationException(
                     "Lambda expressions cannot be evaluated as standalone values. " +
                     "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
@@ -384,6 +426,37 @@ public sealed class ExpressionEvaluator
             CurrentTimestampKind.CurrentTimestamp => DataValue.FromDateTime(now),
             _ => throw new InvalidOperationException($"Unknown CurrentTimestampKind: {ct.Kind}"),
         };
+    }
+
+    /// <summary>
+    /// Resolves a <c>VariableExpression</c> against the procedural variable
+    /// scope chain. Walks innermost-first, then stabilises the bound value
+    /// from <see cref="_variableStore"/> into <see cref="EvaluationFrame.Target"/>
+    /// so downstream operations read it the same way they read any other
+    /// arena-backed value. Throws if the evaluator wasn't constructed with
+    /// a scope (i.e. the query is running outside a procedural batch) or
+    /// if the variable isn't bound in any enclosing frame.
+    /// </summary>
+    private DataValue EvaluateVariable(VariableExpression variable, in EvaluationFrame frame)
+    {
+        if (_variableScope is null || _variableStore is null)
+        {
+            throw new InvalidOperationException(
+                $"Variable '@{variable.Name}' referenced outside a procedural batch — only DECLARE / SET / IF / WHILE / FOR statements (and the queries inside them) can resolve variables.");
+        }
+
+        if (!_variableScope.TryGet(variable.Name, out DataValue value))
+        {
+            throw new InvalidOperationException(
+                $"Variable '@{variable.Name}' is not declared in any enclosing scope.");
+        }
+
+        // Stabilise from the procedure-lifetime variable store into the
+        // frame's target arena. The variable scope holds a value with
+        // offsets in _variableStore; downstream code reads against
+        // frame.Source (or frame.Target when a result is expected). One
+        // copy per read isolates the multi-store concern to this branch.
+        return DataValueRetention.Stabilize(value, _variableStore, frame.Target);
     }
 
     private static DataValue EvaluateColumn(ColumnReference column, in EvaluationFrame frame)

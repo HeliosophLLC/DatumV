@@ -133,6 +133,28 @@ public sealed class VariableScope
         throw new InvalidOperationException($"Variable '@{name}' is not declared.");
     }
 
+    /// <summary>
+    /// Enumerates every visible binding across the scope chain, with
+    /// inner-frame entries shadowing outer-frame entries with the same
+    /// name. Yields each name at most once. Order is innermost-first.
+    /// Useful for snapshotting state at batch end and for diagnostic
+    /// printing.
+    /// </summary>
+    public IEnumerable<KeyValuePair<string, DataValue>> EnumerateVisible()
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Dictionary<string, DataValue> frame in _frames)
+        {
+            foreach (KeyValuePair<string, DataValue> entry in frame)
+            {
+                if (seen.Add(entry.Key))
+                {
+                    yield return entry;
+                }
+            }
+        }
+    }
+
     private static Dictionary<string, DataValue> NewFrame()
         => new(StringComparer.OrdinalIgnoreCase);
 }

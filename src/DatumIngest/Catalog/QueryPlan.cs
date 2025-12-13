@@ -77,7 +77,8 @@ internal sealed class QueryPlan : IQueryPlan
 
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink)
+        IModelStreamingSink? streamingSink,
+        BatchContext? batchContext)
     {
         using LocalBufferPool localBufferPool = new(_backing);
         // Plumb the hoist store as context.Store so any operator that needs to
@@ -98,6 +99,12 @@ internal sealed class QueryPlan : IQueryPlan
             // call site that wants live chunks (currently EXEC in the
             // shell) attaches one.
             StreamingSink = streamingSink,
+            // Procedural variable substrate: borrowed handles from the
+            // enclosing batch context. Null when running outside a
+            // procedural batch (every existing query path); references
+            // to @var in that case throw at evaluation time.
+            VariableScope = batchContext?.VariableScope,
+            VariableStore = batchContext?.VariableStore,
         };
 
         // Auto-return the previous batch when the consumer asks for the next one.

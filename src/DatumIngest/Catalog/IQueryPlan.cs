@@ -32,7 +32,7 @@ public interface IQueryPlan
     /// the next one.
     /// </summary>
     IAsyncEnumerable<RowBatch> ExecuteAsync(CancellationToken cancellationToken)
-        => ExecuteAsync(cancellationToken, streamingSink: null);
+        => ExecuteAsync(cancellationToken, streamingSink: null, batchContext: null);
 
     /// <summary>
     /// Same as <see cref="ExecuteAsync(CancellationToken)"/>, but attaches a
@@ -50,5 +50,27 @@ public interface IQueryPlan
     /// </remarks>
     IAsyncEnumerable<RowBatch> ExecuteAsync(
         CancellationToken cancellationToken,
-        IModelStreamingSink? streamingSink);
+        IModelStreamingSink? streamingSink)
+        => ExecuteAsync(cancellationToken, streamingSink, batchContext: null);
+
+    /// <summary>
+    /// Full-fidelity execution overload: attaches both an optional streaming
+    /// sink and an optional procedural batch context. When
+    /// <paramref name="batchContext"/> is non-<see langword="null"/>, the
+    /// per-query <c>ExecutionContext</c> is plumbed with the batch's
+    /// variable store and scope chain so <c>VariableExpression</c>
+    /// references in this query resolve against the enclosing batch's
+    /// procedural variables.
+    /// </summary>
+    /// <remarks>
+    /// Used by the procedural batch executor when running a child
+    /// <c>SELECT</c> or <c>EXEC</c> inside a procedure body. Top-level
+    /// callers — direct <c>plan.ExecuteAsync(ct)</c> — pass
+    /// <see langword="null"/> here, and queries that reference
+    /// <c>@var</c> in that mode throw.
+    /// </remarks>
+    IAsyncEnumerable<RowBatch> ExecuteAsync(
+        CancellationToken cancellationToken,
+        IModelStreamingSink? streamingSink,
+        BatchContext? batchContext);
 }

@@ -612,6 +612,7 @@ public static class CommonSubexpressionEliminator
             child => CollectCandidatesXC(child, operatorIndex, entries, letNames, functions));
 
         if (expression is ColumnReference or LiteralExpression or ParameterExpression
+            or VariableExpression
             or TypeLiteralExpression or CurrentTimestampExpression)
         {
             return;
@@ -865,6 +866,7 @@ public static class CommonSubexpressionEliminator
         // Skip the trivial leaf cases — column references and literals are
         // already cheap; hoisting them adds operator overhead without benefit.
         if (expression is ColumnReference or LiteralExpression or ParameterExpression
+            or VariableExpression
             or TypeLiteralExpression or CurrentTimestampExpression)
         {
             return;
@@ -901,6 +903,10 @@ public static class CommonSubexpressionEliminator
                 return !letNames.Contains(col.ColumnName);
             case LiteralExpression:
             case ParameterExpression:
+            // Variables are constant within a single query (SET is a
+            // statement, not an expression — it can't fire mid-evaluation),
+            // so two references to @x in the same query reduce to one.
+            case VariableExpression:
             case TypeLiteralExpression:
                 return true;
             case CurrentTimestampExpression:

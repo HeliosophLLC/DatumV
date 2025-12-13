@@ -47,6 +47,11 @@ public static class ExpressionTypeResolver
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
             LambdaExpression => null, // Not a value — lambdas have no kind on their own.
             ParameterExpression => null,
+            // Procedural variables resolve at evaluation time against the
+            // variable scope; their static type isn't tracked through this
+            // pass. DECLARE's type annotation is metadata for binding-time
+            // checks rather than plan-time resolution.
+            VariableExpression => null,
             StructLiteralExpression structLiteral => ResolveStructLiteral(structLiteral, sourceSchema, functions),
             IndexAccessExpression indexAccess => ResolveIndexAccess(indexAccess, sourceSchema, functions),
             TypeLiteralExpression => DataKind.Type,

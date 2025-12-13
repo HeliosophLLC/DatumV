@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.DevWeb;
+using DatumIngest.Execution;
 using DatumIngest.LanguageServer;
 using DatumIngest.Model;
 using DatumIngest.Models;
@@ -472,13 +473,13 @@ static async Task ExecuteQueryStreaming(
         ? DatumIngest.Diagnostics.ExecutionTracer.BeginCapture()
         : null;
 
-    // Plan first. Plan errors happen before we've started writing the response
+    // Parse first. Parse errors happen before we've started writing the response
     // body, so we can still return a regular 400 JSON. After the body opens,
     // errors must flow inline as NDJSON `error` events.
-    IQueryPlan plan;
+    IReadOnlyList<DatumIngest.Parsing.Ast.Statement> statements;
     try
     {
-        plan = catalog.Plan(sql);
+        statements = DatumIngest.Parsing.SqlParser.ParseBatch(sql);
     }
     catch (Exception ex)
     {
@@ -488,16 +489,17 @@ static async Task ExecuteQueryStreaming(
         return;
     }
 
+    if (statements.Count == 0)
+    {
+        httpCtx.Response.StatusCode = 400;
+        await httpCtx.Response.WriteAsJsonAsync(new { error = "empty SQL input" }, jsonOptions, ct);
+        return;
+    }
+
     httpCtx.Response.ContentType = "application/x-ndjson";
     Stream output = httpCtx.Response.Body;
-
     string sessionId = Guid.NewGuid().ToString("N");
-    string cellId = "c0";
-    string cellKind = sql.TrimStart().StartsWith("EXEC", StringComparison.OrdinalIgnoreCase)
-        ? "exec"
-        : sql.TrimStart().StartsWith("EXPLAIN", StringComparison.OrdinalIgnoreCase)
-            ? "explain"
-            : "select";
+    SidecarRegistry registry = catalog.SidecarRegistry;
 
     void WriteEvent(object payload)
     {
@@ -507,71 +509,19 @@ static async Task ExecuteQueryStreaming(
         output.Flush();
     }
 
-    SidecarRegistry registry = catalog.SidecarRegistry;
-    NdjsonStreamingSink sink = new(output, jsonOptions, cellId);
+    WriteEvent(new SessionEvent("session", sessionId));
 
+    // Single execution path: every batch goes through BatchExecutor —
+    // procedural blocks (DECLARE/SET/IF/WHILE/BEGIN), single SELECT, single
+    // EXEC, multi-statement scripts. LLM chunk streaming is preserved via
+    // BatchEventStreamingSink, which translates per-cell IModelStreamingSink
+    // chunks into CellChunkBatchEvent emissions on the same event channel.
     bool errorEmitted = false;
-    int rowCount = 0;
-    bool truncated = false;
-    bool schemaEmitted = false;
 
     try
     {
-        WriteEvent(new SessionEvent("session", sessionId));
-        WriteEvent(new CellStartedEvent("cell_started", cellId, cellKind, sql));
-
-        await foreach (RowBatch batch in plan.ExecuteAsync(ct, sink).ConfigureAwait(false))
-        {
-            Arena arena = batch.Arena;
-
-            if (!schemaEmitted)
-            {
-                IReadOnlyList<string> names = batch.ColumnLookup.ColumnNames;
-                ColumnDescriptor[] cols = new ColumnDescriptor[names.Count];
-                if (batch.Count > 0)
-                {
-                    Row probe = batch[0];
-                    for (int i = 0; i < names.Count; i++)
-                    {
-                        DataValue cell = probe[i];
-                        cols[i] = new ColumnDescriptor(names[i], cell.Kind.ToString(), cell.IsArray);
-                    }
-                }
-                else
-                {
-                    for (int i = 0; i < names.Count; i++)
-                    {
-                        cols[i] = new ColumnDescriptor(names[i], DataKind.Unknown.ToString(), false);
-                    }
-                }
-                WriteEvent(new SchemaEvent("schema", cellId, cols));
-                schemaEmitted = true;
-            }
-
-            for (int r = 0; r < batch.Count; r++)
-            {
-                if (rowCount >= maxRows)
-                {
-                    truncated = true;
-                    break;
-                }
-                Row row = batch[r];
-                JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
-                for (int c = 0; c < batch.ColumnLookup.Count; c++)
-                {
-                    cells[c] = WebCellFormatter.Format(row[c], arena, registry);
-                }
-                WriteEvent(new RowEvent("row", cellId, cells));
-                rowCount++;
-            }
-
-            if (truncated) break;
-        }
-
-        if (truncated)
-        {
-            WriteEvent(new TruncatedEvent("truncated", cellId, rowCount));
-        }
+        await ExecuteBatchAsync(
+            catalog, statements, maxRows, output, jsonOptions, registry, ct, WriteEvent);
 
         if (traceCapture is not null)
         {
@@ -579,22 +529,24 @@ static async Task ExecuteQueryStreaming(
             traceCapture = null;
             if (!string.IsNullOrEmpty(traceText))
             {
-                WriteEvent(new TraceEvent("trace", cellId, traceText));
+                // Trace today is batch-wide rather than per-cell; emit it
+                // attached to a synthetic "batch" cellId since it spans the
+                // whole run. Clients that filter by cellId can ignore it.
+                WriteEvent(new TraceEvent("trace", "batch", traceText));
             }
         }
 
         sw.Stop();
-        WriteEvent(new CellCompletedEvent("cell_completed", cellId, sw.Elapsed.TotalMilliseconds));
         WriteEvent(new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds));
     }
     catch (OperationCanceledException)
     {
-        WriteEvent(new ErrorEvent("error", cellId, "cancelled", null));
+        WriteEvent(new ErrorEvent("error", null, "cancelled", null));
         errorEmitted = true;
     }
     catch (Exception ex)
     {
-        WriteEvent(new ErrorEvent("error", cellId, ex.Message, ex.ToString()));
+        WriteEvent(new ErrorEvent("error", null, ex.Message, ex.ToString()));
         errorEmitted = true;
     }
     finally
@@ -604,15 +556,10 @@ static async Task ExecuteQueryStreaming(
             DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
         }
 
-        // Always close the cell + emit complete so the client knows the
-        // stream is done, even on error. Skip if we never opened the cell
-        // (only happens if WriteEvent itself threw, which we don't recover
-        // from anyway).
         if (errorEmitted)
         {
             try
             {
-                WriteEvent(new CellCompletedEvent("cell_completed", cellId, sw.Elapsed.TotalMilliseconds));
                 WriteEvent(new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds));
             }
             catch { /* response stream broken; nothing to do */ }
@@ -620,8 +567,134 @@ static async Task ExecuteQueryStreaming(
     }
 }
 
+/// <summary>
+/// Drives <see cref="BatchExecutor"/>
+/// and forwards its <see cref="BatchEvent"/>s onto the NDJSON wire.
+/// Cell IDs come from BatchExecutor (monotonic across nested control-flow);
+/// each query/exec cell emits its own schema + row events.
+/// </summary>
+static async Task ExecuteBatchAsync(
+    TableCatalog catalog,
+    IReadOnlyList<DatumIngest.Parsing.Ast.Statement> statements,
+    int maxRows,
+    Stream output,
+    JsonSerializerOptions jsonOptions,
+    SidecarRegistry registry,
+    CancellationToken ct,
+    Action<object> writeEvent)
+{
+    BatchExecutor executor = new(catalog);
+
+    // Per-cell row-count + schema-emitted state. Re-set on each
+    // CellStartedBatchEvent so each cell has its own row budget.
+    string? currentCellId = null;
+    bool schemaEmitted = false;
+    int cellRowCount = 0;
+    bool cellTruncated = false;
+
+    ValueTask OnEvent(BatchEvent ev)
+    {
+        switch (ev)
+        {
+            case CellStartedBatchEvent started:
+                currentCellId = started.CellId;
+                schemaEmitted = false;
+                cellRowCount = 0;
+                cellTruncated = false;
+                writeEvent(new CellStartedEvent("cell_started", started.CellId, started.Kind, Sql: null));
+                break;
+
+            case CellRowBatchEvent rowEvent:
+            {
+                if (cellTruncated) break; // drain remaining batches in this cell
+
+                RowBatch batch = rowEvent.Batch;
+                Arena arena = batch.Arena;
+
+                if (!schemaEmitted)
+                {
+                    writeEvent(new SchemaEvent("schema", rowEvent.CellId, BuildSchema(batch)));
+                    schemaEmitted = true;
+                }
+
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    if (cellRowCount >= maxRows)
+                    {
+                        cellTruncated = true;
+                        break;
+                    }
+                    Row row = batch[r];
+                    JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
+                    for (int c = 0; c < batch.ColumnLookup.Count; c++)
+                    {
+                        cells[c] = WebCellFormatter.Format(row[c], arena, registry);
+                    }
+                    writeEvent(new RowEvent("row", rowEvent.CellId, cells));
+                    cellRowCount++;
+                }
+                break;
+            }
+
+            case CellChunkBatchEvent chunkEvent:
+                // Live model chunk (LLM token, etc.). Translate 1:1 to a
+                // wire `chunk` event scoped to the cell that produced it.
+                writeEvent(new ChunkWireEvent("chunk", chunkEvent.CellId, chunkEvent.ModelName, chunkEvent.Text));
+                break;
+
+            case CellCompletedBatchEvent completed:
+                if (cellTruncated)
+                {
+                    writeEvent(new TruncatedEvent("truncated", completed.CellId, cellRowCount));
+                }
+                writeEvent(new CellCompletedEvent("cell_completed", completed.CellId, completed.ElapsedMs));
+                currentCellId = null;
+                break;
+
+            case CellFailedBatchEvent failed:
+                writeEvent(new ErrorEvent("error", failed.CellId, failed.Error.Message, failed.Error.ToString()));
+                // The exception propagates after this event; the outer
+                // try/catch in ExecuteQueryStreaming will not emit a
+                // duplicate top-level error because errorEmitted gates it.
+                break;
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    await executor.RunWithEventsAsync(statements, OnEvent, ct).ConfigureAwait(false);
+}
+
+/// <summary>
+/// Builds a <see cref="ColumnDescriptor"/> array from a <see cref="RowBatch"/>'s
+/// schema. Falls back to <see cref="DataKind.Unknown"/> on empty batches so the
+/// header still renders.
+/// </summary>
+static ColumnDescriptor[] BuildSchema(RowBatch batch)
+{
+    IReadOnlyList<string> names = batch.ColumnLookup.ColumnNames;
+    ColumnDescriptor[] cols = new ColumnDescriptor[names.Count];
+    if (batch.Count > 0)
+    {
+        Row probe = batch[0];
+        for (int i = 0; i < names.Count; i++)
+        {
+            DataValue cell = probe[i];
+            cols[i] = new ColumnDescriptor(names[i], cell.Kind.ToString(), cell.IsArray);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < names.Count; i++)
+        {
+            cols[i] = new ColumnDescriptor(names[i], DataKind.Unknown.ToString(), false);
+        }
+    }
+    return cols;
+}
+
 internal sealed record SessionEvent(string Type, string Id);
-internal sealed record CellStartedEvent(string Type, string Cell, string Kind, string Sql);
+internal sealed record CellStartedEvent(string Type, string Cell, string Kind, string? Sql);
+internal sealed record ChunkWireEvent(string Type, string Cell, string Model, string Text);
 internal sealed record SchemaEvent(string Type, string Cell, IReadOnlyList<ColumnDescriptor> Columns);
 internal sealed record RowEvent(string Type, string Cell, IReadOnlyList<JsonCell> Cells);
 internal sealed record TruncatedEvent(string Type, string Cell, int RowCount);

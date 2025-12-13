@@ -189,7 +189,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public IQueryPlan Plan(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
+        return Plan(statement);
+    }
 
+    /// <summary>
+    /// Plans an already-parsed <see cref="Statement"/> against this catalog.
+    /// Same dispatch as <see cref="Plan(string)"/> minus the parsing step;
+    /// useful for callers that have built a statement programmatically
+    /// (e.g. the procedural batch executor synthesising
+    /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
+    /// </summary>
+    public IQueryPlan Plan(Statement statement)
+    {
         switch (statement)
         {
             case QueryStatement queryStatement:
