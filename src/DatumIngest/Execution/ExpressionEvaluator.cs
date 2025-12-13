@@ -1195,12 +1195,15 @@ public sealed class ExpressionEvaluator
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Why per-row dispatch.</strong> The planner doesn't yet
-    /// resolve binary-expression result kinds at plan time, so the
-    /// evaluator decides per row. Branch prediction makes the cost of a
-    /// few switch arms negligible compared to the previous "everything
-    /// to Float32" path that lost precision on Int64 sums and tripped
-    /// hard errors on Int128 / Decimal.
+    /// <strong>Why per-row dispatch.</strong> Plan-time
+    /// <see cref="ExpressionTypeResolver.ResolveType"/> reports the same
+    /// promoted target kind via <see cref="TryPromoteArithmeticKind"/>,
+    /// so output schemas stay in sync with the values rows carry. The
+    /// runtime still computes promotion per row because evaluation has
+    /// to read live operand kinds anyway — branch prediction makes the
+    /// cost of a few switch arms negligible compared to the previous
+    /// "everything to Float32" path that lost precision on Int64 sums
+    /// and tripped hard errors on Int128 / Decimal.
     /// </para>
     /// <para>
     /// <strong>Promotion rules.</strong> See
@@ -1233,12 +1236,13 @@ public sealed class ExpressionEvaluator
     /// Pure-function variant of <see cref="PromoteArithmeticKind"/> that
     /// returns null when promotion is undefined. Used by the NULL
     /// short-circuit in binary evaluation so the propagated null carries
-    /// the same kind the non-null path would have produced. Defers to
-    /// the throwing version's logic; the only branch that matters is the
-    /// "neither side resolves" fallback, where we'd rather return null
-    /// than crash.
+    /// the same kind the non-null path would have produced, and by
+    /// <see cref="ExpressionTypeResolver"/> for plan-time schema
+    /// inference. Defers to the throwing version's logic; the only
+    /// branch that matters is the "neither side resolves" fallback,
+    /// where we'd rather return null than crash.
     /// </summary>
-    private static DataKind? TryPromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
+    internal static DataKind? TryPromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
     {
         try { return PromoteArithmeticKind(left, right, op); }
         catch (InvalidOperationException) { return null; }
@@ -1252,7 +1256,7 @@ public sealed class ExpressionEvaluator
     /// (matching <c>byte + byte → int</c> in C#) so small literals
     /// don't pin everything to Int8.
     /// </summary>
-    private static DataKind PromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
+    internal static DataKind PromoteArithmeticKind(DataKind left, DataKind right, BinaryOperator op)
     {
         // String coercion: parse to Float64 (preserves prior behaviour).
         if (left == DataKind.String || right == DataKind.String)

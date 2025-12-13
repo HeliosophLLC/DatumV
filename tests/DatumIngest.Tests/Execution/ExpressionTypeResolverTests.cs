@@ -109,8 +109,11 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
     }
 
     [Fact]
-    public void ResolveBinary_Arithmetic_ReturnsCommonKind()
+    public void ResolveBinary_Float32PlusInt32_PromotesToFloat32()
     {
+        // id is Float32 in TestSchema; literal 10 is Int32. The promoted
+        // target for Float32 + Int32 is Float32 (the wider float wins
+        // over the integer).
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new BinaryExpression(
                 new ColumnReference("id"),
@@ -120,6 +123,77 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
             DefaultFunctions);
 
         Assert.Equal(DataKind.Float32, result);
+    }
+
+    [Fact]
+    public void ResolveBinary_Int64PlusInt64_StaysInt64()
+    {
+        // The headline case: integer arithmetic preserves integer kind
+        // at the wider operand's bit width. Before the kind-promoted
+        // dispatch, this resolved (and ran) as Float32.
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new BinaryExpression(
+                new LiteralExpression(1L),
+                BinaryOperator.Add,
+                new LiteralExpression(2L)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Int64, result);
+    }
+
+    [Fact]
+    public void ResolveBinary_SmallInts_WidenToInt32()
+    {
+        // Mirrors C#'s `byte + byte → int` rule. Two sbyte literals
+        // promote to Int32 so accumulation has headroom.
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new BinaryExpression(
+                new LiteralExpression((sbyte)1),
+                BinaryOperator.Add,
+                new LiteralExpression((sbyte)2)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Int32, result);
+    }
+
+    [Fact]
+    public void ResolveBinary_IntDivideInt_ReturnsFloat32()
+    {
+        // Divide always returns float (SQL "5 / 2 → 2.5" expectation).
+        // Both operands are Int64 but the result kind is Float32 because
+        // there's no Float64 operand to upgrade it.
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new BinaryExpression(
+                new LiteralExpression(5L),
+                BinaryOperator.Divide,
+                new LiteralExpression(2L)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Float32, result);
+    }
+
+    [Fact]
+    public void ResolveBinary_DurationPlusDuration_StaysDuration()
+    {
+        // Duration + Duration is special-cased at the runtime dispatch
+        // level (returns a Duration, not a float). The resolver mirrors
+        // that so introspection reports the same kind.
+        ColumnInfo a = new("a", DataKind.Duration, nullable: false);
+        ColumnInfo b = new("b", DataKind.Duration, nullable: false);
+        Schema schema = new([a, b]);
+
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new BinaryExpression(
+                new ColumnReference("a"),
+                BinaryOperator.Add,
+                new ColumnReference("b")),
+            schema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Duration, result);
     }
 
     // ───────────────────── Unary expressions ─────────────────────

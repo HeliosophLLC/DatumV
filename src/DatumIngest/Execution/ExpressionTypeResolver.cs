@@ -284,15 +284,23 @@ public static class ExpressionTypeResolver
         }
 
         // Duration ± Duration preserves Duration (do not widen to Scalar).
+        // The runtime evaluator special-cases this same pattern at the
+        // dispatch level; mirroring it here keeps schema reporting in
+        // step with the non-promotion path.
         if (leftKind.Value == DataKind.Duration && rightKind.Value == DataKind.Duration
             && binary.Operator is BinaryOperator.Add or BinaryOperator.Subtract)
         {
             return DataKind.Duration;
         }
 
-        // The runtime ArithmeticOp always converts to float and returns Float32,
-        // so the static resolver must match regardless of operand kinds.
-        return DataKind.Float32;
+        // Delegate to the same kind-promotion logic the runtime evaluator
+        // uses, so plan-time schema reporting matches the value the row
+        // ultimately carries. Returns null only for operand combinations
+        // the runtime would also throw on — fine to surface upward as
+        // "unknown" since the query would have failed at execution
+        // anyway.
+        return ExpressionEvaluator.TryPromoteArithmeticKind(
+            leftKind.Value, rightKind.Value, binary.Operator);
     }
 
     private static DataKind? ResolveUnary(UnaryExpression unary, Schema sourceSchema, FunctionRegistry functions)
