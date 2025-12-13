@@ -260,10 +260,25 @@ public sealed class ModelResidencyManager : IDisposable
 
     private static long EstimateFromFile(ModelCatalogEntry entry, string modelDirectory)
     {
+        // Prefer summing all declared files — multi-file models (SDXL, Florence-2,
+        // Whisper, etc.) store their graph in a small .onnx and their weights in a
+        // large .onnx_data sibling; reading only RelativePath misses the bulk.
+        if (entry.Files is { Count: > 0 })
+        {
+            long total = 0;
+            foreach (string rel in entry.Files)
+            {
+                string p = Path.Combine(modelDirectory, rel);
+                if (File.Exists(p))
+                    total += new FileInfo(p).Length;
+            }
+            // 1.2× covers activations / scratch / KV cache headroom.
+            return (long)(total * 1.2);
+        }
+
         if (entry.RelativePath is null) return 0;
         string path = Path.Combine(modelDirectory, entry.RelativePath);
         if (!File.Exists(path)) return 0;
-        // 1.2× covers activations / scratch / KV cache headroom beyond raw weights.
         return (long)(new FileInfo(path).Length * 1.2);
     }
 
