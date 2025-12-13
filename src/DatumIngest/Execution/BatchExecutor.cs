@@ -24,7 +24,7 @@ public abstract record BatchEvent;
 /// <param name="Kind">
 /// Statement category, lowercased: <c>"select"</c>, <c>"exec"</c>,
 /// <c>"declare"</c>, <c>"set"</c>, <c>"if"</c>, <c>"while"</c>,
-/// <c>"block"</c>. Maps 1:1 to AST subtype.
+/// <c>"for"</c>, <c>"block"</c>. Maps 1:1 to AST subtype.
 /// </param>
 public sealed record CellStartedBatchEvent(string CellId, string Kind) : BatchEvent;
 
@@ -65,17 +65,16 @@ public sealed record CellChunkBatchEvent(string CellId, string ModelName, string
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Slice 4 scope.</strong> Handles
+/// <strong>Supported procedural statements.</strong> Handles
 /// <see cref="DeclareStatement"/>, <see cref="SetStatement"/>,
 /// <see cref="BlockStatement"/>, <see cref="IfStatement"/>,
-/// <see cref="WhileStatement"/>, <see cref="QueryStatement"/>, and
-/// <see cref="ExecStatement"/>. Counter-FOR and FOR-IN loops are deferred
-/// to a follow-up slice so the row-binding semantics for cursor loops can
-/// be designed in isolation.
+/// <see cref="WhileStatement"/>, <see cref="ForCounterStatement"/>,
+/// <see cref="ForInStatement"/>, <see cref="QueryStatement"/>, and
+/// <see cref="ExecStatement"/>.
 /// </para>
 /// <para>
 /// <strong>Expression evaluation</strong> — DECLARE / SET initialisers,
-/// IF / WHILE predicates — runs by synthesising
+/// IF / WHILE predicates, FOR start/end bounds — runs by synthesising
 /// <c>SELECT &lt;expression&gt;</c>, planning it through the same
 /// catalog as user queries, executing with the batch context plumbed,
 /// and reading the single resulting cell. This route gets UDF inlining,
@@ -131,11 +130,11 @@ public sealed class BatchExecutor
     /// <remarks>
     /// <para>
     /// Cell numbering is monotonic across the entire batch — including
-    /// cells produced by nested control-flow (IF body, WHILE iterations,
-    /// BEGIN/END blocks). A 5-iteration WHILE with two body statements
-    /// produces 11 cells: one for the WHILE itself plus 10 for the
-    /// inner statements (5 × 2). Counter-FOR and FOR-IN are not yet
-    /// supported.
+    /// cells produced by nested control-flow (IF body, WHILE / FOR
+    /// iterations, BEGIN/END blocks). A 5-iteration WHILE with two body
+    /// statements produces 11 cells: one for the WHILE itself plus 10
+    /// for the inner statements (5 × 2). FOR-counter and FOR-IN follow
+    /// the same per-iteration cell-emission shape.
     /// </para>
     /// <para>
     /// <strong>Row batch lifetime.</strong> A <see cref="CellRowBatchEvent"/>
@@ -273,6 +272,14 @@ public sealed class BatchExecutor
                     }
                     break;
                 }
+                case ForCounterStatement forC:
+                    await ExecuteForCounterAsync(forC, batchContext, onEvent, nextCellId, ct)
+                        .ConfigureAwait(false);
+                    break;
+                case ForInStatement forIn:
+                    await ExecuteForInAsync(forIn, batchContext, onEvent, nextCellId, ct)
+                        .ConfigureAwait(false);
+                    break;
                 case DeclareStatement decl:
                     await ExecuteDeclareAsync(decl, batchContext, ct).ConfigureAwait(false);
                     break;
@@ -282,8 +289,8 @@ public sealed class BatchExecutor
                 default:
                     throw new NotSupportedException(
                         $"Procedural statement type '{stmt.GetType().Name}' is not yet supported. " +
-                        "Counter-FOR and FOR-IN loops are deferred to a later slice; CREATE FUNCTION / DDL " +
-                        "must be applied through TableCatalog.Plan(string) before the batch runs.");
+                        "CREATE FUNCTION / DDL must be applied through TableCatalog.Plan(string) " +
+                        "before the batch runs.");
             }
 
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
@@ -316,7 +323,19 @@ public sealed class BatchExecutor
         DataValue stable;
         if (decl.Initializer is not null)
         {
-            stable = await EvaluateScalarAsync(decl.Initializer, batchContext, ct).ConfigureAwait(false);
+            // When the user supplies both a declared type and an initializer
+            // (`DECLARE @sum INT64 = 0`), wrap the initializer in an implicit
+            // CAST to the declared type. Without this the literal's natural
+            // narrow type (e.g. Int8 for "0") would silently win, leaving
+            // `@sum` bound to Int8 even though the declaration said Int64 —
+            // a foot-gun for any subsequent arithmetic that expected the
+            // declared range. When TypeName is omitted, type-inference from
+            // the initializer is the intended behaviour, so no cast is
+            // synthesised.
+            Expression effective = decl.TypeName is not null
+                ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
+                : decl.Initializer;
+            stable = await EvaluateScalarAsync(effective, batchContext, ct).ConfigureAwait(false);
         }
         else
         {
@@ -342,6 +361,163 @@ public sealed class BatchExecutor
     {
         DataValue stable = await EvaluateScalarAsync(set.Value, batchContext, ct).ConfigureAwait(false);
         batchContext.VariableScope.Set(set.VariableName, stable);
+    }
+
+    /// <summary>
+    /// Counter loop: <c>FOR @i = start TO end body</c>. Inclusive on both
+    /// ends, matching the AST contract. The loop variable is auto-declared
+    /// in a fresh frame pushed for the loop's lifetime — visible to the
+    /// body, gone after the loop ends. Step is always +1 (parser today
+    /// does not surface STEP); when <c>start &gt; end</c> the body never
+    /// runs. The counter is bound as <see cref="DataKind.Int64"/>: any
+    /// numeric kind from the bounds expressions is coerced.
+    /// </summary>
+    private async Task ExecuteForCounterAsync(
+        ForCounterStatement forC,
+        BatchContext batchContext,
+        Func<BatchEvent, ValueTask> onEvent,
+        Func<string> nextCellId,
+        CancellationToken ct)
+    {
+        DataValue startVal = await EvaluateScalarAsync(forC.Start, batchContext, ct).ConfigureAwait(false);
+        DataValue endVal = await EvaluateScalarAsync(forC.End, batchContext, ct).ConfigureAwait(false);
+        long start = ToInt64(startVal, $"FOR @{forC.VariableName} start");
+        long end = ToInt64(endVal, $"FOR @{forC.VariableName} end");
+
+        batchContext.VariableScope.PushFrame();
+        try
+        {
+            if (start > end) return;
+            for (long i = start; i <= end; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                DataValue iValue = DataValue.FromInt64(i);
+                if (i == start)
+                {
+                    batchContext.VariableScope.Declare(forC.VariableName, iValue);
+                }
+                else
+                {
+                    batchContext.VariableScope.Set(forC.VariableName, iValue);
+                }
+                await ExecuteOneEventfulAsync(forC.Body, batchContext, onEvent, nextCellId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            batchContext.VariableScope.PopFrame();
+        }
+    }
+
+    /// <summary>
+    /// Cursor loop: <c>FOR @row IN (SELECT ...) body</c>. Plans the source
+    /// query, drives it batch-by-batch, and binds each row to the loop
+    /// variable as a <see cref="DataKind.Struct"/> whose ordered fields
+    /// mirror the source's columns. The source's column names are attached
+    /// to the binding so <c>@row['column']</c> resolves at evaluation time
+    /// without requiring a per-iteration schema lookup.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Lifetime.</strong> Each row's struct fields are stabilised
+    /// from the producing batch's arena into
+    /// <see cref="BatchContext.VariableStore"/> before the binding
+    /// happens, so the binding remains valid even after the source batch
+    /// recycles. A fresh frame is pushed and popped per iteration so the
+    /// loop variable is re-declared cleanly each pass — this also keeps
+    /// any inner DECLAREs in the body block-scoped to that single
+    /// iteration.
+    /// </para>
+    /// <para>
+    /// <strong>Streaming sink for the source query.</strong> The source
+    /// query runs without a streaming sink — it's infrastructure feeding
+    /// the loop, not user-facing output. Streaming model invocations
+    /// inside the body, by contrast, get the per-cell sink threaded by
+    /// the recursive call into the body.
+    /// </para>
+    /// </remarks>
+    private async Task ExecuteForInAsync(
+        ForInStatement forIn,
+        BatchContext batchContext,
+        Func<BatchEvent, ValueTask> onEvent,
+        Func<string> nextCellId,
+        CancellationToken ct)
+    {
+        QueryStatement sourceQuery = new(forIn.Source);
+        IQueryPlan plan = _catalog.Plan(sourceQuery);
+
+        IReadOnlyList<string>? fieldNames = null;
+
+        await foreach (RowBatch batch in plan
+            .ExecuteAsync(ct, streamingSink: null, batchContext)
+            .ConfigureAwait(false))
+        {
+            // Field names are stable across batches in a single query plan,
+            // so capture once on the first batch and reuse for every row.
+            fieldNames ??= batch.ColumnLookup.ColumnNames;
+            int colCount = fieldNames.Count;
+
+            for (int rowIdx = 0; rowIdx < batch.Count; rowIdx++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Row row = batch[rowIdx];
+
+                // Stabilise field values into the procedure-lifetime store,
+                // then build a struct that points entirely into VariableStore.
+                DataValue[] fields = new DataValue[colCount];
+                for (int j = 0; j < colCount; j++)
+                {
+                    fields[j] = DataValueRetention.Stabilize(
+                        row[j], batch.Arena, batchContext.VariableStore);
+                }
+                DataValue rowStruct = DataValue.FromStruct(
+                    (short)colCount, fields, batchContext.VariableStore);
+
+                batchContext.VariableScope.PushFrame();
+                try
+                {
+                    batchContext.VariableScope.Declare(
+                        forIn.VariableName, rowStruct, fieldNames);
+                    await ExecuteOneEventfulAsync(forIn.Body, batchContext, onEvent, nextCellId, ct)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    batchContext.VariableScope.PopFrame();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Coerces a numeric <see cref="DataValue"/> to <see cref="long"/> for
+    /// FOR-counter bounds. Throws on non-numeric or null input;
+    /// <paramref name="context"/> is interpolated into the message so the
+    /// user sees which side of the loop bound failed.
+    /// </summary>
+    private static long ToInt64(DataValue value, string context)
+    {
+        if (value.IsNull)
+        {
+            throw new InvalidOperationException(
+                $"{context} evaluated to NULL; numeric value required.");
+        }
+        return value.Kind switch
+        {
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.UInt64 => checked((long)value.AsUInt64()),
+            DataKind.Float32 => (long)value.AsFloat32(),
+            DataKind.Float64 => (long)value.AsFloat64(),
+            _ => throw new InvalidOperationException(
+                $"{context} evaluated to {value.Kind}; numeric value required."),
+        };
     }
 
     /// <summary>

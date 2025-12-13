@@ -1161,8 +1161,12 @@ public sealed class ExpressionEvaluator
             case DataKind.UInt32: return value.AsUInt32();
             case DataKind.Int64: return value.AsInt64();
             case DataKind.UInt64: return value.AsUInt64();
+            case DataKind.Int128: return (float)value.AsInt128();
+            case DataKind.UInt128: return (float)value.AsUInt128();
+            case DataKind.Float16: return (float)value.AsFloat16();
             case DataKind.Float32: return value.AsFloat32();
             case DataKind.Float64: return (float)value.AsFloat64();
+            case DataKind.Decimal: return (float)value.AsDecimal();
             case DataKind.Duration: return (float)value.AsDuration().TotalSeconds;
             case DataKind.Time:
             {
@@ -1298,6 +1302,24 @@ public sealed class ExpressionEvaluator
         return DataValue.FromStruct((short)literal.Fields.Count, fields, frame.Target);
     }
 
+    /// <summary>
+    /// Whether <paramref name="kind"/> can be used as a positional ordinal in
+    /// <c>struct[i]</c> indexing. Mirrors <see cref="DataValue.TryToFloat(out float)"/>'s
+    /// supported numeric kinds — the implementation funnels through
+    /// <see cref="ToFloat"/>, so the check must accept every kind that helper
+    /// recognises (otherwise small numeric literals like <c>1</c>, parsed as
+    /// <see cref="DataKind.Int8"/>, fall through to the named-field path and
+    /// trip a String-only conversion).
+    /// </summary>
+    private static bool IsPositionalIndexKind(DataKind kind) => kind is
+        DataKind.Int8 or DataKind.UInt8
+        or DataKind.Int16 or DataKind.UInt16
+        or DataKind.Int32 or DataKind.UInt32
+        or DataKind.Int64 or DataKind.UInt64
+        or DataKind.Int128 or DataKind.UInt128
+        or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+        or DataKind.Decimal;
+
     private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, in EvaluationFrame frame)
     {
         DataValue source = Evaluate(indexAccess.Source, frame);
@@ -1325,8 +1347,11 @@ public sealed class ExpressionEvaluator
 
         if (source.Kind == DataKind.Struct)
         {
-            // Integer index → positional (ordinal) access by declaration order.
-            if (index.Kind is DataKind.Float32 or DataKind.Float64 or DataKind.Int32 or DataKind.Int64)
+            // Integer / float index → positional (ordinal) access by declaration
+            // order. Numeric literals like @row[1] parse to the narrowest type
+            // that fits (Int8 for small values), so the kind check covers every
+            // numeric kind TryToFloat handles rather than only Int32/Int64.
+            if (IsPositionalIndexKind(index.Kind))
             {
                 DataValue[] fields = source.AsStruct(frame.Source);
                 int position = (int)ToFloat(index);
@@ -1461,6 +1486,27 @@ public sealed class ExpressionEvaluator
     {
         DataValue[] fields = source.AsStruct(frame.Source);
         string fieldName = Str(index, frame);
+
+        // Procedural variable bound to a struct via FOR-IN — field names live
+        // alongside the binding on the variable scope, so we can resolve named
+        // access without scanning a schema or AST. Forward-compatible with the
+        // planned per-query type registry: when that lands, the variable scope
+        // will surface the registry's TypeDescriptor here instead of a raw
+        // string list, and this branch collapses into a registry lookup.
+        if (indexAccess.Source is VariableExpression varExpr
+            && _variableScope is not null
+            && _variableScope.TryGetFieldNames(varExpr.Name, out IReadOnlyList<string>? variableFieldNames)
+            && variableFieldNames is not null)
+        {
+            for (int i = 0; i < variableFieldNames.Count; i++)
+            {
+                if (string.Equals(variableFieldNames[i], fieldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i < fields.Length ? fields[i] : DataValue.NullStruct(source.StructFieldCount);
+                }
+            }
+            return DataValue.NullStruct(source.StructFieldCount);
+        }
 
         // Try to resolve field position from schema when source is a column reference.
         if (indexAccess.Source is ColumnReference colRef)

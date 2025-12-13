@@ -24,10 +24,31 @@ namespace DatumIngest.Execution;
 /// resolve to the same binding, matching how the codebase handles UDF
 /// names and SQL identifiers generally.
 /// </para>
+/// <para>
+/// <strong>Optional struct field names.</strong> Bindings whose value is
+/// a <see cref="DataKind.Struct"/> can carry an ordered list of field
+/// names alongside the value. Used by <c>FOR @row IN (...)</c> so
+/// <c>@row['column']</c> can resolve a named field at evaluation time
+/// without per-row schema lookup. Non-struct bindings leave field
+/// names <see langword="null"/>. A future per-query type registry
+/// (planned but not yet shipped) will replace this localised tracking
+/// with a self-describing <see cref="DataValue"/> carrying a type id;
+/// the <c>TryGetFieldNames</c> entry point keeps the consumer-side
+/// surface stable through that migration.
+/// </para>
 /// </remarks>
 public sealed class VariableScope
 {
-    private readonly Stack<Dictionary<string, DataValue>> _frames = new();
+    private readonly Stack<Dictionary<string, Binding>> _frames = new();
+
+    /// <summary>
+    /// Internal per-binding shape: the bound <see cref="DataValue"/>
+    /// plus optional struct field names. Keeping these together avoids
+    /// a parallel dictionary and keeps lookup atomic.
+    /// </summary>
+    private readonly record struct Binding(
+        DataValue Value,
+        IReadOnlyList<string>? StructFieldNames);
 
     /// <summary>
     /// Creates a scope with a single root frame. The root corresponds to
@@ -72,31 +93,38 @@ public sealed class VariableScope
     /// Adds a new binding in the topmost frame. Throws if the name is
     /// already declared in the same frame; shadowing across frames is
     /// allowed (an inner <c>DECLARE @x</c> can hide an outer one for
-    /// the lifetime of its block).
+    /// the lifetime of its block). When <paramref name="structFieldNames"/>
+    /// is non-<see langword="null"/>, the names attach to this binding so
+    /// downstream <c>@var['field']</c> access can resolve a position.
     /// </summary>
-    public void Declare(string name, DataValue value)
+    public void Declare(
+        string name,
+        DataValue value,
+        IReadOnlyList<string>? structFieldNames = null)
     {
-        Dictionary<string, DataValue> top = _frames.Peek();
+        Dictionary<string, Binding> top = _frames.Peek();
         if (top.ContainsKey(name))
         {
             throw new InvalidOperationException(
                 $"Variable '@{name}' is already declared in the current block.");
         }
-        top[name] = value;
+        top[name] = new Binding(value, structFieldNames);
     }
 
     /// <summary>
     /// Mutates an existing binding. Walks frames from innermost outward,
     /// updates the first frame that contains the name. Throws if the
-    /// name is not bound anywhere in the chain.
+    /// name is not bound anywhere in the chain. Preserves the existing
+    /// struct field names for the binding (SET re-assigns the value but
+    /// not the binding's structural identity).
     /// </summary>
     public void Set(string name, DataValue value)
     {
-        foreach (Dictionary<string, DataValue> frame in _frames)
+        foreach (Dictionary<string, Binding> frame in _frames)
         {
-            if (frame.ContainsKey(name))
+            if (frame.TryGetValue(name, out Binding existing))
             {
-                frame[name] = value;
+                frame[name] = new Binding(value, existing.StructFieldNames);
                 return;
             }
         }
@@ -105,16 +133,18 @@ public sealed class VariableScope
     }
 
     /// <summary>
-    /// Looks up a binding. Walks frames innermost-first; the first
-    /// matching frame wins (so inner declarations shadow outer ones).
-    /// Returns <see langword="false"/> when no matching binding exists.
+    /// Looks up a binding's value. Walks frames innermost-first; the
+    /// first matching frame wins (so inner declarations shadow outer
+    /// ones). Returns <see langword="false"/> when no matching binding
+    /// exists.
     /// </summary>
     public bool TryGet(string name, out DataValue value)
     {
-        foreach (Dictionary<string, DataValue> frame in _frames)
+        foreach (Dictionary<string, Binding> frame in _frames)
         {
-            if (frame.TryGetValue(name, out value!))
+            if (frame.TryGetValue(name, out Binding b))
             {
+                value = b.Value;
                 return true;
             }
         }
@@ -134,6 +164,28 @@ public sealed class VariableScope
     }
 
     /// <summary>
+    /// Looks up the struct field names attached to a binding. Returns
+    /// <see langword="true"/> if the binding exists (regardless of
+    /// whether field names are present); <paramref name="fieldNames"/>
+    /// is <see langword="null"/> when the binding is a non-struct or
+    /// was declared without a field-name list. Used by the expression
+    /// evaluator to resolve <c>@row['column']</c> at evaluation time.
+    /// </summary>
+    public bool TryGetFieldNames(string name, out IReadOnlyList<string>? fieldNames)
+    {
+        foreach (Dictionary<string, Binding> frame in _frames)
+        {
+            if (frame.TryGetValue(name, out Binding b))
+            {
+                fieldNames = b.StructFieldNames;
+                return true;
+            }
+        }
+        fieldNames = null;
+        return false;
+    }
+
+    /// <summary>
     /// Enumerates every visible binding across the scope chain, with
     /// inner-frame entries shadowing outer-frame entries with the same
     /// name. Yields each name at most once. Order is innermost-first.
@@ -143,18 +195,18 @@ public sealed class VariableScope
     public IEnumerable<KeyValuePair<string, DataValue>> EnumerateVisible()
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-        foreach (Dictionary<string, DataValue> frame in _frames)
+        foreach (Dictionary<string, Binding> frame in _frames)
         {
-            foreach (KeyValuePair<string, DataValue> entry in frame)
+            foreach (KeyValuePair<string, Binding> entry in frame)
             {
                 if (seen.Add(entry.Key))
                 {
-                    yield return entry;
+                    yield return new KeyValuePair<string, DataValue>(entry.Key, entry.Value.Value);
                 }
             }
         }
     }
 
-    private static Dictionary<string, DataValue> NewFrame()
+    private static Dictionary<string, Binding> NewFrame()
         => new(StringComparer.OrdinalIgnoreCase);
 }

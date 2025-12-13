@@ -2521,16 +2521,17 @@ public static class SqlParser
             ToSpan(declareKw));
 
     /// <summary>
-    /// <c>BEGIN stmt; stmt; ... [;] END</c> — block of statements. Empty
+    /// <c>BEGIN stmt[;] stmt[;] ... [;] END</c> — block of statements. Empty
     /// blocks (<c>BEGIN END</c>) are not supported — at least one statement
-    /// is required, matching T-SQL. Trailing <c>;</c> before <c>END</c> is
-    /// optional.
+    /// is required, matching T-SQL. Statement separators (<c>;</c>) are
+    /// optional, mirroring the top-level batch grammar; the trailing
+    /// <c>;</c> before <c>END</c> is also optional.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> BlockStatementParser =
         from beginKw in Token.EqualTo(SqlToken.Begin)
         from first in SP.Ref(() => SingleStatementParser!)
         from rest in (
-            from semi in Token.EqualTo(SqlToken.Semicolon).AtLeastOnce()
+            from semi in Token.EqualTo(SqlToken.Semicolon).Many()
             from stmt in SP.Ref(() => SingleStatementParser!)
             select stmt
         ).Try().Many()
@@ -2765,13 +2766,20 @@ public static class SqlParser
             .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
 
     /// <summary>
-    /// Parses a batch of semicolon-separated statements. Trailing semicolons
-    /// and empty statements between semicolons are silently ignored.
+    /// Parses a batch of statements. Statements are typically separated by
+    /// <c>;</c>, but the separator is optional — block-terminated statements
+    /// (anything ending with <c>END</c>) are common boundaries where forcing
+    /// a trailing <c>;</c> reads as awkward. Each statement parser is greedy
+    /// and keyword-anchored, so consecutive statements without a separator
+    /// disambiguate cleanly: <c>SELECT 1 SELECT 2</c> parses as two
+    /// statements, while <c>SELECT 1 + 2</c> parses as one (the <c>+</c>
+    /// continues the SELECT's expression). Empty statements (extra
+    /// semicolons) are silently ignored.
     /// </summary>
     private static readonly TokenListParser<SqlToken, IReadOnlyList<Statement>> BatchParser =
         from first in SingleStatementParser
         from rest in (
-            from semi in Token.EqualTo(SqlToken.Semicolon).AtLeastOnce()
+            from semi in Token.EqualTo(SqlToken.Semicolon).Many()
             from stmt in SingleStatementParser
             select stmt
         ).Try().Many()

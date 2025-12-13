@@ -124,12 +124,37 @@ public static class DataValueRetention
                 value.AsByteSpan(sourceStore),
                 retentionStore),
 
-            // Struct retention path isn't implemented yet because no current retention
-            // site uses it as a key. Add a case when needed.
+            // Scalar struct: recursively stabilise each field (a field may itself be
+            // a reference type whose payload references sourceStore), then rebuild
+            // the struct in retentionStore. Mirrors StabilizeStructArray's per-element
+            // recursion.
+            DataKind.Struct => StabilizeStruct(value, sourceStore, retentionStore),
+
             _ => throw new NotSupportedException(
                 $"Retention of {value.Kind} is not implemented. Add a case to " +
                 "DataValueRetention.Stabilize when a retention site needs it."),
         };
+    }
+
+    /// <summary>
+    /// Deep-copies a scalar struct value from <paramref name="sourceStore"/> into
+    /// <paramref name="retentionStore"/>. Each field is recursively stabilised so
+    /// that reference-type fields (strings, images, nested structs) end up
+    /// pointing at the retention store rather than the source.
+    /// </summary>
+    private static DataValue StabilizeStruct(
+        DataValue value,
+        IValueStore sourceStore,
+        IValueStore retentionStore)
+    {
+        DataValue[] sourceFields = value.AsStruct(sourceStore);
+        DataValue[] retentionFields = new DataValue[sourceFields.Length];
+        for (int i = 0; i < sourceFields.Length; i++)
+        {
+            retentionFields[i] = Stabilize(sourceFields[i], sourceStore, retentionStore);
+        }
+        return DataValue.FromStruct(
+            (short)retentionFields.Length, retentionFields, retentionStore);
     }
 
     /// <summary>

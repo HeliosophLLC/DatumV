@@ -80,12 +80,19 @@ public sealed class BatchContext : IDisposable
     /// Stabilises <paramref name="value"/> from <paramref name="sourceStore"/>
     /// into <see cref="VariableStore"/> and binds it to <paramref name="name"/>
     /// in the topmost frame of <see cref="VariableScope"/>. Throws if the
-    /// name is already declared in the topmost frame.
+    /// name is already declared in the topmost frame. When
+    /// <paramref name="structFieldNames"/> is non-<see langword="null"/>,
+    /// the names attach to this binding so downstream
+    /// <c>@var['field']</c> access can resolve a position.
     /// </summary>
-    public void Declare(string name, DataValue value, IValueStore sourceStore)
+    public void Declare(
+        string name,
+        DataValue value,
+        IValueStore sourceStore,
+        IReadOnlyList<string>? structFieldNames = null)
     {
         DataValue stable = DataValueRetention.Stabilize(value, sourceStore, VariableStore);
-        VariableScope.Declare(name, stable);
+        VariableScope.Declare(name, stable, structFieldNames);
     }
 
     /// <summary>

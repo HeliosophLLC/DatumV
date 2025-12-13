@@ -25,7 +25,7 @@ public class QueryMeteringTests : ServiceTestBase
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromString("hello")]);
+        Row row = MakeRow(["x"], [DataValue.FromString("hello")]);
 
         // `len` has a QU cost of 1 (default).
         evaluator.Evaluate(
@@ -43,7 +43,7 @@ public class QueryMeteringTests : ServiceTestBase
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromFloat32(1.5f)]);
+        Row row = MakeRow(["x"], [DataValue.FromFloat32(1.5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → total 3 QU.
         for (int i = 0; i < 3; i++)
@@ -63,7 +63,7 @@ public class QueryMeteringTests : ServiceTestBase
     public void NoMeter_FunctionStillExecutes()
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        Row row = new(["x"], [DataValue.FromFloat32(4f)]);
+        Row row = MakeRow(["x"], [DataValue.FromFloat32(4f)]);
 
         DataValue result = evaluator.Evaluate(
             new FunctionCallExpression("sqrt", [new ColumnReference("x")]),
@@ -80,7 +80,7 @@ public class QueryMeteringTests : ServiceTestBase
     {
         QueryMeter meter = new(budget: 2);
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromFloat32(-5f)]);
+        Row row = MakeRow(["x"], [DataValue.FromFloat32(-5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → 3 QU, budget is 2.
         for (int i = 0; i < 3; i++)
@@ -103,7 +103,7 @@ public class QueryMeteringTests : ServiceTestBase
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromFloat32(3.7f)]);
+        Row row = MakeRow(["x"], [DataValue.FromFloat32(3.7f)]);
 
         // CAST(x AS String) — "cast" is a Tier 1 function (QU 1).
         evaluator.Evaluate(
@@ -121,7 +121,7 @@ public class QueryMeteringTests : ServiceTestBase
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromFloat32(42f)]);
+        Row row = MakeRow(["x"], [DataValue.FromFloat32(42f)]);
 
         evaluator.Evaluate(new LiteralExpression(1), row);
         evaluator.Evaluate(new ColumnReference("x"), row);

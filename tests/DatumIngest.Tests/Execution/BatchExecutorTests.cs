@@ -286,6 +286,245 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["i"]));
     }
 
+    // ───────────────────── FOR-counter ─────────────────────
+
+    [Fact]
+    public async Task ForCounter_LoopsInclusivelyFromStartToEnd()
+    {
+        // Auto-declares @i, runs body 5 times (i = 1..5 inclusive), accumulates
+        // the loop var into @sum. Confirms the auto-declare + per-iter SET +
+        // body evaluation wiring all hang together.
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @i = 1 TO 5 SET @sum = @sum + @i");
+
+        Assert.Equal(15, Convert.ToInt32(result.FinalBindings["sum"]));
+        // @i went out of scope when the loop's frame popped — must not survive.
+        Assert.False(result.FinalBindings.ContainsKey("i"),
+            "@i should not be visible after the FOR loop ends");
+    }
+
+    [Fact]
+    public async Task ForCounter_StartGreaterThanEnd_BodyNeverRuns()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @ran INT32 = 0; " +
+            "FOR @i = 5 TO 1 SET @ran = @ran + 1");
+
+        Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
+    }
+
+    [Fact]
+    public async Task ForCounter_BoundsReferenceVariables()
+    {
+        // The bounds expressions are evaluated once via the synthesise-SELECT
+        // path, so they can reference enclosing variables.
+        BatchResult result = await RunAsync(
+            "DECLARE @lo INT32 = 2; " +
+            "DECLARE @hi INT32 = 4; " +
+            "DECLARE @count INT32 = 0; " +
+            "FOR @i = @lo TO @hi SET @count = @count + 1");
+
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["count"]));
+    }
+
+    [Fact]
+    public async Task ForCounter_BodyBlock_RunsAllChildren()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @a INT32 = 0; " +
+            "DECLARE @b INT32 = 0; " +
+            "FOR @i = 1 TO 3 BEGIN " +
+            "  SET @a = @a + 1; " +
+            "  SET @b = @b + @i; " +
+            "END");
+
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["a"]));
+        // 1 + 2 + 3 = 6
+        Assert.Equal(6, Convert.ToInt32(result.FinalBindings["b"]));
+    }
+
+    [Fact]
+    public async Task ForCounter_NestedLoops_CartesianAccumulator()
+    {
+        BatchResult result = await RunAsync(
+            "DECLARE @total INT32 = 0; " +
+            "FOR @i = 1 TO 3 BEGIN " +
+            "  FOR @j = 1 TO 4 SET @total = @total + 1; " +
+            "END");
+
+        // 3 outer × 4 inner = 12 increments.
+        Assert.Equal(12, Convert.ToInt32(result.FinalBindings["total"]));
+    }
+
+    // ───────────────────── FOR-IN ─────────────────────
+
+    [Fact]
+    public async Task ForIn_IteratesRowsFromTable_AccumulatesByOrdinal()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id", "amount"],
+            [1, 10],
+            [2, 20],
+            [3, 30]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @row IN (SELECT id, amount FROM orders) " +
+            "  SET @sum = @sum + @row[1]",
+            catalog);
+
+        // 10 + 20 + 30 — positional access via ordinal index 1 picks `amount`.
+        Assert.Equal(60, Convert.ToInt32(result.FinalBindings["sum"]));
+        // @row went out of scope.
+        Assert.False(result.FinalBindings.ContainsKey("row"));
+    }
+
+    [Fact]
+    public async Task ForIn_IteratesRowsFromTable_AccumulatesByName()
+    {
+        // Same table, but resolve fields by name. Exercises the field-name
+        // tracking path: the FOR-IN's source query columns flow into the
+        // binding so @row['amount'] resolves at evaluation time.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id", "amount"],
+            [1, 10],
+            [2, 20],
+            [3, 30]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @row IN (SELECT id, amount FROM orders) " +
+            "  SET @sum = @sum + @row['amount']",
+            catalog);
+
+        Assert.Equal(60, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task ForIn_EmptySource_BodyNeverRuns()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id", "amount"]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @ran INT32 = 0; " +
+            "FOR @row IN (SELECT id, amount FROM orders) " +
+            "  SET @ran = @ran + 1",
+            catalog);
+
+        Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
+    }
+
+    [Fact]
+    public async Task ForIn_BodyBlock_CombinesFieldsAcrossRows()
+    {
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id", "amount"],
+            [1, 10],
+            [2, 20]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @ids INT32 = 0; " +
+            "DECLARE @amts INT32 = 0; " +
+            "FOR @row IN (SELECT id, amount FROM orders) BEGIN " +
+            "  SET @ids = @ids + @row['id']; " +
+            "  SET @amts = @amts + @row['amount']; " +
+            "END",
+            catalog);
+
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["ids"]));
+        Assert.Equal(30, Convert.ToInt32(result.FinalBindings["amts"]));
+    }
+
+    [Fact]
+    public async Task ForIn_OuterVariable_VisibleInsideBody()
+    {
+        // Body should still see variables declared in the enclosing scope —
+        // the per-iteration frame is on top of the outer frame, not in
+        // place of it.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1],
+            [2]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @offset INT32 = 100; " +
+            "DECLARE @sum INT32 = 0; " +
+            "FOR @row IN (SELECT id FROM orders) " +
+            "  SET @sum = @sum + @row['id'] + @offset",
+            catalog);
+
+        // (1 + 100) + (2 + 100) = 203
+        Assert.Equal(203, Convert.ToInt32(result.FinalBindings["sum"]));
+    }
+
+    // ───────────────────── Optional ; between statements ─────────────────────
+
+    [Fact]
+    public async Task Batch_NoSemicolonAfterEnd_ParsesNextStatement()
+    {
+        // The user-reported case: writing `;` after END to separate it from
+        // the next statement reads as redundant since END already terminates
+        // the block. The batch grammar allows omitting the inter-statement
+        // separator.
+        BatchResult result = await RunAsync(
+            "DECLARE @sum INT64 = 0 " +
+            "FOR @i = 1 TO 3 BEGIN " +
+            "  SET @sum = @sum + @i " +
+            "END " +
+            "DECLARE @final INT64 = @sum");
+
+        Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
+        Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["final"]));
+    }
+
+    [Fact]
+    public async Task Batch_NoSemicolonsAtAll_StillParses()
+    {
+        // Statements anchored on keywords; no separator needed at all when
+        // each statement starts with one. This isn't a recommended style,
+        // but it should parse.
+        BatchResult result = await RunAsync(
+            "DECLARE @a INT32 = 1 " +
+            "DECLARE @b INT32 = 2 " +
+            "SET @a = @a + @b");
+
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["a"]));
+    }
+
+    [Fact]
+    public async Task Block_NoSemicolonBeforeEnd_ParsesAllStatements()
+    {
+        // BEGIN/END mirrors the top-level grammar: separators between
+        // statements are optional.
+        BatchResult result = await RunAsync(
+            "DECLARE @a INT32 = 0; " +
+            "BEGIN " +
+            "  SET @a = 1 " +
+            "  SET @a = @a + 10 " +
+            "END");
+
+        Assert.Equal(11, Convert.ToInt32(result.FinalBindings["a"]));
+    }
+
+    // ───────────────────── DECLARE coerces initializer to declared type ─────────────────────
+
+    [Fact]
+    public async Task Declare_WithDeclaredType_CoercesInitializerToDeclaredKind()
+    {
+        // Without coercion, the literal `0` (parsed as the narrowest fitting
+        // integer kind) would silently win over the declared INT64 — leaving
+        // @sum bound to Int8. Subsequent arithmetic (which currently widens
+        // to Float32 anyway) would then be wrong on different ground. The
+        // coercion ensures the binding's kind matches the declaration.
+        BatchResult result = await RunAsync("DECLARE @sum INT64 = 0");
+
+        // The result is materialised through the AsInt64 path, which would
+        // throw if the value were still Int8.
+        Assert.Equal(0L, Convert.ToInt64(result.FinalBindings["sum"]));
+    }
+
     // ───────────────────── Top-level @var without batch context ─────────────────────
 
     [Fact]
