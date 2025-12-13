@@ -183,11 +183,11 @@ public sealed class WhisperOnnxModel : OnnxModel
             ?? throw new InvalidOperationException("Whisper encoder ONNX has no declared input.");
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderOutputs = Session.Run(
-            [NamedOnnxValue.CreateFromTensor(encoderInputName, melTensor)]);
+            [OnnxTensorConversion.CreateAutoCastInput(Session, encoderInputName, melTensor)]);
 
         DisposableNamedOnnxValue encoderOutput = encoderOutputs.FirstOrDefault()
             ?? throw new InvalidOperationException("Whisper encoder produced no output.");
-        DenseTensor<float> encoderHidden = encoderOutput.AsTensor<float>().ToDenseTensor();
+        DenseTensor<float> encoderHidden = OnnxTensorConversion.ToFloatTensor(encoderOutput);
 
         // Greedy decoder loop. Prefix is [SOT, lang, task, no_timestamps];
         // we generate content tokens until EOS or max_tokens.
@@ -210,12 +210,12 @@ public sealed class WhisperOnnxModel : OnnxModel
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> decoderOutputs = _decoderSession.Run(
             [
                 NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
-                NamedOnnxValue.CreateFromTensor("encoder_hidden_states", encoderHidden),
+                OnnxTensorConversion.CreateAutoCastInput(_decoderSession, "encoder_hidden_states", encoderHidden),
             ]);
 
             DisposableNamedOnnxValue logitsValue = decoderOutputs.FirstOrDefault(v => v.Name == "logits")
                 ?? decoderOutputs.First();
-            DenseTensor<float> logits = logitsValue.AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> logits = OnnxTensorConversion.ToFloatTensor(logitsValue);
             int[] shape = logits.Dimensions.ToArray();
             // Expect [1, seq_len, vocab_size]
             if (shape.Length != 3 || shape[0] != 1 || shape[1] != tokens.Count)

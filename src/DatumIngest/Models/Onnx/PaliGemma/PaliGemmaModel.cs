@@ -249,10 +249,10 @@ public sealed class PaliGemmaModel : OnnxModel
 
         DenseTensor<float> imageEmbeds;
         using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> visionOut = Session.Run(
-            [NamedOnnxValue.CreateFromTensor(_visionInputName, pixels)]))
+            [OnnxTensorConversion.CreateAutoCastInput(Session, _visionInputName, pixels)]))
         {
             DisposableNamedOnnxValue v = visionOut.First();
-            imageEmbeds = v.AsTensor<float>().ToDenseTensor();
+            imageEmbeds = OnnxTensorConversion.ToFloatTensor(v);
         }
         // Expected shape: [1, num_image_tokens, hidden_dim]
         int[] iShape = imageEmbeds.Dimensions.ToArray();
@@ -279,7 +279,7 @@ public sealed class PaliGemmaModel : OnnxModel
         using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> embedOut = _embedTokensSession.Run(
             [NamedOnnxValue.CreateFromTensor(_embedInputName, promptInputIds)]))
         {
-            promptEmbeds = embedOut.First().AsTensor<float>().ToDenseTensor();
+            promptEmbeds = OnnxTensorConversion.ToFloatTensor(embedOut.First());
         }
         int promptLen = promptEmbeds.Dimensions[1];
 
@@ -302,7 +302,7 @@ public sealed class PaliGemmaModel : OnnxModel
                 DenseTensor<long> genInput = new(genIds, [1, genIds.Length]);
                 using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> genEmbedOut = _embedTokensSession.Run(
                     [NamedOnnxValue.CreateFromTensor(_embedInputName, genInput)]);
-                generatedEmbeds = genEmbedOut.First().AsTensor<float>().ToDenseTensor();
+                generatedEmbeds = OnnxTensorConversion.ToFloatTensor(genEmbedOut.First());
             }
 
             int totalLen = numImageTokens + promptLen + generatedTokens.Count;
@@ -339,13 +339,13 @@ public sealed class PaliGemmaModel : OnnxModel
             // Decoder forward pass.
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> decoderOut = _decoderSession.Run(
             [
-                NamedOnnxValue.CreateFromTensor(_decoderEmbedsName, concat),
+                OnnxTensorConversion.CreateAutoCastInput(_decoderSession, _decoderEmbedsName, concat),
                 NamedOnnxValue.CreateFromTensor(_decoderMaskName, mask),
             ]);
 
             DisposableNamedOnnxValue logitsValue = decoderOut.FirstOrDefault(v => v.Name == _decoderLogitsName)
                 ?? decoderOut.First();
-            DenseTensor<float> logits = logitsValue.AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> logits = OnnxTensorConversion.ToFloatTensor(logitsValue);
             int[] lShape = logits.Dimensions.ToArray();
             // Expected: [1, totalLen, vocab_size]
             if (lShape.Length != 3 || lShape[0] != 1 || lShape[1] != totalLen)

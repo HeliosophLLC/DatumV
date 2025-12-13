@@ -193,11 +193,11 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
                 tensorData,
                 [batchSize, InputChannels, InputHeight, InputWidth]);
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderOutputs = Session.Run(
-                [NamedOnnxValue.CreateFromTensor(_encoderInputName, pixelValues)]);
+                [OnnxTensorConversion.CreateAutoCastInput(Session, _encoderInputName, pixelValues)]);
 
             DisposableNamedOnnxValue encoderOutput = encoderOutputs.FirstOrDefault()
                 ?? throw new InvalidOperationException("ViT encoder produced no output.");
-            DenseTensor<float> encoderHidden = encoderOutput.AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> encoderHidden = OnnxTensorConversion.ToFloatTensor(encoderOutput);
             int[] hiddenShape = encoderHidden.Dimensions.ToArray();
             // Expected: [batchSize, seqLen, hiddenDim]
             if (hiddenShape.Length != 3 || hiddenShape[0] != batchSize)
@@ -312,12 +312,12 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = _decoderSession.Run(
             [
                 NamedOnnxValue.CreateFromTensor(_decoderInputIdsName, inputIds),
-                NamedOnnxValue.CreateFromTensor(_decoderEncoderHiddenStatesName, hiddenTensor),
+                OnnxTensorConversion.CreateAutoCastInput(_decoderSession, _decoderEncoderHiddenStatesName, hiddenTensor),
             ]);
 
             DisposableNamedOnnxValue logitsValue = outputs.FirstOrDefault(v => v.Name == _decoderLogitsName)
                 ?? outputs.First();
-            DenseTensor<float> logits = logitsValue.AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> logits = OnnxTensorConversion.ToFloatTensor(logitsValue);
             int[] logitsShape = logits.Dimensions.ToArray();
             // Expected: [1, seq_len, vocab_size]
             if (logitsShape.Length != 3 || logitsShape[0] != 1 || logitsShape[1] != tokens.Count)

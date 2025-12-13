@@ -167,6 +167,14 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             ?? _textEncoder2Session.OutputMetadata.Keys.Last(); // fallback: pooled is typically the last output
 
         _rng = seed.HasValue ? new Random(seed.Value) : new Random();
+
+        // Diagnostic: print output names so we can verify correct selection.
+        Console.Error.WriteLine("[SDXL diag] text_encoder_1 outputs: " +
+            string.Join(", ", _textEncoder1Session.OutputMetadata.Keys));
+        Console.Error.WriteLine("[SDXL diag] text_encoder_2 outputs: " +
+            string.Join(", ", _textEncoder2Session.OutputMetadata.Keys));
+        Console.Error.WriteLine("[SDXL diag] vae_decoder outputs: " +
+            string.Join(", ", _vaeDecoderSession.OutputMetadata.Keys));
     }
 
     /// <inheritdoc />
@@ -213,8 +221,11 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         // 2. Run both text encoders. Encoder 1 → [1, 77, 768] hidden states.
         //    Encoder 2 → [1, 77, 1280] hidden states + [1, 1280] pooled.
         DenseTensor<float> textEmbeds1 = RunTextEncoder1(inputIds);
+        AssertFinite(textEmbeds1, "text_encoder_1 output");
         (DenseTensor<float> textEmbeds2, DenseTensor<float> pooledTextEmbeds) =
             RunTextEncoder2(inputIds);
+        AssertFinite(textEmbeds2, "text_encoder_2 hidden output");
+        AssertFinite(pooledTextEmbeds, "text_encoder_2 pooled output");
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -253,6 +264,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         // 7. Run UNet.
         DenseTensor<float> noisePred = RunUnet(
             scaledLatents, combinedTextEmbeds, pooledTextEmbeds, timeIds);
+        AssertFinite(noisePred, "UNet noise_pred output");
 
         // 8. Single Euler step from sigma_max to 0.
         float[] cleanLatentBuffer = new float[noisyLatents.Length];
@@ -271,10 +283,16 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             cleanLatentBuffer,
             [1, LatentChannels, LatentHeight, LatentWidth]);
 
+        // fp16 max is 65504; after /vae_scale_factor (0.13025) the latent
+        // values must stay below ~8532 or they will overflow to Inf when
+        // cast to fp16 at the VAE decoder boundary, producing all-NaN output.
+        AssertFinite(cleanLatents, "clean_latents (before VAE)");
+
         cancellationToken.ThrowIfCancellationRequested();
 
         // 10. VAE decode → RGB image in [-1, 1].
         DenseTensor<float> rgbImage = RunVaeDecoder(cleanLatents);
+        AssertFinite(rgbImage, "VAE decoder output");
 
         // 11. Convert to PNG.
         return EncodeAsPng(rgbImage);
@@ -300,12 +318,19 @@ public sealed class SdxlTurboModel : IModel, IDisposable
 
     private DenseTensor<float> RunTextEncoder1(long[] inputIds)
     {
-        DenseTensor<long> inputTensor = new(inputIds, [1, CLIPMaxTokens]);
         string inputName = _textEncoder1Session.InputMetadata.Keys.First();
+        NamedOnnxValue input = OnnxTensorConversion.CreateAutoCastTokenInput(
+            _textEncoder1Session, inputName, inputIds, [1, CLIPMaxTokens]);
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
-            _textEncoder1Session.Run([NamedOnnxValue.CreateFromTensor(inputName, inputTensor)]);
-        return outputs.First().AsTensor<float>().ToDenseTensor();
+            _textEncoder1Session.Run([input]);
+
+        // optimum fp16 export order: [last_hidden_state, pooler_output, hidden_states.0..N]
+        // Named lookup is explicit; fallback to index 0 in case the name differs.
+        DisposableNamedOnnxValue hidden =
+            outputs.FirstOrDefault(o => o.Name.Equals("last_hidden_state", StringComparison.OrdinalIgnoreCase))
+            ?? outputs[0];
+        return OnnxTensorConversion.ToFloatTensor(hidden);
     }
 
     /// <summary>
@@ -315,28 +340,19 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     /// </summary>
     private (DenseTensor<float> Hidden, DenseTensor<float> Pooled) RunTextEncoder2(long[] inputIds)
     {
-        DenseTensor<long> inputTensor = new(inputIds, [1, CLIPMaxTokens]);
         string inputName = _textEncoder2Session.InputMetadata.Keys.First();
+        NamedOnnxValue input = OnnxTensorConversion.CreateAutoCastTokenInput(
+            _textEncoder2Session, inputName, inputIds, [1, CLIPMaxTokens]);
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
-            _textEncoder2Session.Run([NamedOnnxValue.CreateFromTensor(inputName, inputTensor)]);
+            _textEncoder2Session.Run([input]);
 
-        // Pull the pooled output by name; the per-token hidden states are
-        // whatever else is there (typically named "last_hidden_state" or
-        // "hidden_states").
-        DisposableNamedOnnxValue? pooled = null;
-        DisposableNamedOnnxValue? hidden = null;
-        foreach (DisposableNamedOnnxValue output in outputs)
-        {
-            if (output.Name == _encoder2PooledOutputName)
-            {
-                pooled = output;
-            }
-            else if (hidden is null)
-            {
-                hidden = output;
-            }
-        }
+        // optimum fp16 export order: [text_embeds, last_hidden_state, hidden_states.0..N]
+        // Explicit named lookups; fallback to first non-pooled position for portability.
+        DisposableNamedOnnxValue? pooled = outputs.FirstOrDefault(o => o.Name == _encoder2PooledOutputName);
+        DisposableNamedOnnxValue? hidden =
+            outputs.FirstOrDefault(o => o.Name.Equals("last_hidden_state", StringComparison.OrdinalIgnoreCase))
+            ?? outputs.FirstOrDefault(o => o.Name != _encoder2PooledOutputName);
 
         if (pooled is null || hidden is null)
         {
@@ -345,7 +361,9 @@ public sealed class SdxlTurboModel : IModel, IDisposable
                 $"(found: {string.Join(", ", outputs.Select(o => o.Name))}).");
         }
 
-        return (hidden.AsTensor<float>().ToDenseTensor(), pooled.AsTensor<float>().ToDenseTensor());
+        return (
+            OnnxTensorConversion.ToFloatTensor(hidden),
+            OnnxTensorConversion.ToFloatTensor(pooled));
     }
 
     /// <summary>
@@ -382,29 +400,35 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         DenseTensor<float> pooledTextEmbeds,
         DenseTensor<float> timeIds)
     {
-        // Scalar timestep — same convention as SD-Turbo's UNet.
-        DenseTensor<float> timestepTensor = new(new float[] { TimestepValue }, []);
+        // Timestep shape varies by export: optimum-cli exports use scalar [],
+        // Microsoft's onnxruntime/sdxl-turbo export uses rank-1 [1].
+        // Read the metadata so either model works without code changes.
+        int[] timestepShape = _unetSession.InputMetadata["timestep"].Dimensions.Length == 1
+            ? [1]
+            : [];
+        DenseTensor<float> timestepTensor = new(new float[] { TimestepValue }, timestepShape);
 
         var inputs = new List<NamedOnnxValue>
         {
-            NamedOnnxValue.CreateFromTensor("sample", scaledLatents),
-            NamedOnnxValue.CreateFromTensor("timestep", timestepTensor),
-            NamedOnnxValue.CreateFromTensor("encoder_hidden_states", combinedTextEmbeds),
-            NamedOnnxValue.CreateFromTensor("text_embeds", pooledTextEmbeds),
-            NamedOnnxValue.CreateFromTensor("time_ids", timeIds),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "sample", scaledLatents),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "timestep", timestepTensor),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "encoder_hidden_states", combinedTextEmbeds),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "text_embeds", pooledTextEmbeds),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "time_ids", timeIds),
         };
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
             _unetSession.Run(inputs);
-        return outputs.First().AsTensor<float>().ToDenseTensor();
+        return OnnxTensorConversion.ToFloatTensor(outputs[0]);
     }
 
     private DenseTensor<float> RunVaeDecoder(DenseTensor<float> latents)
     {
         string inputName = _vaeDecoderSession.InputMetadata.Keys.First();
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
-            _vaeDecoderSession.Run([NamedOnnxValue.CreateFromTensor(inputName, latents)]);
-        return outputs.First().AsTensor<float>().ToDenseTensor();
+            _vaeDecoderSession.Run([
+                OnnxTensorConversion.CreateAutoCastInput(_vaeDecoderSession, inputName, latents)]);
+        return OnnxTensorConversion.ToFloatTensor(outputs[0]);
     }
 
     /// <summary>
@@ -463,6 +487,45 @@ public sealed class SdxlTurboModel : IModel, IDisposable
 
         using SKData encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
         return encoded.ToArray();
+    }
+
+    // fp16 can represent values up to ±65504. Float32 values outside this
+    // range silently become ±Inf when cast to Float16, which then produces
+    // NaN inside any layer that does Inf-Inf arithmetic (attention softmax,
+    // group norm, etc.).
+    private const float Fp16Max = 65504f;
+
+    private static void AssertFinite(DenseTensor<float> tensor, string label)
+    {
+        ReadOnlySpan<float> span = tensor.Buffer.Span;
+        int nanCount = 0, infCount = 0, fp16OverflowCount = 0;
+        float min = float.MaxValue, max = float.MinValue;
+        for (int i = 0; i < span.Length; i++)
+        {
+            float v = span[i];
+            if (float.IsNaN(v)) { nanCount++; continue; }
+            if (float.IsInfinity(v)) { infCount++; continue; }
+            if (v < min) min = v;
+            if (v > max) max = v;
+            if (v > Fp16Max || v < -Fp16Max) fp16OverflowCount++;
+        }
+
+        // Always print to stderr so ranges are visible in the terminal
+        // even when the check passes.
+        Console.Error.WriteLine(
+            $"[SDXL diag] {label} shape=[{string.Join(',', tensor.Dimensions.ToArray())}] " +
+            $"range=[{min:G5}, {max:G5}] nan={nanCount} inf={infCount} fp16_overflow={fp16OverflowCount}");
+
+        if (nanCount > 0 || infCount > 0)
+            throw new InvalidOperationException(
+                $"SDXL pipeline: {label} contains {nanCount} NaN and {infCount} Inf values " +
+                $"out of {span.Length}. Finite range: [{min:G5}, {max:G5}].");
+
+        if (fp16OverflowCount > 0)
+            throw new InvalidOperationException(
+                $"SDXL pipeline: {label} has {fp16OverflowCount} values outside fp16 range " +
+                $"(±65504). Range: [{min:G5}, {max:G5}]. These become ±Inf when cast to fp16, " +
+                $"causing NaN inside the next session.");
     }
 
     private static byte NormalizeToByte(float value)

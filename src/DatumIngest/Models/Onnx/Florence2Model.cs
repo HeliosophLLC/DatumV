@@ -240,9 +240,9 @@ public sealed class Florence2Model : OnnxModel
                     [1, InputChannels, InputHeight, InputWidth]);
 
                 using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> visionOutputs =
-                    Session.Run([NamedOnnxValue.CreateFromTensor(_visionInputName, pixelValues)]);
+                    Session.Run([OnnxTensorConversion.CreateAutoCastInput(Session, _visionInputName, pixelValues)]);
                 DisposableNamedOnnxValue visionOutput = visionOutputs.First();
-                DenseTensor<float> visualFeatures = visionOutput.AsTensor<float>().ToDenseTensor();
+                DenseTensor<float> visualFeatures = OnnxTensorConversion.ToFloatTensor(visionOutput);
                 int[] visualShape = visualFeatures.Dimensions.ToArray();
                 int visualSeqLen = visualShape[1];
                 int hiddenDim = visualShape[2];
@@ -256,7 +256,7 @@ public sealed class Florence2Model : OnnxModel
 
                 using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> embedOutputs =
                     _embedTokensSession.Run([NamedOnnxValue.CreateFromTensor(_embedInputName, promptIds)]);
-                DenseTensor<float> textEmbeds = embedOutputs.First().AsTensor<float>().ToDenseTensor();
+                DenseTensor<float> textEmbeds = OnnxTensorConversion.ToFloatTensor(embedOutputs.First());
                 int promptSeqLen = textEmbeds.Dimensions[1];
 
                 // 3. Concatenate visual + text embeddings into one sequence
@@ -276,10 +276,10 @@ public sealed class Florence2Model : OnnxModel
                 using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> encoderOutputs =
                     _encoderSession.Run(
                     [
-                        NamedOnnxValue.CreateFromTensor(_encoderInputName, combinedEmbeds),
+                        OnnxTensorConversion.CreateAutoCastInput(_encoderSession, _encoderInputName, combinedEmbeds),
                         NamedOnnxValue.CreateFromTensor(_encoderAttentionMaskName, attentionMask),
                     ]);
-                DenseTensor<float> encoderHidden = encoderOutputs.First().AsTensor<float>().ToDenseTensor();
+                DenseTensor<float> encoderHidden = OnnxTensorConversion.ToFloatTensor(encoderOutputs.First());
 
                 // 5. Greedy autoregressive decode.
                 string caption = DecodeGreedy(
@@ -328,18 +328,18 @@ public sealed class Florence2Model : OnnxModel
 
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> embedOutputs =
                 _embedTokensSession.Run([NamedOnnxValue.CreateFromTensor(_embedInputName, inputIds)]);
-            DenseTensor<float> decoderEmbeds = embedOutputs.First().AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> decoderEmbeds = OnnxTensorConversion.ToFloatTensor(embedOutputs.First());
 
             using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = _decoderSession.Run(
             [
-                NamedOnnxValue.CreateFromTensor(_decoderInputIdsName, decoderEmbeds),
-                NamedOnnxValue.CreateFromTensor(_decoderEncoderHiddenStatesName, encoderHidden),
+                OnnxTensorConversion.CreateAutoCastInput(_decoderSession, _decoderInputIdsName, decoderEmbeds),
+                OnnxTensorConversion.CreateAutoCastInput(_decoderSession, _decoderEncoderHiddenStatesName, encoderHidden),
                 NamedOnnxValue.CreateFromTensor(_decoderEncoderAttentionMaskName, encoderAttentionMask),
             ]);
 
             DisposableNamedOnnxValue logitsValue = outputs.FirstOrDefault(v => v.Name == _decoderLogitsName)
                 ?? outputs.First();
-            DenseTensor<float> logits = logitsValue.AsTensor<float>().ToDenseTensor();
+            DenseTensor<float> logits = OnnxTensorConversion.ToFloatTensor(logitsValue);
             int vocabSize = logits.Dimensions[2];
             ReadOnlySpan<float> logitsFlat = logits.Buffer.Span;
             ReadOnlySpan<float> lastPositionLogits = logitsFlat.Slice(

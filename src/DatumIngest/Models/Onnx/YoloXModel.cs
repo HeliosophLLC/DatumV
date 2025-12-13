@@ -183,13 +183,13 @@ public sealed class YoloXModel : OnnxModel
                 DenseTensor<float> tensor = new(
                     tensorData,
                     [batchSize, InputChannels, _inputSize, _inputSize]);
-                NamedOnnxValue input = NamedOnnxValue.CreateFromTensor(_onnxInputName, tensor);
+                NamedOnnxValue input = OnnxTensorConversion.CreateAutoCastInput(Session, _onnxInputName, tensor);
 
                 using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = Session.Run([input]);
                 DisposableNamedOnnxValue first = outputs.FirstOrDefault()
                     ?? throw new InvalidOperationException("YOLOX ONNX session returned no outputs.");
 
-                DenseTensor<float> raw = first.AsTensor<float>().ToDenseTensor();
+                DenseTensor<float> raw = OnnxTensorConversion.ToFloatTensor(first);
                 ReadOnlySpan<float> flat = raw.Buffer.Span;
 
                 if (flat.Length != batchSize * perImageValues)
@@ -216,13 +216,13 @@ public sealed class YoloXModel : OnnxModel
                     DenseTensor<float> tensor = new(
                         tensorData.AsMemory(row * perImageFloats, perImageFloats),
                         [1, InputChannels, _inputSize, _inputSize]);
-                    NamedOnnxValue input = NamedOnnxValue.CreateFromTensor(_onnxInputName, tensor);
+                    NamedOnnxValue input = OnnxTensorConversion.CreateAutoCastInput(Session, _onnxInputName, tensor);
 
                     using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = Session.Run([input]);
                     DisposableNamedOnnxValue first = outputs.FirstOrDefault()
                         ?? throw new InvalidOperationException("YOLOX ONNX session returned no outputs.");
 
-                    DenseTensor<float> raw = first.AsTensor<float>().ToDenseTensor();
+                    DenseTensor<float> raw = OnnxTensorConversion.ToFloatTensor(first);
                     ReadOnlySpan<float> flat = raw.Buffer.Span;
 
                     if (flat.Length != perImageValues)

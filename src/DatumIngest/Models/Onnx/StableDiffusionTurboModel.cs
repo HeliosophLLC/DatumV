@@ -294,8 +294,7 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
             _textEncoderSession.Run([NamedOnnxValue.CreateFromTensor(inputName, inputTensor)]);
-        DisposableNamedOnnxValue first = outputs.First();
-        return first.AsTensor<float>().ToDenseTensor();
+        return OnnxTensorConversion.ToFloatTensor(outputs[0]);
     }
 
     private DenseTensor<float> RunUnet(
@@ -310,22 +309,23 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
 
         var inputs = new List<NamedOnnxValue>
         {
-            NamedOnnxValue.CreateFromTensor("sample", scaledLatents),
-            NamedOnnxValue.CreateFromTensor("timestep", timestepTensor),
-            NamedOnnxValue.CreateFromTensor("encoder_hidden_states", textEmbeds),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "sample", scaledLatents),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "timestep", timestepTensor),
+            OnnxTensorConversion.CreateAutoCastInput(_unetSession, "encoder_hidden_states", textEmbeds),
         };
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
             _unetSession.Run(inputs);
-        return outputs.First().AsTensor<float>().ToDenseTensor();
+        return OnnxTensorConversion.ToFloatTensor(outputs[0]);
     }
 
     private DenseTensor<float> RunVaeDecoder(DenseTensor<float> latents)
     {
         string inputName = _vaeDecoderSession.InputMetadata.Keys.First();
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs =
-            _vaeDecoderSession.Run([NamedOnnxValue.CreateFromTensor(inputName, latents)]);
-        return outputs.First().AsTensor<float>().ToDenseTensor();
+            _vaeDecoderSession.Run([
+                OnnxTensorConversion.CreateAutoCastInput(_vaeDecoderSession, inputName, latents)]);
+        return OnnxTensorConversion.ToFloatTensor(outputs[0]);
     }
 
     /// <summary>

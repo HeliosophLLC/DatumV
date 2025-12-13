@@ -211,28 +211,30 @@ is identical across all sizes.
   adherence than SD-Turbo, at the cost of more disk + VRAM.
 - **License**: ⚠️ **Stability AI Community License** — same as SD-Turbo.
   Free under $1M ARR; Enterprise license required above.
-- **Source**: [huggingface.co/stabilityai/sdxl-turbo](https://huggingface.co/stabilityai/sdxl-turbo)
+- **Source**: [huggingface.co/onnxruntime/sdxl-turbo](https://huggingface.co/onnxruntime/sdxl-turbo)
+  (Microsoft's official fp16 ONNX build — CUDA EP only, madebyollin
+  VAE for fp16 stability, int32 token IDs). Original PyTorch weights at
+  [huggingface.co/stabilityai/sdxl-turbo](https://huggingface.co/stabilityai/sdxl-turbo).
 - **Folder**: `sdxl-turbo-onnx/` — diffusers-format layout with the
   SDXL addition of a second text encoder
 - **Files** (relative to the folder):
-  - `text_encoder/model.onnx` (~250 MB) — CLIP-L
-  - `text_encoder_2/model.onnx` + `text_encoder_2/model.onnx_data` — OpenCLIP-G (uses external data, ~1.4 GB total)
-  - `unet/model.onnx` + `unet/model.onnx_data` — UNet (~5 GB total — ~2.6B params, far bigger than SD's UNet)
-  - `vae_decoder/model.onnx` (~200 MB)
-  - `vae_encoder/model.onnx` (~140 MB) — only used by img2img
-  - `tokenizer/{vocab.json, merges.txt, ...}` — CLIP BPE for encoder 1
-  - `tokenizer_2/{vocab.json, merges.txt, ...}` — CLIP BPE for encoder 2 (same vocab as encoder 1's tokenizer in practice; diffusers separates them by convention)
-  - `scheduler/scheduler_config.json`
-  - `model_index.json`
-- **Disk footprint**: ~12 GB FP32, ~6 GB FP16 (use `-Fp16` flag on
-  the export script for the smaller build)
+  - `text_encoder/model.onnx` — CLIP-L
+  - `text_encoder_2/model.onnx` + `text_encoder_2/model.onnx_data` — OpenCLIP-G
+  - `unet/model.onnx` + `unet/model.onnx_data` — UNet (~2.6B params)
+  - `vae_decoder/model.onnx` — madebyollin fp16-stable VAE
+  - `vae_encoder/model.onnx` — only used by img2img
+  - `tokenizer/{vocab.json, merges.txt, ...}` — CLIP BPE
+- **Disk footprint**: ~9.7 GB (fp16 mixed precision — UNet + text
+  encoders fp16, VAE uses madebyollin's fp16-native build)
 - **VRAM**: ~6-8 GB during inference; tight on 12 GB cards alongside
   Llama 8B
-- **Setup**: requires conversion from PyTorch — pre-built ONNX repos
-  are usually DirectML-optimized and don't work on standard EPs.
+- **Setup**: download the pre-built ONNX directly from
+  [huggingface.co/onnxruntime/sdxl-turbo](https://huggingface.co/onnxruntime/sdxl-turbo)
+  into your `$env:DATUM_MODELS\sdxl-turbo-onnx` folder. No conversion
+  required. **CUDA EP only** — CPU and DirectML are not supported by
+  this build. For a portable fp32 build that runs on any EP, use
   [scripts/export-sdxl-turbo.ps1](../scripts/export-sdxl-turbo.ps1)
-  handles the conversion via `optimum-cli`. Reuses the same `.venv`
-  the other export scripts created. ~15-25 minutes including download.
+  (~15-25 minutes, ~12 GB).
 - **vs `sd_turbo`**: dramatically better quality, especially for
   complex scenes / multi-subject compositions / fine detail. Slower
   per-image (~3-5s vs SD's ~1-2s). Use SDXL-Turbo for hero outputs;

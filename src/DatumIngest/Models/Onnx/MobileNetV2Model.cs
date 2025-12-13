@@ -123,7 +123,7 @@ public sealed class MobileNetV2Model : OnnxModel
             tensorData,
             [batchSize, InputChannels, InputHeight, InputWidth]);
 
-        return [NamedOnnxValue.CreateFromTensor(_onnxInputName, tensor)];
+        return [OnnxTensorConversion.CreateAutoCastInput(Session, _onnxInputName, tensor)];
     }
 
     /// <inheritdoc />
@@ -134,7 +134,7 @@ public sealed class MobileNetV2Model : OnnxModel
         DisposableNamedOnnxValue first = outputs.FirstOrDefault()
             ?? throw new InvalidOperationException("MobileNetV2 ONNX session returned no outputs.");
 
-        DenseTensor<float> logits = first.AsTensor<float>().ToDenseTensor();
+        DenseTensor<float> logits = OnnxTensorConversion.ToFloatTensor(first);
         ReadOnlySpan<float> flat = logits.Buffer.Span;
 
         if (flat.Length != batchSize * ClassCount)
