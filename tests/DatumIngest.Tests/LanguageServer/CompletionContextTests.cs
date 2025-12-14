@@ -683,4 +683,17 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
     }
+
+    [Fact]
+    public void Classify_SingleLetterAtDocumentStart_ReturnsStatementStartWithPrefix()
+    {
+        // Pinning the empty-document edge case: typing "b" at the start of
+        // a blank document should land in StatementStart with prefix="b".
+        // Anything else (e.g. AfterSelect / Expression) would let column
+        // names leak into the popup as the user is starting a fresh batch.
+        CompletionZone zone = CompletionContext.Classify("b", 1);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+        Assert.Equal("b", zone.Prefix);
+    }
 }

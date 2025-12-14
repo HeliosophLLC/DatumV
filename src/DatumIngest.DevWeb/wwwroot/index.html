@@ -938,6 +938,16 @@
         renderLineHighlight: 'all',
         tabSize: 2,
         insertSpaces: true,
+
+        // Disable Monaco's word-based suggestion fallback. Default since
+        // Monaco 0.34 is 'matchingDocuments', which scrapes words from
+        // every open SQL tab and offers them as plain Text completions —
+        // so a tab containing `system_models` makes the column name
+        // `backend` surface in unrelated zones (e.g. typing `b` at the
+        // start of an empty file). The DatumIngest language server is
+        // schema-aware and zone-aware; the word fallback only adds noise
+        // and out-of-context column suggestions.
+        wordBasedSuggestions: 'off',
       });
 
       // Ctrl/Cmd+Enter runs the active query. Monaco's keybindings system is
