@@ -93,6 +93,10 @@ public static class BuiltinModels
         RegisterSdxlTurbo(modelCatalog);
         RegisterJuggernautXlLightning(modelCatalog);
 
+        // Audio generation.
+        RegisterMusicGenSmall(modelCatalog);
+        RegisterMusicGenMedium(modelCatalog);
+
         // LLM zoo — seven entries spanning Meta, Microsoft, TinyLlama community,
         // Google, Alibaba, IBM, TII. Every voice in the zoo is at Q4_K_M
         // quantization for clean cross-model comparison (architectural
@@ -991,6 +995,102 @@ public static class BuiltinModels
                 $"{folder}/tokenizer_2/tokenizer_config.json",
                 $"{folder}/scheduler/scheduler_config.json",
                 $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for MusicGen Small's ONNX export.</summary>
+    public const string MusicGenSmallFolder = "musicgen-small-onnx";
+
+    /// <summary>Default folder for MusicGen Medium's ONNX export.</summary>
+    public const string MusicGenMediumFolder = "musicgen-medium-onnx";
+
+    /// <summary>
+    /// Registers MusicGen Small under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"musicgen_small"</c>). Generates mono 32 kHz audio from a
+    /// text prompt using Meta's 300M-parameter music generation model.
+    /// </summary>
+    public static void RegisterMusicGenSmall(
+        ModelCatalog catalog,
+        string modelName = "musicgen_small",
+        string folder = MusicGenSmallFolder,
+        int maxNewTokens = 512,
+        int? seed = null)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/decoder_model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Audio,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new MusicGenModel(modelName, modelDirectory, maxNewTokens, seed);
+            },
+            DisplayName: "MusicGen Small",
+            Parameters: "300M",
+            License: "CC-BY-NC-4.0",
+            LicenseHolder: "Meta",
+            SourceUrl: "https://huggingface.co/facebook/musicgen-small",
+            Category: "generator",
+            Modalities: ["text", "audio"],
+            Files:
+            [
+                $"{folder}/text_encoder.onnx",
+                $"{folder}/decoder_model.onnx",
+                $"{folder}/decoder_with_past_model.onnx",
+                $"{folder}/build_delay_pattern_mask.onnx",
+                $"{folder}/encodec_decode.onnx",
+                $"{folder}/tokenizer.json",
+                $"{folder}/config.json",
+                $"{folder}/generation_config.json",
+            ]));
+    }
+
+    /// <summary>
+    /// Registers MusicGen Medium under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"musicgen_medium"</c>). Generates mono 32 kHz audio from a
+    /// text prompt using Meta's 1.5B-parameter music generation model.
+    /// </summary>
+    public static void RegisterMusicGenMedium(
+        ModelCatalog catalog,
+        string modelName = "musicgen_medium",
+        string folder = MusicGenMediumFolder,
+        int maxNewTokens = 512,
+        int? seed = null)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/decoder_model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Audio,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new MusicGenModel(modelName, modelDirectory, maxNewTokens, seed);
+            },
+            DisplayName: "MusicGen Medium",
+            Parameters: "1.5B",
+            License: "CC-BY-NC-4.0",
+            LicenseHolder: "Meta",
+            SourceUrl: "https://huggingface.co/facebook/musicgen-medium",
+            Category: "generator",
+            Modalities: ["text", "audio"],
+            Files:
+            [
+                $"{folder}/text_encoder.onnx",
+                $"{folder}/decoder_model.onnx",
+                $"{folder}/decoder_model.onnx_data",
+                $"{folder}/decoder_with_past_model.onnx",
+                $"{folder}/decoder_with_past_model.onnx_data",
+                $"{folder}/build_delay_pattern_mask.onnx",
+                $"{folder}/encodec_decode.onnx",
+                $"{folder}/tokenizer.json",
+                $"{folder}/config.json",
+                $"{folder}/generation_config.json",
             ]));
     }
 
