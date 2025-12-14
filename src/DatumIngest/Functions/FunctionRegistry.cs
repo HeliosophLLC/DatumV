@@ -239,6 +239,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TypeofFunction>();
         registry.RegisterScalar<Scalar.AssertNotNullFunction>();
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
+        registry.RegisterScalar<Scalar.Math.RoundFunction>();
+        registry.RegisterScalar<Scalar.Math.FloorFunction>();
+        registry.RegisterScalar<Scalar.Math.CeilFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
         registry.RegisterScalar<Scalar.RandomStringFunction>();
         registry.RegisterScalar<Scalar.RandomStringFromSeedFunction>();
         registry.RegisterScalar<Scalar.RandomFloat32Function>();
