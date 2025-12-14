@@ -105,6 +105,10 @@
   #tab-strip .tab .pin {
     font-size: 11px; line-height: 1; margin-right: 2px; user-select: none;
   }
+  #tab-strip .tab .running-indicator {
+    font-size: 11px; line-height: 1; margin-right: 4px;
+    user-select: none;
+  }
   #tab-strip .tab .name-input {
     background: var(--panel); color: var(--fg);
     border: 1px solid var(--accent); border-radius: 2px;
@@ -750,6 +754,23 @@
       lastRunAt: 0,
       sqlOfLastRun: '',
       pinned: false,
+
+      // Per-tab toolbar settings persisted with the workspace. Each tab
+      // remembers its preferred row cap and trace toggle so switching
+      // tabs swaps the toolbar to that tab's settings.
+      maxRows: 200,
+      trace: false,
+
+      // Per-tab run state. None of these are persisted — they're
+      // re-initialised per session. `running` flags an in-flight query
+      // for THIS tab; `abortController` lets the user cancel it; the
+      // accumulator `runningRes` captures streamed events so the
+      // results pane can re-render on tab switch-back.
+      running: false,
+      abortController: null,
+      runStartedAt: 0,
+      runningRes: null,
+      liveTickHandle: null,
     };
   }
   function loadWorkspace(name) {
@@ -769,6 +790,15 @@
           lastRunAt: t.lastRunAt || 0,
           sqlOfLastRun: t.sqlOfLastRun || '',
           pinned: t.pinned === true,
+          maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
+          trace: t.trace === true,
+          // Run-state fields are runtime-only; they always start fresh on
+          // workspace load even if a session crashed mid-run.
+          running: false,
+          abortController: null,
+          runStartedAt: 0,
+          runningRes: null,
+          liveTickHandle: null,
         };
       });
       if (!ws.tabs.find(t => t.id === ws.activeTabId)) {
@@ -792,16 +822,23 @@
         lastRunAt: t.lastRunAt,
         sqlOfLastRun: t.sqlOfLastRun,
         pinned: t.pinned === true,
+        maxRows: t.maxRows,
+        trace: t.trace === true,
+        // Runtime-only fields (running, abortController, etc.) are
+        // intentionally omitted — a reload should always start clean.
       })),
     };
     writeJson(STORE.workspace(name), snapshot);
   }
 
   // ===== State =====
+  // Run state lives on each tab (tab.running / tab.abortController / ...)
+  // so multiple tabs can have queries in flight concurrently. The server
+  // currently serialises queries via a SemaphoreSlim, so requests from
+  // multiple tabs queue server-side — but each tab tracks its own state
+  // and the UI accurately reflects "running" per tab.
   const state = {
     workspace: null,            // { tabs, activeTabId }
-    queryRunning: false,
-    activeAbortController: null, // AbortController for the in-flight query, if any
   };
 
   // Debounce save so rapid keystrokes don't flog localStorage.
@@ -831,6 +868,17 @@
         pin.textContent = '📌';
         pin.title = 'Pinned — right-click to unpin';
         div.appendChild(pin);
+      }
+
+      // Running indicator: small spinner-like glyph in front of the name
+      // when this tab has an in-flight query. Lets the user see at a
+      // glance which tabs are still working without switching to them.
+      if (t.running) {
+        const spinner = document.createElement('span');
+        spinner.className = 'running-indicator';
+        spinner.textContent = '⏳';
+        spinner.title = 'Query running — Esc on this tab to cancel';
+        div.appendChild(spinner);
       }
 
       const name = document.createElement('span');
@@ -992,6 +1040,7 @@
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
     persistWorkspace();
   }
 
@@ -1001,6 +1050,7 @@
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
     persistWorkspace();
   }
 
@@ -1031,6 +1081,7 @@
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
     persistWorkspace();
   }
 
@@ -1384,18 +1435,12 @@
     elapsed.textContent = '';
     if (!tab) return;
 
-    // If the active tab is the one with an in-flight query, show a
-    // "Running…" placeholder rather than re-rendering the previous
-    // run's lastResult. Without this, switching away from a running
-    // tab and back again would display the stale error / table on
-    // top of an executing query — confusing and wrong. The live
-    // ticker on `#elapsed` will resume painting on its next 250ms
-    // tick now that the active tab matches the running tab.
-    if (state.runningTabId === tab.id) {
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = 'Running… (Esc to cancel) — output will appear when the query completes.';
-      results.appendChild(meta);
+    // If THIS tab has an in-flight query, render the streaming view from
+    // the per-tab accumulator (rebuild chunks / partial rows so the user
+    // can see progress on switch-back). The live ticker resumes painting
+    // on its next 250ms tick once the active tab matches the running tab.
+    if (tab.running && tab.runningRes) {
+      renderRunningTab(tab, results);
       return;
     }
 
@@ -1444,6 +1489,70 @@
       const timeText = typeof r.elapsedMs === 'number' ? `${(r.elapsedMs / 1000).toFixed(2)} s` : '';
       elapsed.textContent = timeText ? `${rowText} · ${timeText}` : rowText;
     }
+  }
+
+  // Renders the partial state of a query that's still in flight on this
+  // tab — invoked when the user switches back to a running tab. Rebuilds
+  // any streaming chunks from the accumulator and lists how many rows
+  // have arrived. The live ticker on `#elapsed` paints the elapsed time
+  // from its next 250ms tick.
+  function renderRunningTab(tab, container) {
+    const res = tab.runningRes;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `Running… (Esc to cancel) · ${res.rowCount.toLocaleString()} ${res.rowCount === 1 ? 'row' : 'rows'} so far`;
+    container.appendChild(meta);
+
+    if (res.chunks && res.chunks.length > 0) {
+      // Rebuild the live token-stream pane from the accumulated chunks.
+      // The live append path in run() will continue from this point —
+      // checking `streamPane` truthy in the chunk handler now hits the
+      // newly-attached element.
+      const header = document.createElement('div');
+      header.className = 'meta stream-header';
+      const model = res.chunks[0].model;
+      header.textContent = `streaming from models.${model}`;
+      container.appendChild(header);
+      const pre = document.createElement('pre');
+      pre.className = 'streaming-output';
+      for (const c of res.chunks) {
+        pre.appendChild(document.createTextNode(c.text));
+      }
+      pre.scrollTop = pre.scrollHeight;
+      container.appendChild(pre);
+    }
+  }
+
+  // Pushes the active tab's per-tab settings (maxRows / trace) into the
+  // shared toolbar inputs and updates the Run button's label depending on
+  // whether the active tab has a query in flight. Called on tab switch
+  // and at the start/end of each run.
+  function syncToolbarToActiveTab() {
+    const tab = activeTab();
+    const runBtn = document.getElementById('run');
+    const maxRowsInput = document.getElementById('maxRows');
+    const traceToggle = document.getElementById('traceToggle');
+    const status = document.getElementById('status');
+    if (!tab) {
+      runBtn.textContent = 'Run';
+      runBtn.disabled = true;
+      maxRowsInput.disabled = true;
+      traceToggle.disabled = true;
+      status.textContent = '';
+      return;
+    }
+    runBtn.disabled = false;
+    runBtn.textContent = tab.running ? 'Cancel' : 'Run';
+    runBtn.title = tab.running
+      ? 'Stop the in-flight query for this tab (Esc)'
+      : 'Run the SQL in this tab (Ctrl/⌘+Enter)';
+    // Inputs reflect the active tab's saved settings — typing into them
+    // writes back to the tab via the change listeners wired in boot().
+    maxRowsInput.value = tab.maxRows || 200;
+    traceToggle.checked = tab.trace === true;
+    status.textContent = tab.running
+      ? 'running… (Esc to cancel)'
+      : '';
   }
 
   function renderResult(res, container) {
@@ -1579,9 +1688,16 @@
     return '';
   }
 
+  // run() launches a query for the currently-active tab. Each tab keeps
+  // its own running state on the tab object (tab.running, tab.runningRes,
+  // tab.abortController, tab.liveTickHandle) so multiple tabs can have
+  // queries in flight at once. The server queues them via its query lock
+  // today, but the UX correctly reflects "running per tab" regardless.
   async function run() {
     const tab = activeTab();
     if (!tab) return;
+    if (tab.running) return;  // already running on THIS tab — Cancel button handles abort
+
     // If text is highlighted, run just that fragment; otherwise run the
     // whole tab. Trim AFTER picking so leading/trailing whitespace in a
     // selection doesn't make us silently fall back to the full tab.
@@ -1589,47 +1705,14 @@
     const isPartial = selection.trim().length > 0;
     const sql = (isPartial ? selection : tab.sql).trim();
     if (!sql) return;
-    if (state.queryRunning) return;
 
-    state.queryRunning = true;
-    // The tab the query was launched from. Used by the renderer + the
-    // live elapsed ticker to suppress drawing when the user has switched
-    // away — without this, the renderer would re-paint the tab's stale
-    // lastResult on switch-back, and the ticker would clobber the
-    // currently-active tab's static stats.
-    state.runningTabId = tab.id;
-    // AbortController for this run. Esc handler (or future Stop button)
-    // calls abort() to cancel the fetch — the browser closes the connection,
-    // the server's RequestAborted token fires, OperationCanceledException
-    // propagates through plan.ExecuteAsync, and the streaming path tears
-    // down cleanly. Cleared in the finally block.
-    const abortController = new AbortController();
-    state.activeAbortController = abortController;
-
-    const runBtn = document.getElementById('run');
-    const status = document.getElementById('status');
-    runBtn.disabled = true;
-    status.textContent = isPartial ? 'running selection… (Esc to cancel)' : 'running… (Esc to cancel)';
-
-    const results = document.getElementById('results-pane');
-    results.innerHTML = '<div class="meta">Running…</div>';
-
-    // Streaming pane: lazily attached when the first `chunk` event arrives,
-    // wiped at end-of-run when renderResultsForActiveTab() re-renders the
-    // pane with the final table. Tracks "is it currently in the DOM" so
-    // we only attach once per run.
-    const streamPane = document.createElement('pre');
-    streamPane.className = 'streaming-output';
-    let streamPaneAttached = false;
-    let streamHeaderModel = null;
-
-    const t0 = performance.now();
-    // Result accumulator. Same shape the existing renderer reads, plus
-    // sessionId (for future debugger sidecar calls) and chunks (preserved
-    // for replay). Built up incrementally from NDJSON events; persisted
-    // to IDB as a single object at the end so existing renderers and
-    // saved-result loaders work unchanged.
-    const res = {
+    // Tab-scoped run state. The closure captures `tab` so handlers below
+    // operate on this specific tab even if the user switches away.
+    tab.running = true;
+    tab.abortController = new AbortController();
+    tab.runStartedAt = performance.now();
+    tab.runIsPartial = isPartial;
+    tab.runningRes = {
       schema: null,
       rows: [],
       rowCount: 0,
@@ -1641,23 +1724,35 @@
       chunks: [],
     };
 
-    // Live tick on the toolbar's `#elapsed` slot so long-running queries
-    // show how many rows have streamed in and how much wall time has
-    // passed. Cleared in the finally below; the post-run renderer rewrites
-    // the same span with the final stats. 250ms cadence is smooth-looking
-    // without burning CPU on a busy editor. Only paints while the user
-    // is still on the tab the query started from — otherwise it would
-    // clobber whatever stats the now-active tab is showing.
+    // The DOM nodes for this tab's streaming output. Re-attached when the
+    // user switches back to this tab while it's still running (rebuild
+    // from tab.runningRes). Tracked here so subsequent chunk events can
+    // append directly without rebuilding from scratch.
+    let streamPane = null;
+    let streamHeaderModel = null;
+
+    // Reflect the new running state on whichever views are visible.
+    syncToolbarToActiveTab();
+    renderTabStrip();
+    if (state.workspace.activeTabId === tab.id) {
+      const results = document.getElementById('results-pane');
+      results.innerHTML = '<div class="meta">Running… (Esc to cancel)</div>';
+    }
+
+    // Live tick on the toolbar's `#elapsed` slot. Only paints while the
+    // tab is the active one — switching tabs leaves the visible #elapsed
+    // showing the new active tab's static stats, not a clobbered live
+    // value from a backgrounded run.
     const elapsedSlot = document.getElementById('elapsed');
     function paintLiveStats() {
-      if (state.workspace.activeTabId !== state.runningTabId) return;
-      const seconds = (performance.now() - t0) / 1000;
-      const rows = res.rowCount;
+      if (state.workspace.activeTabId !== tab.id) return;
+      const seconds = (performance.now() - tab.runStartedAt) / 1000;
+      const rows = tab.runningRes.rowCount;
       const rowText = `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}`;
       elapsedSlot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
     }
     paintLiveStats();
-    const liveTickHandle = setInterval(paintLiveStats, 250);
+    tab.liveTickHandle = setInterval(paintLiveStats, 250);
 
     try {
       const response = await fetch('/api/query/stream', {
@@ -1665,32 +1760,33 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sql,
-          maxRows: parseInt(document.getElementById('maxRows').value, 10) || 200,
-          trace: document.getElementById('traceToggle').checked,
+          // Per-tab settings — each tab remembers its own row cap and
+          // trace toggle so switching tabs doesn't change the next run's
+          // shape.
+          maxRows: tab.maxRows || 200,
+          trace: tab.trace === true,
         }),
-        signal: abortController.signal,
+        signal: tab.abortController.signal,
       });
 
       if (!response.ok) {
-        // Plan-time errors come back as a regular 400 with a JSON body
-        // (the server hasn't started writing the NDJSON stream yet).
         try {
           const errBody = await response.json();
-          res.error = errBody.error || `HTTP ${response.status}`;
+          tab.runningRes.error = errBody.error || `HTTP ${response.status}`;
         } catch {
-          res.error = `HTTP ${response.status}`;
+          tab.runningRes.error = `HTTP ${response.status}`;
         }
       } else {
-        // Clear the "Running…" placeholder; events render in place from here.
-        results.innerHTML = '';
+        // Clear the placeholder if we're still the active tab — events
+        // render in place from here.
+        if (state.workspace.activeTabId === tab.id) {
+          document.getElementById('results-pane').innerHTML = '';
+        }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
 
-        // NDJSON line loop. Each chunk of bytes from the server is
-        // appended to a buffer, split on '\n'; complete lines parse as
-        // JSON events and dispatch into the accumulator + DOM.
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -1709,63 +1805,62 @@
         }
       }
     } catch (err) {
-      // AbortError is the expected outcome when Esc cancels the run; show
-      // it as "cancelled" rather than a network error. Any other failure
-      // mid-stream (server crash, lost connection) falls through to the
-      // generic message.
       if (err && err.name === 'AbortError') {
-        if (!res.error) res.error = 'cancelled';
+        if (!tab.runningRes.error) tab.runningRes.error = 'cancelled';
       } else {
-        res.error = `Network error: ${err.message}`;
+        tab.runningRes.error = `Network error: ${err.message}`;
       }
     } finally {
-      state.queryRunning = false;
-      state.runningTabId = null;
-      state.activeAbortController = null;
-      runBtn.disabled = false;
-      status.textContent = '';
-      clearInterval(liveTickHandle);
-      // The post-run renderer rewrites the elapsed slot with the final
-      // stats; if for some reason it doesn't fire (e.g. abort before
-      // any event), drop the "(running)" suffix so the user isn't
-      // misled by a stale ticker.
-      if (elapsedSlot.textContent.endsWith('(running)')) {
-        elapsedSlot.textContent = elapsedSlot.textContent.replace(/\s*\(running\)\s*$/, '');
-      }
+      clearInterval(tab.liveTickHandle);
+      tab.liveTickHandle = null;
+      tab.running = false;
+      tab.abortController = null;
     }
 
     function handleStreamEvent(event) {
-      // Forward-compat: silently ignore unknown event types so future
-      // debugger / scope / breakpoint events on a newer server don't
-      // break older clients. Reserved type names (not yet emitted):
-      //   breakpoint_hit, breakpoint_resumed, step_paused, scope_changed.
+      const res = tab.runningRes;
+      // Whether the user is currently looking at this tab; gates direct
+      // DOM appends. Background tabs accumulate into res only.
+      const isActive = state.workspace.activeTabId === tab.id;
+      const results = isActive ? document.getElementById('results-pane') : null;
+
       switch (event.type) {
         case 'session':
           res.sessionId = event.id;
           break;
         case 'cell_started':
-          // Today there's exactly one cell per run; nothing to do. When
-          // procedures (LET / IF / WHILE) land, this brackets a new
-          // visually-distinct cell group in the UI.
           break;
         case 'schema':
           res.schema = event.columns;
           break;
         case 'chunk':
           res.chunks.push({ model: event.model, text: event.text });
-          if (!streamPaneAttached) {
-            streamHeaderModel = event.model;
-            const header = document.createElement('div');
-            header.className = 'meta stream-header';
-            header.textContent = `streaming from models.${event.model}`;
-            results.appendChild(header);
-            results.appendChild(streamPane);
-            streamPaneAttached = true;
+          if (isActive) {
+            // After a tab switch-back, our closure's streamPane may be
+            // stale (the DOM was wiped) — but renderRunningTab already
+            // rebuilt the pane from res.chunks. Re-grab it from the DOM
+            // before appending so we don't end up with two duplicate
+            // streaming panes one above the other.
+            if (!streamPane || !streamPane.isConnected) {
+              streamPane = results.querySelector('pre.streaming-output');
+            }
+            if (!streamPane) {
+              streamHeaderModel = event.model;
+              const header = document.createElement('div');
+              header.className = 'meta stream-header';
+              header.textContent = `streaming from models.${event.model}`;
+              results.appendChild(header);
+              streamPane = document.createElement('pre');
+              streamPane.className = 'streaming-output';
+              results.appendChild(streamPane);
+            }
+            streamPane.appendChild(document.createTextNode(event.text));
+            streamPane.scrollTop = streamPane.scrollHeight;
+          } else {
+            // Will get rebuilt from res.chunks if/when user switches back.
+            streamPane = null;
+            streamHeaderModel = null;
           }
-          streamPane.appendChild(document.createTextNode(event.text));
-          // Auto-scroll to keep the latest token visible. Cheap because
-          // streamPane is the only thing scrolling — not the parent.
-          streamPane.scrollTop = streamPane.scrollHeight;
           break;
         case 'row':
           res.rows.push(event.cells);
@@ -1779,8 +1874,6 @@
           res.trace = event.text;
           break;
         case 'cell_completed':
-          // Per-cell elapsedMs available; we use the wrapping `complete`
-          // event for total elapsed today.
           break;
         case 'complete':
           res.elapsedMs = event.elapsedMs;
@@ -1790,36 +1883,49 @@
           if (event.detail) res.detail = event.detail;
           break;
         default:
-          // Unknown event type — ignore (forward-compat).
           break;
       }
     }
 
-    const wallMs = performance.now() - t0;
-    if (typeof res.elapsedMs !== 'number' || !res.elapsedMs) res.elapsedMs = wallMs;
-
-    tab.lastResult = res;
+    const finalRes = tab.runningRes;
+    const wallMs = performance.now() - tab.runStartedAt;
+    if (typeof finalRes.elapsedMs !== 'number' || !finalRes.elapsedMs) {
+      finalRes.elapsedMs = wallMs;
+    }
+    tab.runningRes = null;
+    tab.lastResult = finalRes;
     tab.lastRunAt = Date.now();
-    // Only mark the tab "clean" when the whole tab ran. Running a selection
-    // shouldn't clear the dirty dot, since the rest of the tab is still
-    // unsaved-since-last-run.
     if (!isPartial) tab.sqlOfLastRun = tab.sql;
+
     renderTabStrip();
     persistWorkspace();
-    // Final render replaces the streaming pane with the standard table.
-    // For EXEC the table contains the same text that streamed live; for
-    // SELECT the streaming pane was never attached so this is the only render.
-    renderResultsForActiveTab();
 
-    // Persist result to IDB. Fire-and-forget — the in-memory cache is what
-    // the UI renders, so an IDB hiccup only affects survival across reload.
-    IDB.saveResult(workspaceName(), tab.id, res).catch(err =>
+    // If the user is still on this tab, paint the final result. If they
+    // switched away, the renderer will pick it up next time they come
+    // back; meanwhile leave the toolbar / elapsed slot in their current
+    // state for the now-active tab.
+    if (state.workspace.activeTabId === tab.id) {
+      renderResultsForActiveTab();
+    }
+    // Run-button state changes regardless (e.g. another tab might still
+    // be running and need to keep its Cancel state).
+    syncToolbarToActiveTab();
+
+    IDB.saveResult(workspaceName(), tab.id, finalRes).catch(err =>
       console.warn(`Couldn't save result for tab ${tab.id}:`, err));
 
-    // If the user just ran a CREATE/DROP/ALTER FUNCTION/PROCEDURE/TABLE,
-    // invalidate the matching sidebar section so the catalog view stays
-    // in sync. Only on success — failed DDL can't have changed catalog state.
-    if (!res.error) refreshSidebarForSql(sql);
+    if (!finalRes.error) refreshSidebarForSql(sql);
+  }
+
+  // Cancels the in-flight query for the active tab, if any. Pulled out so
+  // the Esc key handler and the Run button's Cancel mode share one entry
+  // point.
+  function cancelActiveTabRun() {
+    const tab = activeTab();
+    if (!tab || !tab.running || !tab.abortController) return;
+    tab.abortController.abort();
+    const status = document.getElementById('status');
+    if (status) status.textContent = 'cancelling…';
   }
 
   // ===== Workspace switcher =====
@@ -1877,6 +1983,7 @@
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
   }
 
   // ===== Modal helpers (alert/confirm/prompt) =====
@@ -2512,6 +2619,7 @@
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
     persistWorkspace();
   }
 
@@ -2567,22 +2675,45 @@
     initFallbackEditor();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
+    syncToolbarToActiveTab();
 
     initCatalogSidebar();
 
-    document.getElementById('run').addEventListener('click', run);
+    // Run button doubles as a Cancel button while the active tab has a
+    // query in flight. Same handler — `run()` early-returns when
+    // `tab.running` is true, so we route to abort() instead.
+    document.getElementById('run').addEventListener('click', () => {
+      const tab = activeTab();
+      if (tab && tab.running) cancelActiveTabRun();
+      else run();
+    });
 
-    // Esc cancels the in-flight query. The browser aborts the fetch, the
-    // server's RequestAborted token fires through plan.ExecuteAsync, and
-    // the catch block sees AbortError and renders the result as
-    // "cancelled". Gated on state.queryRunning so an idle Esc keeps its
-    // existing meaning (modal close, etc.) for the focused element.
+    // Per-tab settings inputs. Writes to the active tab's fields so each
+    // tab carries its own preferences. Persistence runs through the
+    // existing debounced save.
+    document.getElementById('maxRows').addEventListener('input', (e) => {
+      const tab = activeTab();
+      if (!tab) return;
+      const v = parseInt(e.target.value, 10);
+      tab.maxRows = (Number.isFinite(v) && v > 0) ? v : 200;
+      scheduleSave();
+    });
+    document.getElementById('traceToggle').addEventListener('change', (e) => {
+      const tab = activeTab();
+      if (!tab) return;
+      tab.trace = e.target.checked === true;
+      scheduleSave();
+    });
+
+    // Esc cancels the active tab's in-flight query. The browser aborts
+    // the fetch, the server's RequestAborted token fires through
+    // plan.ExecuteAsync, and the catch block sees AbortError and renders
+    // the result as "cancelled". Idle Esc (no running query on the
+    // active tab) falls through to other handlers (modal close, etc.).
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && state.queryRunning && state.activeAbortController) {
-        state.activeAbortController.abort();
-        const status = document.getElementById('status');
-        if (status) status.textContent = 'cancelling…';
-      }
+      if (e.key !== 'Escape') return;
+      const tab = activeTab();
+      if (tab && tab.running) cancelActiveTabRun();
     });
 
     // Persist on visibility change to catch cases where the debounced save

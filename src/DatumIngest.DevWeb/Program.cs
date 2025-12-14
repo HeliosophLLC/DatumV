@@ -118,10 +118,12 @@ builder.WebHost.UseUrls($"http://localhost:{port}");
 WebApplication app = builder.Build();
 app.Lifetime.ApplicationStopping.Register(() => catalog.Dispose());
 
-// One query at a time. The catalog isn't documented as concurrent-safe and
-// this is a single-developer tool; serialising avoids any cross-query
-// arena/store interactions while we keep the engine surface simple.
-SemaphoreSlim queryLock = new(1, 1);
+// Queries run concurrently. The catalog (and per-query ExecutionContext /
+// arena) is thread-safe; each request gets its own buffer pool and store,
+// and catalog reads / mutations are internally synchronised. This lets the
+// UI's per-tab run feature actually parallelise — e.g. a long-running LLM
+// streaming query in one tab doesn't block a quick `system_udfs` lookup
+// from another.
 
 // Shared LanguageService initialized from the live catalog. The manifest is a
 // snapshot — if we ever support runtime DDL or AddFile, this will need to be
@@ -174,16 +176,8 @@ app.MapPost("/api/query", async (HttpRequest request, CancellationToken ct) =>
 
     int maxRows = body.MaxRows is > 0 ? body.MaxRows.Value : 1000;
 
-    await queryLock.WaitAsync(ct).ConfigureAwait(false);
-    try
-    {
-        return await ExecuteQuery(catalog, body.Sql, maxRows, body.Trace == true, jsonOptions, ct)
-            .ConfigureAwait(false);
-    }
-    finally
-    {
-        queryLock.Release();
-    }
+    return await ExecuteQuery(catalog, body.Sql, maxRows, body.Trace == true, jsonOptions, ct)
+        .ConfigureAwait(false);
 });
 
 // Streaming query endpoint. Same request shape as /api/query, but the response
@@ -243,15 +237,7 @@ app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
     int maxRows = body.MaxRows is > 0 ? body.MaxRows.Value : 1000;
     string sql = body.Sql;
 
-    await queryLock.WaitAsync(ct).ConfigureAwait(false);
-    try
-    {
-        await ExecuteQueryStreaming(catalog, sql, maxRows, body.Trace == true, jsonOptions, httpCtx);
-    }
-    finally
-    {
-        queryLock.Release();
-    }
+    await ExecuteQueryStreaming(catalog, sql, maxRows, body.Trace == true, jsonOptions, httpCtx);
 });
 
 // Language services. The LanguageService methods are pure over the (immutable)
