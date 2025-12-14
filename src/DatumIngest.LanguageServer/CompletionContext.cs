@@ -20,7 +20,7 @@ public static class CompletionContext
     {
         if (string.IsNullOrEmpty(sql) || cursorOffset <= 0)
         {
-            return new CompletionZone(CompletionZoneKind.StatementStart, Prefix: null, TableQualifier: null);
+            return new CompletionZone(CompletionZoneKind.StatementStart, Prefix: null, TableQualifier: null, VariablesInScope: null);
         }
 
         // Only analyze text up to the cursor position.
@@ -55,8 +55,16 @@ public static class CompletionContext
 
         if (tokens.Count == 0)
         {
-            return new CompletionZone(CompletionZoneKind.StatementStart, Prefix: null, TableQualifier: null);
+            return new CompletionZone(CompletionZoneKind.StatementStart, Prefix: null, TableQualifier: null, VariablesInScope: null);
         }
+
+        // Procedural variables declared earlier in the fragment. Computed
+        // once and propagated to every zone — the provider decides whether
+        // to surface them. Block-scope nuances (a variable inside a popped
+        // BEGIN/END block isn't actually visible) are deferred; permissive
+        // suggestions are friendlier than no suggestions, and at worst the
+        // engine will reject the resulting query at run time.
+        IReadOnlyList<string> variablesInScope = ExtractVariablesInScope(tokens);
 
         // Check if cursor is in the middle of typing an identifier (for prefix filtering).
         string? prefix = ExtractPrefix(textToCursor, tokens);
@@ -65,18 +73,70 @@ public static class CompletionContext
         string? tableQualifier = ExtractTableQualifier(tokens, prefix);
         if (tableQualifier is not null)
         {
-            return new CompletionZone(CompletionZoneKind.AfterDot, prefix, tableQualifier);
+            return new CompletionZone(CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope);
         }
 
         // Walk backwards through tokens to find the governing keyword.
-        CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefix is not null);
+        // hasPrefix tells the walker to skip the trailing prefix-bearing
+        // token. Most prefixes correspond to a real last token (Identifier
+        // or completed Variable like `@x`); a bare `@` / `$` produces a
+        // prefix string but no last token, so we shouldn't skip anything.
+        bool prefixIsLastToken = prefix is not null
+            && tokens.Count > 0
+            && string.Equals(tokens[^1].Text, prefix, StringComparison.OrdinalIgnoreCase);
+        CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefixIsLastToken);
 
-        return new CompletionZone(zone, prefix, TableQualifier: null);
+        return new CompletionZone(zone, prefix, TableQualifier: null, variablesInScope);
+    }
+
+    /// <summary>
+    /// Walks the token stream and collects procedural-variable bindings —
+    /// names introduced via <c>DECLARE @x</c>, <c>FOR @i = ...</c>,
+    /// <c>FOR @row IN (...)</c>, and <c>CATCH @err</c>. Each name is
+    /// returned with its <c>@</c> prefix so it can be surfaced verbatim
+    /// in completion popups. Duplicates are collapsed (latest binding
+    /// wins for display order, but content equality is what matters).
+    /// </summary>
+    private static IReadOnlyList<string> ExtractVariablesInScope(List<TokenInfo> tokens)
+    {
+        if (tokens.Count == 0) return Array.Empty<string>();
+        // Use a HashSet for dedup + a List to preserve declaration order
+        // — readers expect the first @x they see in the popup to be the
+        // first one declared, not whatever the hash bucket happens to
+        // surface.
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> ordered = new();
+
+        for (int i = 0; i + 1 < tokens.Count; i++)
+        {
+            SqlToken k = tokens[i].Kind;
+            // The patterns that introduce a binding all have a `@var`
+            // immediately following: DECLARE @x ..., FOR @i = ...,
+            // FOR @row IN ..., CATCH @err ...
+            bool introduces = k == SqlToken.Declare
+                || k == SqlToken.For
+                || k == SqlToken.Catch;
+            if (!introduces) continue;
+            if (tokens[i + 1].Kind != SqlToken.Variable) continue;
+            string name = tokens[i + 1].Text;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (seen.Add(name)) ordered.Add(name);
+        }
+        return ordered;
     }
 
     /// <summary>
     /// Tokenizes the input, returning an empty list on failure rather than throwing.
     /// </summary>
+    /// <remarks>
+    /// One retry is attempted when the first pass throws: if the text ends
+    /// with a bare <c>@</c> or <c>$</c> (a Variable / Parameter sigil with
+    /// no name yet), we re-tokenize with the trailing sigil stripped so the
+    /// classifier still sees the preceding tokens. Without this the user
+    /// typing "<c>IF @</c>" would land at the empty-tokens early-return
+    /// branch (StatementStart) and miss out on procedural-context
+    /// completions like the in-scope variable list.
+    /// </remarks>
     private static List<TokenInfo> TokenizeSafely(string text)
     {
         List<TokenInfo> result = new();
@@ -87,10 +147,29 @@ public static class CompletionContext
             {
                 result.Add(new TokenInfo(token.Kind, token.ToStringValue(), token.Position));
             }
+            return result;
         }
         catch
         {
-            // Incomplete input is expected during editing.
+            // First pass failed — likely partial input. Try the sigil-strip
+            // recovery below; if that also fails, fall through with an
+            // empty result, which the classifier handles cleanly.
+        }
+
+        if (text.Length > 0 && (text[^1] == '@' || text[^1] == '$'))
+        {
+            try
+            {
+                TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(text[..^1]);
+                foreach (Token<SqlToken> token in tokens)
+                {
+                    result.Add(new TokenInfo(token.Kind, token.ToStringValue(), token.Position));
+                }
+            }
+            catch
+            {
+                // Still failing — leave the result empty.
+            }
         }
 
         return result;
@@ -115,9 +194,24 @@ public static class CompletionContext
             return null;
         }
 
-        // The last token is (part of) the word the user is typing.
+        // Bare `@` or `$` doesn't tokenize on its own (Variable / Parameter
+        // need a letter to follow), so the tokenizer's last token is whatever
+        // came before — usually a keyword. Return the sigil itself as the
+        // prefix so completion filters keep just `@…` / `$…` candidates.
+        if (lastChar == '@' || lastChar == '$')
+        {
+            return lastChar.ToString();
+        }
+
+        // The last token is (part of) the word the user is typing. Variable
+        // (`@x`) and Parameter (`$p`) tokens are also valid prefixes —
+        // without including them, typing `@x` would yield no prefix and
+        // the popup would show every variable instead of those starting
+        // with `x`.
         TokenInfo lastToken = tokens[^1];
         if (lastToken.Kind == SqlToken.Identifier ||
+            lastToken.Kind == SqlToken.Variable ||
+            lastToken.Kind == SqlToken.Parameter ||
             IsKeywordToken(lastToken.Kind))
         {
             return lastToken.Text;
@@ -189,6 +283,11 @@ public static class CompletionContext
         bool lastTokenIsValueLike =
             startIndex >= 0 && IsValueLikeToken(tokens[startIndex].Kind);
 
+        // Whether the backward walk has crossed an `=` token. Used by the
+        // DECLARE classifier to tell type position (`DECLARE @x ⌷`) from
+        // initializer position (`DECLARE @x INT32 = ⌷`).
+        bool passedEquals = false;
+
         for (int index = startIndex; index >= 0; index--)
         {
             SqlToken kind = tokens[index].Kind;
@@ -251,6 +350,16 @@ public static class CompletionContext
                 // We're inside a function call or subquery — check what precedes the paren.
                 if (index > 0 && tokens[index - 1].Kind == SqlToken.Identifier)
                 {
+                    // Distinguish CREATE FUNCTION / CREATE PROCEDURE
+                    // parameter lists from regular function-call argument
+                    // lists: the routine cases want type-name completions
+                    // for `(@x ⌷` rather than column / function suggestions.
+                    if (index >= 2 && (
+                        tokens[index - 2].Kind == SqlToken.Function ||
+                        tokens[index - 2].Kind == SqlToken.Procedure))
+                    {
+                        return ClassifyRoutineParamPosition(tokens, leftParenIdx: index, lastTokenIdx: startIndex);
+                    }
                     return CompletionZoneKind.InFunctionArguments;
                 }
 
@@ -346,10 +455,16 @@ public static class CompletionContext
                 case SqlToken.Except:
                     return CompletionZoneKind.AfterSetOperation;
 
+                case SqlToken.Equals:
+                    // Mark the equals so the DECLARE classifier knows we're
+                    // past the binding's "=" (initializer position). Then
+                    // fall through to the operator-continue behavior.
+                    passedEquals = true;
+                    continue;
+
                 case SqlToken.And:
                 case SqlToken.Or:
                 case SqlToken.Not:
-                case SqlToken.Equals:
                 case SqlToken.NotEquals:
                 case SqlToken.LessThan:
                 case SqlToken.GreaterThan:
@@ -389,13 +504,13 @@ public static class CompletionContext
                 case SqlToken.While:
                     // IF/WHILE have a predicate, then a body. Right after the
                     // keyword (no content) or mid-predicate (last token is an
-                    // operator) → expression position. After a complete-looking
-                    // predicate (content passed, last token value-like) → body
-                    // position, where StatementStart's BEGIN / inner statements
-                    // are the right offers.
+                    // operator) → procedural expression position (no columns).
+                    // After a complete-looking predicate (content passed, last
+                    // token value-like) → body position, where StatementStart's
+                    // BEGIN / inner statements are the right offers.
                     return passedContent && lastTokenIsValueLike
                         ? CompletionZoneKind.StatementStart
-                        : CompletionZoneKind.Expression;
+                        : CompletionZoneKind.ProceduralExpression;
 
                 case SqlToken.Else:
                 case SqlToken.Begin:
@@ -415,18 +530,22 @@ public static class CompletionContext
                         : CompletionZoneKind.AfterAs;
 
                 case SqlToken.Declare:
-                    // DECLARE @name TYPE [= expr]. After the variable name and
-                    // a value-like token (the type or end of an initializer),
-                    // the next statement starts. Right after DECLARE itself,
-                    // suppress completions — the user is naming a variable.
-                    return passedContent && lastTokenIsValueLike
-                        ? CompletionZoneKind.Expression
-                        : CompletionZoneKind.AfterAs;
+                    // DECLARE @name TYPE [= expr]. Three sub-positions:
+                    //   1. `DECLARE ⌷` (no content yet) — user is naming
+                    //      the variable; suppress completions.
+                    //   2. `DECLARE @x ⌷` (content but no `=` seen) — user
+                    //      wants the TYPE next.
+                    //   3. `DECLARE @x INT32 = ⌷` (passed `=`) — initializer
+                    //      expression position; columns out of scope.
+                    if (!passedContent) return CompletionZoneKind.AfterAs;
+                    if (passedEquals) return CompletionZoneKind.ProceduralExpression;
+                    return CompletionZoneKind.AfterDeclareType;
 
                 case SqlToken.Print:
                 case SqlToken.Raise:
-                    // PRINT / RAISE take an expression argument.
-                    return CompletionZoneKind.Expression;
+                    // PRINT / RAISE take an expression argument. Procedural
+                    // — no row context, so columns aren't legal here.
+                    return CompletionZoneKind.ProceduralExpression;
 
                 // ───────────────────── DDL / DML keywords ─────────────────────
 
@@ -559,6 +678,53 @@ public static class CompletionContext
     private static bool IsKeywordToken(SqlToken kind)
     {
         return kind < SqlToken.Identifier;
+    }
+
+    /// <summary>
+    /// Sub-classifier for the cursor sitting inside a CREATE FUNCTION /
+    /// CREATE PROCEDURE parameter list. Determines which sub-position the
+    /// cursor is in (typing a name, typing a type, typing a default
+    /// expression, or just past a comma) and routes to the matching zone.
+    /// </summary>
+    /// <remarks>
+    /// Walks the tokens between the opening '(' and the cursor for the most
+    /// recent "anchor" token. Anchors are the elements that mark a phase
+    /// transition in the param grammar: <c>,</c> (next slot), <c>@var</c>
+    /// (just declared the name), <c>=</c> (now typing default), type or
+    /// IS / NOT / NULL keywords (in the post-type modifier zone).
+    /// </remarks>
+    private static CompletionZoneKind ClassifyRoutineParamPosition(
+        List<TokenInfo> tokens, int leftParenIdx, int lastTokenIdx)
+    {
+        SqlToken? anchor = null;
+        for (int i = leftParenIdx + 1; i <= lastTokenIdx; i++)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k == SqlToken.Variable
+                || k == SqlToken.Comma
+                || k == SqlToken.Equals
+                || k == SqlToken.TypeKeyword
+                || k == SqlToken.Identifier
+                || k == SqlToken.Is || k == SqlToken.Not || k == SqlToken.Null)
+            {
+                anchor = k;
+            }
+        }
+        return anchor switch
+        {
+            // Right after `(` (no anchor) or right after `,` — the user is
+            // about to type a `@var` name. Suppress completions; we have
+            // nothing useful to suggest for a fresh identifier.
+            null or SqlToken.Comma => CompletionZoneKind.AfterAs,
+            // After a `@var` token — the type is what comes next.
+            SqlToken.Variable => CompletionZoneKind.AfterDeclareType,
+            // After `=` — the user is typing the default-value expression.
+            SqlToken.Equals => CompletionZoneKind.ProceduralExpression,
+            // After type / IS / NOT / NULL — these are post-type modifiers.
+            // Default to type completions; we keep showing them in case the
+            // user wants to switch the type they just typed.
+            _ => CompletionZoneKind.AfterDeclareType,
+        };
     }
 
     /// <summary>
@@ -815,7 +981,18 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// <param name="Kind">The type of completion zone.</param>
 /// <param name="Prefix">The partial text already typed for filtering, or null if at a boundary.</param>
 /// <param name="TableQualifier">The table alias before a dot for qualified column completions, or null.</param>
-public sealed record CompletionZone(CompletionZoneKind Kind, string? Prefix, string? TableQualifier);
+/// <param name="VariablesInScope">
+/// Procedural variables declared earlier in the same fragment (DECLARE,
+/// FOR loop bindings, CATCH error-variable bindings). Names include the
+/// <c>@</c> prefix. Empty when no procedural bindings exist before the
+/// cursor. Always populated regardless of zone — the provider decides
+/// whether to surface them based on whether the zone is expression-like.
+/// </param>
+public sealed record CompletionZone(
+    CompletionZoneKind Kind,
+    string? Prefix,
+    string? TableQualifier,
+    IReadOnlyList<string>? VariablesInScope = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.
@@ -879,6 +1056,17 @@ public enum CompletionZoneKind
     /// <summary>General expression context — offer columns, functions, operators.</summary>
     Expression,
 
+    /// <summary>
+    /// Procedural expression context — predicate of <c>IF</c> / <c>WHILE</c>,
+    /// bounds of <c>FOR</c>, initializer of <c>DECLARE</c>, argument of
+    /// <c>PRINT</c> / <c>RAISE</c>. Same shape as <see cref="Expression"/>
+    /// but columns are <em>not</em> offered: at procedural top level there
+    /// is no row context, so the only legal data references are <c>@vars</c>
+    /// and scalar function calls. (A <c>(SELECT ...)</c> subquery inside the
+    /// expression re-enters query context via the paren walk.)
+    /// </summary>
+    ProceduralExpression,
+
     /// <summary>Inside OVER clause — offer PARTITION BY, ORDER BY, ROWS BETWEEN.</summary>
     InsideOver,
 
@@ -898,6 +1086,14 @@ public enum CompletionZoneKind
 
     /// <summary>After CREATE [TEMP] TABLE name ( — offer column type names.</summary>
     AfterCreateTableColumns,
+
+    /// <summary>
+    /// Type-name position in a procedural binding: right after the variable
+    /// name in <c>DECLARE @x ⌷</c>, <c>CREATE FUNCTION foo(@x ⌷</c>, or
+    /// <c>CREATE PROCEDURE foo(@x ⌷</c>. Offers SQL type literals
+    /// (<c>Int32</c>, <c>Float64</c>, <c>String</c>, …).
+    /// </summary>
+    AfterDeclareType,
 
     /// <summary>After INSERT INTO — offer table names.</summary>
     AfterInsertInto,

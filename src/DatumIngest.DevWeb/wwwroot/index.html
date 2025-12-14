@@ -1349,6 +1349,7 @@
       case 'Column':        return K.Field;
       case 'Function':      return K.Function;
       case 'TypeParameter': return K.TypeParameter;
+      case 'Variable':      return K.Variable;     // procedural @vars
       default:              return K.Text;
     }
   }
@@ -1382,6 +1383,21 @@
     results.innerHTML = '';
     elapsed.textContent = '';
     if (!tab) return;
+
+    // If the active tab is the one with an in-flight query, show a
+    // "Running…" placeholder rather than re-rendering the previous
+    // run's lastResult. Without this, switching away from a running
+    // tab and back again would display the stale error / table on
+    // top of an executing query — confusing and wrong. The live
+    // ticker on `#elapsed` will resume painting on its next 250ms
+    // tick now that the active tab matches the running tab.
+    if (state.runningTabId === tab.id) {
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'Running… (Esc to cancel) — output will appear when the query completes.';
+      results.appendChild(meta);
+      return;
+    }
 
     // tab.lastResult is undefined when hydrated from localStorage and not yet
     // fetched from IDB. Show a placeholder while we resolve it; guard against
@@ -1576,6 +1592,12 @@
     if (state.queryRunning) return;
 
     state.queryRunning = true;
+    // The tab the query was launched from. Used by the renderer + the
+    // live elapsed ticker to suppress drawing when the user has switched
+    // away — without this, the renderer would re-paint the tab's stale
+    // lastResult on switch-back, and the ticker would clobber the
+    // currently-active tab's static stats.
+    state.runningTabId = tab.id;
     // AbortController for this run. Esc handler (or future Stop button)
     // calls abort() to cancel the fetch — the browser closes the connection,
     // the server's RequestAborted token fires, OperationCanceledException
@@ -1618,6 +1640,24 @@
       sessionId: null,
       chunks: [],
     };
+
+    // Live tick on the toolbar's `#elapsed` slot so long-running queries
+    // show how many rows have streamed in and how much wall time has
+    // passed. Cleared in the finally below; the post-run renderer rewrites
+    // the same span with the final stats. 250ms cadence is smooth-looking
+    // without burning CPU on a busy editor. Only paints while the user
+    // is still on the tab the query started from — otherwise it would
+    // clobber whatever stats the now-active tab is showing.
+    const elapsedSlot = document.getElementById('elapsed');
+    function paintLiveStats() {
+      if (state.workspace.activeTabId !== state.runningTabId) return;
+      const seconds = (performance.now() - t0) / 1000;
+      const rows = res.rowCount;
+      const rowText = `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}`;
+      elapsedSlot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
+    }
+    paintLiveStats();
+    const liveTickHandle = setInterval(paintLiveStats, 250);
 
     try {
       const response = await fetch('/api/query/stream', {
@@ -1680,9 +1720,18 @@
       }
     } finally {
       state.queryRunning = false;
+      state.runningTabId = null;
       state.activeAbortController = null;
       runBtn.disabled = false;
       status.textContent = '';
+      clearInterval(liveTickHandle);
+      // The post-run renderer rewrites the elapsed slot with the final
+      // stats; if for some reason it doesn't fire (e.g. abort before
+      // any event), drop the "(running)" suffix so the user isn't
+      // misled by a stale ticker.
+      if (elapsedSlot.textContent.endsWith('(running)')) {
+        elapsedSlot.textContent = elapsedSlot.textContent.replace(/\s*\(running\)\s*$/, '');
+      }
     }
 
     function handleStreamEvent(event) {

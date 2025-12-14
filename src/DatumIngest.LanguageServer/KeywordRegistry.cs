@@ -168,6 +168,12 @@ internal static class KeywordRegistry
 
         [CompletionZoneKind.Expression] = ExpressionKeywords,
 
+        // Procedural expression (IF / WHILE predicates, FOR bounds, DECLARE
+        // initializers, PRINT / RAISE arguments). Same operator/literal
+        // keyword set as a query expression — the difference is that
+        // CompletionProvider doesn't add column names here.
+        [CompletionZoneKind.ProceduralExpression] = ExpressionKeywords,
+
         [CompletionZoneKind.AfterGroupBy] =
             ["ALL", .. PostGroupByKeywords],
 
@@ -206,6 +212,11 @@ internal static class KeywordRegistry
 
         [CompletionZoneKind.AfterCreateTableColumns] =
             [.. ColumnTypeKeywords, "PRIMARY KEY", "NOT NULL", "DEFAULT"],
+
+        // After `DECLARE @x ⌷` and inside `CREATE FUNCTION/PROCEDURE foo(@x ⌷`
+        // we want only type names (no PRIMARY KEY / DEFAULT — those belong
+        // to CREATE TABLE columns, not procedural bindings).
+        [CompletionZoneKind.AfterDeclareType] = ColumnTypeKeywords,
 
         [CompletionZoneKind.AfterInsertTable] =
             ["VALUES", "SELECT"],

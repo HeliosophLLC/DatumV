@@ -44,4 +44,7 @@ public enum CompletionItemKind
 
     /// <summary>A data type name (used in CAST expressions).</summary>
     TypeParameter = 25,
+
+    /// <summary>A procedural variable (@-prefixed) declared earlier in the batch.</summary>
+    Variable = 6,
 }

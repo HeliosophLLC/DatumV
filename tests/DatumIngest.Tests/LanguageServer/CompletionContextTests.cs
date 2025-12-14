@@ -596,24 +596,40 @@ public sealed class CompletionContextTests : ServiceTestBase
     // ───────────────────── Procedural control flow ─────────────────────
 
     [Fact]
-    public void Classify_AfterIfKeyword_ReturnsExpression()
+    public void Classify_AfterIfKeyword_ReturnsProceduralExpression()
     {
-        // `IF |` — predicate position. Want columns / variables / functions.
+        // `IF |` — predicate position. Procedural-expression zone (no row
+        // context, so column names aren't offered — only @vars and scalar
+        // functions).
         string sql = "IF ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
-        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
 
     [Fact]
-    public void Classify_AfterIfPredicateOperator_ReturnsExpression()
+    public void Classify_AfterIfPredicateOperator_ReturnsProceduralExpression()
     {
         // `IF @x > |` — predicate continues; the trailing `>` says we need
-        // another operand, not a body.
+        // another operand, not a body. Still procedural-expression context.
         string sql = "IF @x > ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
-        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_IfBPrefix_ReturnsProceduralExpressionWithPrefix()
+    {
+        // `IF b` — pinning the regression: typing a single-letter prefix
+        // after IF must NOT land in the column-offering Expression zone,
+        // because columns from `system_*` tables (e.g. `backend` on
+        // `system_models`) would otherwise leak into a context where they
+        // aren't legal.
+        CompletionZone zone = CompletionContext.Classify("IF b", 4);
+
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+        Assert.Equal("b", zone.Prefix);
     }
 
     [Fact]
@@ -665,23 +681,23 @@ public sealed class CompletionContextTests : ServiceTestBase
     }
 
     [Fact]
-    public void Classify_AfterPrintKeyword_ReturnsExpression()
+    public void Classify_AfterPrintKeyword_ReturnsProceduralExpression()
     {
-        // PRINT takes an expression — same context as the AfterSelect side
-        // for column / variable / function suggestions.
+        // PRINT takes an expression. Procedural — no row context, so column
+        // names aren't offered.
         string sql = "PRINT ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
-        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
 
     [Fact]
-    public void Classify_AfterRaiseKeyword_ReturnsExpression()
+    public void Classify_AfterRaiseKeyword_ReturnsProceduralExpression()
     {
         string sql = "RAISE ";
         CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
 
-        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
 
     [Fact]
@@ -695,5 +711,154 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
         Assert.Equal("b", zone.Prefix);
+    }
+
+    // ───────────────────── DECLARE type position ─────────────────────
+
+    [Fact]
+    public void Classify_AfterDeclareName_ReturnsAfterDeclareType()
+    {
+        // `DECLARE @x ⌷` — type name expected.
+        CompletionZone zone = CompletionContext.Classify("DECLARE @x ", 11);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterDeclareNameWithPartialType_ReturnsAfterDeclareTypeWithPrefix()
+    {
+        CompletionZone zone = CompletionContext.Classify("DECLARE @x INT", 14);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+        Assert.Equal("INT", zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_AfterDeclareEquals_ReturnsProceduralExpression()
+    {
+        // Past `=` — initializer position, columns out of scope.
+        CompletionZone zone = CompletionContext.Classify("DECLARE @x INT32 = ", 19);
+
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_RightAfterDeclareKeyword_SuppressesCompletions()
+    {
+        // User is naming the variable; nothing useful to suggest.
+        CompletionZone zone = CompletionContext.Classify("DECLARE ", 8);
+
+        Assert.Equal(CompletionZoneKind.AfterAs, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateFunctionParamAfterVar_ReturnsAfterDeclareType()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE FUNCTION foo(@x ", 23);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateProcedureParamAfterVar_ReturnsAfterDeclareType()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE PROCEDURE foo(@x ", 24);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateFunctionAfterComma_SuppressesCompletions()
+    {
+        // After `, ` in a param list — the user is about to type a fresh
+        // `@var` name; we have nothing useful to suggest.
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE FUNCTION foo(@x INT32, ", 30);
+
+        Assert.Equal(CompletionZoneKind.AfterAs, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateFunctionParamDefaultExpression_ReturnsProceduralExpression()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE FUNCTION foo(@x INT32 = ", 31);
+
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+    }
+
+    // ───────────────────── Variables in scope ─────────────────────
+
+    [Fact]
+    public void Classify_AfterDeclare_ExposesVariableInScope()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "DECLARE @xyz INT32 = 0\nIF ", 26);
+
+        Assert.NotNull(zone.VariablesInScope);
+        Assert.Contains("@xyz", zone.VariablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_VariablePrefix_MatchesPartiallyTypedVar()
+    {
+        // `IF @x` — prefix should be `@x` so the popup filters to vars
+        // starting with `@x`. Variable kind tokens were previously
+        // ineligible for prefix extraction.
+        CompletionZone zone = CompletionContext.Classify(
+            "DECLARE @xyz INT32 = 0\nIF @x", 28);
+
+        Assert.Equal("@x", zone.Prefix);
+        Assert.Contains("@xyz", zone.VariablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_TrailingAtSign_TreatsAsVariableSigilPrefix()
+    {
+        // Bare `@` doesn't tokenize, but the user clearly wants variable
+        // suggestions. Prefix is `@` so completion filters to @-prefixed
+        // items, and the zone stays in the procedural-expression context
+        // (not StatementStart) so vars actually get offered.
+        CompletionZone zone = CompletionContext.Classify(
+            "DECLARE @xyz INT32 = 0\nIF @", 27);
+
+        Assert.Equal("@", zone.Prefix);
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+        Assert.Contains("@xyz", zone.VariablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_ForLoopVariable_ExposedInScope()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "FOR @i = 1 TO 10 BEGIN PRINT ", 29);
+
+        Assert.NotNull(zone.VariablesInScope);
+        Assert.Contains("@i", zone.VariablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_CatchErrorVariable_ExposedInScope()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "TRY SELECT 1 CATCH @err PRINT ", 30);
+
+        Assert.NotNull(zone.VariablesInScope);
+        Assert.Contains("@err", zone.VariablesInScope!);
+    }
+
+    [Fact]
+    public void Classify_VariablesInScope_DeduplicatedAcrossDeclarations()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "DECLARE @a INT32 = 0\nDECLARE @b INT32 = 0\nDECLARE @a INT32 = 1\nIF ", 65);
+
+        // Even though @a is "redeclared" in the source, the popup should
+        // surface it once — duplicates are confusing in completion UI.
+        Assert.Equal(2, zone.VariablesInScope!.Count(v => v == "@a") +
+                        zone.VariablesInScope!.Count(v => v == "@b"));
+        Assert.Single(zone.VariablesInScope!, v => v == "@a");
     }
 }

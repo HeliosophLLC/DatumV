@@ -51,9 +51,13 @@ public static class MonarchGrammarFactory
                 // work regardless of position in the input.
                 new { @include = "@whitespace" },
 
-                // Single-quoted string literals. '' is the escape sequence for a
-                // literal single quote inside a string.
-                new[] { @"'([^'\\]|'')*'", "string" },
+                // Single-quoted string literals. Transitions into a sub-state
+                // so the string highlight survives across newlines — Monarch
+                // tokenizes one line at a time, and a single-line regex
+                // `'([^'\\]|'')*'` would unhighlight everything past the
+                // first newline (re-tokenizing it as code). The state-based
+                // form keeps the string class alive until the closing quote.
+                new[] { @"'", "string", "@singleQuotedString" },
 
                 // Backtick-delimited template strings: transition into a sub-state
                 // that highlights the body as a string and ${…} splices as
@@ -67,8 +71,11 @@ public static class MonarchGrammarFactory
                 // Named parameter placeholders: $identifier
                 new[] { @"\$[a-zA-Z_]\w*", "variable" },
 
-                // Double-quoted identifiers: "column name". "" is the escape sequence.
-                new[] { @"""([^""\\]|"""")*""", "identifier" },
+                // Double-quoted identifiers: "column name". Same multi-line
+                // story as single-quoted strings — use a sub-state so the
+                // identifier class persists across newlines (rare in practice
+                // but consistent and crash-free if someone does it).
+                new[] { @"""", "identifier", "@doubleQuotedIdentifier" },
 
                 // TABLESAMPLE transitions to a sub-state that highlights the method
                 // name (BERNOULLI, SYSTEM, STRATIFIED, BALANCED) as a keyword.
@@ -122,6 +129,29 @@ public static class MonarchGrammarFactory
             {
                 new[] { @"\*/", "comment", "@pop" },
                 new[] { @".", "comment" },
+            },
+
+            // Single-quoted string body sub-state. SQL escapes a literal
+            // single quote by doubling it (''); we recognise that BEFORE
+            // the lone-quote close rule so the doubled-quote stays in
+            // string class. Everything else on the line is body content.
+            // Newlines are matched implicitly by Monarch persisting the
+            // state across line boundaries.
+            singleQuotedString = new object[]
+            {
+                new[] { @"''", "string" },
+                new[] { @"'", "string", "@pop" },
+                new[] { @"[^']+", "string" },
+            },
+
+            // Double-quoted identifier body sub-state. Mirrors the single-
+            // quoted string state, with "" as the escape and the identifier
+            // class instead of the string class.
+            doubleQuotedIdentifier = new object[]
+            {
+                new[] { @"""""", "identifier" },
+                new[] { @"""", "identifier", "@pop" },
+                new[] { @"[^""]+", "identifier" },
             },
 
             // Template-string body sub-state. Highlights the body as a string,

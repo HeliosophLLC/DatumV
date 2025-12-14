@@ -30,6 +30,15 @@ public sealed class CompletionProvider
         CompletionZone zone = CompletionContext.Classify(sql, cursorOffset);
         List<CompletionItem> items = new();
 
+        // Variables declared earlier in the fragment (DECLARE @x, FOR @i,
+        // CATCH @err, ...) — surfaced in any expression-like zone where
+        // they could legally be referenced. Done up front so each zone
+        // case below stays focused on its non-variable contributions.
+        if (ZoneAcceptsVariableReferences(zone.Kind))
+        {
+            AddVariablesInScope(items, zone.VariablesInScope);
+        }
+
         switch (zone.Kind)
         {
             case CompletionZoneKind.StatementStart:
@@ -70,6 +79,16 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.Expression:
                 AddColumns(items, allTables: true);
+                AddScalarFunctions(items);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
+            case CompletionZoneKind.ProceduralExpression:
+                // Procedural top level has no row context, so columns aren't
+                // in scope — only @vars (not yet in the manifest), scalar
+                // functions, and literals/keywords. Without this branch the
+                // user typing `IF b…` would see column names like `backend`
+                // from `system_models` even though there's no FROM in scope.
                 AddScalarFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -143,6 +162,13 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterCreateTableColumns:
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
+            case CompletionZoneKind.AfterDeclareType:
+                // Type names only — the binding's variable is named, the
+                // type is what the user is typing now. Constraints / default
+                // values come later.
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -428,6 +454,56 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Keyword,
                 Documentation = EnrichKeywordDoc(keyword),
                 SortOrder = 3,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="kind"/> is a zone where references to
+    /// procedural variables (<c>@var</c>) are legal. Predicates / scalar
+    /// expression contexts qualify; pure structural zones (FROM, INTO,
+    /// AS, AfterDot, etc.) do not. The list is intentionally permissive:
+    /// we'd rather surface a variable that won't help than hide one the
+    /// user wanted.
+    /// </summary>
+    private static bool ZoneAcceptsVariableReferences(CompletionZoneKind kind) => kind switch
+    {
+        CompletionZoneKind.Expression => true,
+        CompletionZoneKind.ProceduralExpression => true,
+        CompletionZoneKind.AfterSelect => true,
+        CompletionZoneKind.AfterWhere => true,
+        CompletionZoneKind.AfterOn => true,
+        CompletionZoneKind.AfterHaving => true,
+        CompletionZoneKind.AfterQualify => true,
+        CompletionZoneKind.AfterAssert => true,
+        CompletionZoneKind.AfterOrderBy => true,
+        CompletionZoneKind.AfterGroupBy => true,
+        CompletionZoneKind.InFunctionArguments => true,
+        CompletionZoneKind.AfterUpdateSet => true,
+        CompletionZoneKind.AfterInsertTable => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Surfaces procedural <c>@var</c> bindings declared earlier in the
+    /// fragment as completion items. Sort order 0 keeps them at the top
+    /// of expression-context popups — when the user types `@x`, they
+    /// almost certainly want a binding match before any column or
+    /// function alphabetically nearby.
+    /// </summary>
+    private static void AddVariablesInScope(
+        List<CompletionItem> items, IReadOnlyList<string>? variables)
+    {
+        if (variables is null) return;
+        foreach (string name in variables)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = name,
+                Kind = CompletionItemKind.Variable,
+                InsertText = name,
+                Detail = "procedural variable",
+                SortOrder = 0,
             });
         }
     }
