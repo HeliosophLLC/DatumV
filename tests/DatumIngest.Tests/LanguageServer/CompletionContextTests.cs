@@ -592,4 +592,95 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.Equal(CompletionZoneKind.InsideStringOrComment, zone.Kind);
     }
+
+    // ───────────────────── Procedural control flow ─────────────────────
+
+    [Fact]
+    public void Classify_AfterIfKeyword_ReturnsExpression()
+    {
+        // `IF |` — predicate position. Want columns / variables / functions.
+        string sql = "IF ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterIfPredicateOperator_ReturnsExpression()
+    {
+        // `IF @x > |` — predicate continues; the trailing `>` says we need
+        // another operand, not a body.
+        string sql = "IF @x > ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterIfPredicateComplete_ReturnsStatementStart()
+    {
+        // `IF @x > 1 |` — predicate looks done (last token is value-like);
+        // the body is what's expected next. StatementStart includes BEGIN
+        // and the procedural statement keywords.
+        string sql = "IF @x > 1 ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterWhilePredicateComplete_ReturnsStatementStart()
+    {
+        string sql = "WHILE @i < 10 ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterElse_ReturnsStatementStart()
+    {
+        string sql = "IF @x > 0 SET @y = 1 ELSE ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideBeginBlock_ReturnsStatementStart()
+    {
+        string sql = "BEGIN ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterTryKeyword_ReturnsStatementStart()
+    {
+        string sql = "TRY ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.StatementStart, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterPrintKeyword_ReturnsExpression()
+    {
+        // PRINT takes an expression — same context as the AfterSelect side
+        // for column / variable / function suggestions.
+        string sql = "PRINT ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterRaiseKeyword_ReturnsExpression()
+    {
+        string sql = "RAISE ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.Expression, zone.Kind);
+    }
 }

@@ -181,6 +181,14 @@ public static class CompletionContext
         bool passedContent = false;
         int startIndex = hasPrefix ? tokens.Count - 2 : tokens.Count - 1;
 
+        // The most recent significant token before the cursor (skipping
+        // whatever's being typed). Procedural control-flow detection uses
+        // this to tell "IF @x > 1 |" (predicate done — body expected) from
+        // "IF @x > |" (predicate continues — expression expected): the
+        // first ends on a value-like token, the second on an operator.
+        bool lastTokenIsValueLike =
+            startIndex >= 0 && IsValueLikeToken(tokens[startIndex].Kind);
+
         for (int index = startIndex; index >= 0; index--)
         {
             SqlToken kind = tokens[index].Kind;
@@ -375,6 +383,51 @@ public static class CompletionContext
                     // After UPDATE ... SET — offer columns for assignment.
                     return CompletionZoneKind.AfterUpdateSet;
 
+                // ───────────────────── Procedural control flow ─────────────────────
+
+                case SqlToken.If:
+                case SqlToken.While:
+                    // IF/WHILE have a predicate, then a body. Right after the
+                    // keyword (no content) or mid-predicate (last token is an
+                    // operator) → expression position. After a complete-looking
+                    // predicate (content passed, last token value-like) → body
+                    // position, where StatementStart's BEGIN / inner statements
+                    // are the right offers.
+                    return passedContent && lastTokenIsValueLike
+                        ? CompletionZoneKind.StatementStart
+                        : CompletionZoneKind.Expression;
+
+                case SqlToken.Else:
+                case SqlToken.Begin:
+                case SqlToken.Try:
+                    // ELSE/BEGIN/TRY have no predicate — a statement (or BEGIN
+                    // block) follows directly. The right offer is whatever
+                    // StatementStart provides.
+                    return CompletionZoneKind.StatementStart;
+
+                case SqlToken.Catch:
+                    // CATCH @err <stmt>. Once the error variable has been
+                    // typed (passedContent), we're at the body position;
+                    // otherwise the user is still typing the @err binding
+                    // and there's nothing useful to suggest.
+                    return passedContent
+                        ? CompletionZoneKind.StatementStart
+                        : CompletionZoneKind.AfterAs;
+
+                case SqlToken.Declare:
+                    // DECLARE @name TYPE [= expr]. After the variable name and
+                    // a value-like token (the type or end of an initializer),
+                    // the next statement starts. Right after DECLARE itself,
+                    // suppress completions — the user is naming a variable.
+                    return passedContent && lastTokenIsValueLike
+                        ? CompletionZoneKind.Expression
+                        : CompletionZoneKind.AfterAs;
+
+                case SqlToken.Print:
+                case SqlToken.Raise:
+                    // PRINT / RAISE take an expression argument.
+                    return CompletionZoneKind.Expression;
+
                 // ───────────────────── DDL / DML keywords ─────────────────────
 
                 case SqlToken.Create:
@@ -507,6 +560,35 @@ public static class CompletionContext
     {
         return kind < SqlToken.Identifier;
     }
+
+    /// <summary>
+    /// Whether <paramref name="kind"/> is a token that can stand at the end
+    /// of a complete value expression (identifier, literal, closing paren,
+    /// boolean / NULL keyword, variable / parameter, etc.) rather than an
+    /// operator that requires more terms to follow.
+    /// </summary>
+    /// <remarks>
+    /// Used to disambiguate procedural control-flow contexts:
+    /// <c>IF @x &gt; 1 |</c> ends on a value-like literal (predicate looks
+    /// done — body expected), while <c>IF @x &gt; |</c> ends on an operator
+    /// (predicate continues — expression expected).
+    /// </remarks>
+    private static bool IsValueLikeToken(SqlToken kind) => kind switch
+    {
+        SqlToken.Identifier => true,
+        SqlToken.NumberLiteral => true,
+        SqlToken.StringLiteral => true,
+        SqlToken.TemplateString => true,
+        SqlToken.Variable => true,
+        SqlToken.Parameter => true,
+        SqlToken.True => true,
+        SqlToken.False => true,
+        SqlToken.Null => true,
+        SqlToken.RightParen => true,
+        SqlToken.RightBracket => true,
+        SqlToken.RightBrace => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Scans the text from start to cursor and reports what lexical context

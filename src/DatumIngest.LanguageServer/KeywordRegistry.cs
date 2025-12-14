@@ -113,7 +113,15 @@ internal static class KeywordRegistry
     private static readonly Dictionary<CompletionZoneKind, string[]> ZoneKeywords = new()
     {
         [CompletionZoneKind.StatementStart] =
-            ["SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "EXEC"],
+        [
+            // Query / DML / DDL statements
+            "SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "EXEC",
+            // Procedural-batch statements. Reachable both at the top of a
+            // batch and after IF/WHILE/FOR/TRY/CATCH/ELSE/BEGIN — wherever
+            // the parser expects a fresh statement.
+            "BEGIN", "DECLARE", "SET", "IF", "WHILE", "FOR",
+            "TRY", "RAISE", "ASSERT", "PRINT", "BREAK", "CONTINUE",
+        ],
 
         [CompletionZoneKind.AfterSelect] =
         [
