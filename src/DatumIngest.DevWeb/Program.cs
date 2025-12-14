@@ -127,7 +127,9 @@ SemaphoreSlim queryLock = new(1, 1);
 // snapshot — if we ever support runtime DDL or AddFile, this will need to be
 // rebuilt and Initialize'd again. Today the catalog is fixed at boot.
 LanguageService languageService = new();
-languageService.Initialize(CatalogManifestBuilder.Build(catalog, catalog.Functions));
+DatumIngest.Manifest.LanguageServerManifest languageManifest =
+    CatalogManifestBuilder.Build(catalog, catalog.Functions);
+languageService.Initialize(languageManifest);
 
 JsonSerializerOptions jsonOptions = new()
 {
@@ -295,6 +297,31 @@ app.MapPost("/api/lang/hover", async (HttpRequest request, CancellationToken ct)
 // browser feeds into monaco.languages.setMonarchTokensProvider, replacing
 // Monaco's built-in 'sql' tokenizer with one that knows about backtick
 // template strings (and all other DatumIngest extensions).
+// Catalog sidebar reads built-in function signatures from this endpoint.
+// `__`-prefixed internal helpers (e.g. __assert_not_null) are filtered out
+// the same way they are in completion.
+app.MapGet("/api/lang/functions", () =>
+{
+    var entries = languageManifest.Functions
+        .Where(f => !f.Name.StartsWith("__", StringComparison.Ordinal))
+        .OrderBy(f => f.Category)
+        .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+        .Select(f => new
+        {
+            name = f.Name,
+            category = f.Category.ToString(),
+            isAggregate = f.IsAggregate,
+            isWindow = f.IsWindowFunction,
+            isTableValued = f.IsTableValued,
+            returnType = f.ReturnType,
+            parameters = f.Parameters
+                .Select(p => new { name = p.Name, type = p.Kind, optional = p.IsOptional })
+                .ToList(),
+        })
+        .ToList();
+    return Results.Json(entries, jsonOptions);
+});
+
 app.MapGet("/api/lang/grammar", () =>
 {
     return Results.Json(MonarchGrammarFactory.Build(), jsonOptions);
