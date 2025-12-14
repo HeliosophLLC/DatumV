@@ -980,7 +980,13 @@
       .catch(() => { /* keep built-in tokenizer */ });
 
     monaco.languages.registerCompletionItemProvider('sql', {
-      triggerCharacters: [' ', '.', ',', '(', '\n'],
+      // '\n' was here too, but it caused the suggest popup to appear every
+      // time the user pressed Enter for a fresh line — and Monaco then
+      // selects the first match (alphabetically near 'ALTER'), so an
+      // unsuspecting Enter to confirm gobbles the wrong word. Trigger only
+      // on intent-bearing characters: word boundary (space), member access
+      // (dot), argument separators (comma, paren).
+      triggerCharacters: [' ', '.', ',', '('],
       provideCompletionItems: async (model, position) => {
         const sql = model.getValue();
         const offset = model.getOffsetAt(position);

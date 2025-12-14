@@ -56,7 +56,7 @@ public static class SqlKeywordRegistry
         // DDL keywords
         "CREATE", "TABLE", "TEMP", "TEMPORARY", "DROP", "ALTER", "ADD",
         "COLUMN", "DEFAULT", "PRIMARY", "KEY", "IF", "INDEX",
-        "FUNCTION", "RETURNS", "REPLACE",
+        "FUNCTION", "PROCEDURE", "RETURNS", "REPLACE",
         "ANALYZE",
 
         // DML keywords
@@ -64,6 +64,13 @@ public static class SqlKeywordRegistry
 
         // Direct execution
         "EXEC",
+
+        // Procedural-batch keywords. BEGIN / END pair as block delimiters
+        // (END is already in the conditional-expression list above).
+        // FOR / IF / ELSE are reused from the clause and conditional lists.
+        "BEGIN", "WHILE", "DECLARE", "TO",
+        "BREAK", "CONTINUE", "PRINT",
+        "TRY", "CATCH", "FINALLY", "RAISE",
     ];
 
     /// <summary>Boolean and null literal keywords.</summary>
