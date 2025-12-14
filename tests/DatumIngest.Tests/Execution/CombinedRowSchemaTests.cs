@@ -17,11 +17,11 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
     [Fact]
     public void Build_UnambiguousColumns_AddUnqualifiedShortcuts()
     {
-        Row left = new(
+        Row left = MakeRow(
             ["left_alias.index", "left_alias.label"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(5)]);
 
-        Row right = new(
+        Row right = MakeRow(
             ["right_alias.index", "right_alias.image"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
@@ -48,11 +48,11 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
     [Fact]
     public void Build_AmbiguousColumns_NoUnqualifiedShortcut()
     {
-        Row left = new(
+        Row left = MakeRow(
             ["left_alias.index", "left_alias.label"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(5)]);
 
-        Row right = new(
+        Row right = MakeRow(
             ["right_alias.index", "right_alias.image"],
             [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
@@ -75,8 +75,8 @@ public sealed class CombinedRowSchemaTests : ServiceTestBase
     [Fact]
     public void Build_UnaliasedColumns_PreservesOriginalNames()
     {
-        Row left = new(["id", "name"], [DataValue.FromFloat32(1), DataValue.FromFloat32(2)]);
-        Row right = new(["value"], [DataValue.FromFloat32(3)]);
+        Row left = MakeRow(["id", "name"], [DataValue.FromFloat32(1), DataValue.FromFloat32(2)]);
+        Row right = MakeRow(["value"], [DataValue.FromFloat32(3)]);
 
         JoinOperator.CombinedRowSchema schema =
             JoinOperator.CombinedRowSchema.Build(left, right);

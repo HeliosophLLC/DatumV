@@ -64,13 +64,13 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Pins down the current behaviour for case-different function names
-    /// (<c>UPPER(a)</c> vs <c>upper(a)</c>). The strict assertion below makes
-    /// the test fail the day this changes — flip the assertion at that point
-    /// and update the docstring.
+    /// Case-different function names (<c>UPPER(a)</c> vs <c>upper(a)</c>)
+    /// fingerprint to the same bucket via <see cref="QueryExplainer.Fingerprint"/>'s
+    /// identifier-canonicalisation. CSE dedups them into a single
+    /// RowEnricher rung.
     /// </summary>
     [Fact]
-    public void FunctionNameCaseDifference_DoesNotDedup()
+    public void FunctionNameCaseDifference_IsDeduped()
     {
         TableCatalog catalog = Catalog();
         IQueryOperator plan = PlanQuery(
@@ -78,27 +78,24 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
             catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(project.Source);
+        Assert.Single(enricher.Enrichments);
 
-        // Today: no RowEnricher, both projection columns still hold their
-        // original FunctionCallExpression with their original-cased
-        // FunctionName. SQL-wise this is a missed optimisation — the two
-        // calls evaluate the same function — but it's not a correctness bug.
-        Assert.IsNotType<RowEnricherOperator>(project.Source);
-
-        FunctionCallExpression call0 = Assert.IsType<FunctionCallExpression>(project.Columns[0].Expression);
-        FunctionCallExpression call1 = Assert.IsType<FunctionCallExpression>(project.Columns[1].Expression);
-        Assert.Equal("UPPER", call0.FunctionName);
-        Assert.Equal("upper", call1.FunctionName);
+        // Both SELECT columns now reference the single hoisted column.
+        Assert.Equal(2, project.Columns.Count);
+        ColumnReference col0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);
+        ColumnReference col1 = Assert.IsType<ColumnReference>(project.Columns[1].Expression);
+        Assert.Equal(col0.ColumnName, col1.ColumnName);
+        Assert.Equal("__cse_0", col0.ColumnName);
     }
 
     /// <summary>
-    /// Pins down the current behaviour for case-different column names
-    /// (<c>concat(A, b)</c> vs <c>concat(a, b)</c>). Captures whatever the
-    /// parser does with column-name casing — strict assertions tell us if
-    /// the parser canonicalises (CSE dedups) or preserves (CSE doesn't).
+    /// Case-different column names (<c>concat(A, b)</c> vs <c>concat(a, b)</c>)
+    /// also dedup. SQL identifiers are case-insensitive; the fingerprint
+    /// canonicalises both before comparing.
     /// </summary>
     [Fact]
-    public void ColumnNameCaseDifference_PinsCurrentBehaviour()
+    public void ColumnNameCaseDifference_IsDeduped()
     {
         TableCatalog catalog = Catalog();
         IQueryOperator plan = PlanQuery(
@@ -106,20 +103,34 @@ public sealed class CseCaseSensitivityTests : ServiceTestBase
             catalog);
 
         ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
-        bool wasDeduped = project.Source is RowEnricherOperator;
+        RowEnricherOperator enricher = Assert.IsType<RowEnricherOperator>(project.Source);
+        Assert.Single(enricher.Enrichments);
 
-        // Strict assertion: encodes today's reality. If this fails, the
-        // parser/fingerprinter changed behaviour — investigate which.
-        Assert.False(wasDeduped,
-            "concat(A, b) and concat(a, b) deduped — column-name casing is " +
-            "now canonicalised. Update the assertion and the docstring.");
+        Assert.Equal(2, project.Columns.Count);
+        ColumnReference col0 = Assert.IsType<ColumnReference>(project.Columns[0].Expression);
+        ColumnReference col1 = Assert.IsType<ColumnReference>(project.Columns[1].Expression);
+        Assert.Equal(col0.ColumnName, col1.ColumnName);
+    }
 
-        // Both projection columns still hold their FunctionCallExpression.
-        FunctionCallExpression call0 = Assert.IsType<FunctionCallExpression>(project.Columns[0].Expression);
-        FunctionCallExpression call1 = Assert.IsType<FunctionCallExpression>(project.Columns[1].Expression);
-        ColumnReference arg0 = Assert.IsType<ColumnReference>(call0.Arguments[0]);
-        ColumnReference arg1 = Assert.IsType<ColumnReference>(call1.Arguments[0]);
-        Assert.Equal("A", arg0.ColumnName);
-        Assert.Equal("a", arg1.ColumnName);
+    /// <summary>
+    /// Case-different string literals (<c>concat(a, 'FOO')</c> vs
+    /// <c>concat(a, 'foo')</c>) must NOT dedup — the two calls genuinely
+    /// produce different output. Verifies the fingerprinter only canonicalises
+    /// identifiers, leaving literal payloads case-sensitive.
+    /// </summary>
+    [Fact]
+    public void StringLiteralCaseDifference_IsNotDeduped()
+    {
+        TableCatalog catalog = Catalog();
+        IQueryOperator plan = PlanQuery(
+            "SELECT concat(a, 'FOO'), concat(a, 'foo') FROM t",
+            catalog);
+
+        ProjectOperator project = Assert.IsType<ProjectOperator>(plan);
+        // No CSE rung — the two calls produce different values, must stay separate.
+        Assert.IsNotType<RowEnricherOperator>(project.Source);
+        Assert.Equal(2, project.Columns.Count);
+        Assert.IsType<FunctionCallExpression>(project.Columns[0].Expression);
+        Assert.IsType<FunctionCallExpression>(project.Columns[1].Expression);
     }
 }

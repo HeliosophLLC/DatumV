@@ -469,7 +469,7 @@ public sealed class ProjectOperator : IQueryOperator
                         if (!passed)
                         {
                             string? message = assertClause.Message is not null
-                                ? evaluator.Evaluate(assertClause.Message, sourceFrame).ToString()
+                                ? evaluator.EvaluateAsValueRef(assertClause.Message, sourceFrame).AsString()
                                 : null;
                             switch (assertClause.FailureMode)
                             {
