@@ -53,6 +53,13 @@ public sealed class RowBatch : IDisposable
     public bool Disposed { get; private set; }
 
     /// <summary>
+    /// The per-query type registry. Set automatically when a batch is rented via
+    /// <see cref="Execution.ExecutionContext.RentRowBatch(ColumnLookup)"/>; null for
+    /// batches rented directly from the pool (provider-level batches without struct outputs).
+    /// </summary>
+    public TypeRegistry? Types { get; internal set; }
+
+    /// <summary>
     /// Clears all fields and returns the backing row and arena as out parameters for reuse.
     /// Rows are not returned to any pool; their lifecycle is managed separately by operators.
     /// The batch must not be used after calling this method.

@@ -351,7 +351,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
             DataValue.FromString("hello world is more than fifteen bytes", writeArena),
             DataValue.FromBoolean(true),
         ];
-        r0[0] = DataValue.FromStruct((short)f0.Length, f0, writeArena);
+        r0[0] = DataValue.FromStruct(f0, writeArena);
         batch.Add(r0);
 
         // Row 1: null struct.
@@ -362,7 +362,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         // Row 2: struct with one Float64 field.
         DataValue[] r2 = pool.RentDataValues(1);
         DataValue[] f2 = [DataValue.FromFloat64(3.14)];
-        r2[0] = DataValue.FromStruct((short)f2.Length, f2, writeArena);
+        r2[0] = DataValue.FromStruct(f2, writeArena);
         batch.Add(r2);
 
         string datumPath = Path.Combine(_tempDir, "struct.datum");

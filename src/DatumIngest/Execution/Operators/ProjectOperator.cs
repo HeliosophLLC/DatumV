@@ -316,6 +316,12 @@ public sealed class ProjectOperator : IQueryOperator
                     case SelectAllColumns allColumns:
                         for (int index = 0; index < firstRow.FieldCount; index++)
                         {
+                            // Hidden planner-synthetic columns (LET/MIO hoists, etc.) carry a `__`
+                            // prefix and must not surface through `*`. Without this filter,
+                            // `SELECT *, models.foo(x)` re-emits the hoisted column once via `*`
+                            // and a second time via the explicit projection.
+                            if (IsHiddenColumnName(firstRow.ColumnNames[index]))
+                                continue;
                             if (IsExcluded(firstRow.ColumnNames[index], allColumns.ExcludedColumns))
                                 continue;
                             Expression? replacement = FindReplacement(
@@ -336,6 +342,8 @@ public sealed class ProjectOperator : IQueryOperator
                                 || columnName.Equals(
                                     tableColumns.TableName, StringComparison.OrdinalIgnoreCase))
                             {
+                                if (IsHiddenColumnName(columnName))
+                                    continue;
                                 if (IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
                                     continue;
                                 Expression? replacement = FindReplacement(
@@ -716,6 +724,20 @@ public sealed class ProjectOperator : IQueryOperator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// True for planner-synthetic column names (LET hoists, model invocation outputs, etc.) that
+    /// must not surface through wildcard expansion. The convention is a leading <c>__</c> on the
+    /// unqualified portion of the name; explicit projections may still reference these names.
+    /// </summary>
+    internal static bool IsHiddenColumnName(string columnName)
+    {
+        int dotIndex = columnName.IndexOf('.');
+        ReadOnlySpan<char> unqualified = dotIndex >= 0
+            ? columnName.AsSpan(dotIndex + 1)
+            : columnName.AsSpan();
+        return unqualified.StartsWith("__");
     }
 
     /// <summary>

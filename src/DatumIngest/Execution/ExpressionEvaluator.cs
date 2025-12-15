@@ -76,6 +76,13 @@ public sealed class ExpressionEvaluator
     private readonly IReadOnlyDictionary<string, Expression>? _letBindingExpressions;
 
     /// <summary>
+    /// Optional per-query type registry for stamping type-ids onto struct literals and
+    /// using the registry as the primary resolution path in struct field access.
+    /// Null when constructed via the field-based overload without one.
+    /// </summary>
+    private readonly TypeRegistry? _typeRegistry;
+
+    /// <summary>
     /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
     /// the same SQL LIKE pattern on every row comparison.
     /// </summary>
@@ -162,6 +169,11 @@ public sealed class ExpressionEvaluator
     /// the source arena from which bound variable payloads are stabilised on read.
     /// Both must be supplied (or both omitted) for the variable path to work.
     /// </param>
+    /// <param name="typeRegistry">
+    /// Optional per-query type registry. When provided, struct literals stamp a type-id
+    /// at construction and struct field access uses the registry as the primary resolution
+    /// path before falling back to schema/AST-based resolution.
+    /// </param>
     public ExpressionEvaluator(
         FunctionRegistry functions,
         QueryMeter? meter = null,
@@ -171,7 +183,8 @@ public sealed class ExpressionEvaluator
         IValueStore? store = null,
         SidecarRegistry? sidecarRegistry = null,
         VariableScope? variableScope = null,
-        IValueStore? variableStore = null)
+        IValueStore? variableStore = null,
+        TypeRegistry? typeRegistry = null)
     {
         _functions = functions;
         _meter = meter;
@@ -182,6 +195,7 @@ public sealed class ExpressionEvaluator
         _sidecarRegistry = sidecarRegistry;
         _variableScope = variableScope;
         _variableStore = variableStore;
+        _typeRegistry = typeRegistry;
     }
 
     /// <summary>
@@ -206,7 +220,8 @@ public sealed class ExpressionEvaluator
             context.Store,
             context.SidecarRegistry,
             context.VariableScope,
-            context.VariableStore)
+            context.VariableStore,
+            context.Types)
     {
     }
 
@@ -1707,13 +1722,24 @@ public sealed class ExpressionEvaluator
     private DataValue EvaluateStructLiteral(StructLiteralExpression literal, in EvaluationFrame frame)
     {
         DataValue[] fields = new DataValue[literal.Fields.Count];
-
         for (int index = 0; index < literal.Fields.Count; index++)
         {
             fields[index] = Evaluate(literal.Fields[index].Value, frame);
         }
 
-        return DataValue.FromStruct((short)literal.Fields.Count, fields, frame.Target);
+        ushort typeId = 0;
+        if (_typeRegistry is not null)
+        {
+            var fieldDescriptors = new StructFieldDescriptor[literal.Fields.Count];
+            for (int i = 0; i < literal.Fields.Count; i++)
+            {
+                int fieldTypeId = _typeRegistry.InternScalarType(fields[i].Kind);
+                fieldDescriptors[i] = new StructFieldDescriptor(literal.Fields[i].Name, fieldTypeId);
+            }
+            typeId = (ushort)_typeRegistry.InternStructType(fieldDescriptors);
+        }
+
+        return DataValue.FromStruct(fields, frame.Target, typeId);
     }
 
     /// <summary>
@@ -1771,7 +1797,7 @@ public sealed class ExpressionEvaluator
                 int position = (int)ToFloat(index);
                 if (position < 0 || position >= fields.Length)
                 {
-                    return DataValue.NullStruct(source.StructFieldCount);
+                    return DataValue.NullStruct(source.TypeId);
                 }
                 return fields[position];
             }
@@ -1832,7 +1858,7 @@ public sealed class ExpressionEvaluator
                     return DataValue.NullStruct(0);
                 }
                 DataValue[] fields = elements[position];
-                return DataValue.FromStruct((short)fields.Length, fields, frame.Target);
+                return DataValue.FromStruct(fields, frame.Target);
             }
         }
 
@@ -1901,6 +1927,21 @@ public sealed class ExpressionEvaluator
         DataValue[] fields = source.AsStruct(frame.Source);
         string fieldName = Str(index, frame);
 
+        // Fast path: value already carries a type-id stamped at construction time.
+        // Avoids schema/AST walking for values emitted by EvaluateStructLiteral or
+        // model-invocation scatter that stamped the type-id at construction.
+        if (_typeRegistry is not null && source.TypeId != 0)
+        {
+            TypeDescriptor? typeDesc = _typeRegistry.GetDescriptor(source.TypeId);
+            if (typeDesc is not null)
+            {
+                int idx = typeDesc.FindFieldIndex(fieldName);
+                if (idx >= 0)
+                    return idx < fields.Length ? fields[idx] : DataValue.NullStruct(source.TypeId);
+                return DataValue.NullStruct(source.TypeId);
+            }
+        }
+
         // Procedural variable bound to a struct via FOR-IN — field names live
         // alongside the binding on the variable scope, so we can resolve named
         // access without scanning a schema or AST. Forward-compatible with the
@@ -1916,10 +1957,10 @@ public sealed class ExpressionEvaluator
             {
                 if (string.Equals(variableFieldNames[i], fieldName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return i < fields.Length ? fields[i] : DataValue.NullStruct(source.StructFieldCount);
+                    return i < fields.Length ? fields[i] : DataValue.NullStruct(source.TypeId);
                 }
             }
-            return DataValue.NullStruct(source.StructFieldCount);
+            return DataValue.NullStruct(source.TypeId);
         }
 
         // Try to resolve field position from schema when source is a column reference.
@@ -1928,7 +1969,7 @@ public sealed class ExpressionEvaluator
             IReadOnlyList<ColumnInfo>? columnFields = FindStructColumnFields(colRef, _sourceSchema);
             if (columnFields is not null)
             {
-                return LookupFieldByName(fields, columnFields, fieldName, source.StructFieldCount);
+                return LookupFieldByName(fields, columnFields, fieldName, source.TypeId);
             }
         }
 
@@ -1943,7 +1984,7 @@ public sealed class ExpressionEvaluator
                 }
             }
 
-            return DataValue.NullStruct(source.StructFieldCount);
+            return DataValue.NullStruct(source.TypeId);
         }
 
         // Fallback for hidden LET binding references (e.g., __destructure_N produced by named
@@ -1973,7 +2014,7 @@ public sealed class ExpressionEvaluator
                     }
                 }
 
-                return DataValue.NullStruct(source.StructFieldCount);
+                return DataValue.NullStruct(source.TypeId);
             }
         }
 
@@ -2005,7 +2046,7 @@ public sealed class ExpressionEvaluator
         DataValue[] fields,
         IReadOnlyList<ColumnInfo> columnFields,
         string fieldName,
-        short fieldCount)
+        ushort typeId)
     {
         for (int i = 0; i < columnFields.Count; i++)
         {
@@ -2015,7 +2056,7 @@ public sealed class ExpressionEvaluator
             }
         }
 
-        return DataValue.NullStruct(fieldCount);
+        return DataValue.NullStruct(typeId);
     }
 
     /// <summary>

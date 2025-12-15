@@ -45,6 +45,9 @@ public abstract class OnnxModel : IModel, IDisposable
     /// <inheritdoc />
     public DataKind OutputKind { get; }
 
+    /// <inheritdoc />
+    public virtual IReadOnlyList<ColumnInfo>? OutputFields => null;
+
     /// <summary>
     /// Loads the ONNX file at <paramref name="modelFilePath"/> via
     /// <see cref="InferenceSession"/>. Subclasses pass through their declared

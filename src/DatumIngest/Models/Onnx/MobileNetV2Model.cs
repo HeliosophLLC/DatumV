@@ -89,6 +89,13 @@ public sealed class MobileNetV2Model : OnnxModel
                 $"ONNX model at '{modelFilePath}' has no input metadata; cannot determine input tensor name.");
     }
 
+    /// <inheritdoc/>
+    public override IReadOnlyList<ColumnInfo>? OutputFields =>
+    [
+        new ColumnInfo("label", DataKind.String, nullable: false),
+        new ColumnInfo("score", DataKind.Float32, nullable: false),
+    ];
+
     /// <inheritdoc />
     protected override IReadOnlyCollection<NamedOnnxValue> BuildBatchInputs(
         IReadOnlyList<IReadOnlyList<ValueRef>> rows)

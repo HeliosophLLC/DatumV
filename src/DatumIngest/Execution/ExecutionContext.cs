@@ -30,6 +30,7 @@ public sealed class ExecutionContext
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
         MaxStratifyClasses = context.MaxStratifyClasses;
+        Types = context.Types;
     }
 
   /// <summary>
@@ -87,8 +88,18 @@ public sealed class ExecutionContext
         }
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
+        Types = new TypeRegistry();
     }
 
+
+    /// <summary>
+    /// Per-query type registry for self-describing struct/array <see cref="DataValue"/>s.
+    /// Construction sites intern their output shape here and stamp the resulting 16-bit
+    /// type-id on emitted values. Consumers look up the descriptor to read field names
+    /// without threading <see cref="Model.ColumnInfo"/> separately.
+    /// Shared across child contexts so type-ids are consistent across the operator tree.
+    /// </summary>
+    public TypeRegistry Types { get; }
 
     /// <summary>Cancellation token for cooperative cancellation.</summary>
     public CancellationToken CancellationToken { get; }
@@ -139,7 +150,11 @@ public sealed class ExecutionContext
     /// row-count reason to rent a smaller batch should use this overload.
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup)
-        => Pool.RentRowBatch(columnLookup, BatchSize, Store);
+    {
+        RowBatch batch = Pool.RentRowBatch(columnLookup, BatchSize, Store);
+        batch.Types = Types;
+        return batch;
+    }
 
     /// <summary>
     /// Rents a <see cref="RowBatch"/> with an explicit capacity. Use only when
@@ -150,7 +165,11 @@ public sealed class ExecutionContext
     /// smaller window.
     /// </summary>
     public RowBatch RentRowBatch(ColumnLookup columnLookup, int capacity)
-        => Pool.RentRowBatch(columnLookup, capacity, Store);
+    {
+        RowBatch batch = Pool.RentRowBatch(columnLookup, capacity, Store);
+        batch.Types = Types;
+        return batch;
+    }
 
     /// <summary>
     /// Returns a <see cref="RowBatch"/> rented via this context. Symmetric

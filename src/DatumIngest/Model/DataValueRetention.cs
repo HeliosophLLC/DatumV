@@ -153,8 +153,7 @@ public static class DataValueRetention
         {
             retentionFields[i] = Stabilize(sourceFields[i], sourceStore, retentionStore);
         }
-        return DataValue.FromStruct(
-            (short)retentionFields.Length, retentionFields, retentionStore);
+        return DataValue.FromStruct(retentionFields, retentionStore);
     }
 
     /// <summary>

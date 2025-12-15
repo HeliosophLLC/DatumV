@@ -203,7 +203,7 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         {
             fields[i] = DataValueReader.ReadDataValue(br, _eagerStore);
         }
-        return DataValue.FromStruct((short)fieldCount, fields, _eagerStore);
+        return DataValue.FromStruct(fields, _eagerStore);
     }
 
 }

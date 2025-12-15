@@ -117,6 +117,17 @@ public sealed class YoloModel : OnnxModel
     public bool SupportsBatching => _supportsBatching;
 
     /// <inheritdoc />
+    public override IReadOnlyList<ColumnInfo>? OutputFields =>
+    [
+        new ColumnInfo("label", DataKind.String, nullable: false),
+        new ColumnInfo("score", DataKind.Float32, nullable: false),
+        new ColumnInfo("x", DataKind.Float32, nullable: false),
+        new ColumnInfo("y", DataKind.Float32, nullable: false),
+        new ColumnInfo("w", DataKind.Float32, nullable: false),
+        new ColumnInfo("h", DataKind.Float32, nullable: false),
+    ];
+
+    /// <inheritdoc />
     public override async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
         IReadOnlyList<IReadOnlyList<ValueRef>> inputs,
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,

@@ -174,6 +174,16 @@ public sealed class ModelInvocationOperator : IQueryOperator
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
 
+        // Intern the model's output struct schema once so scatter can stamp a
+        // type-id on every emitted struct DataValue. 0 = no schema (non-struct
+        // or schema-unknown outputs — Arrays of Struct get inner-element ids
+        // in a future pass when BuildStructArray propagates typeId).
+        ushort outputTypeId = 0;
+        if (model.OutputFields is { } outputFields)
+        {
+            outputTypeId = (ushort)context.Types.InternStructFromColumnInfoFields(outputFields);
+        }
+
         // RowLimit is set by a downstream LimitOperator (LIMIT + OFFSET) to
         // signal "I'll only consume this many rows total." For an expensive
         // operator like model invocation, this is the difference between
@@ -363,7 +373,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                         outValues[slot] = DataValueRetention.Stabilize(
                             sourceRow[sourceCopySlots[slot]], sourceBatch.Arena, outputBatch.Arena);
                     }
-                    outValues[^1] = modelOutputs[chunkRowIdx].ToDataValue(outputBatch.Arena);
+                    outValues[^1] = modelOutputs[chunkRowIdx].ToDataValue(outputBatch.Arena, outputTypeId);
                     outputBatch.Add(outValues);
                 }
 

@@ -142,6 +142,24 @@ public readonly struct DataValue : IEquatable<DataValue>
         _p3 = 0;
     }
 
+    /// <summary>
+    /// Constructor for struct DataValues that carry a <see cref="TypeId"/>.
+    /// Uses <c>_charCount</c> (ushort at offset 2) as the type-id slot — always zero
+    /// for structs in the other constructors. The <c>ushort</c> 3rd parameter
+    /// distinguishes this overload from the <c>int</c>-based reference constructor.
+    /// </summary>
+    private DataValue(DataKind kind, DataValueFlags flags, ushort typeId, int p0, int p1)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _charCount = typeId;
+        _p0 = p0;
+        _p1 = p1;
+        _p2 = 0;
+        _p3 = 0;
+    }
+
     /// <summary>The type discriminator for this value.</summary>
     public DataKind Kind => _kind;
 
@@ -195,6 +213,43 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Only meaningful when <see cref="IsInlineArray"/> is <c>true</c>.
     /// </summary>
     internal byte InlineArrayElementCount => (byte)(_charCount & 0xFF);
+
+    /// <summary>
+    /// Per-query <see cref="TypeRegistry"/> id for this struct value; 0 (<see cref="TypeRegistry.NoType"/>)
+    /// when no type has been registered. For non-array structs, stored in <c>_charCount</c>.
+    /// For arena-backed <c>Array&lt;Struct&gt;</c> (N≥2), also stored in <c>_charCount</c>
+    /// (the field is otherwise unused for that layout). Inline array (N=0/1) and all
+    /// non-struct kinds always return 0.
+    /// </summary>
+    public ushort TypeId =>
+        _kind == DataKind.Struct && !IsArray ? _charCount :
+        _kind == DataKind.Struct && IsArray && (_flags & DataValueFlags.InArena) != 0 ? _charCount :
+        (ushort)0;
+
+    /// <summary>
+    /// Looks up this value's <see cref="TypeDescriptor"/> in <paramref name="registry"/>.
+    /// Returns <c>null</c> when <see cref="TypeId"/> is 0 or the registry is <c>null</c>.
+    /// </summary>
+    public TypeDescriptor? GetTypeDescriptor(TypeRegistry? registry) =>
+        registry?.GetDescriptor(TypeId);
+
+    /// <summary>
+    /// Retrieves a named field from this struct value using the per-query type registry.
+    /// Throws when this value has no type registered or the field name is not found.
+    /// </summary>
+    public DataValue GetField(string name, TypeRegistry registry, IValueStore store)
+    {
+        TypeDescriptor? type = registry.GetDescriptor(TypeId);
+        if (type is null)
+            throw new InvalidOperationException(
+                $"Cannot look up field '{name}' by name: this struct value has no type registered (TypeId=0). " +
+                "Stamp a type-id at the construction site before calling GetField.");
+        int idx = type.FindFieldIndex(name);
+        if (idx < 0)
+            throw new InvalidOperationException(
+                $"Field '{name}' not found in struct type (kind={type.Kind}, fields=[{string.Join(", ", type.Fields?.Select(f => f.Name) ?? [])}]).");
+        return AsStruct(store)[idx];
+    }
 
     /// <summary>
     /// Decodes the 64-bit sidecar offset packed across <c>_p0</c> and <c>_p1</c>. Only
@@ -874,7 +929,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// metadata, so heterogeneous-field-count elements are allowed at the value
     /// layer (the schema layer enforces uniformity when configured).
     /// </summary>
-    public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store)
+    public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store, ushort typeId = 0)
     {
         if (elements.Length == 0)
         {
@@ -915,7 +970,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Struct,
             flags: DataValueFlags.IsArray | DataValueFlags.InArena,
             p0: blockP0,
-            p1: blockP1);
+            p1: blockP1,
+            charCount: typeId);
     }
 
     /// <summary>
@@ -1633,21 +1689,26 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue NullArrayOf(DataKind elementKind) =>
         new(elementKind, flags: DataValueFlags.IsNull | DataValueFlags.IsArray, p0: 0);
 
-    /// <summary>Creates a struct value from a positional array of field values.</summary>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromStruct(short, DataValue[], IValueStore)"/> instead.</remarks>
-    public static DataValue FromStruct(short fieldCount, DataValue[] fields) =>
-        throw new InvalidOperationException("Use FromStruct(fieldCount, fields, store). ReferenceStore is no longer available.");
-
     /// <summary>Creates a struct value using an explicit <see cref="IValueStore"/>.</summary>
-    public static DataValue FromStruct(short fieldCount, DataValue[] fields, IValueStore store)
+    /// <param name="fields">Positional field values for the struct.</param>
+    /// <param name="store">Value store that will hold the field array.</param>
+    /// <param name="typeId">
+    /// Optional type-id from the query's <see cref="TypeRegistry"/>; 0 when no type is registered.
+    /// Stored in <c>_charCount</c> so the value is self-describing once the registry is populated.
+    /// </param>
+    public static DataValue FromStruct(DataValue[] fields, IValueStore store, ushort typeId = 0)
     {
-        var (p0, p1) = store.StoreDataValues(fields);
-        return new(DataKind.Struct, flags: DataValueFlags.InArena, p0: p0, p1: p1, p2: fieldCount);
+        var (p0, count) = store.StoreDataValues(fields);
+        return new(DataKind.Struct, DataValueFlags.InArena, typeId, p0, count);
     }
 
-    /// <summary>Creates a typed null struct with the given field count.</summary>
-    public static DataValue NullStruct(short fieldCount) =>
-        new(DataKind.Struct, DataValueFlags.IsNull, referenceIndex: 0, meta: fieldCount);
+    /// <summary>Creates a typed null struct.</summary>
+    /// <param name="typeId">
+    /// Optional type-id from the query's <see cref="TypeRegistry"/>; 0 when no type is registered.
+    /// Propagated to null results so callers can still read the struct's shape descriptor.
+    /// </param>
+    public static DataValue NullStruct(ushort typeId = 0) =>
+        new(DataKind.Struct, DataValueFlags.IsNull, typeId, p0: 0, p1: 0);
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
@@ -2728,24 +2789,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         return store.RetrieveDataValues(_p0, _p1);
     }
 
-    /// <summary>
-    /// Returns the declared field count for a <see cref="DataKind.Struct"/> value.
-    /// Available on both null and non-null struct values.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Called on a non-struct value.</exception>
-    public short StructFieldCount
-    {
-        get
-        {
-            if (_kind != DataKind.Struct)
-            {
-                throw new InvalidOperationException(
-                    $"Cannot read StructFieldCount on a {_kind} value.");
-            }
-
-            return _meta;
-        }
-    }
 
     // ───────────────────────── Equality ─────────────────────────
 

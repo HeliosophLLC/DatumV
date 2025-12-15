@@ -1305,7 +1305,6 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         Assert.Equal(DataKind.Struct, result.Kind);
         Assert.False(result.IsNull);
-        Assert.Equal(2, result.StructFieldCount);
         DataValue[] fields = result.AsStruct();
         Assert.Equal(2, fields.Length);
         Assert.Equal(1, fields[0].AsInt32());
@@ -1389,9 +1388,10 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // Row has a struct column "info" with fields [name, score].
         // Access info['score'] — evaluator needs schema to know field positions.
+        Arena arena = new();
         DataValue structValue = DataValue.FromStruct(
-            2,
-            [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)]);
+            [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)],
+            arena);
 
         Row row = MakeRow(("info", structValue));
 

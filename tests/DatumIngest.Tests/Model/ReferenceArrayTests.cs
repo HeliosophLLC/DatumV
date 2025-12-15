@@ -258,7 +258,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     {
         Arena arena = new();
         DataValue[] fields = [DataValue.FromString("alice", arena), DataValue.FromInt32(30)];
-        DataValue scalar = DataValue.FromStruct((short)fields.Length, fields, arena);
+        DataValue scalar = DataValue.FromStruct(fields, arena);
         DataValue oneElementArray = DataValue.FromStructArray([fields], arena);
 
         Assert.Equal(DataKind.Struct, scalar.Kind);
@@ -272,7 +272,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     {
         Arena arena = new();
         DataValue[] fields = [DataValue.FromInt32(1)];
-        DataValue scalar = DataValue.FromStruct((short)fields.Length, fields, arena);
+        DataValue scalar = DataValue.FromStruct(fields, arena);
 
         Assert.Throws<InvalidOperationException>(() => scalar.AsStructArray(arena));
     }

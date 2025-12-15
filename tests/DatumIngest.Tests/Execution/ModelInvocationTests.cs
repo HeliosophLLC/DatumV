@@ -325,6 +325,39 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// <c>SELECT *, models.echo(name) FROM t</c> must not duplicate the model's output column.
+    /// The hoister inserts a ModelInvocationOperator above the scan, so the operator stream feeding
+    /// the projection contains <c>name</c> + the synthesised model column. Without a planner-side
+    /// rewrite, <c>SELECT *</c> includes BOTH (giving the model column once via <c>*</c>), then the
+    /// explicit projection adds it again — the row ends up with three columns, two of them identical
+    /// model output. The fix excludes hoisted synthetic columns from <c>*</c> so the row has exactly
+    /// the user-visible columns: <c>name</c> + one model output.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_StarPlusModelCall_DoesNotDuplicateModelColumn()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT *, models.echo(name) FROM t", catalog);
+
+        Assert.Equal(2, rows.Count);
+
+        // Exactly two output columns: the source `name` and one model output column.
+        // With the bug, FieldCount is 3 because `*` re-emits the hoisted column.
+        Assert.Equal(2, rows[0].FieldCount);
+
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal("alice", rows[0][0].AsString(scratch));
+        Assert.Equal("alice", rows[0][1].AsString(scratch));
+    }
+
+    /// <summary>
     /// Different literal arguments produce different fingerprints — the hoister
     /// keeps them as separate operators. Catches a false-positive dedup that
     /// would conflate <c>models.echo('a')</c> with <c>models.echo('b')</c>.

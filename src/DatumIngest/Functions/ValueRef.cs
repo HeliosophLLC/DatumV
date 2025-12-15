@@ -243,7 +243,7 @@ public readonly struct ValueRef
     /// through and writes everything to the target arena in one pass.
     /// </summary>
     public static ValueRef FromStruct(ValueRef[] fields) =>
-        new(DataValue.NullStruct((short)fields.Length), fields);
+        new(DataValue.NullStruct(), fields);
 
     /// <summary>
     /// Array value carried as a recursive <see cref="ValueRef"/>[] payload.
@@ -328,11 +328,11 @@ public readonly struct ValueRef
     }
 
     /// <summary>
-    /// Typed null struct with the given <paramref name="fieldCount"/>. No
-    /// payload — boundary materialisation produces <see cref="DataValue.NullStruct"/>.
+    /// Typed null struct with the given type-id. No payload — boundary materialisation
+    /// produces <see cref="DataValue.NullStruct"/>.
     /// </summary>
-    public static ValueRef NullStruct(short fieldCount) =>
-        new(DataValue.NullStruct(fieldCount), null);
+    public static ValueRef NullStruct(ushort typeId = 0) =>
+        new(DataValue.NullStruct(typeId), null);
 
     /// <summary>
     /// Typed null array of the given element kind. No payload — boundary
@@ -596,7 +596,7 @@ public readonly struct ValueRef
     /// and skip this method entirely. The arena stays cold.
     /// </para>
     /// </remarks>
-    public DataValue ToDataValue(IValueStore targetStore)
+    public DataValue ToDataValue(IValueStore targetStore, ushort typeId = 0)
     {
         if (IsNull)
         {
@@ -625,9 +625,11 @@ public readonly struct ValueRef
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),
             ValueRef[] elements when _inline.IsArray =>
-                BuildTypedArray(_inline.Kind, elements, targetStore),
+                BuildTypedArray(_inline.Kind, elements, targetStore, typeId),
+            // typeId stamped here so model outputs and other top-level struct ValueRefs
+            // get a registered type-id at the single arena-write boundary.
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
-                DataValue.FromStruct((short)fields.Length, MaterialiseEach(fields, targetStore), targetStore),
+                DataValue.FromStruct(MaterialiseEach(fields, targetStore), targetStore, typeId),
             // Bulk primitive-array path: a typed T[] payload (Float32, Int32, …)
             // produced by FromPrimitiveArray<T>. Dispatch by kind to the matching
             // typed-span factory; bytes copy once into the target arena.
@@ -665,13 +667,14 @@ public readonly struct ValueRef
     private static DataValue BuildTypedArray(
         DataKind elementKind,
         ValueRef[] elements,
-        IValueStore target)
+        IValueStore target,
+        ushort typeId = 0)
     {
         return elementKind switch
         {
             DataKind.String => BuildStringArray(elements, target),
             DataKind.Image => BuildImageArray(elements, target),
-            DataKind.Struct => BuildStructArray(elements, target),
+            DataKind.Struct => BuildStructArray(elements, target, typeId),
             // DateTime is intentionally not supported here: the per-element
             // byte-size convention used by typed arrays elsewhere in the
             // engine treats DateTime as 8 bytes (ticks only) and silently
@@ -709,7 +712,7 @@ public readonly struct ValueRef
         return DataValue.FromImageArray(images, target);
     }
 
-    private static DataValue BuildStructArray(ValueRef[] elements, IValueStore target)
+    private static DataValue BuildStructArray(ValueRef[] elements, IValueStore target, ushort typeId = 0)
     {
         DataValue[][] rows = new DataValue[elements.Length][];
         for (int i = 0; i < elements.Length; i++)
@@ -723,7 +726,7 @@ public readonly struct ValueRef
             }
             rows[i] = row;
         }
-        return DataValue.FromStructArray(rows, target);
+        return DataValue.FromStructArray(rows, target, typeId);
     }
 
     /// <summary>

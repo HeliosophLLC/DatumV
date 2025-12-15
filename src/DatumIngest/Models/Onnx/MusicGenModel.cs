@@ -62,6 +62,12 @@ internal sealed class MusicGenModel : IModel, IDisposable
     private readonly string _decoderEncHiddenName;
     private readonly string _decoderEncMaskName;
 
+    // Memory locations for IoBinding. CUDA = GPU device memory (KV caches stay
+    // resident); CPU = system memory (logits land here so we can sample without
+    // a separate copy-back). Constructed once and reused across every step.
+    private readonly OrtMemoryInfo _cudaMemInfo = new("Cuda", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default);
+    private readonly OrtMemoryInfo _cpuMemInfo = OrtMemoryInfo.DefaultInstance;
+
     public string Name { get; }
     public bool IsDeterministic => false;
     public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
@@ -203,83 +209,148 @@ internal sealed class MusicGenModel : IModel, IDisposable
             initIds[k] = _padTokenId;
         DenseTensor<long> currentIds = new(initIds, [_numCodebooks, 1]);
 
-        // --- 4. First decoder step (decoder_model, no past KV) ---
+        // --- 4 & 5. Decoder pipeline with IoBinding ---
+        // KV caches are kept on GPU between iterations: each step's "present.*"
+        // outputs become the next step's "past_key_values.*" inputs by name.
+        // Only logits cross to CPU each step (small) — the bulky KV tensors
+        // (~50 MiB at peak for Small) never round-trip through managed memory.
+        //
+        // Lifetime model:
+        // - firstBinding lives for the entire generation. It owns the encoder
+        //   KV cache, which every subsequent step reads but no step rewrites.
+        // - prevPastBinding holds the most-recent decoder_past binding whose
+        //   outputs (decoder.* KV) are still referenced by the kvCaches map.
+        //   Once the next step refreshes those entries, prevPastBinding can
+        //   be disposed.
+
         long[] nextTokens;
-        DenseTensor<float>[] kvCaches = new DenseTensor<float>[_pastInputNames.Length];
+        Dictionary<string, OrtValue> kvCaches = new(StringComparer.Ordinal);
+        List<long[]> allTokens;
+
+        using RunOptions runOpts = new();
+
+        // CPU-resident input OrtValues that are constant for the whole generation.
+        long[] encMaskShape = [1, seqLen];
+        using OrtValue encMaskOv = OrtValue.CreateTensorValueFromMemory(
+            _cpuMemInfo, attMaskArr.AsMemory(), encMaskShape);
+
+        long[] encHiddenShape = encoderHidden.Dimensions.ToArray().Select(d => (long)d).ToArray();
+        using OrtValue encHiddenOv = OrtValue.CreateTensorValueFromMemory(
+            _cpuMemInfo, encoderHidden.Buffer, encHiddenShape);
+
+        OrtIoBinding firstBinding = _decoderFirstSession.CreateIoBinding();
+        OrtIoBinding? prevPastBinding = null;
+
+        try
         {
-            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> firstOut =
-                _decoderFirstSession.Run([
-                    NamedOnnxValue.CreateFromTensor(_decoderInputIdsName, currentIds),
-                    OnnxTensorConversion.CreateAutoCastInput(
-                        _decoderFirstSession, _decoderEncHiddenName, encoderHidden),
-                    NamedOnnxValue.CreateFromTensor(_decoderEncMaskName, attMaskTensor),
-                ]);
+            long[] initIdsShape = [_numCodebooks, 1];
+            using OrtValue initIdsOv = OrtValue.CreateTensorValueFromMemory(
+                _cpuMemInfo, initIds.AsMemory(), initIdsShape);
 
-            nextTokens = SampleTopK(
-                OnnxTensorConversion.ToFloatTensor(firstOut.First(o => o.Name == "logits")));
+            firstBinding.BindInput(_decoderInputIdsName, initIdsOv);
+            firstBinding.BindInput(_decoderEncHiddenName, encHiddenOv);
+            firstBinding.BindInput(_decoderEncMaskName, encMaskOv);
+            firstBinding.BindOutputToDevice("logits", _cpuMemInfo);
+            foreach (string outName in _decoderFirstSession.OutputMetadata.Keys)
+                if (outName.StartsWith("present.", StringComparison.Ordinal))
+                    firstBinding.BindOutputToDevice(outName, _cudaMemInfo);
 
-            // Initialise every kvCaches slot by routing first-step "present.*" outputs
-            // to their matching past_key_values.* slot. The first step is the only one
-            // that produces ALL caches (decoder + encoder); subsequent steps may only
-            // refresh the decoder.* slots.
-            foreach (DisposableNamedOnnxValue o in firstOut)
+            _decoderFirstSession.RunWithBinding(runOpts, firstBinding);
+            firstBinding.SynchronizeBoundOutputs();
+
+            // Don't `using` the collection — the OrtValues we extract into kvCaches
+            // are kept alive by firstBinding for the rest of the generation.
+            // Disposing the collection wrapper might also dispose the contained
+            // OrtValue handles, which would invalidate our kvCaches entries.
+            IDisposableReadOnlyCollection<OrtValue> firstOutputs = firstBinding.GetOutputValues();
+            IReadOnlyList<string> firstOutputNames = firstBinding.GetOutputNames();
+
+            int firstLogitsIdx = IndexOfLogits(firstOutputNames);
+            nextTokens = SampleTopKFromOrtValue(firstOutputs[firstLogitsIdx]);
+            allTokens = [nextTokens];
+
+            // Map first-step present.* outputs into kvCaches by their past_key_values.* name.
+            for (int i = 0; i < firstOutputNames.Count; i++)
             {
-                if (!o.Name.StartsWith("present.", StringComparison.Ordinal)) continue;
-                int idx = Array.IndexOf(_pastInputNames, PresentToPastName(o.Name));
-                if (idx >= 0)
-                    kvCaches[idx] = OnnxTensorConversion.ToFloatTensor(o);
+                string n = firstOutputNames[i];
+                if (!n.StartsWith("present.", StringComparison.Ordinal)) continue;
+                string pastName = PresentToPastName(n);
+                if (Array.IndexOf(_pastInputNames, pastName) >= 0)
+                    kvCaches[pastName] = firstOutputs[i];
             }
-
-            for (int i = 0; i < kvCaches.Length; i++)
-                if (kvCaches[i] is null)
+            foreach (string pastName in _pastInputNames)
+                if (!kvCaches.ContainsKey(pastName))
                     throw new InvalidOperationException(
-                        $"MusicGen first-step output is missing the present.* counterpart " +
-                        $"of '{_pastInputNames[i]}'.");
+                        $"MusicGen first-step output is missing the present.* counterpart of '{pastName}'.");
 
-            firstOut.Dispose();
-        }
-
-        // --- 5. Autoregressive decoding (decoder_with_past_model) ---
-        // Note: encoder_hidden_states is NOT passed here — the encoder KV cache from
-        // step 4 carries through the past_key_values.X.encoder.* inputs and remains
-        // constant across all subsequent steps.
-        List<long[]> allTokens = [nextTokens];
-
-        for (int step = 1; step < _maxNewTokens; step++)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            DenseTensor<long> stepIds = new(nextTokens, [_numCodebooks, 1]);
-
-            List<NamedOnnxValue> pastInputs =
-            [
-                NamedOnnxValue.CreateFromTensor(_decoderInputIdsName, stepIds),
-                NamedOnnxValue.CreateFromTensor(_decoderEncMaskName, attMaskTensor),
-            ];
-
-            for (int k = 0; k < _pastInputNames.Length; k++)
-                pastInputs.Add(OnnxTensorConversion.CreateAutoCastInput(
-                    _decoderPastSession, _pastInputNames[k], kvCaches[k]));
-
-            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> pastOut =
-                _decoderPastSession.Run(pastInputs);
-
-            nextTokens = SampleTopK(
-                OnnxTensorConversion.ToFloatTensor(pastOut.First(o => o.Name == "logits")));
-            allTokens.Add(nextTokens);
-
-            // Update only the slots that have a corresponding present.* output.
-            // decoder.* slots will refresh every step; encoder.* slots typically
-            // are not re-emitted (they're invariant) and we leave them as-is.
-            foreach (DisposableNamedOnnxValue o in pastOut)
+            // --- Autoregressive loop ---
+            for (int step = 1; step < _maxNewTokens; step++)
             {
-                if (!o.Name.StartsWith("present.", StringComparison.Ordinal)) continue;
-                int idx = Array.IndexOf(_pastInputNames, PresentToPastName(o.Name));
-                if (idx >= 0)
-                    kvCaches[idx] = OnnxTensorConversion.ToFloatTensor(o);
-            }
+                ct.ThrowIfCancellationRequested();
 
-            pastOut.Dispose();
+                OrtIoBinding stepBinding = _decoderPastSession.CreateIoBinding();
+                bool ownStepBinding = true;
+
+                try
+                {
+                    // Per-step input_ids (small CPU OrtValue; lives only for this Run).
+                    long[] stepIdsShape = [_numCodebooks, 1];
+                    using OrtValue stepIdsOv = OrtValue.CreateTensorValueFromMemory(
+                        _cpuMemInfo, nextTokens.AsMemory(), stepIdsShape);
+
+                    stepBinding.BindInput(_decoderInputIdsName, stepIdsOv);
+                    stepBinding.BindInput(_decoderEncMaskName, encMaskOv);
+
+                    foreach (string pastName in _pastInputNames)
+                        stepBinding.BindInput(pastName, kvCaches[pastName]);
+
+                    stepBinding.BindOutputToDevice("logits", _cpuMemInfo);
+                    foreach (string outName in _decoderPastSession.OutputMetadata.Keys)
+                        if (outName.StartsWith("present.", StringComparison.Ordinal))
+                            stepBinding.BindOutputToDevice(outName, _cudaMemInfo);
+
+                    _decoderPastSession.RunWithBinding(runOpts, stepBinding);
+                    stepBinding.SynchronizeBoundOutputs();
+
+                    // Same reasoning as in the first-step block: don't dispose the
+                    // collection wrapper — kvCaches takes references to OrtValues
+                    // that stepBinding (now prevPastBinding) owns.
+                    IDisposableReadOnlyCollection<OrtValue> stepOutputs = stepBinding.GetOutputValues();
+                    IReadOnlyList<string> stepOutputNames = stepBinding.GetOutputNames();
+
+                    int logitsIdx = IndexOfLogits(stepOutputNames);
+                    nextTokens = SampleTopKFromOrtValue(stepOutputs[logitsIdx]);
+                    allTokens.Add(nextTokens);
+
+                    // Replace the kvCaches entries whose present.* counterpart is in this
+                    // step's outputs. Encoder.* slots (which decoder_with_past doesn't
+                    // re-emit) keep pointing at firstBinding's OrtValues — those remain
+                    // valid because firstBinding is still alive.
+                    for (int i = 0; i < stepOutputNames.Count; i++)
+                    {
+                        string n = stepOutputNames[i];
+                        if (!n.StartsWith("present.", StringComparison.Ordinal)) continue;
+                        string pastName = PresentToPastName(n);
+                        if (Array.IndexOf(_pastInputNames, pastName) >= 0)
+                            kvCaches[pastName] = stepOutputs[i];
+                    }
+
+                    // kvCaches no longer references prevPastBinding's outputs — safe
+                    // to dispose. firstBinding is preserved (still owns encoder KV).
+                    prevPastBinding?.Dispose();
+                    prevPastBinding = stepBinding;
+                    ownStepBinding = false;
+                }
+                finally
+                {
+                    if (ownStepBinding) stepBinding.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            prevPastBinding?.Dispose();
+            firstBinding.Dispose();
         }
 
         // --- 6. Undelay tokens for EnCodec ---
@@ -318,19 +389,20 @@ internal sealed class MusicGenModel : IModel, IDisposable
     }
 
     /// <summary>
-    /// Greedy (argmax) sampling across all codebooks for the last time step.
-    /// <paramref name="logits"/> shape: [num_codebooks, seq_len, vocab_size].
-    /// Uses top-k=250 multinomial sampling at temperature=1.0 — Meta's defaults
-    /// for MusicGen. Greedy argmax produces a degenerate metallic buzz because
-    /// the model locks onto repetitive token cycles; top-k restores variety.
+    /// Top-k (default 250) multinomial sampling at temperature 1.0 over the
+    /// last time-step's logits, applied per codebook. Reads directly from the
+    /// CPU-bound <see cref="OrtValue"/> produced by <c>BindOutputToDevice("logits", cpuMem)</c>
+    /// — no managed copy. Logits shape: [num_codebooks, seq_len, vocab_size].
     /// </summary>
-    private long[] SampleTopK(DenseTensor<float> logits, int topK = 250, float temperature = 1.0f)
+    private long[] SampleTopKFromOrtValue(OrtValue logits, int topK = 250, float temperature = 1.0f)
     {
-        ReadOnlySpan<float> data = logits.Buffer.Span;
-        int numCb = logits.Dimensions[0];
-        int seqLen = logits.Dimensions[1];
-        int vocabSize = logits.Dimensions[2];
+        ReadOnlySpan<long> dims = logits.GetTensorTypeAndShape().Shape;
+        int numCb = (int)dims[0];
+        int seqLen = (int)dims[1];
+        int vocabSize = (int)dims[2];
         int lastStep = seqLen - 1;
+
+        ReadOnlySpan<float> data = logits.GetTensorDataAsSpan<float>();
 
         long[] result = new long[numCb];
         for (int cb = 0; cb < numCb; cb++)
@@ -340,6 +412,18 @@ internal sealed class MusicGenModel : IModel, IDisposable
             result[cb] = SampleOneTopK(slice, topK, temperature);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Returns the index of the "logits" entry in <paramref name="names"/>,
+    /// throwing if absent.
+    /// </summary>
+    private static int IndexOfLogits(IReadOnlyList<string> names)
+    {
+        for (int i = 0; i < names.Count; i++)
+            if (names[i] == "logits") return i;
+        throw new InvalidOperationException(
+            $"Decoder session output is missing 'logits'. Available: [{string.Join(", ", names)}].");
     }
 
     /// <summary>

@@ -1041,8 +1041,7 @@ public sealed class BatchExecutor
                     fields[j] = DataValueRetention.Stabilize(
                         row[j], batch.Arena, batchContext.VariableStore);
                 }
-                DataValue rowStruct = DataValue.FromStruct(
-                    (short)colCount, fields, batchContext.VariableStore);
+                DataValue rowStruct = DataValue.FromStruct(fields, batchContext.VariableStore);
 
                 batchContext.VariableScope.PushFrame();
                 try

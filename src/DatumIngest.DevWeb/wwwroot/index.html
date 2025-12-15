@@ -296,8 +296,22 @@
     display: flex; flex-direction: column;
     min-height: 120px;
     height: 32vh;
-    resize: vertical;
     overflow: hidden;
+  }
+
+  /* Drag handle between the editor and the results pane. Mirrors
+     #sidebar-resize but in the row direction — full width, 6px tall hit
+     area, transparent until hover. */
+  #editor-results-resize {
+    height: 6px; flex-shrink: 0;
+    cursor: row-resize;
+    background: transparent;
+    margin-top: -3px; margin-bottom: -3px;
+    z-index: 5; position: relative;
+  }
+  #editor-results-resize:hover, #editor-results-resize.dragging {
+    background: var(--accent);
+    opacity: 0.6;
   }
   #editor-host {
     flex: 1;
@@ -389,7 +403,31 @@
     color: var(--muted); font-weight: 400; font-size: 11px;
     margin-left: 6px;
   }
+  /* Cells host an absolutely-positioned copy button in their top-right
+     corner. Only set on td so th's sticky positioning is unaffected. */
+  table.results td { position: relative; }
   table.results td.null { color: var(--muted); font-style: italic; }
+  /* Copy button: hidden until the cell is hovered, then fades in. Sized
+     small to avoid overlapping short content; for narrow cells it may
+     overlay text — that's fine for a hover-only affordance. */
+  .cell-copy {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 22px; height: 22px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    z-index: 2;
+  }
+  table.results td:hover .cell-copy { opacity: 1; }
+  .cell-copy:hover { color: var(--fg); background: var(--panel); }
+  .cell-copy.copied { color: var(--accent); border-color: var(--accent); opacity: 1; }
   table.results td pre {
     margin: 0; white-space: pre-wrap; word-break: break-word;
     font-family: var(--mono); font-size: 13px;
@@ -468,6 +506,35 @@
   .modal .actions button.primary {
     background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
   }
+
+  /* Lightbox for clicked result-grid images. The backdrop is its own
+     element (not reusing .modal-backdrop) so the close-on-backdrop-click
+     behavior can be more permissive — clicking the image itself shouldn't
+     dismiss, but anywhere outside the image (or the close button) should. */
+  table.results td img { cursor: zoom-in; }
+  .lightbox-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1100;
+    cursor: zoom-out;
+  }
+  .lightbox-backdrop img {
+    max-width: 95vw; max-height: 95vh;
+    display: block;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    cursor: default;
+  }
+  .lightbox-close {
+    position: absolute; top: 12px; right: 16px;
+    width: 32px; height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(0, 0, 0, 0.4); color: #fff;
+    border-radius: 50%; font-size: 18px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .lightbox-close:hover { background: rgba(0, 0, 0, 0.7); }
 </style>
 
 <!-- Monaco loader from CDN. Editor.main is loaded inside the boot script. -->
@@ -559,6 +626,8 @@
           <span id="elapsed" class="tip"></span>
         </div>
       </div>
+
+      <div id="editor-results-resize" title="Drag to resize"></div>
 
       <div id="results-pane">
         <div class="meta">Type a query and press Run.</div>
@@ -804,31 +873,98 @@
       if (!ws.tabs.find(t => t.id === ws.activeTabId)) {
         ws.activeTabId = ws.tabs[0].id;
       }
+      // Tombstones for tabs intentionally closed in any window. Used by
+      // persistWorkspace to avoid resurrecting a deleted tab during a
+      // multi-window merge. Stored as a bare string[] of ids; we cap the
+      // length on save to keep the snapshot small.
+      ws.deletedTabIds = Array.isArray(ws.deletedTabIds) ? ws.deletedTabIds.slice() : [];
       return ws;
     }
     const tab = freshTab(1);
-    return { tabs: [tab], activeTabId: tab.id };
+    return { tabs: [tab], activeTabId: tab.id, deletedTabIds: [] };
   }
+  // One-time guard so we don't spam the user with a modal if every save
+  // is failing (quota exhaustion tends to fail repeatedly until something
+  // is freed). The console.warn still fires every time.
+  let persistFailureNotified = false;
+
   // Persist current workspace metadata. Result payloads live in IDB and are
   // not part of this snapshot — keeps the localStorage write small and fast.
+  //
+  // Merge-on-save: read whatever is currently on disk and union it with our
+  // in-memory tab list, indexed by id. This keeps a second window's tabs
+  // alive when this window saves, instead of clobbering them. Tabs explicitly
+  // closed in this window go onto a tombstone list so the merge doesn't
+  // resurrect them from another window's older snapshot.
   function persistWorkspace() {
     const name = workspaceName();
+    const tombSet = new Set(state.workspace.deletedTabIds || []);
+    const inMemoryById = new Map(state.workspace.tabs.map(t => [t.id, t]));
+
+    const onDisk = readJson(STORE.workspace(name), null);
+    const tabsToWrite = state.workspace.tabs.map(t => ({
+      id: t.id,
+      name: t.name,
+      sql: t.sql,
+      lastRunAt: t.lastRunAt,
+      sqlOfLastRun: t.sqlOfLastRun,
+      pinned: t.pinned === true,
+      maxRows: t.maxRows,
+      trace: t.trace === true,
+      // Runtime-only fields (running, abortController, etc.) are
+      // intentionally omitted — a reload should always start clean.
+    }));
+    if (onDisk && Array.isArray(onDisk.tabs)) {
+      for (const t of onDisk.tabs) {
+        if (!t || !t.id) continue;
+        if (inMemoryById.has(t.id)) continue;   // we have a fresher view
+        if (tombSet.has(t.id)) continue;         // intentionally deleted here
+        tabsToWrite.push({
+          id: t.id,
+          name: t.name || 'Untitled',
+          sql: t.sql || '',
+          lastRunAt: t.lastRunAt || 0,
+          sqlOfLastRun: t.sqlOfLastRun || '',
+          pinned: t.pinned === true,
+          maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
+          trace: t.trace === true,
+        });
+      }
+      // Carry forward tombstones recorded by other windows so a deletion
+      // there isn't undone by the merge here.
+      if (Array.isArray(onDisk.deletedTabIds)) {
+        for (const id of onDisk.deletedTabIds) tombSet.add(id);
+      }
+    }
+
+    // Cap tombstones FIFO so the snapshot can't grow without bound. 500 is
+    // far more than any real session would close.
+    const tombArr = [...tombSet];
+    const cappedTombs = tombArr.length > 500 ? tombArr.slice(tombArr.length - 500) : tombArr;
+    state.workspace.deletedTabIds = cappedTombs;
+
     const snapshot = {
       activeTabId: state.workspace.activeTabId,
-      tabs: state.workspace.tabs.map(t => ({
-        id: t.id,
-        name: t.name,
-        sql: t.sql,
-        lastRunAt: t.lastRunAt,
-        sqlOfLastRun: t.sqlOfLastRun,
-        pinned: t.pinned === true,
-        maxRows: t.maxRows,
-        trace: t.trace === true,
-        // Runtime-only fields (running, abortController, etc.) are
-        // intentionally omitted — a reload should always start clean.
-      })),
+      tabs: tabsToWrite,
+      deletedTabIds: cappedTombs,
     };
-    writeJson(STORE.workspace(name), snapshot);
+    const ok = writeJson(STORE.workspace(name), snapshot);
+    if (!ok) {
+      // Most likely cause is localStorage quota exhaustion (a few large SQL
+      // pastes can do it). Loud-fail to the console every time so it shows
+      // up in dev tools, and pop a one-time modal so the user knows their
+      // tabs aren't being saved before they restart and lose work.
+      console.warn('[DatumIngest] Failed to persist workspace — localStorage write returned false. ' +
+                   'Likely quota exceeded; tab changes are not being saved.');
+      if (!persistFailureNotified) {
+        persistFailureNotified = true;
+        try {
+          alertModal('Tabs are not being saved',
+            'localStorage rejected the workspace snapshot — usually because the per-origin storage quota is full. ' +
+            'New tabs and edits will be lost on reload until space is freed (close large tabs or clear site data).');
+        } catch { /* alertModal may not be ready during early boot */ }
+      }
+    }
   }
 
   // ===== State =====
@@ -1072,6 +1208,10 @@
     IDB.deleteResult(workspaceName(), id).catch(err =>
       console.warn(`Couldn't delete IDB result for tab ${id}:`, err));
     state.workspace.tabs = state.workspace.tabs.filter(t => t.id !== id);
+    // Record a tombstone so the multi-window merge in persistWorkspace
+    // doesn't resurrect this tab from a stale on-disk snapshot.
+    if (!Array.isArray(state.workspace.deletedTabIds)) state.workspace.deletedTabIds = [];
+    state.workspace.deletedTabIds.push(id);
     if (state.workspace.tabs.length === 0) {
       state.workspace.tabs.push(freshTab(1));
     }
@@ -1431,6 +1571,10 @@
     const tab = activeTab();
     const results = document.getElementById('results-pane');
     const elapsed = document.getElementById('elapsed');
+    // Revoke any media object URLs from the previous render — the
+    // upcoming innerHTML wipe detaches the elements, but the underlying
+    // blobs would remain pinned until the page unloads otherwise.
+    revokeMediaObjectUrls();
     results.innerHTML = '';
     elapsed.textContent = '';
     if (!tab) return;
@@ -1621,23 +1765,92 @@
     }
   }
 
+  // Object URLs created for the currently-rendered media cells. Tracked so
+  // we can revoke them on the next render — without revocation the browser
+  // would hold the underlying blobs alive indefinitely (a few MB per image
+  // adds up across runs).
+  let mediaObjectUrls = [];
+  function revokeMediaObjectUrls() {
+    for (const u of mediaObjectUrls) URL.revokeObjectURL(u);
+    mediaObjectUrls = [];
+  }
+
+  // Decode base64 → Blob → object URL. Used in place of `data:` URLs for
+  // image / audio / video cells: blob URLs aren't subject to Chromium's
+  // ~2 MB URL-length limit, so right-click "Open image in new tab" works
+  // reliably regardless of the image's encoded size. Returned URLs are
+  // tracked in `mediaObjectUrls` and revoked on the next render.
+  function dataB64ToBlobUrl(b64, mime) {
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([arr], { type: mime }));
+    mediaObjectUrls.push(url);
+    return url;
+  }
+
+  // Hover-revealed copy button. `getText` is a thunk so JSON cells can copy
+  // their pretty-printed display text (which the renderer computes once
+  // and stores on the <pre>) without us having to capture it eagerly.
+  // Skipped for media cells — copying base64 image bytes isn't useful and
+  // would clobber the clipboard with megabytes of text.
+  const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6">'
+    + '<rect x="9" y="9" width="11" height="11" rx="1.5"></rect>'
+    + '<path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
+  const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">'
+    + '<polyline points="5 12 10 17 19 7"></polyline></svg>';
+
+  function addCopyButton(td, getText) {
+    const btn = document.createElement('button');
+    btn.className = 'cell-copy';
+    btn.type = 'button';
+    btn.title = 'Copy';
+    btn.setAttribute('aria-label', 'Copy cell value');
+    btn.innerHTML = COPY_ICON_SVG;
+    btn.addEventListener('click', async (e) => {
+      // Don't bubble into the cell — image cells handle clicks for the
+      // lightbox, and we don't want a stray copy click to also expand.
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(getText());
+        btn.classList.add('copied');
+        btn.innerHTML = CHECK_ICON_SVG;
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = COPY_ICON_SVG;
+        }, 900);
+      } catch (err) {
+        console.warn('[DatumIngest] clipboard.writeText failed:', err);
+      }
+    });
+    td.appendChild(btn);
+  }
+
   function renderCell(cell) {
     const td = document.createElement('td');
     if (cell.kind === 'null') {
       td.classList.add('null');
       td.textContent = 'NULL';
+      addCopyButton(td, () => 'NULL');
       return td;
     }
     if (cell.kind === 'media' && cell.mime) {
-      const dataUrl = `data:${cell.mime};base64,${cell.dataB64}`;
+      // Prefer blob URLs over `data:` URLs: Chrome disables "Open image in
+      // new tab" for data URLs longer than ~2 MB (so a large image renders
+      // fine inline but loses the context-menu option), while blob URLs
+      // navigate cleanly at any size.
+      const url = dataB64ToBlobUrl(cell.dataB64, cell.mime);
       let media;
       if (cell.mime.startsWith('image/')) {
         media = document.createElement('img');
-        media.src = dataUrl; media.alt = ''; media.loading = 'lazy';
+        media.src = url; media.alt = '';
+        media.title = 'Click to expand';
+        media.addEventListener('click', () => openImageLightbox(url));
       } else if (cell.mime.startsWith('audio/')) {
-        media = document.createElement('audio'); media.controls = true; media.src = dataUrl;
+        media = document.createElement('audio'); media.controls = true; media.src = url;
       } else if (cell.mime.startsWith('video/')) {
-        media = document.createElement('video'); media.controls = true; media.src = dataUrl;
+        media = document.createElement('video'); media.controls = true; media.src = url;
       } else {
         media = document.createElement('span'); media.textContent = `<${cell.mime}>`;
       }
@@ -1661,11 +1874,13 @@
       catch { /* fall back to raw text */ }
       pre.textContent = display;
       td.appendChild(pre);
+      addCopyButton(td, () => pre.textContent);
       return td;
     }
     const pre = document.createElement('pre');
     pre.textContent = cell.text ?? '';
     td.appendChild(pre);
+    addCopyButton(td, () => pre.textContent);
     return td;
   }
 
@@ -1986,6 +2201,126 @@
     syncToolbarToActiveTab();
   }
 
+  // Cross-window live sync. The browser's `storage` event fires on every
+  // *other* same-origin window/tab when localStorage changes here, so this
+  // is how Window A learns about Window B's saves without a reload.
+  //
+  // Three keys are interesting:
+  //   STORE.workspace(<currentName>) — our workspace was just rewritten by
+  //     another window. Merge in any new tabs and apply remote tombstones.
+  //   STORE.workspaces — the workspace registry changed (another window
+  //     created or deleted a workspace). Refresh the dropdown.
+  //   STORE.theme — the user toggled theme in another window. Mirror it.
+  //
+  // We deliberately don't try to reconcile *content edits* on tabs that
+  // exist in both windows — picking up a remote edit mid-typing would
+  // stomp the local user's keystrokes. In-memory always wins for tabs we
+  // already have; only adds and remote-tombstone removals propagate.
+  function applyRemoteWorkspaceSnapshot(onDisk) {
+    if (!onDisk || !Array.isArray(onDisk.tabs)) return;
+
+    const inMemoryById = new Map(state.workspace.tabs.map(t => [t.id, t]));
+    const localTombs = new Set(state.workspace.deletedTabIds || []);
+    const diskTombs = new Set(Array.isArray(onDisk.deletedTabIds) ? onDisk.deletedTabIds : []);
+
+    let tabsChanged = false;
+    let activeMissing = false;
+
+    // Apply remote tombstones first — drop tabs another window deleted.
+    for (const id of diskTombs) {
+      if (localTombs.has(id)) continue;       // already gone here
+      const idx = state.workspace.tabs.findIndex(t => t.id === id);
+      if (idx === -1) continue;               // we never saw it
+      state.workspace.tabs.splice(idx, 1);
+      tabsChanged = true;
+      if (monacoModels.has(id)) {
+        monacoModels.get(id).dispose();
+        monacoModels.delete(id);
+      }
+      // IDB result was deleted by the closing window already.
+      if (id === state.workspace.activeTabId) activeMissing = true;
+    }
+
+    // Add tabs we don't have. Skip anything we tombstoned locally — our
+    // delete is fresher than disk's "still alive" view (next save will
+    // propagate the tombstone to disk).
+    for (const t of onDisk.tabs) {
+      if (!t || !t.id) continue;
+      if (inMemoryById.has(t.id)) continue;
+      if (localTombs.has(t.id)) continue;
+      if (diskTombs.has(t.id)) continue;
+      state.workspace.tabs.push({
+        id: t.id,
+        name: t.name || 'Untitled',
+        sql: t.sql || '',
+        lastResult: undefined,                 // hydrate from IDB on activation
+        lastRunAt: t.lastRunAt || 0,
+        sqlOfLastRun: t.sqlOfLastRun || '',
+        pinned: t.pinned === true,
+        maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
+        trace: t.trace === true,
+        running: false,
+        abortController: null,
+        runStartedAt: 0,
+        runningRes: null,
+        liveTickHandle: null,
+      });
+      tabsChanged = true;
+    }
+
+    // Carry forward remote tombstones into local state so our next save
+    // doesn't drop them. Cap FIFO at 500 to match persistWorkspace.
+    if (diskTombs.size > 0) {
+      const merged = new Set([...localTombs, ...diskTombs]);
+      const arr = [...merged];
+      state.workspace.deletedTabIds = arr.length > 500 ? arr.slice(arr.length - 500) : arr;
+    }
+
+    // If our active tab got tombstoned remotely, fall back to the first
+    // surviving tab. Create a fresh one if everything's gone.
+    if (activeMissing) {
+      if (state.workspace.tabs.length === 0) {
+        state.workspace.tabs.push(freshTab(1));
+      }
+      state.workspace.activeTabId = state.workspace.tabs[0].id;
+      swapEditorToActiveTab();
+      renderResultsForActiveTab();
+      syncToolbarToActiveTab();
+    }
+
+    if (tabsChanged) renderTabStrip();
+  }
+
+  function setupCrossWindowSync() {
+    window.addEventListener('storage', (e) => {
+      // Same-tab writes don't fire this event, so we'll only see real
+      // cross-window changes here.
+      if (!e.key) return;
+
+      // Workspace registry changed — refresh the dropdown so newly created
+      // workspaces from other windows show up immediately.
+      if (e.key === STORE.workspaces) {
+        rebuildWsSelect();
+        return;
+      }
+
+      // Theme toggled in another window — mirror it.
+      if (e.key === STORE.theme && e.newValue) {
+        applyTheme(e.newValue);
+        return;
+      }
+
+      // Our current workspace was rewritten somewhere else.
+      if (e.key === STORE.workspace(workspaceName())) {
+        if (!e.newValue) return;               // workspace deleted elsewhere; let beforeunload sort it out
+        let snapshot;
+        try { snapshot = JSON.parse(e.newValue); }
+        catch { return; }
+        applyRemoteWorkspaceSnapshot(snapshot);
+      }
+    });
+  }
+
   // ===== Modal helpers (alert/confirm/prompt) =====
   function showModal(buildContent) {
     return new Promise((resolve) => {
@@ -2044,6 +2379,40 @@
     });
   }
 
+  // Image lightbox. Built ad-hoc rather than via showModal so the backdrop
+  // can swallow clicks anywhere outside the image (the standard modal only
+  // closes when clicking the backdrop element directly, which would conflict
+  // with the close-button positioning). Restores body scroll and removes the
+  // Escape listener on close so multiple opens don't stack handlers.
+  function openImageLightbox(url) {
+    const root = document.getElementById('modal-root');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'lightbox-backdrop';
+    const img = document.createElement('img');
+    img.src = url; img.alt = '';
+    const close = document.createElement('button');
+    close.className = 'lightbox-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '✕';
+    backdrop.appendChild(img);
+    backdrop.appendChild(close);
+    root.appendChild(backdrop);
+
+    const dismiss = () => {
+      document.removeEventListener('keydown', onKey);
+      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
+    backdrop.addEventListener('click', (e) => {
+      // Click on the image itself shouldn't dismiss — only clicks on the
+      // surrounding backdrop or the close button.
+      if (e.target === backdrop || e.target === close) dismiss();
+    });
+    img.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('keydown', onKey);
+  }
+
   // ===== Catalog sidebar =====
   // Activity-bar-driven panel listing the user's catalog (tables, UDFs,
   // procedures, built-in functions, models) with right-click templates that
@@ -2056,6 +2425,11 @@
     width: 'datum.devweb.sidebar.width',
     collapsed: 'datum.devweb.sidebar.collapsed',
   };
+
+  // Persisted height (px) of the editor pane, restored on boot and updated
+  // on drag end. Stored as an integer; missing/invalid falls back to the
+  // CSS default (32vh).
+  const EDITOR_HEIGHT_STORE = 'datum.devweb.editorHeight';
 
   // Per-section cache so switching tabs doesn't re-fetch. Keys: 'tables',
   // 'udfs', 'procedures', 'functions', 'models'. Values: rendered HTML or
@@ -2126,6 +2500,7 @@
 
     // Drag-to-resize on the handle.
     setupSidebarResize();
+    setupEditorResultsResize();
 
     // Activate persisted section. If the sidebar was collapsed at last save,
     // we still pick a section so the activity-bar highlight is correct and
@@ -2653,6 +3028,53 @@
     });
   }
 
+  // Bottom bound is recomputed each drag from the current viewport so the
+  // results pane is guaranteed at least ~120px regardless of window size.
+  function clampEditorHeight(h) {
+    const min = 120;
+    const max = Math.max(min, window.innerHeight - 200);
+    if (!isFinite(h)) return min;
+    return Math.max(min, Math.min(max, h));
+  }
+
+  function setupEditorResultsResize() {
+    const handle = document.getElementById('editor-results-resize');
+    const pane = document.getElementById('editor-pane');
+
+    // Restore persisted height. CSS default (32vh) stays in effect when no
+    // value is saved yet — only override once the user has dragged.
+    const persisted = parseInt(localStorage.getItem(EDITOR_HEIGHT_STORE) || '', 10);
+    if (isFinite(persisted)) {
+      pane.style.height = clampEditorHeight(persisted) + 'px';
+    }
+
+    let dragStartY = 0, dragStartH = 0;
+    function onMove(e) {
+      const dy = e.clientY - dragStartY;
+      const h = clampEditorHeight(dragStartH + dy);
+      pane.style.height = h + 'px';
+    }
+    function onUp() {
+      handle.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      localStorage.setItem(EDITOR_HEIGHT_STORE, parseInt(pane.style.height, 10));
+    }
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      handle.classList.add('dragging');
+      // Suppress text selection while dragging — the cursor would otherwise
+      // grab whatever it passes over inside the editor or results table.
+      document.body.style.userSelect = 'none';
+      dragStartY = e.clientY;
+      dragStartH = pane.getBoundingClientRect().height;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
   // ===== Boot =====
   function boot() {
     applyTheme(loadTheme());
@@ -2670,6 +3092,7 @@
     document.getElementById('ws-new').addEventListener('click', newWorkspace);
     document.getElementById('ws-delete').addEventListener('click', deleteWorkspace);
     window.addEventListener('hashchange', onHashChange);
+    setupCrossWindowSync();
 
     renderTabStrip();
     initFallbackEditor();

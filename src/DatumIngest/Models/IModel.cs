@@ -59,6 +59,13 @@ public interface IModel
     DataKind OutputKind { get; }
 
     /// <summary>
+    /// For struct-output models, the ordered field descriptors of the output struct.
+    /// Returns <see langword="null"/> for non-struct outputs or when the schema is
+    /// unspecified. The default implementation returns <see langword="null"/>.
+    /// </summary>
+    IReadOnlyList<ColumnInfo>? OutputFields => null;
+
+    /// <summary>
     /// Run inference over a slice of inputs. <paramref name="inputs"/> is a row-
     /// major view: <c>inputs[r][c]</c> is column <c>c</c> of row <c>r</c>.
     /// Implementations should dispatch in one or a small number of GPU calls —

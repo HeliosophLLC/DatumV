@@ -7,7 +7,7 @@ namespace DatumIngest.DevWeb;
 
 internal static class WebCellFormatter
 {
-    public static JsonCell Format(DataValue value, Arena arena, SidecarRegistry registry)
+    public static JsonCell Format(DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
     {
         if (value.IsNull)
         {
@@ -57,29 +57,30 @@ internal static class WebCellFormatter
             }
         }
 
-        return new JsonCell("text", Text: FormatText(value, arena, registry, fields: null));
+        return new JsonCell("text", Text: FormatText(value, arena, registry, types));
     }
 
     private static string FormatText(
-        DataValue value, Arena arena, SidecarRegistry registry, IReadOnlyList<ColumnInfo>? fields)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
     {
         if (value.IsNull) return "NULL";
 
         if (value.IsArray)
         {
-            return FormatArray(value, arena, registry, fields);
+            return FormatArray(value, arena, registry, types);
         }
 
         if (value.Kind == DataKind.Struct)
         {
             DataValue[] fieldValues = value.AsStruct(arena);
+            TypeDescriptor? typeDesc = value.TypeId != 0 ? types?.GetDescriptor(value.TypeId) : null;
             string[] parts = new string[fieldValues.Length];
             for (int i = 0; i < fieldValues.Length; i++)
             {
-                string name = fields is not null && i < fields.Count ? fields[i].Name : $"f{i}";
-                IReadOnlyList<ColumnInfo>? nested =
-                    fields is not null && i < fields.Count ? fields[i].Fields : null;
-                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, nested)}";
+                string name = typeDesc?.Fields is { } tFields && i < tFields.Count
+                    ? tFields[i].Name
+                    : $"f{i}";
+                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
             }
             return "{" + string.Join(", ", parts) + "}";
         }
@@ -109,15 +110,16 @@ internal static class WebCellFormatter
     }
 
     private static string FormatArray(
-        DataValue value, Arena arena, SidecarRegistry registry, IReadOnlyList<ColumnInfo>? structFields)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
     {
         if (value.Kind == DataKind.Struct)
         {
+            ushort elementTypeId = value.TypeId;
             DataValue[][] rows = value.AsStructArray(arena, registry);
             string[] parts = new string[rows.Length];
             for (int i = 0; i < rows.Length; i++)
             {
-                parts[i] = FormatStructFromFields(rows[i], arena, registry, structFields);
+                parts[i] = FormatStructFromFields(rows[i], arena, registry, types, elementTypeId);
             }
             return "[" + string.Join(", ", parts) + "]";
         }
@@ -151,17 +153,17 @@ internal static class WebCellFormatter
     }
 
     private static string FormatStructFromFields(
-        DataValue[] fieldValues, Arena arena, SidecarRegistry registry, IReadOnlyList<ColumnInfo>? structFields)
+        DataValue[] fieldValues, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
+        ushort elementTypeId = 0)
     {
+        TypeDescriptor? typeDesc = elementTypeId != 0 ? types?.GetDescriptor(elementTypeId) : null;
         string[] parts = new string[fieldValues.Length];
         for (int i = 0; i < fieldValues.Length; i++)
         {
-            string name = structFields is not null && i < structFields.Count
-                ? structFields[i].Name
+            string name = typeDesc?.Fields is { } tFields && i < tFields.Count
+                ? tFields[i].Name
                 : $"f{i}";
-            IReadOnlyList<ColumnInfo>? nested =
-                structFields is not null && i < structFields.Count ? structFields[i].Fields : null;
-            parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, nested)}";
+            parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
         }
         return "{" + string.Join(", ", parts) + "}";
     }
