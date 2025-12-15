@@ -457,7 +457,7 @@ public sealed class SourceIndexBuilder
 
         foreach (ColumnInfo column in schema.Columns)
         {
-            if (IsAutoIndexableKind(column.Kind))
+            if (IsAutoIndexableKind(column.Kind) && column.IsArray == false)
             {
                 accumulators ??= new Dictionary<string, BitmapChunkAccumulator>(StringComparer.OrdinalIgnoreCase);
                 accumulators[column.Name] = new BitmapChunkAccumulator();
