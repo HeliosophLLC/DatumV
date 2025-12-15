@@ -3059,7 +3059,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull) return $"NULL({_kind})";
 
-        if (IsByteArrayKind) return $"UInt8[{_p1} bytes]";
+        if (IsByteArrayKind)
+        {
+            // Sidecar layout packs length across _p2/_p3 (40 bits); inline
+            // arena layout keeps length in _p1. Reading _p1 unconditionally
+            // would print the high 32 bits of the sidecar offset instead.
+            long byteLen = IsInSidecar ? SidecarLength : _p1;
+            return $"UInt8[{byteLen} bytes]";
+        }
 
         return _kind switch
         {
@@ -3086,10 +3093,23 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
-            DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
-            DataKind.Audio => $"Audio[offset={_p0}, len={_p1}]",
-            DataKind.Video => $"Video[offset={_p0}, len={_p1}]",
-            DataKind.Json => $"Json[offset={_p0}, len={_p1}]",
+            // Sidecar-backed values pack the 64-bit offset across _p0/_p1
+            // and the 40-bit length across _p2/_p3, so reading _p0/_p1 as
+            // offset/length only works for arena-backed values. Branching
+            // on IsInSidecar restores the real length when the bytes live
+            // in a .datum-blob sidecar.
+            DataKind.Image => IsInSidecar
+                ? $"Image[offset={SidecarOffset}, len={SidecarLength}]"
+                : $"Image[offset={_p0}, len={_p1}]",
+            DataKind.Audio => IsInSidecar
+                ? $"Audio[offset={SidecarOffset}, len={SidecarLength}]"
+                : $"Audio[offset={_p0}, len={_p1}]",
+            DataKind.Video => IsInSidecar
+                ? $"Video[offset={SidecarOffset}, len={SidecarLength}]"
+                : $"Video[offset={_p0}, len={_p1}]",
+            DataKind.Json => IsInSidecar
+                ? $"Json[offset={SidecarOffset}, len={SidecarLength}]"
+                : $"Json[offset={_p0}, len={_p1}]",
             DataKind.Struct => $"Struct({_meta} fields)",
             _ => _kind.ToString(),
         };
