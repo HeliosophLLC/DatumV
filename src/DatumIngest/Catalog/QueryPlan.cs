@@ -88,7 +88,8 @@ internal sealed class QueryPlan : IQueryPlan
         // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
             cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
-            store: _hoistStore)
+            store: _hoistStore,
+            types: batchContext?.Types)
         {
             // Pull the catalog-level tracer (if any) into the per-query
             // context. Setting / clearing _catalog.ModelTracer at runtime

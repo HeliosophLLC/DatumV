@@ -153,7 +153,10 @@ public static class DataValueRetention
         {
             retentionFields[i] = Stabilize(sourceFields[i], sourceStore, retentionStore);
         }
-        return DataValue.FromStruct(retentionFields, retentionStore);
+        // Preserve the TypeId — the rebuilt struct describes the same shape, and
+        // downstream consumers (renderers, field-by-name access) need the registry
+        // lookup to keep working after stabilisation.
+        return DataValue.FromStruct(retentionFields, retentionStore, value.TypeId);
     }
 
     /// <summary>
@@ -211,6 +214,6 @@ public static class DataValueRetention
             }
             stabilizedElements[i] = retentionFields;
         }
-        return DataValue.FromStructArray(stabilizedElements, retentionStore);
+        return DataValue.FromStructArray(stabilizedElements, retentionStore, value.TypeId);
     }
 }

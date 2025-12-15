@@ -553,6 +553,54 @@ public sealed class BatchExecutorTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task ForIn_RowVariable_StampsTypeIdWithSourceColumnNames()
+    {
+        // The struct DataValue assigned to @row must carry a TypeId that resolves to
+        // a TypeDescriptor with the source query's column names. Without this, downstream
+        // renderers (DevWeb formatter, anywhere a Struct value is displayed) fall back to
+        // "f0..fN" because they have no schema to consult. Pins the registry-stamping
+        // contract in ExecuteForInAsync at the place where the row struct is materialised.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id", "amount"],
+            [1, 10],
+            [2, 20]);
+
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+            "FOR @row IN (SELECT id, amount FROM orders) SELECT @row");
+        BatchExecutor exec = new(catalog);
+
+        // Snapshot inside the callback because the RowBatch is disposed once the
+        // event has been consumed by the host. We grab the descriptor by value;
+        // the registry itself outlives the batch (it's per-query, not per-batch).
+        List<TypeDescriptor?> capturedDescriptors = [];
+        await exec.RunWithEventsAsync(
+            stmts,
+            evt =>
+            {
+                if (evt is CellRowBatchEvent r && r.Batch.Count > 0)
+                {
+                    DataValue cell = r.Batch[0][0];
+                    Assert.Equal(DataKind.Struct, cell.Kind);
+                    Assert.False(cell.IsArray);
+
+                    TypeRegistry? types = r.Batch.Types;
+                    capturedDescriptors.Add(types?.GetDescriptor(cell.TypeId));
+                }
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+
+        // One non-empty SELECT @row batch per source row.
+        Assert.Equal(2, capturedDescriptors.Count);
+        foreach (TypeDescriptor? desc in capturedDescriptors)
+        {
+            Assert.NotNull(desc);
+            Assert.NotNull(desc!.Fields);
+            Assert.Equal(["id", "amount"], desc.Fields!.Select(f => f.Name).ToArray());
+        }
+    }
+
+    [Fact]
     public async Task ForIn_OuterVariable_VisibleInsideBody()
     {
         // Body should still see variables declared in the enclosing scope —

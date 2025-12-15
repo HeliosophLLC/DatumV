@@ -58,6 +58,7 @@ public sealed class BatchContext : IDisposable
         // once on Dispose. Mirrors the QueryPlan._hoistStore pattern.
         VariableStore.AddReference();
         VariableScope = new VariableScope();
+        Types = new TypeRegistry();
     }
 
     /// <summary>
@@ -75,6 +76,15 @@ public sealed class BatchContext : IDisposable
     /// <c>VariableExpression</c> at evaluation time.
     /// </summary>
     public VariableScope VariableScope { get; }
+
+    /// <summary>
+    /// Procedure-lifetime type registry for self-describing struct/array values.
+    /// Shared across every <see cref="DatumIngest.Execution.ExecutionContext"/> spun up
+    /// for queries inside this batch (FOR-loop sources, body queries, EXEC bodies, …)
+    /// so a TypeId stamped on a row struct in one query stays resolvable when the same
+    /// struct appears in a downstream query within the same procedural batch.
+    /// </summary>
+    public TypeRegistry Types { get; }
 
     /// <summary>
     /// Number of procedure-call frames currently above this context's

@@ -1016,6 +1016,7 @@ public sealed class BatchExecutor
         IQueryPlan plan = _catalog.Plan(sourceQuery);
 
         IReadOnlyList<string>? fieldNames = null;
+        ushort rowTypeId = 0;
         bool broke = false;
 
         await foreach (RowBatch batch in plan
@@ -1041,7 +1042,22 @@ public sealed class BatchExecutor
                     fields[j] = DataValueRetention.Stabilize(
                         row[j], batch.Arena, batchContext.VariableStore);
                 }
-                DataValue rowStruct = DataValue.FromStruct(fields, batchContext.VariableStore);
+                // Intern the row schema once into the batch-shared registry. Sharing
+                // the registry across all queries in the batch (FOR source, body
+                // SELECTs, …) is what makes the type-id resolvable from inside the
+                // body — without it the body's renderers fall back to f0..fN.
+                if (rowTypeId == 0)
+                {
+                    StructFieldDescriptor[] fieldDescriptors = new StructFieldDescriptor[colCount];
+                    for (int j = 0; j < colCount; j++)
+                    {
+                        int fieldTypeId = batchContext.Types.InternScalarType(fields[j].Kind);
+                        fieldDescriptors[j] = new StructFieldDescriptor(fieldNames[j], fieldTypeId);
+                    }
+                    rowTypeId = (ushort)batchContext.Types.InternStructType(fieldDescriptors);
+                }
+                DataValue rowStruct = DataValue.FromStruct(
+                    fields, batchContext.VariableStore, rowTypeId);
 
                 batchContext.VariableScope.PushFrame();
                 try

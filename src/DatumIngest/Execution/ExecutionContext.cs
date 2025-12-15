@@ -56,6 +56,11 @@ public sealed class ExecutionContext
   /// Optional value store for reference-type payloads. Defaults to a new <see cref="Model.Arena"/>
   /// if not provided.
   /// </param>
+  /// <param name="types">
+  /// Optional pre-existing type registry to share across multiple query contexts (e.g. across
+  /// queries within a single procedural batch). When <see langword="null"/>, a fresh registry
+  /// is allocated per context.
+  /// </param>
   public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
@@ -64,7 +69,8 @@ public sealed class ExecutionContext
         Pool pool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
-        Arena? store = null)
+        Arena? store = null,
+        TypeRegistry? types = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
@@ -88,7 +94,10 @@ public sealed class ExecutionContext
         }
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
-        Types = new TypeRegistry();
+        // When a caller passes a TypeRegistry (typically a procedural BatchContext
+        // sharing one across loop iterations), reuse it so type-ids stamped on
+        // values in one query remain resolvable in downstream queries.
+        Types = types ?? new TypeRegistry();
     }
 
 
