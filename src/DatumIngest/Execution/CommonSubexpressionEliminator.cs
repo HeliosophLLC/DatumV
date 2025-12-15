@@ -23,7 +23,7 @@ namespace DatumIngest.Execution;
 /// <para>
 /// <strong>Eligibility.</strong> A subtree is CSE-candidate when:
 /// <list type="bullet">
-///   <item><description>Its fingerprint (<see cref="QueryExplainer.FormatExpression"/>) appears at <c>≥ 2</c> sites.</description></item>
+///   <item><description>Its fingerprint (<see cref="QueryExplainer.Fingerprint"/>) appears at <c>≥ 2</c> sites. Identifier casing is canonicalised — <c>UPPER(a)</c> and <c>upper(A)</c> share one bucket.</description></item>
 ///   <item><description>Every leaf function is pure — <see cref="IScalarFunction.IsPure"/> = <see langword="true"/>; aggregates, models, and unknown functions disqualify.</description></item>
 ///   <item><description>It is non-trivial — not just a <see cref="ColumnReference"/> or <see cref="LiteralExpression"/> (those are already cheap).</description></item>
 ///   <item><description>It does <em>not</em> reference any LET-bound name — keeps the hoist placement (RowEnricher above source, below the projection) sound.</description></item>
@@ -623,7 +623,7 @@ public static class CommonSubexpressionEliminator
             return;
         }
 
-        string fp = QueryExplainer.FormatExpression(expression);
+        string fp = QueryExplainer.Fingerprint(expression);
         if (!entries.TryGetValue(fp, out CrossClauseEntry? entry))
         {
             entry = new CrossClauseEntry(expression);
@@ -734,7 +734,7 @@ public static class CommonSubexpressionEliminator
         {
             foreach (LetBinding binding in project.LetBindings)
             {
-                string fp = QueryExplainer.FormatExpression(binding.Expression);
+                string fp = QueryExplainer.Fingerprint(binding.Expression);
                 letBodyToName.TryAdd(fp, binding.Name);
             }
         }
@@ -797,7 +797,7 @@ public static class CommonSubexpressionEliminator
             {
                 LetBinding binding = project.LetBindings[i];
                 Expression bindingBody = binding.Expression;
-                string bindingFingerprint = QueryExplainer.FormatExpression(bindingBody);
+                string bindingFingerprint = QueryExplainer.Fingerprint(bindingBody);
 
                 Expression rewrittenBody;
                 if (letBodyToName.TryGetValue(bindingFingerprint, out string? boundName)
@@ -878,7 +878,7 @@ public static class CommonSubexpressionEliminator
             return;
         }
 
-        string fingerprint = QueryExplainer.FormatExpression(expression);
+        string fingerprint = QueryExplainer.Fingerprint(expression);
         if (entries.TryGetValue(fingerprint, out FingerprintEntry existing))
         {
             entries[fingerprint] = existing with { Count = existing.Count + 1 };
@@ -1041,7 +1041,7 @@ public static class CommonSubexpressionEliminator
     private static Expression RewriteWithHoists(
         Expression expression, IReadOnlyDictionary<string, string> hoists)
     {
-        string fingerprint = QueryExplainer.FormatExpression(expression);
+        string fingerprint = QueryExplainer.Fingerprint(expression);
         if (hoists.TryGetValue(fingerprint, out string? hoistedColumn))
         {
             return new ColumnReference(TableName: null, ColumnName: hoistedColumn);

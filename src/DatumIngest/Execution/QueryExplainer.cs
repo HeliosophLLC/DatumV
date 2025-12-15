@@ -814,6 +814,82 @@ public static class QueryExplainer
         };
     }
 
+    /// <summary>
+    /// Fingerprint variant of <see cref="FormatExpression"/> for plan-time
+    /// dedup keys (CSE, model-hoister fingerprints). Identifier-shaped fields
+    /// — function names, column names, table aliases — are lower-cased so
+    /// case-different but semantically-equivalent calls
+    /// (<c>UPPER(a)</c> vs <c>upper(a)</c>, <c>concat(A, b)</c> vs
+    /// <c>concat(a, b)</c>) collide on a single fingerprint and dedup.
+    /// Literal-shaped fields are kept verbatim so genuinely-different calls
+    /// (<c>concat(a, 'FOO')</c> vs <c>concat(a, 'foo')</c>) stay distinct.
+    /// User-visible formatting goes through <see cref="FormatExpression"/>
+    /// — that path preserves the user's casing.
+    /// </summary>
+    public static string Fingerprint(Expression expression)
+    {
+        return expression switch
+        {
+            ColumnReference col => col.TableName is not null
+                ? $"{col.TableName.ToLowerInvariant()}.{col.ColumnName.ToLowerInvariant()}"
+                : col.ColumnName.ToLowerInvariant(),
+            VariableExpression v => $"@{v.Name.ToLowerInvariant()}",
+            LiteralExpression lit => FormatLiteral(lit.Value),
+            BinaryExpression bin => $"{Fingerprint(bin.Left)} {FormatBinaryOp(bin.Operator)} {Fingerprint(bin.Right)}",
+            LikeExpression like => $"{Fingerprint(like.Expression)} {(like.CaseInsensitive ? "ILIKE" : "LIKE")} {Fingerprint(like.Pattern)} ESCAPE {Fingerprint(like.EscapeCharacter)}",
+            UnaryExpression unary => FingerprintUnary(unary),
+            FunctionCallExpression func => $"{func.FunctionName.ToLowerInvariant()}({(func.Distinct ? "DISTINCT " : "")}{string.Join(", ", func.Arguments.Select(Fingerprint))})",
+            InExpression inExpr => $"{Fingerprint(inExpr.Expression)} {(inExpr.Negated ? "NOT IN" : "IN")} ({string.Join(", ", inExpr.Values.Select(Fingerprint))})",
+            BetweenExpression between => $"{Fingerprint(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {Fingerprint(between.Low)} AND {Fingerprint(between.High)}",
+            IsNullExpression isNull => $"{Fingerprint(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
+            CastExpression cast => $"CAST({Fingerprint(cast.Expression)} AS {cast.TargetType})",
+            CaseExpression caseExpr => FingerprintCaseExpression(caseExpr),
+            WindowFunctionCallExpression window => FingerprintWindowFunctionCall(window),
+            _ => expression.ToString() ?? "?",
+        };
+    }
+
+    private static string FingerprintUnary(UnaryExpression unary)
+        => unary.Operator switch
+        {
+            UnaryOperator.Negate => $"-({Fingerprint(unary.Operand)})",
+            UnaryOperator.Not => $"NOT ({Fingerprint(unary.Operand)})",
+            _ => $"({unary.Operator} {Fingerprint(unary.Operand)})",
+        };
+
+    private static string FingerprintCaseExpression(CaseExpression caseExpr)
+    {
+        System.Text.StringBuilder sb = new();
+        sb.Append("CASE");
+        if (caseExpr.Operand is not null)
+        {
+            sb.Append(' ').Append(Fingerprint(caseExpr.Operand));
+        }
+        foreach (WhenClause when in caseExpr.WhenClauses)
+        {
+            sb.Append(" WHEN ").Append(Fingerprint(when.Condition))
+              .Append(" THEN ").Append(Fingerprint(when.Result));
+        }
+        if (caseExpr.ElseResult is not null)
+        {
+            sb.Append(" ELSE ").Append(Fingerprint(caseExpr.ElseResult));
+        }
+        sb.Append(" END");
+        return sb.ToString();
+    }
+
+    private static string FingerprintWindowFunctionCall(WindowFunctionCallExpression window)
+    {
+        // Window calls are never CSE candidates today (their lifecycle is
+        // owned by the window-rewrite pass), but we keep a Fingerprint
+        // implementation symmetric with FormatExpression in case some
+        // future caller inspects them. Identifier canonicalisation extends
+        // to the function name; the OVER clause is rendered case-sensitively
+        // since the existing FormatWindowFunctionCall doesn't expose a
+        // recursive hook we'd want to replicate.
+        return $"{window.FunctionName.ToLowerInvariant()}({string.Join(", ", window.Arguments.Select(Fingerprint))}) OVER (...)";
+    }
+
     private static string FormatBinaryOp(BinaryOperator op)
     {
         return op switch
