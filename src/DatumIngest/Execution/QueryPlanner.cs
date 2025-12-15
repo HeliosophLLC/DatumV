@@ -4456,7 +4456,10 @@ public sealed class QueryPlanner
             return cteSource;
         }
 
-        ITableProvider provider = _catalog[tableRef.Name];
+        string tableLookupKey = tableRef.SchemaName is not null
+            ? $"{tableRef.SchemaName}.{tableRef.Name}"
+            : tableRef.Name;
+        ITableProvider provider = _catalog[tableLookupKey];
 
         // Projection pushdown: compute required columns for this table's alias.
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;

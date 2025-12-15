@@ -67,14 +67,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this.Tables = new();
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
 
-        // system_udfs / system_procedures are auto-registered against the
-        // catalog's registries so `SELECT * FROM system_udfs` (and the
-        // procedure equivalent) work without any host setup. Models are
-        // different — they require a ModelCatalog injected by the host —
-        // but the UDF and procedure registries are intrinsic to every
-        // TableCatalog.
+        // Auto-register intrinsic system tables. information_schema providers
+        // take `this` because they enumerate the catalog at scan time;
+        // construction is safe because no scan occurs during initialization.
         Add(new Providers.UdfsTableProvider(pool, _udfs));
         Add(new Providers.ProceduresTableProvider(pool, _procedures));
+        Add(new Providers.InformationSchemaTablesProvider(pool, this));
+        Add(new Providers.InformationSchemaColumnsProvider(pool, this));
+        Add(new Providers.InformationSchemaSchemataProvider(pool));
 
         // Replay any persisted UDFs / procedures into the registries.
         // Done after the system table registrations so the rehydrated

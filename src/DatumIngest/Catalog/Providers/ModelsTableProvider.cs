@@ -47,16 +47,13 @@ namespace DatumIngest.Catalog.Providers;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class ModelsTableProvider : ITableProvider
+public sealed class ModelsTableProvider : NonSeekableTableProviderBase
 {
-    private const int DefaultBatchSize = 64;
-
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system_models";
 
     private static readonly Schema _schema = BuildSchema();
 
-    private readonly Pool _pool;
     private readonly ModelCatalog _modelCatalog;
 
     /// <summary>
@@ -66,44 +63,19 @@ public sealed class ModelsTableProvider : ITableProvider
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="modelCatalog">The catalog whose entries become rows.</param>
-    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog)
+    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog) : base(pool, TableName)
     {
-        _pool = pool;
         _modelCatalog = modelCatalog;
-        Name = TableName;
     }
 
     /// <inheritdoc/>
-    public string Name { get; }
+    public override long GetRowCount() => _modelCatalog.Entries.Count;
 
     /// <inheritdoc/>
-    public bool Seekable => false;
-
-    /// <summary>
-    /// Gets whether <see cref="Dispose"/> has been called.
-    /// </summary>
-    public bool Disposed { get; private set; }
+    public override Schema GetSchema() => _schema;
 
     /// <inheritdoc/>
-    public void Dispose()
-    {
-        Disposed = true;
-    }
-
-    /// <inheritdoc/>
-    public long GetRowCount() => _modelCatalog.Entries.Count;
-
-    /// <inheritdoc/>
-    public Schema GetSchema() => _schema;
-
-    /// <inheritdoc/>
-    public Manifest.QueryResultsManifest? GetManifest() => null;
-
-    /// <inheritdoc/>
-    public Indexing.SourceIndex? GetSourceIndex() => null;
-
-    /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ScanAsync(
+    public override async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
@@ -132,9 +104,9 @@ public sealed class ModelsTableProvider : ITableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            batch ??= _pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
+            batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
 
-            DataValue[] values = _pool.RentDataValues(_schema.Columns.Count);
+            DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
             FillRow(values, entries[i], modelDirectory, batch.Arena);
             batch.Add(values);
 
@@ -151,13 +123,6 @@ public sealed class ModelsTableProvider : ITableProvider
         }
 
         await Task.CompletedTask;
-    }
-
-    /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
-    {
-        throw new NotSupportedException(
-            $"{nameof(ModelsTableProvider)} does not support seek sessions; use ScanAsync.");
     }
 
     /// <summary>

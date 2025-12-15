@@ -29,16 +29,13 @@ namespace DatumIngest.Catalog.Providers;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class ProceduresTableProvider : ITableProvider
+public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
 {
-    private const int DefaultBatchSize = 64;
-
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system_procedures";
 
     private static readonly Schema _schema = BuildSchema();
 
-    private readonly Pool _pool;
     private readonly ProcedureRegistry _registry;
 
     /// <summary>
@@ -48,39 +45,19 @@ public sealed class ProceduresTableProvider : ITableProvider
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="registry">The registry whose entries become rows.</param>
-    public ProceduresTableProvider(Pool pool, ProcedureRegistry registry)
+    public ProceduresTableProvider(Pool pool, ProcedureRegistry registry) : base(pool, TableName)
     {
-        _pool = pool;
         _registry = registry;
-        Name = TableName;
     }
 
     /// <inheritdoc/>
-    public string Name { get; }
+    public override long GetRowCount() => _registry.Entries.Count;
 
     /// <inheritdoc/>
-    public bool Seekable => false;
-
-    /// <summary>Whether <see cref="Dispose"/> has been called.</summary>
-    public bool Disposed { get; private set; }
+    public override Schema GetSchema() => _schema;
 
     /// <inheritdoc/>
-    public void Dispose() => Disposed = true;
-
-    /// <inheritdoc/>
-    public long GetRowCount() => _registry.Entries.Count;
-
-    /// <inheritdoc/>
-    public Schema GetSchema() => _schema;
-
-    /// <inheritdoc/>
-    public Manifest.QueryResultsManifest? GetManifest() => null;
-
-    /// <inheritdoc/>
-    public Indexing.SourceIndex? GetSourceIndex() => null;
-
-    /// <inheritdoc/>
-    public async IAsyncEnumerable<RowBatch> ScanAsync(
+    public override async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
@@ -106,9 +83,9 @@ public sealed class ProceduresTableProvider : ITableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            batch ??= _pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
+            batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
 
-            DataValue[] values = _pool.RentDataValues(_schema.Columns.Count);
+            DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
             FillRow(values, entries[i], batch.Arena);
             batch.Add(values);
 
@@ -125,13 +102,6 @@ public sealed class ProceduresTableProvider : ITableProvider
         }
 
         await Task.CompletedTask;
-    }
-
-    /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
-    {
-        throw new NotSupportedException(
-            $"{nameof(ProceduresTableProvider)} does not support seek sessions; use ScanAsync.");
     }
 
     private static void FillRow(DataValue[] cells, ProcedureDescriptor descriptor, Arena arena)

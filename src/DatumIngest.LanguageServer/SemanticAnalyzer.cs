@@ -272,11 +272,15 @@ internal sealed class SemanticAnalyzer
         switch (source)
         {
             case TableReference tableReference:
-                if (!_tableColumnTypes.ContainsKey(tableReference.Name) &&
-                    !opaqueAliases.Contains(tableReference.Name))
+                string tableLookupName = tableReference.SchemaName is not null
+                    ? $"{tableReference.SchemaName}.{tableReference.Name}"
+                    : tableReference.Name;
+                if (!_tableColumnTypes.ContainsKey(tableLookupName) &&
+                    !opaqueAliases.Contains(tableLookupName) &&
+                    !IsKnownVirtualSchemaTable(tableReference.SchemaName, tableReference.Name))
                 {
                     EmitWarning(diagnostics, tableReference.Span,
-                        $"Unknown table '{tableReference.Name}'.");
+                        $"Unknown table '{tableLookupName}'.");
                 }
 
                 // Register both alias and raw name so column references
@@ -909,6 +913,22 @@ internal sealed class SemanticAnalyzer
                 $"Unknown table or alias '{tableName}'.");
         }
     }
+
+    // Virtual schema names and their valid table names. Kept in sync with
+    // CompletionProvider.VirtualSchemaTables and the registered providers.
+    private static readonly Dictionary<string, HashSet<string>> KnownVirtualSchemas =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["information_schema"] = new(StringComparer.OrdinalIgnoreCase)
+                { "tables", "columns", "schemata" },
+            ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
+                { "providers", "functions", "function_parameters", "statistics", "indexes", "interactions" },
+        };
+
+    private static bool IsKnownVirtualSchemaTable(string? schemaName, string tableName)
+        => schemaName is not null
+            && KnownVirtualSchemas.TryGetValue(schemaName, out HashSet<string>? tables)
+            && tables.Contains(tableName);
 
     /// <summary>
     /// Creates a <see cref="DiagnosticSeverity.Warning"/> diagnostic from
