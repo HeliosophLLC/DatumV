@@ -354,6 +354,9 @@ public sealed class BPlusTreeBulkLoaderTests : ServiceTestBase
     [Fact]
     public void Build_LongStringKeys_ProducesValidTree()
     {
+        using Arena arena = new();
+        arena.AddReference();
+
         // Use strings ~500 chars each — enough that only a handful of separator keys
         // fit per 8 KiB internal page, forcing the probing loop.
         int entryCount = 500;
@@ -366,7 +369,7 @@ public sealed class BPlusTreeBulkLoaderTests : ServiceTestBase
             int chunkIndex = index / chunkSize;
             long rowOffset = index % chunkSize;
             entries[index] = new ValueIndexEntry(
-                DataValue.FromString(key), chunkIndex, rowOffset);
+                DataValue.FromString(key, arena), chunkIndex, rowOffset);
         }
 
         Array.Sort(entries, (left, right) =>

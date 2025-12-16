@@ -25,11 +25,12 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         SourceIndexBuilder builder = new(chunkSize: 10);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
+        ColumnLookup lookup = new(["flag"]);
+
         for (int i = 0; i < 10; i++)
         {
-            string[] names = ["flag"];
             DataValue[] values = [DataValue.FromBoolean(i % 2 == 0)];
-            incremental.AddRow(new Row(names, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -47,13 +48,14 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         SourceIndexBuilder builder = new(chunkSize: 3);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
+        ColumnLookup lookup = new(["cat"]);
+
         string[] categories = ["A", "B"];
 
         for (int i = 0; i < 6; i++)
         {
-            string[] names = ["cat"];
             DataValue[] values = [DataValue.FromString(categories[i % 2])];
-            incremental.AddRow(new Row(names, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -78,11 +80,12 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         SourceIndexBuilder builder = new(chunkSize: count);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
+        ColumnLookup lookup = new(["id"]);
+
         for (int i = 0; i < count; i++)
         {
-            string[] names = ["id"];
             DataValue[] values = [DataValue.FromFloat32((float)i)];
-            incremental.AddRow(new Row(names, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -100,11 +103,12 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         SourceIndexBuilder builder = new(chunkSize: 5);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
+        ColumnLookup lookup = new(["color"]);
+
         for (int i = 0; i < 5; i++)
         {
-            string[] names = ["color"];
             DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(new Row(names, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();
@@ -149,11 +153,12 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         SourceIndexBuilder builder = new(chunkSize: 5, indexColumns: indexColumns);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
+        ColumnLookup lookup = new(["color"]);
+
         for (int i = 0; i < 5; i++)
         {
-            string[] names = ["color"];
             DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(new Row(names, values), Store);
+            incremental.AddRow(MakeRow(lookup, values), Store);
         }
 
         SourceIndex index = incremental.Finalize();

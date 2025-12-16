@@ -304,8 +304,11 @@ public sealed class BPlusTreePageCodecTests : ServiceTestBase
     public void EncodeInternalPage_OversizedKeys_ThrowsInvalidOperationException()
     {
         // A single string key larger than the 8 KiB page capacity guarantees overflow.
+        using Arena arena = new();
+        arena.AddReference();
+
         string longKey = new('x', 8192);
-        DataValue[] keys = [DataValue.FromString(longKey)];
+        DataValue[] keys = [DataValue.FromString(longKey, arena)];
         uint[] children = [0, 1];
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(

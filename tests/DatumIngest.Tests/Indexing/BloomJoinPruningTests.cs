@@ -26,16 +26,17 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_WithBloomFilters_PrunesChunksWithNoMatchingKeys()
     {
+        ColumnLookup lookup = new(["id", "value"]);
         // Arrange: Build a left (probe) side with 3 chunks of 2 rows each.
         // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("value", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("value", DataValue.FromString("b"))),
-            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("value", DataValue.FromString("c"))),
-            MakeRow(("id", DataValue.FromFloat32(4.0f)), ("value", DataValue.FromString("d"))),
-            MakeRow(("id", DataValue.FromFloat32(5.0f)), ("value", DataValue.FromString("e"))),
-            MakeRow(("id", DataValue.FromFloat32(6.0f)), ("value", DataValue.FromString("f"))),
+            MakeRow(lookup, DataValue.FromFloat32(1.0f), DataValue.FromString("a")),
+            MakeRow(lookup, DataValue.FromFloat32(2.0f), DataValue.FromString("b")),
+            MakeRow(lookup, DataValue.FromFloat32(3.0f), DataValue.FromString("c")),
+            MakeRow(lookup, DataValue.FromFloat32(4.0f), DataValue.FromString("d")),
+            MakeRow(lookup, DataValue.FromFloat32(5.0f), DataValue.FromString("e")),
+            MakeRow(lookup, DataValue.FromFloat32(6.0f), DataValue.FromString("f")),
         ];
 
         // Build bloom filters per chunk for the "id" column.
@@ -90,8 +91,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
 
         // Right (build) side: only has key value 3.0 — should match chunk 1 only.
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(3.0f)), ("data", DataValue.FromString("match"))));
+        MockOperator rightSide = CreateMockOperator(["rid", "data"], [[3.0f, "match"]]);
 
         // Create join: left.id = right.rid
         JoinOperator join = new(
@@ -123,8 +123,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         // All chunks contain values that might match — nothing should be pruned.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f))),
+            MakeRow(["id"], DataValue.FromFloat32(1.0f)),
+            MakeRow(["id"], DataValue.FromFloat32(2.0f)),
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
@@ -154,8 +154,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
 
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(1.0f))));
+        MockOperator rightSide = CreateMockOperator(["rid"], [[1.0f]]);
 
         JoinOperator join = new(
             scanOperator,
@@ -181,8 +180,8 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         // Source index exists but has no bloom filters — no pruning should occur.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f))),
+            MakeRow(["id"], DataValue.FromFloat32(1.0f)),
+            MakeRow(["id"], DataValue.FromFloat32(2.0f)),
         ];
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
@@ -201,8 +200,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
 
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(999.0f))));
+        MockOperator rightSide = CreateMockOperator(["rid"], [[999.0f]]);
 
         JoinOperator join = new(
             scanOperator,
@@ -228,10 +226,10 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         // Probe side is wrapped in AliasOperator — FindScanOperator should traverse it.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f))),
-            MakeRow(("id", DataValue.FromFloat32(3.0f))),
-            MakeRow(("id", DataValue.FromFloat32(4.0f))),
+            MakeRow(["id"], DataValue.FromFloat32(1.0f)),
+            MakeRow(["id"], DataValue.FromFloat32(2.0f)),
+            MakeRow(["id"], DataValue.FromFloat32(3.0f)),
+            MakeRow(["id"], DataValue.FromFloat32(4.0f)),
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
@@ -277,8 +275,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         AliasOperator aliased = new(scanOperator, "a");
 
         // Right side has key 4.0 — only chunk 1 should match.
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(4.0f))));
+        MockOperator rightSide = CreateMockOperator(["rid"], [[4.0f]]);
 
         JoinOperator join = new(
             aliased,
@@ -308,14 +305,15 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_NestedJoin_BloomPruningReachesBuriedScan()
     {
+        ColumnLookup lookup = new(["order_id", "product_id"]);
         // Inner-left scan: "orders" table with 2 chunks on column "product_id".
         // Chunk 0: product_id 1.0, 2.0 | Chunk 1: product_id 3.0, 4.0
         Row[] orderRows =
         [
-            MakeRow(("order_id", DataValue.FromFloat32(100.0f)), ("product_id", DataValue.FromFloat32(1.0f))),
-            MakeRow(("order_id", DataValue.FromFloat32(101.0f)), ("product_id", DataValue.FromFloat32(2.0f))),
-            MakeRow(("order_id", DataValue.FromFloat32(102.0f)), ("product_id", DataValue.FromFloat32(3.0f))),
-            MakeRow(("order_id", DataValue.FromFloat32(103.0f)), ("product_id", DataValue.FromFloat32(4.0f))),
+            MakeRow(lookup, DataValue.FromFloat32(100.0f), DataValue.FromFloat32(1.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(101.0f), DataValue.FromFloat32(2.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(102.0f), DataValue.FromFloat32(3.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(103.0f), DataValue.FromFloat32(4.0f)),
         ];
 
         BloomFilter orderChunk0Bloom = new(expectedElements: 10);
@@ -358,8 +356,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ScanOperator orderScan = new(catalog["orders"], null, orderRows.Length);
 
         // Inner right: "customers" table — simple, no bloom needed.
-        MockOperator customerSide = new(
-            MakeRow(("customer_id", DataValue.FromFloat32(1.0f)), ("order_id", DataValue.FromFloat32(100.0f))));
+        MockOperator customerSide = CreateMockOperator(["customer_id"], [[1.0f, 100.0f]]);
 
         // Inner join: orders JOIN customers ON orders.order_id = customers.order_id
         JoinOperator innerJoin = new(
@@ -373,8 +370,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
 
         // Outer right (build): "products" table has product_id = 3.0.
         // This should prune the orders scan to chunk 1 only.
-        MockOperator productsSide = new(
-            MakeRow(("product_id", DataValue.FromFloat32(3.0f)), ("name", DataValue.FromString("Widget"))));
+        MockOperator productsSide = CreateMockOperator(["product_id"], [[3.0f, "Widget"]]);
 
         // Outer join: (orders ⋈ customers) JOIN products ON orders.product_id = products.product_id
         JoinOperator outerJoin = new(
@@ -445,16 +441,17 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_WithSortedIndexes_PrunesChunksWithNoMatchingKeys()
     {
+        ColumnLookup lookup = new(["id", "value"]);
         // Probe side: 3 chunks of 2 rows each on column "id".
         // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("value", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("value", DataValue.FromString("b"))),
-            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("value", DataValue.FromString("c"))),
-            MakeRow(("id", DataValue.FromFloat32(4.0f)), ("value", DataValue.FromString("d"))),
-            MakeRow(("id", DataValue.FromFloat32(5.0f)), ("value", DataValue.FromString("e"))),
-            MakeRow(("id", DataValue.FromFloat32(6.0f)), ("value", DataValue.FromString("f"))),
+            MakeRow(lookup, DataValue.FromFloat32(1.0f), DataValue.FromString("a")),
+            MakeRow(lookup, DataValue.FromFloat32(2.0f), DataValue.FromString("b")),
+            MakeRow(lookup, DataValue.FromFloat32(3.0f), DataValue.FromString("c")),
+            MakeRow(lookup, DataValue.FromFloat32(4.0f), DataValue.FromString("d")),
+            MakeRow(lookup, DataValue.FromFloat32(5.0f), DataValue.FromString("e")),
+            MakeRow(lookup, DataValue.FromFloat32(6.0f), DataValue.FromString("f")),
         ];
 
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
@@ -487,8 +484,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
 
         // Build side: only key 4.0 — should match chunk 1 only.
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(4.0f)), ("data", DataValue.FromString("match"))));
+        MockOperator rightSide = CreateMockOperator(["rid", "data"], [[4.0f, "match"]]);
 
         JoinOperator join = new(
             scanOperator,
@@ -518,12 +514,13 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
     [Fact]
     public async Task HashJoin_WithSortedIndexes_NoPruningWhenAllChunksMatch()
     {
+        ColumnLookup lookup = new(["id"]);
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromFloat32(1.0f))),
-            MakeRow(("id", DataValue.FromFloat32(2.0f))),
-            MakeRow(("id", DataValue.FromFloat32(3.0f))),
-            MakeRow(("id", DataValue.FromFloat32(4.0f))),
+            MakeRow(lookup, DataValue.FromFloat32(1.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(2.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(3.0f)),
+            MakeRow(lookup, DataValue.FromFloat32(4.0f)),
         ];
 
         ValueIndexEntry[] entries =
@@ -562,9 +559,7 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
 
         // Build side has keys from both chunks.
-        MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromFloat32(1.0f))),
-            MakeRow(("rid", DataValue.FromFloat32(3.0f))));
+        MockOperator rightSide = CreateMockOperator(["rid"], [[1.0f], [3.0f]]);
 
         JoinOperator join = new(
             scanOperator,
@@ -582,41 +577,5 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         Assert.Equal(2, results.Count);
         Assert.Equal(2, scanOperator.TotalIndexChunks);
         Assert.Equal(0, scanOperator.PrunedIndexChunks);
-    }
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
-
-    /// <summary>
-    /// Simple in-memory operator that yields pre-defined rows.
-    /// </summary>
-    private sealed class MockOperator : IQueryOperator
-    {
-        private readonly Row[] _rows;
-
-        public MockOperator(params Row[] rows)
-        {
-            _rows = rows;
-        }
-
-        public OperatorPlanDescription DescribeForExplain() => new("Mock");
-
-        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
-        {
-            RowBatch? outputBatch = null;
-            foreach (Row row in _rows)
-            {
-                outputBatch ??= RowBatch.Rent(64);
-                outputBatch.Add(row);
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-            }
-
-            if (outputBatch is not null) yield return outputBatch;
-            await Task.CompletedTask;
-        }
     }
 }

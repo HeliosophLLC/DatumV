@@ -78,6 +78,8 @@ public sealed class BitmapPruningTests : ServiceTestBase
     [Fact]
     public async Task BitmapPruning_AndPredicate_BothColumnsIndexed()
     {
+        ColumnLookup lookup = new(["color", "size"]);
+
         // 6 rows in 2 chunks of 3:
         // Chunk 0: color=[red, red, blue],    size=[S, M, S]
         // Chunk 1: color=[green, green, red],  size=[M, L, L]
@@ -87,12 +89,12 @@ public sealed class BitmapPruningTests : ServiceTestBase
         // Both chunks pruned → empty result.
         Row[] rows =
         [
-            new(["color", "size"], [DataValue.FromString("red"),   DataValue.FromString("S")]),
-            new(["color", "size"], [DataValue.FromString("red"),   DataValue.FromString("M")]),
-            new(["color", "size"], [DataValue.FromString("blue"),  DataValue.FromString("S")]),
-            new(["color", "size"], [DataValue.FromString("green"), DataValue.FromString("M")]),
-            new(["color", "size"], [DataValue.FromString("green"), DataValue.FromString("L")]),
-            new(["color", "size"], [DataValue.FromString("red"),   DataValue.FromString("L")]),
+            MakeRow(lookup, [DataValue.FromString("red"),   DataValue.FromString("S")]),
+            MakeRow(lookup, [DataValue.FromString("red"),   DataValue.FromString("M")]),
+            MakeRow(lookup, [DataValue.FromString("blue"),  DataValue.FromString("S")]),
+            MakeRow(lookup, [DataValue.FromString("green"), DataValue.FromString("M")]),
+            MakeRow(lookup, [DataValue.FromString("green"), DataValue.FromString("L")]),
+            MakeRow(lookup, [DataValue.FromString("red"),   DataValue.FromString("L")]),
         ];
 
         InMemoryTableProvider provider = CreateInMemoryProvider("data", rows);
@@ -197,16 +199,17 @@ public sealed class BitmapPruningTests : ServiceTestBase
     [Fact]
     public async Task BitmapRowFilter_AndAcrossTwoColumns_IntersectsBitmaps()
     {
+        ColumnLookup lookup = new(["color", "size"]);
         // 6 rows: color=[R,R,B,B,R,B], size=[S,M,S,M,S,M]
         // WHERE color='R' AND size='S' → rows 0, 4.
         Row[] rows =
         [
-            new(["color", "size"], [DataValue.FromString("R"), DataValue.FromString("S")]),
-            new(["color", "size"], [DataValue.FromString("R"), DataValue.FromString("M")]),
-            new(["color", "size"], [DataValue.FromString("B"), DataValue.FromString("S")]),
-            new(["color", "size"], [DataValue.FromString("B"), DataValue.FromString("M")]),
-            new(["color", "size"], [DataValue.FromString("R"), DataValue.FromString("S")]),
-            new(["color", "size"], [DataValue.FromString("B"), DataValue.FromString("M")]),
+            MakeRow(lookup, [DataValue.FromString("R"), DataValue.FromString("S")]),
+            MakeRow(lookup, [DataValue.FromString("R"), DataValue.FromString("M")]),
+            MakeRow(lookup, [DataValue.FromString("B"), DataValue.FromString("S")]),
+            MakeRow(lookup, [DataValue.FromString("B"), DataValue.FromString("M")]),
+            MakeRow(lookup, [DataValue.FromString("R"), DataValue.FromString("S")]),
+            MakeRow(lookup, [DataValue.FromString("B"), DataValue.FromString("M")]),
         ];
 
         InMemoryTableProvider provider = CreateInMemoryProvider("data", rows);
@@ -318,18 +321,19 @@ public sealed class BitmapPruningTests : ServiceTestBase
     [Fact]
     public async Task BitmapAndSortedCoexist_BothApplyPruning()
     {
+        ColumnLookup lookup = new(["value", "color"]);
         // 6 rows, 2 chunks of 3. Sorted index on "value", bitmap on "color".
         // WHERE value > 10 AND color = 'red'
         // Sorted prunes chunk 0 (values 1..3, all < 10). Bitmap prunes nothing
         // (red appears in both). Net result: chunk 1 rows with color='red'.
         Row[] rows =
         [
-            new(["value", "color"], [DataValue.FromFloat32(1f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromFloat32(2f), DataValue.FromString("blue")]),
-            new(["value", "color"], [DataValue.FromFloat32(3f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromFloat32(11f), DataValue.FromString("blue")]),
-            new(["value", "color"], [DataValue.FromFloat32(12f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromFloat32(13f), DataValue.FromString("red")]),
+            MakeRow(lookup, [DataValue.FromFloat32(1f), DataValue.FromString("red")]),
+            MakeRow(lookup, [DataValue.FromFloat32(2f), DataValue.FromString("blue")]),
+            MakeRow(lookup, [DataValue.FromFloat32(3f), DataValue.FromString("red")]),
+            MakeRow(lookup, [DataValue.FromFloat32(11f), DataValue.FromString("blue")]),
+            MakeRow(lookup, [DataValue.FromFloat32(12f), DataValue.FromString("red")]),
+            MakeRow(lookup, [DataValue.FromFloat32(13f), DataValue.FromString("red")]),
         ];
 
         InMemoryTableProvider provider = CreateInMemoryProvider("data", rows);
@@ -475,7 +479,7 @@ public sealed class BitmapPruningTests : ServiceTestBase
         Row[] rows = new Row[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
-            rows[i] = new Row([columnName], [DataValue.FromString(values[i])]);
+            rows[i] = MakeRow([columnName], [DataValue.FromString(values[i])]);
         }
 
         return rows;
@@ -486,7 +490,7 @@ public sealed class BitmapPruningTests : ServiceTestBase
         Row[] rows = new Row[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
-            rows[i] = new Row([columnName], [DataValue.FromBoolean(values[i])]);
+            rows[i] = MakeRow([columnName], [DataValue.FromBoolean(values[i])]);
         }
 
         return rows;
@@ -497,7 +501,7 @@ public sealed class BitmapPruningTests : ServiceTestBase
         Row[] rows = new Row[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
-            rows[i] = new Row([columnName], [DataValue.FromInt32(values[i])]);
+            rows[i] = MakeRow([columnName], [DataValue.FromInt32(values[i])]);
         }
 
         return rows;
