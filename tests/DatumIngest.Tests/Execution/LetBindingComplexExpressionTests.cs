@@ -98,17 +98,15 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
     }
 
     // ──────────────── Window functions inside LET ────────────────
-    //
-    // The planner's window-rewrite pass already walks LET binding bodies
-    // (HasLetWindowFunction at QueryPlanner.cs), so window functions inside
-    // LET DO get lifted into a WindowOperator at plan time. The runtime side,
-    // though, is blocked: WindowOperator.ExecuteAsync still calls the
-    // throw-stubbed LocalBufferPool.RentBatch — see the deferred operator-
-    // migration list. Once WindowOperator is migrated to context.RentRowBatch
-    // these tests can be re-enabled. Skipped (not deleted) so the regression
-    // is visible the moment the underlying fix lands.
 
-    [Fact(Skip = "Blocked by WindowOperator using throw-stubbed LocalBufferPool.RentBatch — re-enable when WindowOperator is migrated.")]
+    /// <summary>
+    /// Window function inside a LET binding body. The planner's window-rewrite
+    /// pass walks LET binding bodies and lifts the call into a
+    /// <see cref="DatumIngest.Execution.Operators.WindowOperator"/>; the LET
+    /// binding rewrites to a column reference that subsequent SELECT-list
+    /// expressions can use.
+    /// </summary>
+    [Fact]
     public async Task Window_RowNumber_InLet()
     {
         TableCatalog catalog = CreateCatalog("t",
@@ -129,13 +127,18 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
         Row a20 = rows.First(r => r["value"].AsFloat32() == 20f);
         Row a30 = rows.First(r => r["value"].AsFloat32() == 30f);
         Row b50 = rows.First(r => r["value"].AsFloat32() == 50f);
-        Assert.Equal(1L, a10["within_group_rank"].AsInt64());
-        Assert.Equal(2L, a20["within_group_rank"].AsInt64());
-        Assert.Equal(3L, a30["within_group_rank"].AsInt64());
-        Assert.Equal(1L, b50["within_group_rank"].AsInt64());
+        Assert.Equal(1f, a10["within_group_rank"].AsFloat32());
+        Assert.Equal(2f, a20["within_group_rank"].AsFloat32());
+        Assert.Equal(3f, a30["within_group_rank"].AsFloat32());
+        Assert.Equal(1f, b50["within_group_rank"].AsFloat32());
     }
 
-    [Fact(Skip = "Blocked by WindowOperator using throw-stubbed LocalBufferPool.RentBatch — re-enable when WindowOperator is migrated.")]
+    /// <summary>
+    /// LET window-function output used in arithmetic in a subsequent SELECT
+    /// column. Verifies the LET name resolves correctly when consumed by a
+    /// non-trivial expression (not just a bare column reference).
+    /// </summary>
+    [Fact]
     public async Task Window_InLet_UsedInArithmetic()
     {
         TableCatalog catalog = CreateCatalog("t",
@@ -151,12 +154,13 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
             catalog);
 
         Assert.Equal(3, rows.Count);
-        Row a10 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsInt64() == 100L);
-        Row a20 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsInt64() == 200L);
+        // ROW_NUMBER() returns Float32 in this engine; arithmetic preserves Float32.
+        Row a10 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsFloat32() == 100f);
+        Row a20 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsFloat32() == 200f);
         Row b30 = rows.First(r => r["category"].AsString() == "B");
         Assert.NotEqual(default, a10);
         Assert.NotEqual(default, a20);
-        Assert.Equal(100L, b30["scaled_rank"].AsInt64());
+        Assert.Equal(100f, b30["scaled_rank"].AsFloat32());
     }
 
     // ──────────────── Scalar subqueries inside LET ────────────────

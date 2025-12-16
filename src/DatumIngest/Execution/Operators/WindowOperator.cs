@@ -2,6 +2,7 @@ using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -71,114 +72,145 @@ public sealed class WindowOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
 
-        // Step 1: Materialize all source rows and track their original order.
+        // Window is a blocking operator: every input row must be materialised
+        // before any output emits, since window functions need partition-wide
+        // visibility. Source rows are stabilised into operator-owned
+        // DataValue[] rentals so input batches return to the pool immediately
+        // (same-arena fast path under one-arena-per-query — just a fresh
+        // DataValue[] rental, no payload copy). Released in the finally below.
         List<Row> allRows = new();
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < inputBatch.Count; i++)
-            {
-                Row row = inputBatch[i];
-                context.CancellationToken.ThrowIfCancellationRequested();
-                context.QueryMeter?.ThrowIfExceeded();
-
-                allRows.Add(row);
-            }
-
-            context.ReturnRowBatch(inputBatch);
-        }
-
-        if (allRows.Count == 0)
-        {
-            yield break;
-        }
-
-        int inputFieldCount = allRows[0].FieldCount;
-        int totalFieldCount = inputFieldCount + _windowColumns.Count;
-
-        // Allocate result storage for each row — one DataValue per window column.
-        // windowResults[rowIndex][windowColumnIndex]
-        DataValue[][] windowResults = new DataValue[allRows.Count][];
-        for (int i = 0; i < windowResults.Length; i++)
-        {
-            windowResults[i] = new DataValue[_windowColumns.Count];
-        }
-
-        // Step 2: Group window columns by their window specification to avoid
-        // redundant partitioning and sorting for columns sharing the same spec.
-        Dictionary<WindowSpecificationKey, List<int>> specGroups = new();
-        for (int columnIndex = 0; columnIndex < _windowColumns.Count; columnIndex++)
-        {
-            WindowSpecificationKey key = new(_windowColumns[columnIndex].WindowSpecification);
-            if (!specGroups.TryGetValue(key, out List<int>? indices))
-            {
-                indices = new List<int>();
-                specGroups[key] = indices;
-            }
-            indices.Add(columnIndex);
-        }
-
-        // Step 3: For each unique spec, partition + sort + compute.
-        foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
-        {
-            WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
-            ComputeForSpecification(
-                spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter,
-                context.Store, context.SidecarRegistry);
-        }
-
-        // Step 4: Emit all rows in original order, augmented with window columns.
-        string[]? outputNames = null;
-        Dictionary<string, int>? outputNameIndex = null;
-        LocalBufferPool pool = context.LocalBufferPool;
+        ColumnLookup? sourceLookup = null;
+        ColumnLookup? outputLookup = null;
         RowBatch? outputBatch = null;
 
-        for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
+        try
         {
-            Row sourceRow = allRows[rowIndex];
-
-            if (outputNames is null)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                outputNames = new string[totalFieldCount];
-                for (int field = 0; field < inputFieldCount; field++)
+                try
                 {
-                    outputNames[field] = sourceRow.ColumnNames[field];
+                    if (sourceLookup is null && inputBatch.Count > 0)
+                    {
+                        sourceLookup = inputBatch.ColumnLookup;
+                    }
+
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        context.CancellationToken.ThrowIfCancellationRequested();
+                        context.QueryMeter?.ThrowIfExceeded();
+
+                        Row sourceRow = inputBatch[i];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            sourceRow, inputBatch.Arena, context.Store);
+                        allRows.Add(new Row(sourceRow.ColumnLookup, copy));
+                    }
                 }
-                for (int windowColumnIndex = 0; windowColumnIndex < _windowColumns.Count; windowColumnIndex++)
+                finally
                 {
-                    outputNames[inputFieldCount + windowColumnIndex] = _windowColumns[windowColumnIndex].OutputName;
-                }
-                outputNameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                for (int index = 0; index < outputNames.Length; index++)
-                {
-                    outputNameIndex[outputNames[index]] = index;
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
-            DataValue[] values = pool.Rent(totalFieldCount);
+            if (allRows.Count == 0)
+            {
+                yield break;
+            }
+
+            int inputFieldCount = allRows[0].FieldCount;
+            int totalFieldCount = inputFieldCount + _windowColumns.Count;
+
+            // Result slot for each row × each window column.
+            DataValue[][] windowResults = new DataValue[allRows.Count][];
+            for (int i = 0; i < windowResults.Length; i++)
+            {
+                windowResults[i] = new DataValue[_windowColumns.Count];
+            }
+
+            // Group window columns by spec — columns sharing the same
+            // PARTITION BY / ORDER BY / Frame compute together.
+            Dictionary<WindowSpecificationKey, List<int>> specGroups = new();
+            for (int columnIndex = 0; columnIndex < _windowColumns.Count; columnIndex++)
+            {
+                WindowSpecificationKey key = new(_windowColumns[columnIndex].WindowSpecification);
+                if (!specGroups.TryGetValue(key, out List<int>? indices))
+                {
+                    indices = new List<int>();
+                    specGroups[key] = indices;
+                }
+                indices.Add(columnIndex);
+            }
+
+            foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
+            {
+                WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
+                ComputeForSpecification(
+                    spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter,
+                    context.Store, context.SidecarRegistry);
+            }
+
+            // Build the output ColumnLookup once — source columns followed by
+            // each window column's OutputName. Reused across every output batch.
+            string[] outputNames = new string[totalFieldCount];
             for (int field = 0; field < inputFieldCount; field++)
             {
-                values[field] = sourceRow[field];
+                outputNames[field] = sourceLookup!.ColumnNames[field];
             }
             for (int windowColumnIndex = 0; windowColumnIndex < _windowColumns.Count; windowColumnIndex++)
             {
-                values[inputFieldCount + windowColumnIndex] = windowResults[rowIndex][windowColumnIndex];
+                outputNames[inputFieldCount + windowColumnIndex] =
+                    _windowColumns[windowColumnIndex].OutputName;
+            }
+            outputLookup = new ColumnLookup(outputNames);
+
+            // Emit rows in original input order, augmented with window columns.
+            for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
+            {
+                Row sourceRow = allRows[rowIndex];
+
+                DataValue[] values = bufferPool.Rent(totalFieldCount);
+                for (int field = 0; field < inputFieldCount; field++)
+                {
+                    values[field] = sourceRow[field];
+                }
+                for (int windowColumnIndex = 0; windowColumnIndex < _windowColumns.Count; windowColumnIndex++)
+                {
+                    values[inputFieldCount + windowColumnIndex] = windowResults[rowIndex][windowColumnIndex];
+                }
+
+                outputBatch ??= context.RentRowBatch(outputLookup);
+                outputBatch.Add(values);
+
+                if (outputBatch.IsFull)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
             }
 
-            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-            outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
-
-            if (outputBatch.IsFull)
+            if (outputBatch is not null)
             {
-                yield return outputBatch;
+                RowBatch toYield = outputBatch;
                 outputBatch = null;
+                yield return toYield;
             }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
+
+            // Release the stabilised source-row rentals.
+            foreach (Row row in allRows)
+            {
+                pool.ReturnRow(row);
+            }
         }
     }
 
