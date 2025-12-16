@@ -251,12 +251,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyDropFunction(drop);
                 return EmptyQueryPlan.Instance;
 
-            case CreateProcedureStatement:
-                throw new InvalidOperationException(
-                    "CREATE PROCEDURE must be planned via Plan(string) so the " +
-                    "original source text can be captured for catalog persistence. " +
-                    "Build the SQL string and call Plan(sql) instead of constructing " +
-                    "the AST manually.");
+            case CreateProcedureStatement create:
+                // Source text is null when coming from the AST-only path (e.g.
+                // BatchExecutor). ApplyCreateProcedure falls back to a synthetic
+                // description so the procedure still runs and persists; only the
+                // display text in system_procedures.source_text is affected.
+                ApplyCreateProcedure(create, sourceText: null);
+                return EmptyQueryPlan.Instance;
 
             case DropProcedureStatement drop:
                 ApplyDropProcedure(drop);
@@ -342,7 +343,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (removed) _catalogStore?.Save(_udfs, _procedures);
     }
 
-    private void ApplyCreateProcedure(CreateProcedureStatement create, string sourceText)
+    private void ApplyCreateProcedure(CreateProcedureStatement create, string? sourceText)
     {
         // Defaults must be contiguous at the tail of the parameter list so
         // call-site arity stays unambiguous (positional matching only).
@@ -361,11 +362,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"CREATE PROCEDURE {create.Name}: {ex.Message}", ex);
         }
 
+        // When the source text isn't available (e.g. registered via the AST-only
+        // BatchExecutor path), store a placeholder so the procedure can still run
+        // and persist. The display in system_procedures.source_text will show this
+        // synthetic text rather than the user's original formatting.
+        string text = sourceText ?? $"CREATE PROCEDURE {create.Name}";
+
         ProcedureDescriptor descriptor = new(
             create.Name,
             create.Parameters,
             create.Body,
-            sourceText);
+            text);
 
         if (create.IfNotExists && _procedures.TryGet(create.Name, out _))
         {

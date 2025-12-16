@@ -423,11 +423,19 @@ public sealed class BatchExecutor
                         ?? "RAISE: <null>";
                     throw new InvalidOperationException(message);
                 }
+                case CreateFunctionStatement:
+                case DropFunctionStatement:
+                case DropProcedureStatement:
+                case CreateProcedureStatement:
+                    // DDL statements modify the catalog as a side effect and
+                    // produce no rows. Delegate to Plan(Statement) which already
+                    // handles all four types; the returned EmptyQueryPlan is
+                    // discarded because there is nothing to execute.
+                    _catalog.Plan(stmt);
+                    break;
                 default:
                     throw new NotSupportedException(
-                        $"Procedural statement type '{stmt.GetType().Name}' is not yet supported. " +
-                        "CREATE FUNCTION / DDL must be applied through TableCatalog.Plan(string) " +
-                        "before the batch runs.");
+                        $"Procedural statement type '{stmt.GetType().Name}' is not yet supported.");
             }
 
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))
@@ -473,6 +481,10 @@ public sealed class BatchExecutor
         TryStatement => "try",
         AssertStatement => "assert",
         RaiseStatement => "raise",
+        CreateFunctionStatement => "create_function",
+        DropFunctionStatement => "drop_function",
+        CreateProcedureStatement => "create_procedure",
+        DropProcedureStatement => "drop_procedure",
         _ => stmt.GetType().Name.ToLowerInvariant(),
     };
 
