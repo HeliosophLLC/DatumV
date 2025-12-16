@@ -40,6 +40,11 @@ public enum FunctionCategory
     /// <summary>General-purpose conditional, null-handling, and byte manipulation functions.</summary>
     Utility,
 
+    /// <summary>
+    /// Array-based operations.
+    /// </summary>
+    Array,
+
     /// <summary>Table-valued functions that produce multiple rows (used in FROM/JOIN clauses).</summary>
     Table,
 

@@ -23,7 +23,7 @@ public sealed class ArrayToStringFunction : IFunction, IScalarFunction
     public static string Name => "array_to_string";
 
     /// <inheritdoc />
-    public static FunctionCategory Category => FunctionCategory.String;
+    public static FunctionCategory Category => FunctionCategory.Array;
 
     /// <inheritdoc />
     public static string Description =>

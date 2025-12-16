@@ -253,6 +253,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
         registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
         registry.RegisterScalar<Scalar.ArrayToStringFunction>();
+        registry.RegisterScalar<Scalar.ArrayLengthFunction>();
 
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.

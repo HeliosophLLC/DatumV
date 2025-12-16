@@ -16,7 +16,7 @@ public sealed class ArrayConstructorFunction : IFunction, IScalarFunction
     public static string Name => "array";
 
     /// <inheritdoc />
-    public static FunctionCategory Category => FunctionCategory.Utility;
+    public static FunctionCategory Category => FunctionCategory.Array;
 
     /// <inheritdoc />
     public static string Description =>
