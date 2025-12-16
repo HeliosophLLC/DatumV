@@ -922,7 +922,7 @@ internal sealed class SemanticAnalyzer
             ["information_schema"] = new(StringComparer.OrdinalIgnoreCase)
                 { "tables", "columns", "schemata" },
             ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
-                { "providers", "functions", "function_parameters", "statistics", "indexes", "interactions" },
+                { "functions", "function_parameters", "statistics", "indexes", "interactions" },
         };
 
     private static bool IsKnownVirtualSchemaTable(string? schemaName, string tableName)

@@ -2649,6 +2649,7 @@
     if (!Array.isArray(tables) || tables.length === 0) {
       return htmlNode('<div class="empty-state">No tables registered.</div>');
     }
+    tables.sort((a, b) => a.name.localeCompare(b.name));
     const wrap = document.createDocumentFragment();
     for (const t of tables) {
       const node = renderTreeNode({

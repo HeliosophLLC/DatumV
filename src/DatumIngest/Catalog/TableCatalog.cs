@@ -75,6 +75,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         Add(new Providers.InformationSchemaTablesProvider(pool, this));
         Add(new Providers.InformationSchemaColumnsProvider(pool, this));
         Add(new Providers.InformationSchemaSchemataProvider(pool));
+        Add(new Providers.DatumCatalogFunctionsProvider(pool, _functions));
+        Add(new Providers.DatumCatalogFunctionParametersProvider(pool, _functions));
+        Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
+        Add(new Providers.DatumCatalogIndexesProvider(pool, this));
+        Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
 
         // Replay any persisted UDFs / procedures into the registries.
         // Done after the system table registrations so the rehydrated
