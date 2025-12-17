@@ -2835,6 +2835,22 @@ public sealed class QueryPlanner
                         references.Add((tableName, columnName));
                     }
                 }
+
+                // LATERAL right-side subqueries can reference outer-scope columns
+                // (correlation). Recurse into the inner SelectStatement to surface
+                // those refs in the parent's required-columns set — otherwise
+                // projection pushdown trims columns the lateral body needs at
+                // execution time. ComputeRequiredColumns filters by alias, so
+                // inner-scope refs (e.g. items.order_id when lateral source is
+                // FROM items) drop out naturally for outer tables.
+                if (join.IsLateral && join.Source is SubquerySource lateralSubquery)
+                {
+                    foreach ((string? tableName, string columnName) in
+                        CollectAllReferencedColumns(lateralSubquery.Query))
+                    {
+                        references.Add((tableName, columnName));
+                    }
+                }
             }
         }
 

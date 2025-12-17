@@ -1,5 +1,6 @@
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -83,79 +84,125 @@ public sealed class LateralJoinOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         JoinOperator.CombinedRowSchema? schema = null;
+        Row? residualCheckRow = null;
+        DataValue[]? residualCheckBuffer = null;
         Row? cachedNullRight = null;
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
+            await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
             {
-                Row leftRow = leftBatch[leftIndex];
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                // Execute the right side with the current left row as correlation context.
-                ExecutionContext lateralContext = context.WithOuterRow(leftRow);
-                bool matched = false;
-
-                await foreach (RowBatch rightBatch in _right.ExecuteAsync(lateralContext).ConfigureAwait(false))
+                try
                 {
-                    for (int rightIndex = 0; rightIndex < rightBatch.Count; rightIndex++)
+                    for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
                     {
-                        Row rightRow = rightBatch[rightIndex];
-                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, rightRow);
-                        Row combined = schema.Combine(leftRow, rightRow);
+                        Row leftRow = leftBatch[leftIndex];
+                        context.CancellationToken.ThrowIfCancellationRequested();
 
-                        if (_onCondition is not null && !evaluator.EvaluateAsBoolean(_onCondition, combined))
+                        // Execute the right side with the current left row as correlation context.
+                        ExecutionContext lateralContext = context.WithOuterRow(leftRow);
+                        bool matched = false;
+
+                        await foreach (RowBatch rightBatch in _right.ExecuteAsync(lateralContext).ConfigureAwait(false))
                         {
-                            continue;
+                            try
+                            {
+                                for (int rightIndex = 0; rightIndex < rightBatch.Count; rightIndex++)
+                                {
+                                    Row rightRow = rightBatch[rightIndex];
+                                    schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, rightRow);
+
+                                    if (_onCondition is not null)
+                                    {
+                                        if (residualCheckRow is null)
+                                        {
+                                            (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
+                                        }
+
+                                        schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
+                                        if (!evaluator.EvaluateAsBoolean(_onCondition, residualCheckRow.Value))
+                                        {
+                                            continue;
+                                        }
+                                    }
+
+                                    matched = true;
+                                    cachedNullRight ??= JoinOperator.CreateNullRow(rightRow, pool);
+                                    outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                                    outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+
+                                    if (outputBatch.IsFull)
+                                    {
+                                        RowBatch toYield = outputBatch;
+                                        outputBatch = null;
+                                        yield return toYield;
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                context.ReturnRowBatch(rightBatch);
+                            }
                         }
 
-                        matched = true;
-                        cachedNullRight ??= JoinOperator.CreateNullRow(rightRow, context.Pool);
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(combined);
-
-                        if (outputBatch.IsFull)
+                        // LEFT LATERAL: emit left + NULLs when no right rows matched.
+                        if (!matched && _joinType == JoinType.Left)
                         {
-                            yield return outputBatch;
-                            outputBatch = null;
+                            if (schema is not null && cachedNullRight is not null)
+                            {
+                                outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                            }
+                            else
+                            {
+                                // No right row has ever been observed — emit the left row solo
+                                // so the empty-lateral case still surfaces the driving row. Copy
+                                // the values into a pool-rented buffer so the output batch owns
+                                // its rows independent of the left batch's rental.
+                                outputBatch ??= context.RentRowBatch(leftRow.ColumnLookup);
+                                DataValue[] copy = pool.RentAndCopyDataValues(
+                                    leftRow, leftBatch.Arena, outputBatch.Arena);
+                                outputBatch.Add(copy);
+                            }
+
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
                         }
                     }
-                    context.ReturnRowBatch(rightBatch);
                 }
-
-                // LEFT LATERAL: emit left + NULLs when no right rows matched.
-                if (!matched && _joinType == JoinType.Left)
+                finally
                 {
-                    Row unmatched;
-                    if (cachedNullRight is not null)
-                    {
-                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                        unmatched = schema.Combine(leftRow, cachedNullRight.Value);
-                    }
-                    else
-                    {
-                        unmatched = leftRow;
-                    }
-
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(unmatched);
-
-                    if (outputBatch.IsFull)
-                    {
-                        yield return outputBatch;
-                        outputBatch = null;
-                    }
+                    context.ReturnRowBatch(leftBatch);
                 }
             }
-            context.ReturnRowBatch(leftBatch);
-        }
 
-        if (outputBatch is not null)
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
+        }
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
+
+            if (cachedNullRight is not null)
+            {
+                pool.ReturnRow(cachedNullRight.Value);
+            }
         }
     }
 }
