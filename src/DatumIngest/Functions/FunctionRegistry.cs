@@ -234,6 +234,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.ConcatFunction>();
         registry.RegisterScalar<Scalar.UpperFunction>();
         registry.RegisterScalar<Scalar.LowerFunction>();
+        registry.RegisterScalar<Scalar.LenFunction>();
         registry.RegisterScalar<Scalar.CastFunction>();
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();

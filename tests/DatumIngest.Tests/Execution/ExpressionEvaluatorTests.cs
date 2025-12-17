@@ -7,21 +7,15 @@ namespace DatumIngest.Tests.Execution;
 
 public class ExpressionEvaluatorTests : ServiceTestBase
 {
-    private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault());
-
-    private static Row MakeRow(params (string Name, DataValue Value)[] columns)
-    {
-        string[] names = columns.Select(c => c.Name).ToArray();
-        DataValue[] values = columns.Select(c => c.Value).ToArray();
-        return new Row(names, values);
-    }
+    //rivate readonly Arena _arena = new();
+    private readonly ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault(), store: new Arena());
 
     // ─────────────── Literals ───────────────
 
     [Fact]
     public void Literal_Integer()
     {
-        DataValue result = _evaluator.Evaluate(new LiteralExpression(42), MakeRow());
+        DataValue result = _evaluator.Evaluate(new LiteralExpression(42), Row.Empty);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(42, result.AsInt32());
     }
@@ -29,7 +23,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Literal_Float()
     {
-        DataValue result = _evaluator.Evaluate(new LiteralExpression(3.14), MakeRow());
+        DataValue result = _evaluator.Evaluate(new LiteralExpression(3.14), Row.Empty);
         Assert.Equal(DataKind.Float64, result.Kind);
         Assert.Equal(3.14, result.AsFloat64(), 0.001);
     }
@@ -37,7 +31,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Literal_String()
     {
-        DataValue result = _evaluator.Evaluate(new LiteralExpression("hello"), MakeRow());
+        DataValue result = _evaluator.Evaluate(new LiteralExpression("hello"), Row.Empty);
         Assert.Equal(DataKind.String, result.Kind);
         Assert.Equal("hello", result.AsString());
     }
@@ -45,14 +39,14 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Literal_Null()
     {
-        DataValue result = _evaluator.Evaluate(new LiteralExpression(null), MakeRow());
+        DataValue result = _evaluator.Evaluate(new LiteralExpression(null), Row.Empty);
         Assert.True(result.IsNull);
     }
 
     [Fact]
     public void Literal_Bool_True()
     {
-        DataValue result = _evaluator.Evaluate(new LiteralExpression(true), MakeRow());
+        DataValue result = _evaluator.Evaluate(new LiteralExpression(true), Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -61,7 +55,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void ColumnReference_ByName()
     {
-        Row row = MakeRow(("age", DataValue.FromFloat32(25f)));
+        Row row = MakeRow(["age"], DataValue.FromFloat32(25f));
         DataValue result = _evaluator.Evaluate(new ColumnReference("age"), row);
         Assert.Equal(25f, result.AsFloat32());
     }
@@ -69,7 +63,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void ColumnReference_Qualified()
     {
-        Row row = MakeRow(("t.age", DataValue.FromFloat32(30f)));
+        Row row = MakeRow(["t.age"], DataValue.FromFloat32(30f));
         DataValue result = _evaluator.Evaluate(new ColumnReference("t", "age"), row);
         Assert.Equal(30f, result.AsFloat32());
     }
@@ -77,7 +71,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void ColumnReference_NotFound_Throws()
     {
-        Row row = MakeRow(("name", DataValue.FromString("test")));
+        Row row = MakeRow(["name"], DataValue.FromString("test"));
         Assert.Throws<InvalidOperationException>(
             () => _evaluator.Evaluate(new ColumnReference("missing"), row));
     }
@@ -92,8 +86,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(10),
                 BinaryOperator.Add,
                 new LiteralExpression(5)),
-            MakeRow());
-        Assert.Equal(15f, result.AsFloat32());
+            Row.Empty);
+        Assert.Equal(15, result.AsInt32());
     }
 
     [Fact]
@@ -104,8 +98,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(10),
                 BinaryOperator.Subtract,
                 new LiteralExpression(3)),
-            MakeRow());
-        Assert.Equal(7f, result.AsFloat32());
+            Row.Empty);
+        Assert.Equal(7, result.AsInt32());
     }
 
     [Fact]
@@ -116,8 +110,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(4),
                 BinaryOperator.Multiply,
                 new LiteralExpression(6)),
-            MakeRow());
-        Assert.Equal(24f, result.AsFloat32());
+            Row.Empty);
+        Assert.Equal(24, result.AsInt32());
     }
 
     [Fact]
@@ -128,8 +122,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(20),
                 BinaryOperator.Divide,
                 new LiteralExpression(4)),
-            MakeRow());
-        Assert.Equal(5f, result.AsFloat32());
+            Row.Empty);
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]
@@ -140,7 +134,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(1),
                 BinaryOperator.Divide,
                 new LiteralExpression(0)),
-            MakeRow());
+            Row.Empty);
         Assert.True(float.IsNaN(result.AsFloat32()));
     }
 
@@ -152,8 +146,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(10),
                 BinaryOperator.Modulo,
                 new LiteralExpression(3)),
-            MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+            Row.Empty);
+        Assert.Equal(1, result.AsInt32());
     }
 
     [Fact]
@@ -161,10 +155,10 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
-                new LiteralExpression(10),
+                new LiteralExpression(10f),
                 BinaryOperator.Modulo,
-                new LiteralExpression(0)),
-            MakeRow());
+                new LiteralExpression(0f)),
+            Row.Empty);
         Assert.True(float.IsNaN(result.AsFloat32()));
     }
 
@@ -176,7 +170,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(2),
                 BinaryOperator.Power,
                 new LiteralExpression(10)),
-            MakeRow());
+            Row.Empty);
         Assert.Equal(1024f, result.AsFloat32());
     }
 
@@ -190,7 +184,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.Equal,
                 new LiteralExpression(5)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -202,7 +196,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.Equal,
                 new LiteralExpression(3)),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -214,7 +208,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.NotEqual,
                 new LiteralExpression(3)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -226,7 +220,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(3),
                 BinaryOperator.LessThan,
                 new LiteralExpression(5)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -238,7 +232,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.GreaterThan,
                 new LiteralExpression(3)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -250,7 +244,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.LessThanOrEqual,
                 new LiteralExpression(5)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -262,7 +256,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 BinaryOperator.GreaterThanOrEqual,
                 new LiteralExpression(5)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -274,7 +268,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("abc"),
                 BinaryOperator.Equal,
                 new LiteralExpression("abc")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -286,7 +280,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("abc"),
                 BinaryOperator.LessThan,
                 new LiteralExpression("def")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -300,7 +294,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(1),
                 BinaryOperator.And,
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -312,7 +306,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(0),
                 BinaryOperator.And,
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -324,7 +318,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(1),
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -336,7 +330,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(0),
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -345,7 +339,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -354,7 +348,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(0)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -362,8 +356,8 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public void Negate()
     {
         DataValue result = _evaluator.Evaluate(
-            new UnaryExpression(UnaryOperator.Negate, new LiteralExpression(42)),
-            MakeRow());
+            new UnaryExpression(UnaryOperator.Negate, new LiteralExpression(42f)),
+            Row.Empty);
         Assert.Equal(-42f, result.AsFloat32());
     }
 
@@ -377,7 +371,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(null),
                 BinaryOperator.Add,
                 new LiteralExpression(5)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
@@ -386,7 +380,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Negate, new LiteralExpression(null)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
@@ -399,7 +393,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new InExpression(
                 new LiteralExpression(3),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -410,7 +404,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new InExpression(
                 new LiteralExpression(4),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -422,7 +416,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(4),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)],
                 Negated: true),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -433,7 +427,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new InExpression(
                 new LiteralExpression(null),
                 [new LiteralExpression(1)]),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
@@ -444,7 +438,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new InExpression(
                 new LiteralExpression(99),
                 [new LiteralExpression(1), new LiteralExpression(null), new LiteralExpression(3)]),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
@@ -455,7 +449,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new InExpression(
                 new LiteralExpression(3),
                 [new LiteralExpression(null), new LiteralExpression(3)]),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -466,9 +460,9 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new ColumnReference("value"),
             [new LiteralExpression(10), new LiteralExpression(20), new LiteralExpression(30)]);
 
-        Row row1 = MakeRow(("value", DataValue.FromFloat32(20)));
-        Row row2 = MakeRow(("value", DataValue.FromFloat32(99)));
-        Row row3 = MakeRow(("value", DataValue.FromFloat32(10)));
+        Row row1 = MakeRow(["value"], DataValue.FromFloat32(20));
+        Row row2 = MakeRow(["value"], DataValue.FromFloat32(99));
+        Row row3 = MakeRow(["value"], DataValue.FromFloat32(10));
 
         Assert.True(_evaluator.Evaluate(inExpr, row1).AsBoolean());
         Assert.False(_evaluator.Evaluate(inExpr, row2).AsBoolean());
@@ -486,7 +480,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         InExpression inExpr = new(new LiteralExpression(999), values);
 
-        DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
+        DataValue result = _evaluator.Evaluate(inExpr, Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -501,7 +495,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         InExpression inExpr = new(new LiteralExpression(9999), values, Negated: true);
 
-        DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
+        DataValue result = _evaluator.Evaluate(inExpr, Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -515,7 +509,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(5),
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -527,7 +521,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(15),
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -539,7 +533,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(10),
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -552,7 +546,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression(1),
                 new LiteralExpression(10),
                 Negated: true),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -561,7 +555,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void IsNull_True()
     {
-        Row row = MakeRow(("x", DataValue.Null(DataKind.Float32)));
+        Row row = MakeRow(["x"], DataValue.Null(DataKind.Float32));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
@@ -571,7 +565,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void IsNull_False()
     {
-        Row row = MakeRow(("x", DataValue.FromFloat32(42f)));
+        Row row = MakeRow(["x"], DataValue.FromFloat32(42f));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
@@ -581,7 +575,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void IsNotNull_True()
     {
-        Row row = MakeRow(("x", DataValue.FromFloat32(42f)));
+        Row row = MakeRow(["x"], DataValue.FromFloat32(42f));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x"), Negated: true),
             row);
@@ -598,7 +592,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("hello world"),
                 BinaryOperator.Like,
                 new LiteralExpression("hello%")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -610,7 +604,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("hello world"),
                 BinaryOperator.Like,
                 new LiteralExpression("%world")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -622,7 +616,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("cat"),
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -634,7 +628,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("dog"),
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -646,7 +640,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("HELLO"),
                 BinaryOperator.Like,
                 new LiteralExpression("hello")),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -658,7 +652,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("Hello"),
                 BinaryOperator.Like,
                 new LiteralExpression("Hello")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -672,7 +666,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("HELLO WORLD"),
                 BinaryOperator.ILike,
                 new LiteralExpression("hello%")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -684,7 +678,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("Cat"),
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -696,7 +690,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("dog"),
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -710,7 +704,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("abc123def"),
                 BinaryOperator.Regexp,
                 new LiteralExpression("\\d+")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -722,7 +716,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("555-1234"),
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d{3}-\\d{4}$")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -734,7 +728,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("hello"),
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d+$")),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -746,7 +740,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("HELLO"),
                 BinaryOperator.Regexp,
                 new LiteralExpression("hello")),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -758,7 +752,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("HELLO"),
                 BinaryOperator.Regexp,
                 new LiteralExpression("(?i)hello")),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -771,7 +765,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                     new LiteralExpression("test"),
                     BinaryOperator.Regexp,
                     new LiteralExpression("[invalid")),
-                MakeRow()));
+                Row.Empty));
     }
 
     // ─────────────── LIKE ESCAPE ───────────────
@@ -785,7 +779,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("100\\%"),
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -798,7 +792,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("100\\%"),
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
-            MakeRow());
+            Row.Empty);
         Assert.False(result.AsBoolean());
     }
 
@@ -811,7 +805,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("!_test"),
                 new LiteralExpression("!"),
                 CaseInsensitive: false),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -824,7 +818,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("%\\%%"),
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -837,7 +831,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("100\\%"),
                 new LiteralExpression("\\"),
                 CaseInsensitive: true),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.AsBoolean());
     }
 
@@ -850,7 +844,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 new LiteralExpression("pattern"),
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
@@ -864,7 +858,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                     new LiteralExpression("te\\st"),
                     new LiteralExpression("ab"),
                     CaseInsensitive: false),
-                MakeRow()));
+                Row.Empty));
     }
 
     // ─────────────── Function calls ───────────────
@@ -872,7 +866,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void FunctionCall_Len()
     {
-        Row row = MakeRow(("name", DataValue.FromString("hello")));
+        Row row = MakeRow(["name"], DataValue.FromString("hello"));
         DataValue result = _evaluator.Evaluate(
             new FunctionCallExpression("len", [new ColumnReference("name")]),
             row);
@@ -885,7 +879,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         Assert.Throws<InvalidOperationException>(
             () => _evaluator.Evaluate(
                 new FunctionCallExpression("nonexistent", [new LiteralExpression(1)]),
-                MakeRow()));
+                Row.Empty));
     }
 
     // ─────────────── CAST expression ───────────────
@@ -893,7 +887,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Cast_UInt8ToScalar()
     {
-        Row row = MakeRow(("x", DataValue.FromUInt8(200)));
+        Row row = MakeRow(["x"], DataValue.FromUInt8(200));
         DataValue result = _evaluator.Evaluate(
             new CastExpression(new ColumnReference("x"), "Float32"),
             row);
@@ -906,31 +900,31 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void EvaluateAsBoolean_NonZero_True()
     {
-        Assert.True(_evaluator.EvaluateAsBoolean(new LiteralExpression(1), MakeRow()));
+        Assert.True(_evaluator.EvaluateAsBoolean(new LiteralExpression(1), Row.Empty));
     }
 
     [Fact]
     public void EvaluateAsBoolean_Zero_False()
     {
-        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(0), MakeRow()));
+        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(0), Row.Empty));
     }
 
     [Fact]
     public void EvaluateAsBoolean_Null_False()
     {
-        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(null), MakeRow()));
+        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(null), Row.Empty));
     }
 
     [Fact]
     public void EvaluateAsBoolean_NonEmptyString_True()
     {
-        Assert.True(_evaluator.EvaluateAsBoolean(new LiteralExpression("x"), MakeRow()));
+        Assert.True(_evaluator.EvaluateAsBoolean(new LiteralExpression("x"), Row.Empty));
     }
 
     [Fact]
     public void EvaluateAsBoolean_EmptyString_False()
     {
-        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(""), MakeRow()));
+        Assert.False(_evaluator.EvaluateAsBoolean(new LiteralExpression(""), Row.Empty));
     }
 
     // ─────────────── Column expressions with row data ───────────────
@@ -938,9 +932,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void ArithmeticOnColumns()
     {
-        Row row = MakeRow(
-            ("price", DataValue.FromFloat32(10f)),
-            ("quantity", DataValue.FromFloat32(3f)));
+        Row row = MakeRow(["price", "quantity"], DataValue.FromFloat32(10f), DataValue.FromFloat32(3f));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -959,9 +951,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void ComparisonOnColumns()
     {
-        Row row = MakeRow(
-            ("age", DataValue.FromFloat32(25f)),
-            ("threshold", DataValue.FromFloat32(18f)));
+        Row row = MakeRow(["age", "threshold"], DataValue.FromFloat32(25f), DataValue.FromFloat32(18f));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -978,8 +968,9 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public void DurationAdd_ReturnsDuration()
     {
         Row row = MakeRow(
-            ("a", DataValue.FromDuration(TimeSpan.FromHours(1))),
-            ("b", DataValue.FromDuration(TimeSpan.FromMinutes(30))));
+            ["a", "b"],
+            DataValue.FromDuration(TimeSpan.FromHours(1)),
+            DataValue.FromDuration(TimeSpan.FromMinutes(30)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -996,8 +987,9 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public void DurationSubtract_ReturnsDuration()
     {
         Row row = MakeRow(
-            ("a", DataValue.FromDuration(TimeSpan.FromHours(2))),
-            ("b", DataValue.FromDuration(TimeSpan.FromMinutes(30))));
+            ["a", "b"],
+            DataValue.FromDuration(TimeSpan.FromHours(2)),
+            DataValue.FromDuration(TimeSpan.FromMinutes(30)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -1014,8 +1006,9 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public void DurationSubtract_NegativeResult()
     {
         Row row = MakeRow(
-            ("a", DataValue.FromDuration(TimeSpan.FromMinutes(10))),
-            ("b", DataValue.FromDuration(TimeSpan.FromHours(1))));
+            ["a", "b"],
+            DataValue.FromDuration(TimeSpan.FromMinutes(10)),
+            DataValue.FromDuration(TimeSpan.FromHours(1)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -1033,8 +1026,9 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // Duration * Scalar is not a Duration operation — widens both to float.
         Row row = MakeRow(
-            ("d", DataValue.FromDuration(TimeSpan.FromHours(1))),
-            ("n", DataValue.FromFloat32(2)));
+            ["d", "n"],
+            DataValue.FromDuration(TimeSpan.FromHours(1)),
+            DataValue.FromFloat32(2));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -1060,7 +1054,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                     new WhenClause(new LiteralExpression(true), new LiteralExpression("yes")),
                 ],
                 new LiteralExpression("default")),
-            MakeRow());
+            Row.Empty);
         Assert.Equal("yes", result.AsString());
     }
 
@@ -1072,7 +1066,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(false), new LiteralExpression("no"))],
                 new LiteralExpression("fallback")),
-            MakeRow());
+            Row.Empty);
         Assert.Equal("fallback", result.AsString());
     }
 
@@ -1084,14 +1078,14 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(false), new LiteralExpression("no"))],
                 null),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
     }
 
     [Fact]
     public void Case_Simple_MatchesOperand()
     {
-        Row row = MakeRow(("status", DataValue.FromFloat32(2)));
+        Row row = MakeRow(["status"], DataValue.FromFloat32(2));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1107,7 +1101,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Case_Simple_NoMatch_FallsToElse()
     {
-        Row row = MakeRow(("status", DataValue.FromFloat32(99)));
+        Row row = MakeRow(["status"], DataValue.FromFloat32(99));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1120,7 +1114,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Case_Simple_NullOperand_ReturnsNull()
     {
-        Row row = MakeRow(("status", DataValue.Null(DataKind.Float32)));
+        Row row = MakeRow(["status"], DataValue.Null(DataKind.Float32));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1133,7 +1127,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Case_Searched_WithColumnCondition()
     {
-        Row row = MakeRow(("x", DataValue.FromFloat32(5)));
+        Row row = MakeRow(["x"], DataValue.FromFloat32(5));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
@@ -1167,7 +1161,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                     new WhenClause(new LiteralExpression(true), new LiteralExpression("second")),
                 ],
                 null),
-            MakeRow());
+            Row.Empty);
         Assert.Equal("first", result.AsString());
     }
 
@@ -1182,7 +1176,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression("42"))],
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(42, result.AsInt32());
     }
@@ -1196,7 +1190,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(false), new LiteralExpression("0"))],
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(1, result.AsInt32());
     }
@@ -1210,7 +1204,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression("abc"))],
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Int32, result.Kind);
     }
@@ -1224,7 +1218,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression(false))],
                 new LiteralExpression(1)),
-            MakeRow());
+            Row.Empty);
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(0, result.AsInt32());
     }
@@ -1234,7 +1228,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // CASE WHEN false THEN '0' END → no match, no ELSE → null with Int32 kind
         // (String + Int32 unifies to Int32; string values are parsed at runtime).
-        Row row = MakeRow(("x", DataValue.FromFloat32(5)));
+        Row row = MakeRow(["x"], DataValue.FromFloat32(5));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
@@ -1256,7 +1250,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression("yes"))],
                 new LiteralExpression("no")),
-            MakeRow());
+            Row.Empty);
         Assert.Equal(DataKind.String, result.Kind);
         Assert.Equal("yes", result.AsString());
     }
@@ -1270,7 +1264,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Case_IntegerLiteral_PreservesInt32Kind()
     {
-        Row row = MakeRow(("eval_set", DataValue.FromString("train")));
+        Row row = MakeRow(["eval_set"], DataValue.FromString("train"));
         CaseExpression caseExpression = new(
             null,
             [
@@ -1301,7 +1295,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new StructField("y", new LiteralExpression(2)),
         ]);
 
-        DataValue result = _evaluator.Evaluate(literal, MakeRow());
+        DataValue result = _evaluator.Evaluate(literal, Row.Empty);
 
         Assert.Equal(DataKind.Struct, result.Kind);
         Assert.False(result.IsNull);
@@ -1314,7 +1308,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void StructLiteral_WithColumnReferences_CapturesRowValues()
     {
-        Row row = MakeRow(("a", DataValue.FromFloat32(3.14f)), ("b", DataValue.FromString("hi")));
+        Row row = MakeRow(["a", "b"], DataValue.FromFloat32(3.14f), DataValue.FromString("hi"));
 
         StructLiteralExpression literal = new(
         [
@@ -1343,7 +1337,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             ]),
             new LiteralExpression("y"));
 
-        DataValue result = _evaluator.Evaluate(access, MakeRow());
+        DataValue result = _evaluator.Evaluate(access, Row.Empty);
 
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(20, result.AsInt32());
@@ -1360,7 +1354,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             ]),
             new LiteralExpression("z"));
 
-        DataValue result = _evaluator.Evaluate(access, MakeRow());
+        DataValue result = _evaluator.Evaluate(access, Row.Empty);
 
         Assert.True(result.IsNull);
     }
@@ -1376,7 +1370,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             ]),
             new LiteralExpression("foo"));
 
-        DataValue result = _evaluator.Evaluate(access, MakeRow());
+        DataValue result = _evaluator.Evaluate(access, Row.Empty);
 
         Assert.Equal(42, result.AsInt32());
     }
@@ -1393,7 +1387,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)],
             arena);
 
-        Row row = MakeRow(("info", structValue));
+        Row row = MakeRow(["info"], structValue);
 
         ColumnInfo[] fieldInfos =
         [
@@ -1422,7 +1416,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // 2026-01-15 12:00 UTC → 2026-01-15 07:00 EST (-05:00)
         DateTimeOffset utc = new(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1441,7 +1435,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // 2026-07-15 12:00 UTC → 2026-07-15 08:00 EDT (-04:00)
         DateTimeOffset utc = new(2026, 7, 15, 12, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1457,7 +1451,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void AtTimeZone_NullInputReturnsNull()
     {
-        Row row = MakeRow(("ts", DataValue.Null(DataKind.DateTime)));
+        Row row = MakeRow(["ts"], DataValue.Null(DataKind.DateTime));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1474,7 +1468,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // Convert to New_York and back to UTC — should get the same instant.
         DateTimeOffset utc = new(2026, 6, 15, 18, 0, 0, TimeSpan.Zero);
-        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+        Row row = MakeRow(["ts"], DataValue.FromDateTime(utc));
 
         Expression toNy = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1492,7 +1486,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void AtTimeZone_InvalidTimezone_Throws()
     {
-        Row row = MakeRow(("ts", DataValue.FromDateTime(DateTimeOffset.UtcNow)));
+        Row row = MakeRow(["ts"], DataValue.FromDateTime(DateTimeOffset.UtcNow));
 
         Expression expr = new AtTimeZoneExpression(
             new ColumnReference("ts"),
@@ -1506,7 +1500,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Typeof_ReturnsTypeTag()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
         Expression expr = new FunctionCallExpression("typeof", [new ColumnReference("x")]);
 
         DataValue result = _evaluator.Evaluate(expr, row);
@@ -1518,7 +1512,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Typeof_StringColumn_ReturnsStringType()
     {
-        Row row = MakeRow(("x", DataValue.FromString("hello")));
+        Row row = MakeRow(["x"], DataValue.FromString("hello"));
         Expression expr = new FunctionCallExpression("typeof", [new ColumnReference("x")]);
 
         DataValue result = _evaluator.Evaluate(expr, row);
@@ -1530,7 +1524,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TypeLiteral_ProducesTypeValue()
     {
-        Row row = MakeRow();
+        Row row = Row.Empty;
         Expression expr = new TypeLiteralExpression("Int32");
 
         DataValue result = _evaluator.Evaluate(expr, row);
@@ -1542,7 +1536,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Typeof_EqualsTypeLiteral_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
         Expression expr = new BinaryExpression(
             new FunctionCallExpression("typeof", [new ColumnReference("x")]),
             BinaryOperator.Equal,
@@ -1557,7 +1551,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void Typeof_NotEqualsTypeLiteral_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
         Expression expr = new BinaryExpression(
             new FunctionCallExpression("typeof", [new ColumnReference("x")]),
             BinaryOperator.Equal,
@@ -1582,7 +1576,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void IsType_Desugared_MatchingType_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
 
         // x IS Int32 desugars to: typeof(x) = Int32
         Expression expr = new BinaryExpression(
@@ -1598,7 +1592,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void IsNotType_Desugared_DifferentType_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromString("hello")));
+        Row row = MakeRow(["x"], DataValue.FromString("hello"));
 
         // x IS NOT Int32 desugars to: typeof(x) != Int32
         Expression expr = new BinaryExpression(
@@ -1616,7 +1610,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_SameType_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1626,7 +1620,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_IntFitsInUInt8_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(200)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(200));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
 
@@ -1636,7 +1630,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_IntOverflowsUInt8_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(5000)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(5000));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
 
@@ -1646,7 +1640,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_NegativeToUnsigned_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(-1)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(-1));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
 
@@ -1658,7 +1652,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     {
         // Truncation is allowed — only overflow returns false.
         // can_cast(3.14, Int32) is true because CAST(3.14 AS Int32) succeeds (returns 3).
-        Row row = MakeRow(("x", DataValue.FromFloat64(3.14)));
+        Row row = MakeRow(["x"], DataValue.FromFloat64(3.14));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1668,7 +1662,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_FloatToInt_WholeNumber_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromFloat64(42.0)));
+        Row row = MakeRow(["x"], DataValue.FromFloat64(42.0));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1678,7 +1672,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_ValidDateString_ReturnsTrue()
     {
-        Row row = MakeRow(("x", DataValue.FromString("2024-06-15")));
+        Row row = MakeRow(["x"], DataValue.FromString("2024-06-15"));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
 
@@ -1688,7 +1682,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_InvalidDateString_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromString("not-a-date")));
+        Row row = MakeRow(["x"], DataValue.FromString("not-a-date"));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
 
@@ -1698,7 +1692,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void CanCast_UnsupportedPair_ReturnsFalse()
     {
-        Row row = MakeRow(("x", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)));
+        Row row = MakeRow(["x"], DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32));
         Expression expr = new FunctionCallExpression("can_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1710,7 +1704,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_ValidConversion_ReturnsValue()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Float64")]);
 
@@ -1723,7 +1717,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_InvalidStringToInt_ReturnsNull()
     {
-        Row row = MakeRow(("x", DataValue.FromString("not_a_number")));
+        Row row = MakeRow(["x"], DataValue.FromString("not_a_number"));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1736,7 +1730,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_ValidStringToDate_ReturnsDate()
     {
-        Row row = MakeRow(("x", DataValue.FromString("2024-06-15")));
+        Row row = MakeRow(["x"], DataValue.FromString("2024-06-15"));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
 
@@ -1750,7 +1744,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_InvalidStringToDate_ReturnsNull()
     {
-        Row row = MakeRow(("x", DataValue.FromString("garbage")));
+        Row row = MakeRow(["x"], DataValue.FromString("garbage"));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
 
@@ -1764,7 +1758,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     public void TryCast_NumericTruncation_Succeeds()
     {
         // try_cast follows CAST semantics — truncation is allowed
-        Row row = MakeRow(("x", DataValue.FromFloat64(3.99)));
+        Row row = MakeRow(["x"], DataValue.FromFloat64(3.99));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1778,7 +1772,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_UnsupportedPair_ReturnsNull()
     {
-        Row row = MakeRow(("x", DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32)));
+        Row row = MakeRow(["x"], DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1790,7 +1784,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TryCast_NullInput_ReturnsTypedNull()
     {
-        Row row = MakeRow(("x", DataValue.Null(DataKind.String)));
+        Row row = MakeRow(["x"], DataValue.Null(DataKind.String));
         Expression expr = new FunctionCallExpression("try_cast",
             [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
 
@@ -1805,7 +1799,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TypeNarrow_MatchingType_GuardPassesAndCastApplies()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(42));
 
         // x AS Int32 y AND y > 0 desugars to:
         // can_cast(x, Int32) AND CAST(x AS Int32) > 0
@@ -1824,7 +1818,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TypeNarrow_WrongType_GuardFailsAndShortCircuits()
     {
-        Row row = MakeRow(("x", DataValue.FromString("hello")));
+        Row row = MakeRow(["x"], DataValue.FromString("hello"));
 
         // can_cast(x, Int32) AND CAST(x AS Int32) > 0
         // The guard fails ("hello" can't be cast to Int32), AND short-circuits
@@ -1843,7 +1837,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public void TypeNarrow_ValueOutOfRange_GuardFailsAndShortCircuits()
     {
-        Row row = MakeRow(("x", DataValue.FromInt32(5000)));
+        Row row = MakeRow(["x"], DataValue.FromInt32(5000));
 
         // x AS UInt8 y AND y > 0 desugars to:
         // can_cast(x, UInt8) AND CAST(x AS UInt8) > 0
@@ -1872,7 +1866,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new LiteralExpression("not_a_number"), "Int32", span);
 
         var ex = Assert.Throws<ExpressionEvaluationException>(
-            () => _evaluator.Evaluate(expr, MakeRow()));
+            () => _evaluator.Evaluate(expr, Row.Empty));
 
         Assert.Equal(span, ex.Span);
         Assert.Contains("Line 14", ex.Message);
@@ -1893,7 +1887,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             Span: span);
 
         var ex = Assert.Throws<ExpressionEvaluationException>(
-            () => _evaluator.Evaluate(expr, MakeRow()));
+            () => _evaluator.Evaluate(expr, Row.Empty));
 
         Assert.Equal(span, ex.Span);
         Assert.Contains("Line 7", ex.Message);
@@ -1913,7 +1907,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new LiteralExpression(1));
 
         var ex = Assert.Throws<ExpressionEvaluationException>(
-            () => _evaluator.Evaluate(expr, MakeRow()));
+            () => _evaluator.Evaluate(expr, Row.Empty));
 
         Assert.Equal(childSpan, ex.Span);
         Assert.Contains("Line 3", ex.Message);
@@ -1933,7 +1927,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
             new SourceSpan(5, 20, 15));
 
         var ex = Assert.Throws<ExpressionEvaluationException>(
-            () => _evaluator.Evaluate(expr, MakeRow()));
+            () => _evaluator.Evaluate(expr, Row.Empty));
 
         // The innermost span should be the one reported.
         Assert.Equal(innerSpan, ex.Span);
@@ -1947,6 +1941,6 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         var expr = new LiteralExpression(new object());
 
         Assert.Throws<InvalidOperationException>(
-            () => _evaluator.Evaluate(expr, MakeRow()));
+            () => _evaluator.Evaluate(expr, Row.Empty));
     }
 }
