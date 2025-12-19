@@ -646,4 +646,189 @@ public sealed class CompletionProviderTests : ServiceTestBase
 
         Assert.DoesNotContain(items, item => item.Label == "Int32");
     }
+
+    // ───────────────────── models.X completions ─────────────────────
+
+    private static LanguageServerManifest CreateManifestWithModels()
+    {
+        return new LanguageServerManifest
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "mobilenetv2",
+                    OutputKind = "String",
+                    Category = "classifier",
+                    Backend = "onnx",
+                    DisplayName = "MobileNetV2 ImageNet Classifier",
+                },
+                new ModelEntry
+                {
+                    Name = "llama31_8b",
+                    OutputKind = "String",
+                    Category = "llm",
+                    Backend = "llama",
+                    DisplayName = "Llama 3.1 8B Instruct",
+                },
+            ],
+        };
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDot_OffersModelNames()
+    {
+        CompletionProvider provider = new(CreateManifestWithModels());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT models.", 14);
+
+        Assert.Contains(items, item => item.Label == "mobilenetv2" && item.Kind == CompletionItemKind.Function);
+        Assert.Contains(items, item => item.Label == "llama31_8b" && item.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDotWithPrefix_FiltersByPrefix()
+    {
+        CompletionProvider provider = new(CreateManifestWithModels());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT models.mob", 17);
+
+        Assert.Contains(items, item => item.Label == "mobilenetv2");
+        Assert.DoesNotContain(items, item => item.Label == "llama31_8b");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDot_ItemCarriesCategoryAndOutputKind()
+    {
+        CompletionProvider provider = new(CreateManifestWithModels());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT models.", 14);
+
+        CompletionItem mobilenet = Assert.Single(items, item => item.Label == "mobilenetv2");
+        Assert.Contains("classifier", mobilenet.Detail);
+        Assert.Contains("String", mobilenet.Detail);
+        // InsertText opens the call so the user just types the args next.
+        Assert.Equal("mobilenetv2(", mobilenet.InsertText);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDot_CaseInsensitiveQualifier()
+    {
+        CompletionProvider provider = new(CreateManifestWithModels());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT MODELS.", 14);
+
+        Assert.Contains(items, item => item.Label == "mobilenetv2");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDot_NoModelsManifest_ReturnsEmpty()
+    {
+        // CreateProvider's manifest doesn't include a Models field; the
+        // dispatch should noop instead of throwing.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT models.", 14);
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterModelsDot_DetailIncludesParameterSignature()
+    {
+        // Models with InputKinds + OptionalArgKinds should surface the full
+        // call shape in Detail so the popup acts as a signature hint.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "llama31_8b",
+                    OutputKind = "String",
+                    Category = "llm",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "input", Kind = "String" },
+                        new ParameterSignature { Name = "option", Kind = "Float64", IsOptional = true },
+                    ],
+                },
+            ],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem item = Assert.Single(provider.GetCompletions("SELECT models.", 14));
+
+        Assert.Contains("input: String", item.Detail);
+        Assert.Contains("option: Float64?", item.Detail);
+        Assert.Contains("→ String", item.Detail);
+    }
+
+    // ───────────────────── Function argument surfacing ─────────────────────
+
+    [Fact]
+    public void GetCompletions_ScalarFunction_DetailIncludesParameterSignature()
+    {
+        // Scalar functions with populated Parameters should show their
+        // call shape in Detail, the same hint shape models use.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    Name = "upper",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "String" }],
+                    ReturnType = "String",
+                    Category = FunctionCategory.String,
+                },
+            ],
+            Keywords = ["SELECT"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem item = Assert.Single(provider.GetCompletions("SELECT ", 7),
+            i => i.Label == "upper");
+
+        Assert.Contains("upper(value: String)", item.Detail);
+        Assert.Contains("→ String", item.Detail);
+    }
+
+    [Fact]
+    public void GetCompletions_ScalarFunction_VariadicRendersWithEllipsis()
+    {
+        // The builder lowers VariadicTrailing into a "...name" optional
+        // parameter; the surfaced Detail should show the ellipsis form.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    Name = "concat",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "...elements", Kind = "Any", IsOptional = true },
+                    ],
+                    ReturnType = "String",
+                    Category = FunctionCategory.String,
+                },
+            ],
+            Keywords = [],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem item = Assert.Single(provider.GetCompletions("SELECT ", 7),
+            i => i.Label == "concat");
+
+        Assert.Contains("...elements: Any?", item.Detail);
+    }
 }

@@ -145,6 +145,15 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterDot:
                 if (zone.TableQualifier is not null)
                 {
+                    // Reserved namespaces (`models.X`, future `udf.X` /
+                    // `proc.X` / `tasks.X`) are dispatched ahead of the
+                    // table-column lookup. The qualifier match is
+                    // case-insensitive to mirror SQL's keyword conventions.
+                    if (string.Equals(zone.TableQualifier, "models", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddModels(items);
+                        break;
+                    }
                     AddQualifiedColumns(items, zone.TableQualifier);
                 }
                 break;
@@ -389,6 +398,44 @@ public sealed class CompletionProvider
                 Detail = $"[{function.Category}] Table function: {signature}",
                 InsertText = $"{function.Name}(",
                 Documentation = EnrichFunctionDoc(function.Name),
+                SortOrder = 1,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Surfaces every model registered in the catalog's <c>ModelCatalog</c> as
+    /// a <c>models.&lt;name&gt;(...)</c> call-site suggestion. Items insert
+    /// just the bare name (the leading <c>models.</c> is already in the
+    /// buffer); the editor follows up with an open-paren via the user's
+    /// next keystroke.
+    /// </summary>
+    private void AddModels(List<CompletionItem> items)
+    {
+        if (_manifest.Models is null) return;
+
+        foreach (ModelEntry model in _manifest.Models)
+        {
+            string parameters = model.Parameters is null
+                ? ""
+                : string.Join(", ", model.Parameters.Select(FormatParameter));
+            string signature = $"models.{model.Name}({parameters})";
+            string returnInfo = $" → {model.OutputKind ?? "?"}";
+            string detail = model.Category is not null
+                ? $"[{model.Category}] {signature}{returnInfo}"
+                : $"{signature}{returnInfo}";
+
+            string? doc = model.DisplayName is not null && model.Backend is not null
+                ? $"{model.DisplayName} ({model.Backend})"
+                : model.DisplayName ?? (model.Backend is not null ? $"backend: {model.Backend}" : null);
+
+            items.Add(new CompletionItem
+            {
+                Label = model.Name,
+                Kind = CompletionItemKind.Function,
+                Detail = detail,
+                InsertText = $"{model.Name}(",
+                Documentation = doc,
                 SortOrder = 1,
             });
         }

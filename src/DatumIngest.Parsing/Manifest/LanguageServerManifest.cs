@@ -17,6 +17,51 @@ public sealed class LanguageServerManifest
 
     /// <summary>SQL keywords recognized by the DatumIngest SQL dialect.</summary>
     public required IReadOnlyList<string> Keywords { get; init; }
+
+    /// <summary>
+    /// Models registered in the catalog's <c>ModelCatalog</c>, surfaced for
+    /// the <c>models.&lt;name&gt;(...)</c> completion namespace. May be
+    /// <see langword="null"/> when no model catalog is attached (the offline
+    /// JSON manifest workflow doesn't carry models today).
+    /// </summary>
+    public IReadOnlyList<ModelEntry>? Models { get; init; }
+}
+
+/// <summary>
+/// Lightweight description of a registered model for completion / hover.
+/// Mirrors the subset of <c>ModelCatalogEntry</c> useful at edit time.
+/// </summary>
+public sealed class ModelEntry
+{
+    /// <summary>Stable model identifier as it appears after <c>models.</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Output <c>DataKind</c> name (e.g. <c>"String"</c>, <c>"Float32"</c>).</summary>
+    public string? OutputKind { get; init; }
+
+    /// <summary>
+    /// Single-valued purpose label from the catalog entry: <c>"llm"</c>,
+    /// <c>"classifier"</c>, <c>"detector"</c>, etc.
+    /// </summary>
+    public string? Category { get; init; }
+
+    /// <summary>Free-form backend identifier (<c>"onnx"</c>, <c>"llama"</c>, …).</summary>
+    public string? Backend { get; init; }
+
+    /// <summary>
+    /// Human-readable name for hover docs. Distinct from <see cref="Name"/>
+    /// (the SQL identifier) — e.g. <c>"MobileNetV2 ImageNet Classifier"</c>.
+    /// </summary>
+    public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Positional argument shape: required inputs first, then optional
+    /// hyperparameters. Required inputs derive from
+    /// <c>ModelCatalogEntry.InputKinds</c>; optionals from
+    /// <c>OptionalArgKinds</c>. Empty when the catalog doesn't expose
+    /// signature info.
+    /// </summary>
+    public IReadOnlyList<ParameterSignature>? Parameters { get; init; }
 }
 
 /// <summary>
