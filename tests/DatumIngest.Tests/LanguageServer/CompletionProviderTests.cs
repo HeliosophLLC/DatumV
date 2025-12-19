@@ -590,4 +590,60 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, item => item.Label == "CROSS VALIDATE");
         Assert.Contains(items, item => item.Label == "CROSS JOIN");
     }
+
+    // ───────────────────── Type completions ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterDeclareName_OffersTypeKeywords()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("DECLARE @x ", 11);
+
+        // Coverage of the runtime DataKind enum: classic scalars + Array
+        // wrapper + extended numerics that came in after the original list.
+        Assert.Contains(items, item => item.Label == "Int32" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "String" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "Boolean" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "Float64" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "Array" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "Json" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterCastAs_OffersTypeKeywords()
+    {
+        // CAST(x AS |) — previously suppressed, now offers types.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT CAST(id AS ", 18);
+
+        Assert.Contains(items, item => item.Label == "Int32");
+        Assert.Contains(items, item => item.Label == "String");
+        Assert.Contains(items, item => item.Label == "Array");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterReturns_OffersTypeKeywords()
+    {
+        // CREATE FUNCTION foo() RETURNS | — type position.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("CREATE FUNCTION sq(@x INT32) RETURNS ", 37);
+
+        Assert.Contains(items, item => item.Label == "Int32");
+        Assert.Contains(items, item => item.Label == "Float64");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterFromAlias_StillSuppressesCompletions()
+    {
+        // Regression: AS used for table aliasing must not start showing
+        // type names. The CAST-detection path is paren-scoped.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users AS ", 23);
+
+        Assert.DoesNotContain(items, item => item.Label == "Int32");
+    }
 }

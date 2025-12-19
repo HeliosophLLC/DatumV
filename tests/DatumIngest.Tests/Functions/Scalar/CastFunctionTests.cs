@@ -168,6 +168,66 @@ public sealed class CastFunctionTests
         Assert.Contains("does not support", ex.Message);
     }
 
+    [Fact]
+    public void Cast_ScalarToArrayAnnotation_Throws()
+    {
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            new CastFunction().Execute(
+                [ValueRef.FromString("1,2,3"), ValueRef.FromString("Array<Int32>")],
+                in Frame));
+        // Error message points users at the right path — array construction
+        // is a separate concern from type conversion.
+        Assert.Contains("requires the source to already be Array", ex.Message);
+        Assert.Contains("string_split", ex.Message);
+    }
+
+    [Fact]
+    public void Cast_ArrayToScalarAnnotation_Throws()
+    {
+        ValueRef arr = ValueRef.FromArray(DataKind.Int32,
+            [ValueRef.FromInt32(1), ValueRef.FromInt32(2)]);
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            new CastFunction().Execute(
+                [arr, ValueRef.FromType(DataKind.Int32)],
+                in Frame));
+        Assert.Contains("cannot convert Array<Int32>", ex.Message);
+    }
+
+    [Fact]
+    public void Cast_ArrayToSameArrayAnnotation_PassesThrough()
+    {
+        ValueRef arr = ValueRef.FromArray(DataKind.String,
+            [ValueRef.FromString("a"), ValueRef.FromString("b")]);
+        ValueRef result = new CastFunction().Execute(
+            [arr, ValueRef.FromString("Array<String>")],
+            in Frame);
+        Assert.True(result.IsArray);
+        Assert.Equal(DataKind.String, result.Kind);
+    }
+
+    [Fact]
+    public void Cast_ArrayToDifferentArrayAnnotation_Throws()
+    {
+        ValueRef arr = ValueRef.FromArray(DataKind.Int32,
+            [ValueRef.FromInt32(1), ValueRef.FromInt32(2)]);
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            new CastFunction().Execute(
+                [arr, ValueRef.FromString("Array<Float64>")],
+                in Frame));
+        Assert.Contains("requires the source to already be Array<Float64>", ex.Message);
+    }
+
+    [Fact]
+    public void Cast_NullSourceToArrayAnnotation_ReturnsTypedNullArray()
+    {
+        ValueRef result = new CastFunction().Execute(
+            [ValueRef.Null(DataKind.String), ValueRef.FromString("Array<String>")],
+            in Frame);
+        Assert.True(result.IsNull);
+        Assert.True(result.IsArray);
+        Assert.Equal(DataKind.String, result.Kind);
+    }
+
     // ─── try_cast ──────────────────────────────────────────────────────────
 
     [Fact]

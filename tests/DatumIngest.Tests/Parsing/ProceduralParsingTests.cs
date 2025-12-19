@@ -73,6 +73,25 @@ public class ProceduralParsingTests : ServiceTestBase
         Assert.Equal("hi", lit.Value);
     }
 
+    [Fact]
+    public void Declare_AngleBracketArrayType_CanonicalisesToArrayWrapper()
+    {
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @players Array<STRING>");
+        Assert.Equal("players", decl.VariableName);
+        Assert.Equal("Array<STRING>", decl.TypeName);
+        Assert.Null(decl.Initializer);
+    }
+
+    [Fact]
+    public void Declare_PostfixBracketSugar_DesugarsToArrayWrapper()
+    {
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE @scores FLOAT32[]");
+        Assert.Equal("scores", decl.VariableName);
+        // Both syntaxes share one canonical form so downstream consumers
+        // (the resolver, system_udfs, the catalog file) see one shape.
+        Assert.Equal("Array<FLOAT32>", decl.TypeName);
+    }
+
     // ───────────────────── SET ─────────────────────
 
     [Fact]

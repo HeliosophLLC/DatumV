@@ -63,6 +63,48 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Null(result.FinalBindings["x"]);
     }
 
+    [Fact]
+    public async Task Declare_AngleBracketArrayType_NoInitializer_BindsTypedNullArray()
+    {
+        // No initializer + array annotation → null carrier with Kind=String,
+        // IsArray=true. Materialize() returns null for any IsNull value, so
+        // surface verification is "did not throw"; the parser + resolver +
+        // DataValue.NullArrayOf wiring is what we're pinning.
+        BatchResult result = await RunAsync("DECLARE @players Array<STRING>");
+        Assert.True(result.FinalBindings.ContainsKey("players"));
+        Assert.Null(result.FinalBindings["players"]);
+    }
+
+    [Fact]
+    public async Task Declare_PostfixBracketSugar_NoInitializer_BindsTypedNullArray()
+    {
+        BatchResult result = await RunAsync("DECLARE @scores FLOAT32[]");
+        Assert.True(result.FinalBindings.ContainsKey("scores"));
+        Assert.Null(result.FinalBindings["scores"]);
+    }
+
+    [Fact]
+    public async Task Declare_NestedArrayAnnotation_Throws()
+    {
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync("DECLARE @bad Array<Array<INT32>>"));
+        Assert.Contains("cannot resolve type name", ex.Message);
+    }
+
+    [Fact]
+    public async Task Declare_ArrayLiteralInitializer_BindsArrayUsableByArrayLength()
+    {
+        // Reported bug: storing an array literal under a variable and then
+        // calling array_length() on the variable threw "argument must be an
+        // array" because the IsArray flag wasn't preserved through the path
+        // (DECLARE → variable scope → variable read → function arg).
+        BatchResult result = await RunAsync(
+            "DECLARE @players Array<String> = ['Fighter', 'Wizard', 'Healer']; " +
+            "DECLARE @player_count INT32 = ARRAY_LENGTH(@players)");
+
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["player_count"]));
+    }
+
     // ───────────────────── DECLARE-with-subquery ─────────────────────
 
     [Fact]

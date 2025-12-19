@@ -491,8 +491,20 @@ public static class CompletionContext
                     {
                         continue;
                     }
+                    // CAST(expr AS |) wants a type, not an alias. Detect by
+                    // walking back to the enclosing unmatched left paren and
+                    // checking whether CAST sits immediately before it.
+                    if (IsInsideCastParen(tokens, index))
+                    {
+                        return CompletionZoneKind.AfterDeclareType;
+                    }
                     // No alias typed yet — user is typing an alias name, no completions.
                     return CompletionZoneKind.AfterAs;
+
+                case SqlToken.Returns:
+                    // CREATE FUNCTION foo(...) RETURNS | — type position. Same
+                    // shape as DECLARE @x |, so reuse the type-completion zone.
+                    return CompletionZoneKind.AfterDeclareType;
 
                 case SqlToken.Set:
                     // After UPDATE ... SET — offer columns for assignment.
@@ -619,6 +631,37 @@ public static class CompletionContext
 
         // No governing keyword found — we're at the start of a statement.
         return CompletionZoneKind.StatementStart;
+    }
+
+    /// <summary>
+    /// Walks back from <paramref name="fromIndex"/> tracking paren balance to
+    /// find the enclosing unmatched left paren. Returns <see langword="true"/>
+    /// when that paren is the argument list of a CAST(...) call —
+    /// <c>CAST(x AS |)</c> wants type completions, not alias completions.
+    /// </summary>
+    private static bool IsInsideCastParen(List<TokenInfo> tokens, int fromIndex)
+    {
+        int depth = 0;
+        for (int i = fromIndex - 1; i >= 0; i--)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k == SqlToken.RightParen)
+            {
+                depth++;
+                continue;
+            }
+            if (k == SqlToken.LeftParen)
+            {
+                if (depth > 0)
+                {
+                    depth--;
+                    continue;
+                }
+                // Unmatched left paren — this is the enclosing argument list.
+                return i > 0 && tokens[i - 1].Kind == SqlToken.Cast;
+            }
+        }
+        return false;
     }
 
     /// <summary>

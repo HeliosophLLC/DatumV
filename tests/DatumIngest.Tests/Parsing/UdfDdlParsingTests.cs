@@ -85,6 +85,46 @@ public class UdfDdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void Create_ArrayParameter_AngleBracket_PreservesCanonicalForm()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION first_player(@players Array<STRING>) AS @players[0]");
+
+        Assert.Equal("Array<STRING>", create.Parameters[0].TypeName);
+        Assert.False(create.Parameters[0].IsNotNull);
+    }
+
+    [Fact]
+    public void Create_ArrayParameter_PostfixSugar_DesugarsToCanonical()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION first_score(@scores FLOAT32[]) AS @scores[0]");
+
+        Assert.Equal("Array<FLOAT32>", create.Parameters[0].TypeName);
+    }
+
+    [Fact]
+    public void Create_ArrayParameter_WithIsNotNull_ComposesCorrectly()
+    {
+        // The IS NOT NULL modifier sits *after* the type, so the array
+        // parser doesn't swallow it; the parameter still records both pieces.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION join_names(@players Array<STRING> IS NOT NULL) AS array_to_string(@players, ',')");
+
+        Assert.Equal("Array<STRING>", create.Parameters[0].TypeName);
+        Assert.True(create.Parameters[0].IsNotNull);
+    }
+
+    [Fact]
+    public void Create_ArrayReturnType_PreservedOnDescriptor()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION lift(@x INT32) RETURNS Array<INT32> AS array_of(@x)");
+
+        Assert.Equal("Array<INT32>", create.ReturnTypeName);
+    }
+
+    [Fact]
     public void Create_ReturnsWithIsNotNull_SetsFlag()
     {
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(

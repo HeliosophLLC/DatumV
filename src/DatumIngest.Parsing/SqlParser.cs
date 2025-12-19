@@ -610,15 +610,17 @@ public static class SqlParser
                 ? (Expression)new WindowFunctionCallExpression(qualifiedName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
                 : (Expression)new FunctionCallExpression(qualifiedName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
 
-    /// <summary>CAST( expression AS type )</summary>
+    /// <summary>CAST( expression AS type ) — accepts scalar names, the
+    /// <c>Array&lt;T&gt;</c> wrapper, and the <c>T[]</c> sugar via the shared
+    /// <see cref="TypeNameParser"/>.</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =
         from cast in Token.EqualTo(SqlToken.Cast)
         from open in Token.EqualTo(SqlToken.LeftParen)
         from expression in SP.Ref(() => ExpressionParser!)
         from asKw in Token.EqualTo(SqlToken.As)
-        from targetType in Token.EqualTo(SqlToken.TypeKeyword).Or(Token.EqualTo(SqlToken.Identifier)).Or(Token.EqualTo(SqlToken.Time))
+        from targetType in SP.Ref(() => TypeNameParser!)
         from close in Token.EqualTo(SqlToken.RightParen)
-        select (Expression)new CastExpression(expression, GetTokenText(targetType), ToSpan(cast, close));
+        select (Expression)new CastExpression(expression, targetType, ToSpan(cast, close));
 
     /// <summary>
     /// EXTRACT( field FROM expression ) — desugared to <c>date_part('field', expression)</c>.
@@ -2299,12 +2301,36 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.TypeKeyword).Select(t => t.ToStringValue()));
 
     /// <summary>
-    /// Parses a column type name. Accepts a plain identifier and also compound types
-    /// like <c>NOT NULL</c> as a suffix modifier.
+    /// Parses a column type name. Accepts a plain scalar identifier
+    /// (<c>Int32</c>, <c>String</c>, <c>Time</c>), the angle-bracket array
+    /// wrapper (<c>Array&lt;T&gt;</c>, recursive in syntax — rejected past
+    /// one level at resolution time), and the postfix sugar (<c>T[]</c>)
+    /// which canonicalises to <c>Array&lt;T&gt;</c> at parse time so
+    /// downstream consumers see one form. Returns the canonical string.
     /// </summary>
     private static readonly TokenListParser<SqlToken, string> TypeNameParser =
-        Token.EqualTo(SqlToken.TypeKeyword).Or(Token.EqualTo(SqlToken.Identifier)).Or(Token.EqualTo(SqlToken.Time))
-            .Select(GetTokenText);
+        from baseOrWrapper in
+            // Wrapper form first; backtrack to bare scalar when the
+            // identifier isn't followed by '<' — the bare scalar grammar is
+            // a strict prefix of the wrapper grammar.
+            (
+                from name in Token.EqualTo(SqlToken.Identifier)
+                from open in Token.EqualTo(SqlToken.LessThan)
+                from inner in SP.Ref(() => TypeNameParser!)
+                from close in Token.EqualTo(SqlToken.GreaterThan)
+                select $"{GetTokenText(name)}<{inner}>"
+            ).Try()
+            .Or(
+                Token.EqualTo(SqlToken.TypeKeyword)
+                    .Or(Token.EqualTo(SqlToken.Identifier))
+                    .Or(Token.EqualTo(SqlToken.Time))
+                    .Select(GetTokenText))
+        from postfixArray in (
+            from lb in Token.EqualTo(SqlToken.LeftBracket)
+            from rb in Token.EqualTo(SqlToken.RightBracket)
+            select true
+        ).OptionalOrDefault()
+        select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
 
     /// <summary>
     /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY]</c>.

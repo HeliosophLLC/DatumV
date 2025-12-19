@@ -60,7 +60,35 @@ public sealed class CastFunction : IFunction, IScalarFunction
     public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
     {
         ValueRef input = arguments[0];
-        DataKind targetKind = ResolveTargetKind(arguments[1]);
+        (DataKind targetKind, bool targetIsArray) = ResolveTarget(arguments[1]);
+
+        // Array-typed casts are intentionally restrictive: source must already
+        // be an array of the same element kind. Parsing a string into an array
+        // belongs in helpers like string_split + array_map + cast on elements,
+        // not in cast() itself.
+        if (targetIsArray)
+        {
+            if (input.IsNull)
+            {
+                return ValueRef.NullArray(targetKind);
+            }
+            if (input.IsArray && input.Kind == targetKind)
+            {
+                return input;
+            }
+            throw new InvalidOperationException(
+                $"cast() to Array<{targetKind}> requires the source to already be Array<{targetKind}>; "
+                + $"got {(input.IsArray ? $"Array<{input.Kind}>" : input.Kind.ToString())}. "
+                + "Use string_split / array_map to construct an array from non-array sources.");
+        }
+
+        // Scalar target: arrays cannot be flattened to a scalar via cast.
+        if (input.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"cast() cannot convert Array<{input.Kind}> to scalar {targetKind}. "
+                + "Index or aggregate the array first (e.g. arr[0], array_first(arr)).");
+        }
 
         if (input.IsNull)
         {
@@ -82,27 +110,41 @@ public sealed class CastFunction : IFunction, IScalarFunction
     }
 
     /// <summary>
-    /// Reads the target kind from the second argument. Accepts either a
-    /// <see cref="DataKind.Type"/> literal or a <see cref="DataKind.String"/>
-    /// name (with a few common aliases like <c>bool</c>).
+    /// Reads the target type annotation from the second argument. Accepts
+    /// either a <see cref="DataKind.Type"/> literal (always scalar) or a
+    /// <see cref="DataKind.String"/> annotation that may carry an
+    /// <c>Array&lt;T&gt;</c> wrapper as produced by <c>TypeNameParser</c>.
+    /// </summary>
+    internal static (DataKind Kind, bool IsArray) ResolveTarget(ValueRef target)
+    {
+        if (target.Kind == DataKind.Type)
+        {
+            return (target.AsType(), false);
+        }
+
+        string annotation = target.AsString();
+        if (TypeAnnotationResolver.TryParse(annotation, out DataKind kind, out bool isArray))
+        {
+            return (kind, isArray);
+        }
+
+        throw new ArgumentException($"Unknown target kind '{annotation}'.");
+    }
+
+    /// <summary>
+    /// Scalar-only convenience for callers that don't carry an array flag
+    /// through their pipelines. Throws if the annotation names an array
+    /// type — array-typed casts must use <see cref="ResolveTarget"/>.
     /// </summary>
     internal static DataKind ResolveTargetKind(ValueRef target)
     {
-        string targetName = target.Kind == DataKind.Type
-            ? target.AsType().ToString()
-            : target.AsString();
-
-        if (Enum.TryParse(targetName, ignoreCase: true, out DataKind kind))
+        (DataKind kind, bool isArray) = ResolveTarget(target);
+        if (isArray)
         {
-            return kind;
+            throw new ArgumentException(
+                $"Expected a scalar type, got an array annotation 'Array<{kind}>'.");
         }
-
-        return targetName.ToLowerInvariant() switch
-        {
-            "bool" => DataKind.Boolean,
-            "scalar" => DataKind.Float32,
-            _ => throw new ArgumentException($"Unknown target kind '{targetName}'."),
-        };
+        return kind;
     }
 
     /// <summary>

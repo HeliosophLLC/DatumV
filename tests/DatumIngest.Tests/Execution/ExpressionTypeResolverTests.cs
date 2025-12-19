@@ -234,17 +234,6 @@ public sealed class ExpressionTypeResolverTests : ServiceTestBase
     }
 
     [Fact]
-    public void ResolveFunction_VectorReduction_ReturnsScalar()
-    {
-        DataKind? result = ExpressionTypeResolver.ResolveType(
-            new FunctionCallExpression("vec_sum", [new ColumnReference("embedding")]),
-            TestSchema,
-            DefaultFunctions);
-
-        Assert.Equal(DataKind.Float32, result);
-    }
-
-    [Fact]
     public void ResolveFunction_UnknownFunction_ReturnsNull()
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(

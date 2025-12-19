@@ -745,9 +745,13 @@ public sealed class ExpressionEvaluator
     /// </summary>
     private static ValueRef ToValueRef(DataValue value, in EvaluationFrame frame)
     {
+        // Null values: pick the right shape (null array vs null scalar) so
+        // downstream IsArray checks don't misfire on a typed-null array.
         if (value.IsNull)
         {
-            return ValueRef.Null(value.Kind);
+            return value.IsArray
+                ? ValueRef.NullArray(value.Kind)
+                : ValueRef.Null(value.Kind);
         }
 
         if (value.IsInline)
@@ -755,12 +759,20 @@ public sealed class ExpressionEvaluator
             return ValueRef.FromInline(value);
         }
 
-        // Non-inline: resolve managed payload from source store / sidecar.
-        // Byte arrays (UInt8 + IsArray) and Image both carry byte content.
-        if (value.IsByteArrayKind || value.Kind == DataKind.Image)
+        // Arrays must be dispatched before the byte-blob / string scalar
+        // branches: Kind=String|Image without IsArray means a single value,
+        // but with IsArray means a typed array carrier and the element bytes
+        // need to be read through the array accessors.
+        if (value.IsArray)
+        {
+            return ArrayDataValueToValueRef(value, frame);
+        }
+
+        // Non-inline single-value byte blobs.
+        if (value.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
-            return ValueRef.FromBytes(value.Kind, bytes.ToArray(), isArray: value.IsByteArrayKind);
+            return ValueRef.FromBytes(value.Kind, bytes.ToArray());
         }
 
         return value.Kind switch
@@ -771,6 +783,70 @@ public sealed class ExpressionEvaluator
                 $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
                 + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary."),
         };
+    }
+
+    /// <summary>
+    /// Reads a non-inline array <see cref="DataValue"/> into a managed payload
+    /// and wraps the result in the matching <see cref="ValueRef"/> shape so
+    /// downstream functions see <c>IsArray=true</c>. Reference-type arrays
+    /// (<c>Array&lt;String&gt;</c>, <c>Array&lt;Image&gt;</c>) build a per-element
+    /// <see cref="ValueRef"/>; fixed-width primitive arrays flow through
+    /// <see cref="ValueRef.FromPrimitiveArray{T}"/> with the matching
+    /// element type.
+    /// </summary>
+    private static ValueRef ArrayDataValueToValueRef(DataValue value, in EvaluationFrame frame)
+    {
+        return value.Kind switch
+        {
+            DataKind.String => StringArrayToValueRef(value, frame),
+            DataKind.Image => BytesArrayToValueRef(value, DataKind.Image, frame),
+
+            DataKind.Boolean => PrimitiveArrayToValueRef<byte>(value, frame),
+            DataKind.UInt8 => PrimitiveArrayToValueRef<byte>(value, frame),
+            DataKind.UInt16 => PrimitiveArrayToValueRef<ushort>(value, frame),
+            DataKind.UInt32 => PrimitiveArrayToValueRef<uint>(value, frame),
+            DataKind.UInt64 => PrimitiveArrayToValueRef<ulong>(value, frame),
+            DataKind.Int8 => PrimitiveArrayToValueRef<sbyte>(value, frame),
+            DataKind.Int16 => PrimitiveArrayToValueRef<short>(value, frame),
+            DataKind.Int32 => PrimitiveArrayToValueRef<int>(value, frame),
+            DataKind.Int64 => PrimitiveArrayToValueRef<long>(value, frame),
+            DataKind.Float16 => PrimitiveArrayToValueRef<Half>(value, frame),
+            DataKind.Float32 => PrimitiveArrayToValueRef<float>(value, frame),
+            DataKind.Float64 => PrimitiveArrayToValueRef<double>(value, frame),
+
+            _ => throw new InvalidOperationException(
+                $"Cannot convert non-inline Array<{value.Kind}> into a ValueRef. "
+                + "Add a case to ExpressionEvaluator.ArrayDataValueToValueRef when this element kind reaches the function boundary."),
+        };
+    }
+
+    private static ValueRef StringArrayToValueRef(DataValue value, in EvaluationFrame frame)
+    {
+        string[] strings = value.AsStringArray(frame.Source, frame.SidecarRegistry);
+        ValueRef[] elements = new ValueRef[strings.Length];
+        for (int i = 0; i < strings.Length; i++)
+        {
+            elements[i] = ValueRef.FromString(strings[i]);
+        }
+        return ValueRef.FromArray(DataKind.String, elements);
+    }
+
+    private static ValueRef BytesArrayToValueRef(DataValue value, DataKind elementKind, in EvaluationFrame frame)
+    {
+        byte[][] blobs = value.AsImageArray(frame.Source, frame.SidecarRegistry);
+        ValueRef[] elements = new ValueRef[blobs.Length];
+        for (int i = 0; i < blobs.Length; i++)
+        {
+            elements[i] = ValueRef.FromBytes(elementKind, blobs[i]);
+        }
+        return ValueRef.FromArray(elementKind, elements);
+    }
+
+    private static ValueRef PrimitiveArrayToValueRef<T>(DataValue value, in EvaluationFrame frame)
+        where T : unmanaged
+    {
+        ReadOnlySpan<T> span = value.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
+        return ValueRef.FromPrimitiveArray(span.ToArray(), value.Kind);
     }
 
     /// <summary>

@@ -92,20 +92,22 @@ internal static class KeywordRegistry
     ];
 
     /// <summary>
-    /// Column type keywords offered in CREATE TABLE and ALTER TABLE ADD COLUMN contexts.
+    /// Column / variable / parameter type keywords offered in CREATE TABLE,
+    /// ALTER TABLE ADD COLUMN, DECLARE, CREATE FUNCTION parameter, and
+    /// CAST AS contexts. Mirrors the runtime <c>DataKind</c> enum plus the
+    /// <c>Array</c> wrapper.
     /// </summary>
     internal static readonly string[] ColumnTypeKeywords =
     [
-        "Unknown",
-        "Type",
         "Boolean",
-        "UInt8", "UInt16", "UInt32", "UInt64",
-        "Int8", "Int16", "Int32", "Int64",
-        "Float32", "Float64",
+        "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
+        "Int8", "Int16", "Int32", "Int64", "Int128",
+        "Float16", "Float32", "Float64", "Decimal",
         "Date", "Time", "DateTime", "Duration",
         "String", "Uuid",
-        "UInt8Array", "Image",
-        "Vector", "Matrix", "Tensor", "Array", "Struct",
+        "Image", "Audio", "Video", "Json",
+        "Struct",
+        "Array",
     ];
 
     // ───────────────────── Zone → keyword completions ─────────────────────

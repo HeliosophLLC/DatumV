@@ -533,16 +533,17 @@ public sealed class BatchExecutor
         {
             // No initializer → bind a typed NULL. The TypeName is required by
             // the parser when there's no initializer, so non-null here.
-            DataKind? kind = decl.TypeName is not null
-                ? ExpressionTypeResolver.ResolveCastTargetKind(decl.TypeName)
-                : null;
-            if (kind is null)
+            // Annotations may carry an Array<T> wrapper produced by the
+            // shared TypeNameParser; resolve to (kind, isArray) and pick the
+            // matching null carrier.
+            if (decl.TypeName is null
+                || !TypeAnnotationResolver.TryParse(decl.TypeName, out DataKind kind, out bool isArray))
             {
                 throw new InvalidOperationException(
                     $"DECLARE @{decl.VariableName}: cannot resolve type name '{decl.TypeName}'. " +
-                    "Use a recognised SQL type (Int32, Float64, String, Boolean, etc.) or supply an initializer.");
+                    "Use a recognised SQL type (Int32, Float64, String, Boolean, Array<String>, etc.) or supply an initializer.");
             }
-            stable = DataValue.Null(kind.Value);
+            stable = isArray ? DataValue.NullArrayOf(kind) : DataValue.Null(kind);
         }
 
         batchContext.VariableScope.Declare(decl.VariableName, stable);

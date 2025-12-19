@@ -789,6 +789,48 @@ public sealed class CompletionContextTests : ServiceTestBase
         Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
     }
 
+    [Fact]
+    public void Classify_InsideCastAs_ReturnsAfterDeclareType()
+    {
+        // CAST(x AS |) wants type completions, not the alias-suppression
+        // path that bare AS uses elsewhere.
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT CAST(x AS ", 17);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCastAsWithPrefix_ReturnsAfterDeclareTypeWithPrefix()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT CAST(x AS Int", 20);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+        Assert.Equal("Int", zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_AfterReturns_ReturnsAfterDeclareType()
+    {
+        // CREATE FUNCTION foo(...) RETURNS | — type position.
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE FUNCTION foo(@x INT32) RETURNS ", 38);
+
+        Assert.Equal(CompletionZoneKind.AfterDeclareType, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AliasAfterFromTable_StillSuppressesCompletions()
+    {
+        // Regression check: the CAST-detection path must not catch
+        // aliasing AS uses (FROM t AS u — no enclosing CAST paren).
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT * FROM t AS ", 19);
+
+        Assert.Equal(CompletionZoneKind.AfterAs, zone.Kind);
+    }
+
     // ───────────────────── Variables in scope ─────────────────────
 
     [Fact]
