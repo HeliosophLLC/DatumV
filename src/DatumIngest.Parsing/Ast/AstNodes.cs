@@ -1147,11 +1147,20 @@ public sealed record UdfParameter(
     Expression? Default = null);
 
 /// <summary>
-/// <c>CREATE [OR REPLACE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], @p2 TYPE [IS NOT NULL]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>
-/// — registers a user-defined scalar macro that the planner inlines at every
-/// call site. The body is any scalar <see cref="Expression"/>, including model
-/// invocations (<c>models.X(...)</c>) and references to other UDFs (subject to
-/// cycle detection at registration time).
+/// <c>CREATE [OR REPLACE] [PURE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], @p2 TYPE [IS NOT NULL]) [RETURNS TYPE [IS NOT NULL]] {AS expression | BEGIN ... RETURN expr; ... END}</c>
+/// — registers a user-defined scalar function. Two body shapes:
+/// <list type="bullet">
+///   <item><description><b>Macro UDF</b> — body is a single <see cref="Expression"/>
+///   (<see cref="Body"/> is set, <see cref="StatementBody"/> is <see langword="null"/>).
+///   The planner inlines the body at every call site, with parameter references
+///   substituted; name resolution happens in the caller's scope.</description></item>
+///   <item><description><b>Procedural UDF</b> — body is a sequence of procedural
+///   statements (<see cref="StatementBody"/> is set, <see cref="Body"/> is
+///   <see langword="null"/>) that must terminate with a <see cref="ReturnStatement"/>.
+///   The planner does NOT inline; the executor evaluates the body once per call
+///   with the parameters bound in a fresh procedural frame.</description></item>
+/// </list>
+/// Exactly one of <see cref="Body"/> / <see cref="StatementBody"/> is non-null.
 /// </summary>
 /// <param name="Name">The unqualified UDF name. Call sites use the <c>udf.</c> prefix.</param>
 /// <param name="Parameters">The declared parameters in order.</param>
@@ -1160,7 +1169,9 @@ public sealed record UdfParameter(
 /// <see langword="null"/>, the inliner wraps the substituted body with
 /// an implicit <c>CAST</c> to the declared type, so the call site sees
 /// the declared kind regardless of the body's natural type. When
-/// <see langword="null"/>, the body's natural return type wins.
+/// <see langword="null"/>, the body's natural return type wins. Required
+/// for procedural UDFs (the type system needs the return shape up front
+/// because the body is opaque to the planner).
 /// </param>
 /// <param name="ReturnIsNotNull">
 /// When <see langword="true"/>, the inliner wraps the substituted body
@@ -1168,7 +1179,21 @@ public sealed record UdfParameter(
 /// NULL return value at the call site throws with the UDF name in the
 /// message. Defaults to <see langword="false"/>.
 /// </param>
-/// <param name="Body">The expression evaluated at every call site, with parameter references substituted.</param>
+/// <param name="Body">
+/// The macro-form expression evaluated at every call site with parameter
+/// references substituted, or <see langword="null"/> for procedural UDFs.
+/// </param>
+/// <param name="StatementBody">
+/// The procedural-form statement sequence (the body of <c>BEGIN…END</c>),
+/// or <see langword="null"/> for macro UDFs.
+/// </param>
+/// <param name="IsPure">
+/// When <see langword="true"/>, asserts the body is referentially transparent
+/// (same inputs always produce the same output, no observable side effects).
+/// Allows the planner's CSE pass to dedupe call sites with structurally
+/// identical arguments. Macro UDFs are inlined and their purity is inherited
+/// from the body expression; the flag is meaningful primarily for procedural UDFs.
+/// </param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the UDF already exists.</param>
 /// <param name="OrReplace">When <see langword="true"/>, replaces an existing UDF with the same name.</param>
 /// <param name="Span">Source location of the UDF name for diagnostic reporting.</param>
@@ -1176,7 +1201,9 @@ public sealed record CreateFunctionStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string? ReturnTypeName,
-    Expression Body,
+    Expression? Body,
+    IReadOnlyList<Statement>? StatementBody = null,
+    bool IsPure = false,
     bool IfNotExists = false,
     bool OrReplace = false,
     SourceSpan? Span = null,
@@ -1363,6 +1390,19 @@ public sealed record DeclareStatement(
 /// <param name="Span">Source location of the <c>SET</c> keyword.</param>
 public sealed record SetStatement(
     string VariableName,
+    Expression Value,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>RETURN expression</c> — terminates the enclosing procedural UDF body
+/// and yields <paramref name="Value"/> as the function's scalar result. Only
+/// valid inside the body of a procedural UDF (a <see cref="CreateFunctionStatement"/>
+/// whose <see cref="CreateFunctionStatement.StatementBody"/> is non-null);
+/// the executor raises an error if encountered elsewhere.
+/// </summary>
+/// <param name="Value">Expression whose value becomes the UDF's return value.</param>
+/// <param name="Span">Source location of the <c>RETURN</c> keyword.</param>
+public sealed record ReturnStatement(
     Expression Value,
     SourceSpan? Span = null) : Statement;
 

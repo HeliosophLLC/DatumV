@@ -310,6 +310,21 @@ public enum SqlToken
     /// <summary>The RETURNS keyword (CREATE FUNCTION return-type annotation).</summary>
     Returns,
 
+    /// <summary>
+    /// The RETURN keyword (procedural-UDF body terminator: <c>RETURN expr</c>
+    /// inside <c>BEGIN…END</c> evaluates the expression, sets the function's
+    /// scalar result, and exits the body).
+    /// </summary>
+    Return,
+
+    /// <summary>
+    /// The PURE keyword (CREATE [OR REPLACE] PURE FUNCTION modifier asserting
+    /// the body is referentially transparent — same inputs always produce the
+    /// same output and have no observable side effects). Allows the planner's
+    /// CSE pass to dedupe call sites with structurally identical arguments.
+    /// </summary>
+    Pure,
+
     /// <summary>The EXEC keyword (direct function execution statement).</summary>
     Exec,
 

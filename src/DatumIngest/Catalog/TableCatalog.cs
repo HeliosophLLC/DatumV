@@ -299,6 +299,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // call-site arity stays unambiguous (positional matching only).
         ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
 
+        // Procedural UDFs (BEGIN…END bodies) parse correctly but execution
+        // is not yet wired up — registration would store a descriptor with
+        // no Body for the inliner to substitute. Reject explicitly until
+        // the procedural execution adapter lands.
+        if (create.StatementBody is not null)
+        {
+            throw new NotSupportedException(
+                $"CREATE FUNCTION {create.Name}: procedural UDFs (BEGIN…END bodies) " +
+                "are parsed but not yet executable. Use the macro form (AS expression) for now.");
+        }
+
+        if (create.Body is null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE FUNCTION {create.Name}: function body is missing.");
+        }
+
         // Validate the body at registration time by running the inliner on it
         // against the current registry. This catches references to undefined
         // UDFs in the body and direct cycles (A -> A) eagerly. Indirect

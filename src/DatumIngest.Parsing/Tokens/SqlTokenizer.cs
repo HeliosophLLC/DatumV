@@ -386,6 +386,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("FUNCTION"), SqlToken.Function, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PROCEDURE"), SqlToken.Procedure, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("RETURNS"), SqlToken.Returns, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RETURN"), SqlToken.Return, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PURE"), SqlToken.Pure, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXEC"), SqlToken.Exec, requireDelimiters: true)
 
             // Procedural keywords (BEGIN/END/IF/ELSE/WHILE/FOR/DECLARE/SET/TO/BREAK/CONTINUE).

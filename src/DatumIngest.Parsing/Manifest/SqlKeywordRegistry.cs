@@ -56,7 +56,7 @@ public static class SqlKeywordRegistry
         // DDL keywords
         "CREATE", "TABLE", "TEMP", "TEMPORARY", "DROP", "ALTER", "ADD",
         "COLUMN", "DEFAULT", "PRIMARY", "KEY", "IF", "INDEX",
-        "FUNCTION", "PROCEDURE", "RETURNS", "REPLACE",
+        "FUNCTION", "PROCEDURE", "RETURNS", "RETURN", "PURE", "REPLACE",
         "ANALYZE",
 
         // DML keywords

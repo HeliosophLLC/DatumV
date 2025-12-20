@@ -236,6 +236,185 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.Equal(BinaryOperator.Add, body.Operator);
     }
 
+    // ───────────────────── Procedural UDFs (BEGIN…END body) ─────────────────────
+
+    [Fact]
+    public void Create_ProceduralBody_PopulatesStatementBodyAndClearsExpressionBody()
+    {
+        // Smallest legal procedural function: takes one parameter, returns
+        // an expression of it. The body parses into a Statement[] (not the
+        // Expression slot used by macro UDFs) and Body is null.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        Assert.Null(create.Body);
+        Assert.NotNull(create.StatementBody);
+        Assert.Single(create.StatementBody);
+        Assert.IsType<ReturnStatement>(create.StatementBody[0]);
+        Assert.Equal("INT32", create.ReturnTypeName, ignoreCase: true);
+        Assert.False(create.IsPure);
+    }
+
+    [Fact]
+    public void Create_ProceduralBody_DeclareThenReturn_PreservesStatementOrder()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION step(@x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE @y INT32 = @x + 1; " +
+                "RETURN @y " +
+            "END");
+
+        Assert.NotNull(create.StatementBody);
+        Assert.Equal(2, create.StatementBody.Count);
+        Assert.IsType<DeclareStatement>(create.StatementBody[0]);
+        Assert.IsType<ReturnStatement>(create.StatementBody[1]);
+    }
+
+    [Fact]
+    public void Create_PureProceduralFunction_SetsIsPureFlag()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        Assert.True(create.IsPure);
+        Assert.NotNull(create.StatementBody);
+    }
+
+    [Fact]
+    public void Create_OrReplacePureFunction_SetsBothFlags()
+    {
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE OR REPLACE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        Assert.True(create.OrReplace);
+        Assert.True(create.IsPure);
+    }
+
+    [Fact]
+    public void Create_OrAlterPureFunction_SetsBothFlags()
+    {
+        // T-SQL spelling — OR ALTER is a synonym for OR REPLACE and composes
+        // with PURE in the same position.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE OR ALTER PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        Assert.True(create.OrReplace);
+        Assert.True(create.IsPure);
+    }
+
+    [Fact]
+    public void Create_PureMacro_IsRejected()
+    {
+        // PURE has no meaning for inlined macros (CSE already deduplicates the
+        // substituted expression). The parser should refuse rather than accept
+        // a flag that does nothing.
+        FormatException ex = Assert.Throws<FormatException>(() =>
+            Parse<CreateFunctionStatement>(
+                "CREATE PURE FUNCTION sq(@x INT32) AS @x * @x"));
+
+        Assert.Contains("PURE", ex.Message);
+    }
+
+    [Fact]
+    public void Create_ProceduralBodyWithoutReturnsClause_IsRejected()
+    {
+        // Procedural bodies are opaque to the planner so RETURNS T must be
+        // explicit — without it the type system has no return shape.
+        FormatException ex = Assert.Throws<FormatException>(() =>
+            Parse<CreateFunctionStatement>(
+                "CREATE FUNCTION sq(@x INT32) BEGIN RETURN @x * @x END"));
+
+        Assert.Contains("RETURNS", ex.Message);
+    }
+
+    [Fact]
+    public void Create_ProceduralBodyMissingTrailingReturn_IsRejected()
+    {
+        // Procedural bodies must end in RETURN — otherwise some control-flow
+        // path could exit with no value defined for the function's result.
+        FormatException ex = Assert.Throws<FormatException>(() =>
+            Parse<CreateFunctionStatement>(
+                "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN " +
+                    "DECLARE @y INT32 = @x * @x " +
+                "END"));
+
+        Assert.Contains("RETURN", ex.Message);
+    }
+
+    [Fact]
+    public void Create_ProceduralBodyWithTopLevelSelect_IsRejected()
+    {
+        // A scalar function returns one value, not a result set. A bare
+        // SELECT in statement position has no place to send its rows.
+        FormatException ex = Assert.Throws<FormatException>(() =>
+            Parse<CreateFunctionStatement>(
+                "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN " +
+                    "SELECT @x; " +
+                    "RETURN @x " +
+                "END"));
+
+        Assert.Contains("SELECT", ex.Message);
+    }
+
+    [Fact]
+    public void Create_ProceduralBodyWithSubqueryInReturn_IsAccepted()
+    {
+        // Subqueries in expression position are fine — the rejection only
+        // covers top-level statement-position SELECTs. RETURN (SELECT ...)
+        // is a useful idiom for "compute one value via a query".
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION lookup(@id INT32) RETURNS STRING BEGIN " +
+                "RETURN (SELECT name FROM users WHERE id = @id) " +
+            "END");
+
+        Assert.NotNull(create.StatementBody);
+        Assert.IsType<ReturnStatement>(create.StatementBody[^1]);
+    }
+
+    [Fact]
+    public void Create_ProceduralBodyWithIfElse_BothBranchesEndingInReturn()
+    {
+        // Procedural control flow with multiple terminating RETURNs.
+        // The trailing RETURN at the body's top level still satisfies the
+        // "last statement is RETURN" check.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION abs2(@x INT32) RETURNS INT32 BEGIN " +
+                "IF @x < 0 RETURN -@x ELSE RETURN @x " +
+            "END");
+
+        Assert.NotNull(create.StatementBody);
+        Assert.Single(create.StatementBody);
+        Assert.IsType<IfStatement>(create.StatementBody[0]);
+    }
+
+    [Fact]
+    public void Create_ProceduralBody_RoundTripsThroughBatchParser()
+    {
+        // Confirm the procedural form composes with the batch parser — a
+        // semicolon after END terminates the statement cleanly and a
+        // following statement parses as its own batch entry.
+        IReadOnlyList<Statement> batch = SqlParser.ParseBatch(
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END; " +
+            "SELECT udf.sq(3) FROM dual;");
+
+        Assert.Equal(2, batch.Count);
+        Assert.IsType<CreateFunctionStatement>(batch[0]);
+        Assert.IsType<QueryStatement>(batch[1]);
+    }
+
+    [Fact]
+    public void Create_MacroForm_RemainsUnchanged_StatementBodyIsNull()
+    {
+        // Regression check: existing macro UDFs must keep parsing into the
+        // Expression-body slot with a null StatementBody and IsPure=false.
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+
+        Assert.NotNull(create.Body);
+        Assert.Null(create.StatementBody);
+        Assert.False(create.IsPure);
+    }
+
     [Fact]
     public void Drop_BasicForm_ProducesDropFunctionStatement()
     {

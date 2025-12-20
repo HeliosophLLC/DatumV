@@ -2495,15 +2495,33 @@ public static class SqlParser
 
     /// <summary>
     /// Parses
-    /// <c>CREATE [OR REPLACE | OR ALTER] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL] [, @p2 TYPE [IS NOT NULL] ...]) [RETURNS TYPE [IS NOT NULL]] AS expression</c>.
-    /// The body is any scalar expression and may reference the parameters as
-    /// <c>@name</c>, plus any normal column / function names — the planner
-    /// inlines the body at every call site so name resolution happens in the
-    /// caller's scope.
+    /// <c>CREATE [OR REPLACE | OR ALTER] [PURE] FUNCTION [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL] [, @p2 TYPE [IS NOT NULL] ...]) [RETURNS TYPE [IS NOT NULL]] {AS expression | BEGIN ... RETURN expr; ... END}</c>.
+    /// Two body shapes are accepted:
+    /// <list type="bullet">
+    ///   <item><description><b>Macro</b> (<c>AS expression</c>): the body is any
+    ///   scalar expression and may reference the parameters as <c>@name</c>,
+    ///   plus any normal column / function names — the planner inlines the
+    ///   body at every call site so name resolution happens in the caller's
+    ///   scope.</description></item>
+    ///   <item><description><b>Procedural</b> (<c>BEGIN…END</c>): the body is a
+    ///   sequence of procedural statements terminated by <c>RETURN expr</c>.
+    ///   The body runs once per call against a fresh procedural frame —
+    ///   <c>RETURNS T</c> is required so the type system has a concrete
+    ///   return shape without analysing the body.</description></item>
+    /// </list>
+    /// The optional <c>PURE</c> modifier is meaningful for procedural UDFs
+    /// (it asserts referential transparency, allowing CSE to dedupe call
+    /// sites with identical arguments). <c>PURE</c> is rejected on macro
+    /// bodies because macros are inlined and CSE already operates on the
+    /// substituted expression.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> CreateFunctionParser =
         from createKw in Token.EqualTo(SqlToken.Create)
         from orReplace in OrReplaceParser
+        from isPure in (
+            from pureKw in Token.EqualTo(SqlToken.Pure)
+            select true
+        ).OptionalOrDefault()
         from functionKw in Token.EqualTo(SqlToken.Function)
         from ifNotExists in IfNotExistsParser
         // UDF names are permissive: accept any keyword that can serve as an
@@ -2524,17 +2542,202 @@ public static class SqlParser
             ).OptionalOrDefault()
             select (TypeName: (string?)typeName, IsNotNull: isNotNull)
         ).OptionalOrDefault((TypeName: (string?)null, IsNotNull: false))
-        from asKw in Token.EqualTo(SqlToken.As)
-        from body in SP.Ref(() => ExpressionParser!)
-        select (Statement)new CreateFunctionStatement(
+        from body in
+            // Macro form: AS expression. Tried first because it's the original
+            // grammar — keeps backtracking shallow for the common case.
+            ((from asKw in Token.EqualTo(SqlToken.As)
+              from expr in SP.Ref(() => ExpressionParser!)
+              select (Expr: (Expression?)expr, Stmts: (IReadOnlyList<Statement>?)null))
+             .Try())
+            // Procedural form: BEGIN ... END. Reuses the procedural block
+            // parser (which already understands RETURN/DECLARE/SET/IF/WHILE)
+            // and unwraps the resulting BlockStatement to the bare statement
+            // sequence so the descriptor doesn't carry a redundant block node.
+            .Or(from blk in SP.Ref(() => BlockStatementParser!)
+                select (Expr: (Expression?)null,
+                        Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
+        select (Statement)BuildCreateFunctionStatement(
             name,
             parameters,
             returnAnnotation.TypeName,
-            body,
+            returnAnnotation.IsNotNull,
+            body.Expr,
+            body.Stmts,
+            isPure,
             ifNotExists,
-            orReplace,
+            orReplace);
+
+    /// <summary>
+    /// Constructs a <see cref="CreateFunctionStatement"/> from the parsed
+    /// pieces, applying body-shape-specific validation that the grammar
+    /// can't express directly:
+    /// <list type="bullet">
+    ///   <item><description><c>PURE</c> requires a procedural body (macros are
+    ///   inlined; CSE on the substituted expression already deduplicates
+    ///   identical macro call sites).</description></item>
+    ///   <item><description>Procedural bodies must declare <c>RETURNS T</c>
+    ///   — without it the type system has no return shape because the body
+    ///   is opaque to the planner.</description></item>
+    ///   <item><description>Procedural bodies must end with a
+    ///   <see cref="ReturnStatement"/> at the top level so the function has a
+    ///   defined scalar result on every path the body completes.</description></item>
+    ///   <item><description>Procedural bodies must not contain top-level
+    ///   <see cref="QueryStatement"/>s (bare <c>SELECT</c> producing rows).
+    ///   Subqueries in expressions remain legal — only result-emitting
+    ///   statements are rejected.</description></item>
+    /// </list>
+    /// </summary>
+    private static CreateFunctionStatement BuildCreateFunctionStatement(
+        string name,
+        IReadOnlyList<UdfParameter> parameters,
+        string? returnTypeName,
+        bool returnIsNotNull,
+        Expression? body,
+        IReadOnlyList<Statement>? statementBody,
+        bool isPure,
+        bool ifNotExists,
+        bool orReplace)
+    {
+        if (statementBody is not null)
+        {
+            if (returnTypeName is null)
+            {
+                throw new FormatException(
+                    $"CREATE FUNCTION {name}: procedural functions (BEGIN…END body) " +
+                    "must declare a return type with RETURNS T.");
+            }
+
+            ValidateProceduralBody(name, statementBody);
+        }
+        else if (isPure)
+        {
+            throw new FormatException(
+                $"CREATE FUNCTION {name}: PURE applies only to procedural functions " +
+                "(BEGIN…END body); macro UDFs (AS expression) are inlined and CSE " +
+                "already deduplicates identical call sites.");
+        }
+
+        return new CreateFunctionStatement(
+            name,
+            parameters,
+            returnTypeName,
+            body,
+            StatementBody: statementBody,
+            IsPure: isPure,
+            IfNotExists: ifNotExists,
+            OrReplace: orReplace,
             Span: null,
-            ReturnIsNotNull: returnAnnotation.IsNotNull);
+            ReturnIsNotNull: returnIsNotNull);
+    }
+
+    /// <summary>
+    /// Walks the procedural-body statement sequence and rejects shapes that
+    /// can't be a scalar function: top-level <c>SELECT</c> statements (which
+    /// would produce rows the function has no place to send) and bodies that
+    /// don't end in a <see cref="ReturnStatement"/> on every path. The walk
+    /// is shallow on the top level and recurses into <c>IF</c> branches so
+    /// "every branch ends with RETURN" is enforced for simple control flow;
+    /// loops and TRY blocks are accepted as terminators when the function
+    /// body's last statement is a <c>RETURN</c>.
+    /// </summary>
+    private static void ValidateProceduralBody(string name, IReadOnlyList<Statement> body)
+    {
+        if (body.Count == 0)
+        {
+            throw new FormatException(
+                $"CREATE FUNCTION {name}: procedural function body is empty; " +
+                "a RETURN statement is required.");
+        }
+
+        foreach (Statement stmt in body)
+        {
+            RejectQueryStatementsRecursively(name, stmt);
+        }
+
+        if (!IsTerminatingStatement(body[^1]))
+        {
+            throw new FormatException(
+                $"CREATE FUNCTION {name}: every control-flow path through the body " +
+                "must end with RETURN expr (the last top-level statement must be a " +
+                "RETURN, a BEGIN…END whose final statement RETURNs, or an IF whose " +
+                "branches all RETURN).");
+        }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="stmt"/> guarantees
+    /// the procedural function body's control flow exits via <c>RETURN</c>.
+    /// Three shapes qualify: a literal <see cref="ReturnStatement"/>; a
+    /// <see cref="BlockStatement"/> whose final statement is itself
+    /// terminating; and an <see cref="IfStatement"/> where both the
+    /// <c>Then</c> and <c>Else</c> branches are terminating (so neither path
+    /// can fall through to whatever sits after the IF). Loops and TRY blocks
+    /// are deliberately excluded — a <c>WHILE</c> body might never execute,
+    /// and a <c>TRY</c>'s exception path is hard to reason about at parse
+    /// time.
+    /// </summary>
+    private static bool IsTerminatingStatement(Statement stmt)
+    {
+        return stmt switch
+        {
+            ReturnStatement => true,
+            BlockStatement block => block.Statements.Count > 0
+                && IsTerminatingStatement(block.Statements[^1]),
+            IfStatement ifStmt => ifStmt.Else is not null
+                && IsTerminatingStatement(ifStmt.Then)
+                && IsTerminatingStatement(ifStmt.Else),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Recursively walks a procedural statement and throws when it encounters
+    /// a top-level <see cref="QueryStatement"/>. Subquery expressions inside
+    /// <c>RETURN</c>, <c>SET</c>, <c>IF</c> predicates, etc. are not visited
+    /// — only statement-position SELECTs are rejected.
+    /// </summary>
+    private static void RejectQueryStatementsRecursively(string name, Statement stmt)
+    {
+        switch (stmt)
+        {
+            case QueryStatement:
+                throw new FormatException(
+                    $"CREATE FUNCTION {name}: top-level SELECT statements are not allowed " +
+                    "in procedural function bodies (a function returns one scalar value, " +
+                    "not a result set). Use SELECT in expression position instead, e.g. " +
+                    "RETURN (SELECT ...).");
+            case BlockStatement block:
+                foreach (Statement inner in block.Statements)
+                {
+                    RejectQueryStatementsRecursively(name, inner);
+                }
+                break;
+            case IfStatement ifStmt:
+                RejectQueryStatementsRecursively(name, ifStmt.Then);
+                if (ifStmt.Else is not null)
+                {
+                    RejectQueryStatementsRecursively(name, ifStmt.Else);
+                }
+                break;
+            case WhileStatement whileStmt:
+                RejectQueryStatementsRecursively(name, whileStmt.Body);
+                break;
+            case ForCounterStatement forC:
+                RejectQueryStatementsRecursively(name, forC.Body);
+                break;
+            case ForInStatement forIn:
+                RejectQueryStatementsRecursively(name, forIn.Body);
+                break;
+            case TryStatement tryStmt:
+                RejectQueryStatementsRecursively(name, tryStmt.TryBody);
+                RejectQueryStatementsRecursively(name, tryStmt.CatchBody);
+                if (tryStmt.FinallyBody is not null)
+                {
+                    RejectQueryStatementsRecursively(name, tryStmt.FinallyBody);
+                }
+                break;
+        }
+    }
 
     /// <summary>
     /// Parses <c>DROP FUNCTION [IF EXISTS] name</c>.
@@ -2760,6 +2963,18 @@ public static class SqlParser
         select (Statement)new BreakStatement(ToSpan(breakKw));
 
     /// <summary>
+    /// <c>RETURN expression</c> — yields the value of <see cref="ReturnStatement.Value"/>
+    /// as the enclosing procedural function's scalar result and exits the body.
+    /// Legality (must sit inside a procedural-UDF body) is enforced at execution
+    /// time; the parser only recognises the shape so it can appear inside the
+    /// <c>BEGIN…END</c> block of <see cref="CreateFunctionParser"/>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ReturnStatementParser =
+        from returnKw in Token.EqualTo(SqlToken.Return)
+        from value in SP.Ref(() => ExpressionParser!)
+        select (Statement)new ReturnStatement(value, ToSpan(returnKw));
+
+    /// <summary>
     /// <c>CONTINUE</c> — keyword-only statement; legality (must be inside a loop)
     /// is enforced at execution time, not parse time.
     /// </summary>
@@ -2965,6 +3180,7 @@ public static class SqlParser
             .Or(ForStatementParser.Try())
             .Or(BreakStatementParser.Try())
             .Or(ContinueStatementParser.Try())
+            .Or(ReturnStatementParser.Try())
             .Or(PrintStatementParser.Try())
             .Or(AssertStatementParser.Try())
             .Or(RaiseStatementParser.Try())
