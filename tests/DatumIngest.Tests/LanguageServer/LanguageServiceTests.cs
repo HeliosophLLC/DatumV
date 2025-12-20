@@ -86,7 +86,9 @@ public sealed class LanguageServiceTests : ServiceTestBase
     {
         LanguageService service = CreateInitializedService();
 
-        CompletionItem[] items = service.GetCompletions("SELECT ", 7);
+        // FROM products brings the `sku` column into scope. Without a FROM,
+        // column completions are intentionally suppressed (no row context).
+        CompletionItem[] items = service.GetCompletions("SELECT  FROM products", 7);
 
         Assert.NotEmpty(items);
         Assert.Contains(items, item => item.Label == "sku");

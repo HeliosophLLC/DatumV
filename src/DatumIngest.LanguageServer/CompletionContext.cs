@@ -66,6 +66,18 @@ public static class CompletionContext
         // engine will reject the resulting query at run time.
         IReadOnlyList<string> variablesInScope = ExtractVariablesInScope(tokens);
 
+        // Tables / aliases bound by FROM / JOIN — extracted from the *full*
+        // SQL text, not just the prefix up to the cursor. The user often
+        // edits an existing query (cursor lands inside a function call
+        // whose source query already has FROM after the cursor); scoping
+        // off the cursor-prefix view alone would miss those tables and
+        // wrongly suppress legitimate column completions. Empty list when
+        // no FROM/JOIN exists anywhere in the buffer.
+        List<TokenInfo> fullTokens = sql.Length == textToCursor.Length
+            ? tokens
+            : TokenizeSafely(sql);
+        IReadOnlyList<string> tablesInScope = ExtractTablesInScope(fullTokens);
+
         // Check if cursor is in the middle of typing an identifier (for prefix filtering).
         string? prefix = ExtractPrefix(textToCursor, tokens);
 
@@ -73,7 +85,8 @@ public static class CompletionContext
         string? tableQualifier = ExtractTableQualifier(tokens, prefix);
         if (tableQualifier is not null)
         {
-            return new CompletionZone(CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope);
+            return new CompletionZone(
+                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope);
         }
 
         // Walk backwards through tokens to find the governing keyword.
@@ -86,7 +99,8 @@ public static class CompletionContext
             && string.Equals(tokens[^1].Text, prefix, StringComparison.OrdinalIgnoreCase);
         CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefixIsLastToken);
 
-        return new CompletionZone(zone, prefix, TableQualifier: null, variablesInScope);
+        return new CompletionZone(
+            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope);
     }
 
     /// <summary>
@@ -97,6 +111,63 @@ public static class CompletionContext
     /// in completion popups. Duplicates are collapsed (latest binding
     /// wins for display order, but content equality is what matters).
     /// </summary>
+    /// <summary>
+    /// Walks the token stream and collects every table that appears after a
+    /// <c>FROM</c> or <c>JOIN</c> keyword, plus any explicit alias the user
+    /// has bound. Used by the column-completion path to suppress noise from
+    /// the rest of the catalog when only a couple of tables are actually in
+    /// scope (e.g. <c>SELECT abs(|) FROM users</c> should only suggest
+    /// <c>users</c>'s columns inside the <c>abs(</c> argument list).
+    /// </summary>
+    /// <remarks>
+    /// Returns an empty list when no FROM/JOIN is present — the caller
+    /// (<see cref="CompletionProvider"/>) treats that as "no column scope"
+    /// and suppresses column completions entirely. Subquery sources
+    /// (<c>FROM (SELECT ...)</c>) are skipped because the inner SELECT's
+    /// scope doesn't carry to the outer query.
+    /// </remarks>
+    private static IReadOnlyList<string> ExtractTablesInScope(List<TokenInfo> tokens)
+    {
+        if (tokens.Count == 0) return Array.Empty<string>();
+
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> ordered = new();
+
+        for (int i = 0; i + 1 < tokens.Count; i++)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k != SqlToken.From && k != SqlToken.Join) continue;
+
+            // Only handle the simple `<keyword> Identifier [...]` shape.
+            // Subquery sources (`FROM (SELECT ...)`) start with a left paren
+            // — their inner scope doesn't apply to the outer query, so skip.
+            int next = i + 1;
+            if (tokens[next].Kind != SqlToken.Identifier) continue;
+
+            string tableName = tokens[next].Text;
+            if (string.IsNullOrEmpty(tableName)) continue;
+            if (seen.Add(tableName)) ordered.Add(tableName);
+
+            // Capture an optional alias: `FROM users u` or `FROM users AS u`.
+            // The alias is also a valid qualifier inside the query body.
+            int aliasIdx = next + 1;
+            if (aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.As)
+            {
+                aliasIdx++;
+            }
+            if (aliasIdx < tokens.Count && tokens[aliasIdx].Kind == SqlToken.Identifier)
+            {
+                string alias = tokens[aliasIdx].Text;
+                if (!string.IsNullOrEmpty(alias) && seen.Add(alias))
+                {
+                    ordered.Add(alias);
+                }
+            }
+        }
+
+        return ordered.Count == 0 ? Array.Empty<string>() : ordered;
+    }
+
     private static IReadOnlyList<string> ExtractVariablesInScope(List<TokenInfo> tokens)
     {
         if (tokens.Count == 0) return Array.Empty<string>();
@@ -1031,11 +1102,19 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// cursor. Always populated regardless of zone — the provider decides
 /// whether to surface them based on whether the zone is expression-like.
 /// </param>
+/// <param name="TablesInScope">
+/// Tables and aliases bound by FROM / JOIN clauses earlier in the same
+/// fragment. Used to scope column completions in expression zones —
+/// when empty, no column suggestions surface. <c>null</c> means
+/// "scope not extracted" (legacy callers); empty list means "extracted
+/// and there's nothing in scope".
+/// </param>
 public sealed record CompletionZone(
     CompletionZoneKind Kind,
     string? Prefix,
     string? TableQualifier,
-    IReadOnlyList<string>? VariablesInScope = null);
+    IReadOnlyList<string>? VariablesInScope = null,
+    IReadOnlyList<string>? TablesInScope = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.

@@ -46,7 +46,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterSelect:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -66,19 +66,19 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterWhere:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -94,30 +94,30 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterOrderBy:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterHaving:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddAggregateFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterQualify:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterAssert:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -129,7 +129,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.InFunctionArguments:
-                AddColumns(items, allTables: true);
+                AddColumns(items, zone.TablesInScope);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 break;
@@ -186,7 +186,11 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterInsertTable:
-                AddColumns(items, allTables: true);
+                // INSERT INTO t (...) — `t` is in scope but the FROM/JOIN
+                // extractor doesn't see it. Pass null so columns from every
+                // table are still surfaced; tightening this is a separate
+                // task once INSERT/UPDATE scope extraction lands.
+                AddColumns(items, tablesInScope: null);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -195,7 +199,9 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterUpdateSet:
-                AddColumns(items, allTables: true);
+                // Same caveat as AfterInsertTable: target table comes from
+                // UPDATE rather than FROM, so leave columns un-scoped here.
+                AddColumns(items, tablesInScope: null);
                 AddScalarFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
@@ -302,10 +308,27 @@ public sealed class CompletionProvider
         ("datum_catalog", ["providers", "functions", "function_parameters", "statistics", "indexes", "interactions"]),
     ];
 
-    private void AddColumns(List<CompletionItem> items, bool allTables)
+    /// <summary>
+    /// Adds column completions, filtered to <paramref name="tablesInScope"/>
+    /// when the classifier extracted FROM/JOIN bindings. Three states:
+    /// <list type="bullet">
+    ///   <item><c>null</c> — caller didn't provide scope info; show every catalog table's columns (legacy behaviour, kept for callers we haven't migrated).</item>
+    ///   <item>empty list — classifier saw no FROM/JOIN; suppress columns entirely so e.g. <c>SELECT abs(|)</c> doesn't dump the whole catalog into the popup.</item>
+    ///   <item>non-empty list — only emit columns from the named tables/aliases (case-insensitive match against the manifest's table names).</item>
+    /// </list>
+    /// </summary>
+    private void AddColumns(List<CompletionItem> items, IReadOnlyList<string>? tablesInScope)
     {
+        // Empty list = "FROM scope was extracted and there's nothing in it" —
+        // surfacing every catalog column would be the bug we're fixing.
+        if (tablesInScope is { Count: 0 }) return;
+
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
+            if (tablesInScope is not null && !ContainsIgnoreCase(tablesInScope, table.Name))
+            {
+                continue;
+            }
             foreach (TableColumnEntry column in table.Columns)
             {
                 string nullable = column.Nullable ? " (nullable)" : "";
@@ -318,6 +341,18 @@ public sealed class CompletionProvider
                 });
             }
         }
+    }
+
+    private static bool ContainsIgnoreCase(IReadOnlyList<string> names, string target)
+    {
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], target, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void AddQualifiedColumns(List<CompletionItem> items, string tableQualifier)

@@ -81,7 +81,10 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("SELECT ", 7);
+        // FROM users brings users' columns into scope; without it we'd see
+        // no column suggestions at all (see ColumnFiltering tests further
+        // down).
+        CompletionItem[] items = provider.GetCompletions("SELECT  FROM users", 7);
 
         Assert.Contains(items, item => item.Label == "id" && item.Kind == CompletionItemKind.Column);
         Assert.Contains(items, item => item.Label == "name" && item.Kind == CompletionItemKind.Column);
@@ -94,7 +97,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("SELECT na", 9);
+        CompletionItem[] items = provider.GetCompletions("SELECT na FROM users", 9);
 
         Assert.Contains(items, item => item.Label == "name");
         Assert.DoesNotContain(items, item => item.Label == "id");
@@ -213,7 +216,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         CompletionProvider provider = CreateProvider();
 
-        CompletionItem[] items = provider.GetCompletions("SELECT abs(", 11);
+        CompletionItem[] items = provider.GetCompletions("SELECT abs( FROM users", 11);
 
         Assert.Contains(items, item => item.Label == "id" && item.Kind == CompletionItemKind.Column);
         Assert.Contains(items, item => item.Label == "abs" && item.Kind == CompletionItemKind.Function);
@@ -799,6 +802,54 @@ public sealed class CompletionProviderTests : ServiceTestBase
 
         Assert.Contains("upper(value: String)", item.Detail);
         Assert.Contains("→ String", item.Detail);
+    }
+
+    // ───────────────────── In-scope column filtering ─────────────────────
+
+    [Fact]
+    public void GetCompletions_InsideFunctionCall_NoFrom_DoesNotOfferColumns()
+    {
+        // Reported bug: `SELECT array_length()` with cursor in the parens
+        // dumped every column from every table in the catalog into the
+        // popup (anova_f, backend, body, …). Expected: no FROM means no
+        // columns — only functions/keywords/variables apply.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT array_length()", 20);
+
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_InsideFunctionCall_WithFrom_OffersOnlyInScopeColumns()
+    {
+        // The same shape with a FROM should still offer columns — but only
+        // from tables that are in scope. The provider's manifest has two
+        // tables (users, orders); a query reading users should not surface
+        // orders' columns inside the inner function call.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT array_length() FROM users", 20);
+
+        Assert.Contains(items, item => item.Label == "id" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "name" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items,
+            item => item.Label == "order_id" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items,
+            item => item.Label == "total" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterSelect_NoFrom_DoesNotOfferColumns()
+    {
+        // Same scoping rule for the AfterSelect zone — listing every column
+        // before any FROM is parsed is just noise.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT ", 7);
+
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Column);
     }
 
     [Fact]
