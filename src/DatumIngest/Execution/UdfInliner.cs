@@ -250,10 +250,15 @@ public static class UdfInliner
             // NRE deeper in the substitution path.
             if (udf.IsProcedural)
             {
-                throw new NotSupportedException(
-                    $"UDF '{call.FunctionName}' is a procedural function (BEGIN…END body); " +
-                    "execution of procedural UDFs is not yet wired up. Use a macro UDF " +
-                    "(AS expression) for now.");
+                // Procedural UDFs aren't macro-substituted. The catalog has
+                // registered a runtime-dispatched IScalarFunction adapter
+                // under the same name in the FunctionRegistry; leaving the
+                // call expression untouched lets the standard scalar dispatch
+                // path resolve and invoke that adapter at evaluation time.
+                // Argument rewriting has already happened (Rewrite visits
+                // children before delegating here), and recursion / cycle
+                // detection runs in the adapter's per-call stack, not here.
+                return call;
             }
 
             // Allow trailing arguments to be omitted when the matching

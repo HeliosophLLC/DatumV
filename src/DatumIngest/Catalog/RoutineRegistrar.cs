@@ -1,4 +1,5 @@
 using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog;
@@ -24,22 +25,69 @@ internal sealed class RoutineRegistrar
 {
     private readonly UdfRegistry _udfs;
     private readonly ProcedureRegistry _procedures;
+    private readonly FunctionRegistry _functions;
     private readonly CatalogStore? _catalogStore;
 
     /// <summary>
     /// Wires the registrar to the registries and (optional) persistent store
     /// it operates on. The instances are held by reference — every mutation
-    /// goes through the same UDF / procedure registries the catalog exposes
-    /// publicly, and every save targets the same file.
+    /// goes through the same UDF / procedure / function registries the
+    /// catalog exposes publicly, and every save targets the same file.
     /// </summary>
+    /// <param name="udfs">The catalog's UDF registry — descriptors for both macros and procedurals.</param>
+    /// <param name="procedures">The catalog's procedure registry.</param>
+    /// <param name="functions">
+    /// The catalog's scalar-function registry. Procedural UDFs are mirrored
+    /// here as <see cref="ProceduralUdfFunction"/> adapters under their
+    /// <c>udf.X</c> name so the standard scalar dispatch path can resolve
+    /// them at evaluation time without a separate code path. Macros stay out
+    /// of this registry — they're inlined before evaluation.
+    /// </param>
+    /// <param name="catalogStore">Optional persistent catalog file.</param>
     public RoutineRegistrar(
         UdfRegistry udfs,
         ProcedureRegistry procedures,
+        FunctionRegistry functions,
         CatalogStore? catalogStore)
     {
         _udfs = udfs;
         _procedures = procedures;
+        _functions = functions;
         _catalogStore = catalogStore;
+    }
+
+    /// <summary>
+    /// Reconciles every procedural UDF loaded from the catalog file. Two
+    /// things happen per descriptor:
+    /// <list type="bullet">
+    ///   <item><description>Macro references inside the body are inlined
+    ///   against the now-fully-loaded registry, mirroring what the
+    ///   register-time pass does for fresh CREATE FUNCTION calls.</description></item>
+    ///   <item><description>A <see cref="ProceduralUdfFunction"/> adapter is
+    ///   wired into the scalar-function registry so call sites can dispatch.
+    ///   </description></item>
+    /// </list>
+    /// Order matters: macro UDFs the procedural body depends on must be
+    /// loaded first. The catalog file persists entries alphabetically, so
+    /// users who name their procedurals after their dependencies (the
+    /// existing macro chain rule) get correct ordering for free.
+    /// </summary>
+    public void SyncProceduralAdaptersFromRegistry()
+    {
+        // Snapshot before mutating so we don't iterate a collection that
+        // we replace entries in.
+        UdfDescriptor[] proceduralEntries = _udfs.Entries.Values
+            .Where(d => d.IsProcedural)
+            .ToArray();
+
+        foreach (UdfDescriptor descriptor in proceduralEntries)
+        {
+            IReadOnlyList<Statement> rewrittenBody = RewriteBodyWithInlinedMacros(
+                descriptor.StatementBody!);
+            UdfDescriptor finalDescriptor = descriptor with { StatementBody = rewrittenBody };
+            _udfs.Register(finalDescriptor, replace: true);
+            RegisterProceduralAdapter(finalDescriptor, replace: true);
+        }
     }
 
     // ───────────────────── Functions ─────────────────────
@@ -59,18 +107,288 @@ internal sealed class RoutineRegistrar
         // call-site arity stays unambiguous (positional matching only).
         ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
 
-        UdfDescriptor descriptor = create.StatementBody is not null
-            ? BuildProceduralDescriptor(create, sourceText)
-            : BuildMacroDescriptor(create);
-
         if (create.IfNotExists && _udfs.TryGet(create.Name, out _))
         {
             return;
         }
 
-        _udfs.Register(descriptor, replace: create.OrReplace);
+        if (create.StatementBody is not null)
+        {
+            ApplyCreateProceduralFunction(create, sourceText);
+        }
+        else
+        {
+            ApplyCreateMacroFunction(create);
+        }
+
         _catalogStore?.Save(_udfs, _procedures);
     }
+
+    private void ApplyCreateMacroFunction(CreateFunctionStatement create)
+    {
+        UdfDescriptor descriptor = BuildMacroDescriptor(create);
+        _udfs.Register(descriptor, replace: create.OrReplace);
+        // OR REPLACE may have swapped a previous procedural for this macro;
+        // drop any stale adapter so dispatch falls through to the inliner.
+        UnregisterProceduralAdapter(descriptor.Name);
+    }
+
+    /// <summary>
+    /// Registers a procedural UDF in two phases:
+    /// <list type="number">
+    ///   <item><description>Insert the descriptor with the body's original AST so
+    ///   self-references inside the body resolve once the inliner walks it
+    ///   (the inliner now treats procedurals as runtime-dispatched and
+    ///   leaves their call sites alone, but it still requires a registered
+    ///   descriptor to make that decision).</description></item>
+    ///   <item><description>Walk the body, inline every <c>udf.X</c> macro call,
+    ///   and re-register with the rewritten body. The runtime adapter
+    ///   walks <see cref="UdfDescriptor.StatementBody"/> as-is — no
+    ///   plan-time inlining at call sites — so macro substitution must
+    ///   happen here.</description></item>
+    /// </list>
+    /// On failure (typically an undefined <c>udf.Y</c> reference) the partial
+    /// registration is rolled back so the catalog can't observe the broken
+    /// intermediate state.
+    /// </summary>
+    private void ApplyCreateProceduralFunction(CreateFunctionStatement create, string? sourceText)
+    {
+        UdfDescriptor initial = BuildProceduralDescriptor(create, sourceText);
+
+        _udfs.Register(initial, replace: create.OrReplace);
+
+        UdfDescriptor finalDescriptor;
+        // Procedural UDFs allow forward references — `a` can call `udf.b`
+        // even before `b` is registered, since the call dispatches at
+        // runtime through the FunctionRegistry adapter. To make the inliner
+        // treat unresolved names as "leave alone" (rather than throwing
+        // "not registered"), pre-register a stub procedural descriptor for
+        // each missing referenced name. The stubs satisfy the inliner's
+        // lookup; we remove them immediately after the rewrite so the
+        // catalog only commits to the final state.
+        List<string> stubNames = RegisterStubsForUnresolvedReferences(create.StatementBody!, create.Name);
+        try
+        {
+            IReadOnlyList<Statement> rewrittenBody = RewriteBodyWithInlinedMacros(
+                create.StatementBody!);
+            finalDescriptor = initial with { StatementBody = rewrittenBody };
+            _udfs.Register(finalDescriptor, replace: true);
+        }
+        catch (Exception)
+        {
+            // Roll the partial registration back so a failed rewrite leaves
+            // the catalog in the same state the caller observed before
+            // CREATE FUNCTION started.
+            _udfs.Unregister(create.Name);
+            UnregisterProceduralAdapter(create.Name);
+            throw;
+        }
+        finally
+        {
+            foreach (string stubName in stubNames)
+            {
+                _udfs.Unregister(stubName);
+            }
+        }
+
+        // Mirror the (final) descriptor into the scalar registry so the
+        // standard scalar dispatch path can resolve udf.X at evaluation time.
+        RegisterProceduralAdapter(finalDescriptor, replace: create.OrReplace);
+    }
+
+    /// <summary>
+    /// Pre-scans <paramref name="body"/> for <c>udf.X</c> calls whose target
+    /// isn't yet in the registry and inserts a placeholder procedural
+    /// descriptor for each missing name. This makes the subsequent
+    /// <see cref="UdfInliner"/> pass treat the call as "leave alone" instead
+    /// of throwing — which lets a procedural UDF reference another that
+    /// will be defined later (or itself, transitively). Returns the names
+    /// of every stub registered so the caller can unregister them once the
+    /// rewrite is done.
+    /// </summary>
+    /// <param name="body">The procedural body whose expressions are about to be rewritten.</param>
+    /// <param name="selfName">The UDF currently being defined; the stub for self is unnecessary because the caller has already registered the real descriptor.</param>
+    private List<string> RegisterStubsForUnresolvedReferences(IReadOnlyList<Statement> body, string selfName)
+    {
+        HashSet<string> referencedNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Statement stmt in body)
+        {
+            CollectUdfReferences(stmt, referencedNames);
+        }
+
+        List<string> stubsRegistered = new();
+        foreach (string name in referencedNames)
+        {
+            if (string.Equals(name, selfName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (_udfs.TryGet(name, out _)) continue;
+
+            UdfDescriptor stub = new(
+                name,
+                Parameters: Array.Empty<UdfParameter>(),
+                ReturnTypeName: null,
+                ExpressionBody: null,
+                ReturnIsNotNull: false,
+                StatementBody: Array.Empty<Statement>(),
+                IsPure: false,
+                SourceText: null);
+            try
+            {
+                _udfs.Register(stub, replace: false);
+                stubsRegistered.Add(name);
+            }
+            catch (InvalidOperationException)
+            {
+                // A concurrent registration may have raced us — that's
+                // fine, the registry already has a real descriptor we can
+                // dispatch through.
+            }
+        }
+        return stubsRegistered;
+    }
+
+    private static void CollectUdfReferences(Statement stmt, HashSet<string> referencedNames)
+    {
+        switch (stmt)
+        {
+            case ReturnStatement ret:
+                CollectUdfReferencesInExpression(ret.Value, referencedNames);
+                break;
+            case DeclareStatement decl:
+                if (decl.Initializer is not null)
+                {
+                    CollectUdfReferencesInExpression(decl.Initializer, referencedNames);
+                }
+                break;
+            case SetStatement set:
+                CollectUdfReferencesInExpression(set.Value, referencedNames);
+                break;
+            case IfStatement ifStmt:
+                CollectUdfReferencesInExpression(ifStmt.Predicate, referencedNames);
+                CollectUdfReferences(ifStmt.Then, referencedNames);
+                if (ifStmt.Else is not null) CollectUdfReferences(ifStmt.Else, referencedNames);
+                break;
+            case WhileStatement whileStmt:
+                CollectUdfReferencesInExpression(whileStmt.Predicate, referencedNames);
+                CollectUdfReferences(whileStmt.Body, referencedNames);
+                break;
+            case BlockStatement block:
+                foreach (Statement inner in block.Statements)
+                {
+                    CollectUdfReferences(inner, referencedNames);
+                }
+                break;
+        }
+    }
+
+    private static void CollectUdfReferencesInExpression(Expression expression, HashSet<string> referencedNames)
+    {
+        switch (expression)
+        {
+            case FunctionCallExpression fn:
+                if (fn.FunctionName.StartsWith(UdfInliner.UdfNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    referencedNames.Add(fn.FunctionName[UdfInliner.UdfNamespacePrefix.Length..]);
+                }
+                foreach (Expression arg in fn.Arguments)
+                {
+                    CollectUdfReferencesInExpression(arg, referencedNames);
+                }
+                break;
+            case BinaryExpression b:
+                CollectUdfReferencesInExpression(b.Left, referencedNames);
+                CollectUdfReferencesInExpression(b.Right, referencedNames);
+                break;
+            case UnaryExpression u:
+                CollectUdfReferencesInExpression(u.Operand, referencedNames);
+                break;
+            case CastExpression c:
+                CollectUdfReferencesInExpression(c.Expression, referencedNames);
+                break;
+            case CaseExpression ce:
+                if (ce.Operand is not null) CollectUdfReferencesInExpression(ce.Operand, referencedNames);
+                foreach (WhenClause w in ce.WhenClauses)
+                {
+                    CollectUdfReferencesInExpression(w.Condition, referencedNames);
+                    CollectUdfReferencesInExpression(w.Result, referencedNames);
+                }
+                if (ce.ElseResult is not null) CollectUdfReferencesInExpression(ce.ElseResult, referencedNames);
+                break;
+            case InExpression ie:
+                CollectUdfReferencesInExpression(ie.Expression, referencedNames);
+                foreach (Expression v in ie.Values) CollectUdfReferencesInExpression(v, referencedNames);
+                break;
+            case BetweenExpression be:
+                CollectUdfReferencesInExpression(be.Expression, referencedNames);
+                CollectUdfReferencesInExpression(be.Low, referencedNames);
+                CollectUdfReferencesInExpression(be.High, referencedNames);
+                break;
+            case IsNullExpression isn:
+                CollectUdfReferencesInExpression(isn.Expression, referencedNames);
+                break;
+            case LikeExpression lk:
+                CollectUdfReferencesInExpression(lk.Expression, referencedNames);
+                CollectUdfReferencesInExpression(lk.Pattern, referencedNames);
+                CollectUdfReferencesInExpression(lk.EscapeCharacter, referencedNames);
+                break;
+            case AtTimeZoneExpression atz:
+                CollectUdfReferencesInExpression(atz.Expression, referencedNames);
+                CollectUdfReferencesInExpression(atz.TimeZone, referencedNames);
+                break;
+            case StructLiteralExpression sl:
+                foreach (StructField f in sl.Fields)
+                {
+                    CollectUdfReferencesInExpression(f.Value, referencedNames);
+                }
+                break;
+            case IndexAccessExpression ix:
+                CollectUdfReferencesInExpression(ix.Source, referencedNames);
+                CollectUdfReferencesInExpression(ix.Index, referencedNames);
+                break;
+            // Leaves: column references, literals, parameters, variables.
+        }
+    }
+
+    /// <summary>
+    /// Walks every expression embedded in the procedural body and inlines
+    /// any <c>udf.X</c> macro references it finds. References to procedural
+    /// UDFs (including self-references) are left intact — the runtime adapter
+    /// dispatches them via the registered <see cref="ProceduralUdfFunction"/>.
+    /// Returns a new statement list with the rewritten expressions; the
+    /// original AST is untouched.
+    /// </summary>
+    private IReadOnlyList<Statement> RewriteBodyWithInlinedMacros(IReadOnlyList<Statement> body)
+    {
+        Statement[] rewritten = new Statement[body.Count];
+        for (int i = 0; i < body.Count; i++)
+        {
+            rewritten[i] = RewriteStatement(body[i]);
+        }
+        return rewritten;
+    }
+
+    private Statement RewriteStatement(Statement stmt) => stmt switch
+    {
+        ReturnStatement ret => new ReturnStatement(UdfInliner.Inline(ret.Value, _udfs), ret.Span),
+        DeclareStatement decl => decl.Initializer is null
+            ? decl
+            : new DeclareStatement(decl.VariableName, decl.TypeName, UdfInliner.Inline(decl.Initializer, _udfs), decl.Span),
+        SetStatement set => new SetStatement(set.VariableName, UdfInliner.Inline(set.Value, _udfs), set.Span),
+        IfStatement ifStmt => new IfStatement(
+            UdfInliner.Inline(ifStmt.Predicate, _udfs),
+            RewriteStatement(ifStmt.Then),
+            ifStmt.Else is null ? null : RewriteStatement(ifStmt.Else),
+            ifStmt.Span),
+        WhileStatement whileStmt => new WhileStatement(
+            UdfInliner.Inline(whileStmt.Predicate, _udfs),
+            RewriteStatement(whileStmt.Body),
+            whileStmt.Span),
+        BlockStatement block => new BlockStatement(
+            RewriteBodyWithInlinedMacros(block.Statements),
+            block.Span),
+        // Other procedural shapes (BREAK/CONTINUE) carry no expressions to
+        // rewrite and pass through unchanged.
+        _ => stmt,
+    };
 
     /// <summary>
     /// Applies a <c>DROP FUNCTION</c> statement. Throws when the named UDF
@@ -85,8 +403,49 @@ internal sealed class RoutineRegistrar
                 $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
         }
 
-        if (removed) _catalogStore?.Save(_udfs, _procedures);
+        if (removed)
+        {
+            // Drop the procedural adapter too, if one was registered. The
+            // call is idempotent for macro UDFs (no adapter ever existed) so
+            // we don't need to gate it on IsProcedural.
+            UnregisterProceduralAdapter(drop.Name);
+            _catalogStore?.Save(_udfs, _procedures);
+        }
     }
+
+    /// <summary>
+    /// Registers (or replaces) the <see cref="ProceduralUdfFunction"/>
+    /// adapter for <paramref name="descriptor"/> in the scalar function
+    /// registry under its <c>udf.NAME</c> key. Replace semantics mirror the
+    /// underlying <c>OR REPLACE</c> on the UDF registry.
+    /// </summary>
+    private void RegisterProceduralAdapter(UdfDescriptor descriptor, bool replace)
+    {
+        ProceduralUdfFunction adapter = new(descriptor, _functions);
+        _functions.RegisterScalarInstance(
+            UdfNameForFunctionRegistry(descriptor.Name),
+            adapter,
+            descriptor: null,
+            replace: replace);
+    }
+
+    /// <summary>
+    /// Drops the procedural adapter for <paramref name="udfName"/> from the
+    /// scalar registry. Idempotent — returns silently when no adapter is
+    /// registered (the common case for macro UDFs and DROP IF EXISTS misses).
+    /// </summary>
+    private void UnregisterProceduralAdapter(string udfName)
+    {
+        _functions.UnregisterScalar(UdfNameForFunctionRegistry(udfName));
+    }
+
+    /// <summary>
+    /// Builds the <c>udf.NAME</c> key the scalar registry stores procedural
+    /// adapters under. Centralised so any future tweak (e.g. case
+    /// canonicalisation) lives in one place.
+    /// </summary>
+    private static string UdfNameForFunctionRegistry(string udfName)
+        => UdfInliner.UdfNamespacePrefix + udfName;
 
     /// <summary>
     /// Builds the descriptor for a macro UDF (<c>AS expression</c> body). Runs
@@ -127,14 +486,13 @@ internal sealed class RoutineRegistrar
 
     /// <summary>
     /// Builds the descriptor for a procedural UDF (<c>BEGIN…END</c> body).
-    /// Validates references to other UDFs by running the inliner over every
-    /// expression node reachable from the body's statements; the body itself
-    /// is opaque to the planner (the executor walks it per call) but the
-    /// expressions inside <c>DECLARE</c> initialisers, <c>RETURN</c> values,
-    /// and predicates are subject to the same name-resolution rules as a
-    /// macro UDF body.
+    /// The descriptor's <see cref="UdfDescriptor.StatementBody"/> carries the
+    /// body's original AST; the macro-inlining + reference-validation pass
+    /// runs after this descriptor lands in the registry (see
+    /// <see cref="ApplyCreateProceduralFunction"/>) so self-references can
+    /// resolve to the UDF being defined without bootstrap headaches.
     /// </summary>
-    private UdfDescriptor BuildProceduralDescriptor(CreateFunctionStatement create, string? sourceText)
+    private static UdfDescriptor BuildProceduralDescriptor(CreateFunctionStatement create, string? sourceText)
     {
         // Source text fallback: when the descriptor is built from an AST-only
         // path (e.g. a programmatic catalog mutation), synthesise a minimal
@@ -145,16 +503,6 @@ internal sealed class RoutineRegistrar
         // is supplied.
         string text = sourceText ?? $"CREATE FUNCTION {create.Name}";
 
-        try
-        {
-            ValidateProceduralBodyExpressions(create.StatementBody!);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new InvalidOperationException(
-                $"CREATE FUNCTION {create.Name}: {ex.Message}", ex);
-        }
-
         return new UdfDescriptor(
             create.Name,
             create.Parameters,
@@ -164,57 +512,6 @@ internal sealed class RoutineRegistrar
             StatementBody: create.StatementBody,
             IsPure: create.IsPure,
             SourceText: text);
-    }
-
-    /// <summary>
-    /// Walks every expression embedded in a procedural body and runs the
-    /// inliner over it so unresolved <c>udf.X</c> references and direct
-    /// macro cycles surface at registration time. Statement-level shapes are
-    /// already validated by the parser's <c>ValidateProceduralBody</c> pass.
-    /// </summary>
-    private void ValidateProceduralBodyExpressions(IReadOnlyList<Statement> body)
-    {
-        foreach (Statement stmt in body)
-        {
-            ValidateExpressionsInStatement(stmt);
-        }
-    }
-
-    private void ValidateExpressionsInStatement(Statement stmt)
-    {
-        switch (stmt)
-        {
-            case ReturnStatement ret:
-                UdfInliner.Inline(ret.Value, _udfs);
-                break;
-            case DeclareStatement decl:
-                if (decl.Initializer is not null)
-                {
-                    UdfInliner.Inline(decl.Initializer, _udfs);
-                }
-                break;
-            case SetStatement set:
-                UdfInliner.Inline(set.Value, _udfs);
-                break;
-            case IfStatement ifStmt:
-                UdfInliner.Inline(ifStmt.Predicate, _udfs);
-                ValidateExpressionsInStatement(ifStmt.Then);
-                if (ifStmt.Else is not null)
-                {
-                    ValidateExpressionsInStatement(ifStmt.Else);
-                }
-                break;
-            case WhileStatement whileStmt:
-                UdfInliner.Inline(whileStmt.Predicate, _udfs);
-                ValidateExpressionsInStatement(whileStmt.Body);
-                break;
-            case BlockStatement block:
-                foreach (Statement inner in block.Statements)
-                {
-                    ValidateExpressionsInStatement(inner);
-                }
-                break;
-        }
     }
 
     // ───────────────────── Procedures ─────────────────────

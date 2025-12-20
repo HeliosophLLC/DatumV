@@ -66,7 +66,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._procedures = new ProcedureRegistry();
         this.Tables = new();
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
-        this._routines = new RoutineRegistrar(_udfs, _procedures, _catalogStore);
+        this._routines = new RoutineRegistrar(_udfs, _procedures, _functions, _catalogStore);
 
         // Auto-register intrinsic system tables. information_schema providers
         // take `this` because they enumerate the catalog at scan time;
@@ -89,6 +89,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
             CatalogLoadReport = report;
+
+            // The Load() call writes straight into _udfs without going
+            // through ApplyCreateFunction, so procedural adapters in the
+            // scalar registry haven't been wired yet. Reconcile them here so
+            // a freshly opened catalog can immediately invoke any persisted
+            // procedural UDF.
+            _routines.SyncProceduralAdaptersFromRegistry();
         }
     }
 

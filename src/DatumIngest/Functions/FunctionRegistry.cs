@@ -75,6 +75,63 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Registers a runtime-constructed scalar function instance under
+    /// <paramref name="name"/>. Used for entries that don't have static-abstract
+    /// metadata — currently the procedural-UDF adapter built per
+    /// <c>CREATE FUNCTION … BEGIN…END</c> registration. <paramref name="descriptor"/>
+    /// is optional; when supplied, it surfaces in <c>system.functions</c> alongside
+    /// the type-registered scalars.
+    /// </summary>
+    /// <param name="name">Name to register under. May contain a namespace prefix (<c>udf.X</c>).</param>
+    /// <param name="instance">The scalar function instance.</param>
+    /// <param name="descriptor">Optional catalog descriptor for introspection.</param>
+    /// <param name="replace">When <see langword="true"/>, overwrites any existing entry with the same name.</param>
+    /// <exception cref="ArgumentException">A function with the same name is already registered and <paramref name="replace"/> is <see langword="false"/>.</exception>
+    public void RegisterScalarInstance(
+        string name,
+        IScalarFunction instance,
+        FunctionDescriptor? descriptor = null,
+        bool replace = false)
+    {
+        if (replace)
+        {
+            // When replacing, also drop the old descriptor so introspection
+            // doesn't show stale metadata next to the new instance.
+            if (_scalarDescriptorsByName.Remove(name, out FunctionDescriptor? old))
+            {
+                _scalarDescriptors.Remove(old);
+            }
+            _scalarFunctions[name] = instance;
+        }
+        else if (!_scalarFunctions.TryAdd(name, instance))
+        {
+            throw new ArgumentException($"Scalar function '{name}' is already registered.");
+        }
+
+        if (descriptor is not null)
+        {
+            _scalarDescriptorsByName[name] = descriptor;
+            _scalarDescriptors.Add(descriptor);
+        }
+    }
+
+    /// <summary>
+    /// Removes a previously registered scalar function. Returns
+    /// <see langword="true"/> when an entry was removed, <see langword="false"/>
+    /// when the name wasn't registered. Both the instance and any associated
+    /// descriptor are dropped together so introspection stays consistent.
+    /// </summary>
+    public bool UnregisterScalar(string name)
+    {
+        bool removedInstance = _scalarFunctions.Remove(name);
+        if (_scalarDescriptorsByName.Remove(name, out FunctionDescriptor? descriptor))
+        {
+            _scalarDescriptors.Remove(descriptor);
+        }
+        return removedInstance;
+    }
+
+    /// <summary>
     /// Registers a table-valued function described by <typeparamref name="T"/>'s
     /// static-abstract metadata. Reads <c>T.Name</c>, <c>T.Category</c>, and
     /// <c>T.Description</c> at registration time.
