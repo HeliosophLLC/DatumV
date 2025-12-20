@@ -1,4 +1,6 @@
+using DatumIngest.Functions.Image;
 using DatumIngest.Model;
+using SkiaSharp;
 
 namespace DatumIngest.Functions;
 
@@ -219,6 +221,15 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Decoded bitmap value. Produced by models and image functions that construct
+    /// the output bitmap directly, avoiding an intermediate encode/decode round-trip.
+    /// The bitmap is GC-managed; arena encoding (PNG, lossless) happens once at
+    /// <see cref="ToDataValue"/>. Disposal in V1 relies on SkiaSharp's finalizer.
+    /// </summary>
+    public static ValueRef FromImage(SKBitmap bitmap) =>
+        new(DataValue.Null(DataKind.Image), bitmap);
+
+    /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
     /// <c>json_query</c> to return a subdocument view without copying. The
     /// segment's <c>(Array, Offset, Count)</c> identifies a window into a
@@ -424,6 +435,31 @@ public readonly struct ValueRef
     }
 
     /// <summary>
+    /// Returns the value as a decoded <see cref="SKBitmap"/>. If the payload is
+    /// already an <see cref="SKBitmap"/> (produced by a prior function or model),
+    /// it is returned directly. If it is a raw-encoded <see cref="byte"/>[] (from
+    /// the arena/sidecar boundary), the bytes are decoded on demand. No caching —
+    /// hold the result in a local if the same function decodes more than once.
+    /// </summary>
+    public SKBitmap AsImage()
+    {
+        if (_materialized is SKBitmap bitmap)
+        {
+            return bitmap;
+        }
+        if (_materialized is byte[] bytes)
+        {
+            SKBitmap? decoded = SKBitmap.Decode(bytes);
+            return decoded ?? throw new InvalidOperationException(
+                "Failed to decode Image bytes into an SKBitmap. "
+                + "The bytes may be corrupt or in an unsupported format.");
+        }
+        throw new InvalidOperationException(
+            $"ValueRef of kind {Kind} does not carry an Image payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
     /// Returns the field <see cref="ValueRef"/>s of a struct value without
     /// materialising into the arena. Each element is itself a ValueRef so
     /// callers can recurse into nested structures (or read leaf values via
@@ -615,6 +651,8 @@ public readonly struct ValueRef
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Image && !_inline.IsArray =>
                 DataValue.FromImage(bytes, targetStore),
+            SKBitmap bmp when _inline.Kind == DataKind.Image && !_inline.IsArray =>
+                DataValue.FromImage(ImageEncoder.Encode(bmp, SKEncodedImageFormat.Png, 100), targetStore),
             byte[] bytes when _inline.Kind == DataKind.Audio && !_inline.IsArray =>
                 DataValue.FromAudio(bytes, targetStore),
             byte[] bytes when _inline.Kind == DataKind.Video && !_inline.IsArray =>
@@ -690,6 +728,15 @@ public readonly struct ValueRef
         };
     }
 
+    private static byte[] GetImageBytes(ValueRef v) => v._materialized switch
+    {
+        byte[] bytes => bytes,
+        SKBitmap bmp => ImageEncoder.Encode(bmp, SKEncodedImageFormat.Png, 100),
+        _ => throw new InvalidOperationException(
+            $"ValueRef of kind {v.Kind} does not carry an Image payload "
+            + $"(Materialized: {v._materialized?.GetType().Name ?? "<none>"})."),
+    };
+
     private static DataValue BuildStringArray(ValueRef[] elements, IValueStore target)
     {
         string[] strings = new string[elements.Length];
@@ -707,7 +754,7 @@ public readonly struct ValueRef
         for (int i = 0; i < elements.Length; i++)
         {
             ThrowIfNullElement(elements[i], i, DataKind.Image);
-            images[i] = elements[i].AsBytes();
+            images[i] = GetImageBytes(elements[i]);
         }
         return DataValue.FromImageArray(images, target);
     }

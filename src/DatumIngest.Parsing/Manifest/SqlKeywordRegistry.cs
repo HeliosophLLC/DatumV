@@ -156,5 +156,8 @@ public static class SqlKeywordRegistry
 
         // Scalar functions (rebuilt set; cast excluded as keyword overlap)
         "concat", "upper", "lower", "try_cast", "typeof",
+
+        // Image functions
+        "image_crop",
     ];
 }
