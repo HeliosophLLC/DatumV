@@ -84,6 +84,20 @@ public sealed record LlamaChatTemplate(
         StopSequences: ["<|im_end|>", "<|endoftext|>"]);
 
     /// <summary>
+    /// Mistral Instruct template (v0.1 / v0.2 / v0.3). Wraps the user message
+    /// in <c>[INST] ... [/INST]</c> with a single trailing space inside the
+    /// brackets — Mistral's reference tokenizer expects exactly that whitespace
+    /// and skipping it produces noticeably worse output. No system-prompt slot:
+    /// system instructions, if any, get prepended to the user message inside
+    /// the same <c>[INST]</c> block. The leading <c>&lt;s&gt;</c> is omitted —
+    /// llama.cpp's tokenizer auto-adds BOS based on the model's metadata.
+    /// </summary>
+    public static readonly LlamaChatTemplate Mistral = new(
+        Format: msg =>
+            "[INST] " + msg + " [/INST]",
+        StopSequences: ["</s>", "[INST]"]);
+
+    /// <summary>
     /// IBM Granite 3.x instruct template. Roles wrap in
     /// <c>&lt;|start_of_role|&gt;...&lt;|end_of_role|&gt;</c>; turn content
     /// terminates with <c>&lt;|end_of_text|&gt;</c>. Visually wordier than

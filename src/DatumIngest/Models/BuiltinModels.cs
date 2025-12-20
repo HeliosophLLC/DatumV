@@ -114,6 +114,7 @@ public static class BuiltinModels
         RegisterQwen25Coder7B(modelCatalog);
         RegisterGranite31(modelCatalog);
         RegisterFalcon31b(modelCatalog);
+        RegisterMistral7B(modelCatalog);
 
         // Whisper STT zoo. All four sizes; each shows status=missing in
         // system.models until its optimum-cli output folder lands.
@@ -702,6 +703,53 @@ public static class BuiltinModels
             License: "Falcon LLM License 2.0",
             LicenseHolder: "TII",
             SourceUrl: "https://huggingface.co/tiiuae/Falcon3-1B-Instruct-GGUF",
+            Category: "llm",
+            Modalities: ["text"],
+            Files: [modelFilename]));
+    }
+
+    /// <summary>Default filename for Mistral-7B-Instruct-v0.3 (bartowski's GGUF mirror, Q5_K_M).</summary>
+    public const string Mistral7Bv03DefaultFilename = "Mistral-7B-Instruct-v0.3-Q5_K_M.gguf";
+
+    /// <summary>
+    /// Registers Mistral AI's Mistral-7B-Instruct-v0.3 under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"mistral_7b"</c>). The
+    /// French-trained 7B that fills the Mistral-shaped gap in the LLM zoo —
+    /// a distinct voice from the Meta / Microsoft / Alibaba / Google entries
+    /// already registered. Apache-2.0 — fully unencumbered for commercial use.
+    /// </summary>
+    /// <remarks>
+    /// Uses the <see cref="LlamaChatTemplate.Mistral"/> template
+    /// (<c>[INST] ... [/INST]</c>). v0.3 was trained for 32K native context;
+    /// the default 16K matches the Phi-3.5 / Qwen2.5 zoo siblings and leaves
+    /// generation headroom on a 24 GB card.
+    /// </remarks>
+    public static void RegisterMistral7B(
+        ModelCatalog catalog,
+        string modelName = "mistral_7b",
+        string modelFilename = Mistral7Bv03DefaultFilename,
+        uint contextSize = 16384,
+        int maxTokens = 16384,
+        float temperature = 0.7f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "llama",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Mistral, contextSize, maxTokens, temperature);
+            },
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            DisplayName: "Mistral 7B Instruct v0.3",
+            Parameters: "7B",
+            License: "Apache-2.0",
+            LicenseHolder: "Mistral AI",
+            SourceUrl: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF",
             Category: "llm",
             Modalities: ["text"],
             Files: [modelFilename]));
