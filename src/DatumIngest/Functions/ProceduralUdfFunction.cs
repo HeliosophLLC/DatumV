@@ -115,15 +115,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     public bool ProducesArray => _returnIsArray;
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// Conservative default: a procedural body can call any other function
-    /// (including <c>random()</c>, <c>now()</c>, models) so we can't claim
-    /// purity from outside. The catalog records the user's
-    /// <see cref="UdfDescriptor.IsPure"/> assertion; the planner's CSE pass
-    /// keys on that descriptor flag rather than this <see cref="IsPure"/>
-    /// property when deciding whether to dedupe call sites.
-    /// </remarks>
-    public bool IsPure => false;
+    public bool IsPure => _descriptor.IsPure;
 
     /// <inheritdoc/>
     public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
