@@ -5,10 +5,18 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Catalog;
 
 /// <summary>
-/// A registered user-defined scalar function (macro). The body is parsed once
-/// at registration time and stored as an AST; the planner inlines it at every
-/// call site by substituting parameter references with the call's argument
-/// expressions.
+/// A registered user-defined scalar function. Two body shapes are supported:
+/// <list type="bullet">
+///   <item><description><b>Macro</b> — <see cref="ExpressionBody"/> is the parsed scalar
+///   expression. The planner inlines it at every call site by substituting
+///   parameter references with the call's argument expressions.</description></item>
+///   <item><description><b>Procedural</b> — <see cref="StatementBody"/> is a
+///   sequence of procedural statements (<c>DECLARE</c> / <c>RETURN</c> / control
+///   flow) executed once per call against a fresh frame. Opaque to the planner
+///   and the model-invocation hoister; <see cref="ReturnTypeName"/> is required
+///   so call sites have a known scalar shape without analysing the body.</description></item>
+/// </list>
+/// Exactly one of <see cref="ExpressionBody"/> / <see cref="StatementBody"/> is non-null.
 /// </summary>
 /// <param name="Name">
 /// The unqualified UDF name (case-insensitive). SQL call sites use the
@@ -21,27 +29,61 @@ namespace DatumIngest.Catalog;
 /// null assertion.
 /// </param>
 /// <param name="ReturnTypeName">
-/// Optional return-type annotation from <c>RETURNS TYPE</c>. When non-
-/// <see langword="null"/>, the inliner wraps the substituted body with
-/// an implicit <c>CAST</c> to the declared type, so the call site
-/// sees the declared kind regardless of the body's natural type.
+/// Return-type annotation from <c>RETURNS TYPE</c>. Optional for macro UDFs;
+/// required for procedural UDFs because the planner can't infer a return shape
+/// from an opaque statement body. When non-<see langword="null"/> on a macro,
+/// the inliner wraps the substituted body with an implicit <c>CAST</c>; on a
+/// procedural body the executor casts the value passed to <c>RETURN</c>.
+/// </param>
+/// <param name="ExpressionBody">
+/// Macro form: the parsed scalar expression evaluated at every call site with
+/// parameter references in scope. Substitution at inlining time replaces
+/// <see cref="VariableExpression"/> nodes whose name matches a parameter with
+/// the corresponding call-site argument expression. <see langword="null"/> for
+/// procedural UDFs. Named to parallel <see cref="StatementBody"/> so the body-
+/// shape duality is obvious at the call site.
 /// </param>
 /// <param name="ReturnIsNotNull">
-/// When <see langword="true"/>, the inliner wraps the substituted body
-/// with a runtime null assertion (in addition to any declared CAST).
+/// When <see langword="true"/>, a runtime null assertion is applied to the
+/// returned value (the inliner adds it for macros; the executor adds it for
+/// procedural bodies).
 /// </param>
-/// <param name="Body">
-/// The parsed scalar expression evaluated at every call site, with parameter
-/// references in scope. Substitution at inlining time replaces
-/// <see cref="VariableExpression"/> nodes whose name matches a parameter with
-/// the corresponding call-site argument expression.
+/// <param name="StatementBody">
+/// Procedural form: the body of <c>BEGIN…END</c> as a flat statement sequence.
+/// Every control-flow path through the body must end with <c>RETURN expr</c>.
+/// <see langword="null"/> for macro UDFs.
+/// </param>
+/// <param name="IsPure">
+/// Asserts referential transparency (same arguments always produce the same
+/// result, no observable side effects). Honoured by the planner's CSE / content-
+/// addressed cache when those passes land; otherwise stored and surfaced via
+/// <c>system_udfs</c>. Meaningful primarily for procedural UDFs — macros are
+/// already inlined and CSE operates on the substituted expression.
+/// </param>
+/// <param name="SourceText">
+/// The original <c>CREATE FUNCTION</c> SQL text, captured verbatim. Always
+/// set for procedural UDFs (so the catalog can round-trip the body without
+/// a Statement formatter); optional for macros (where the body expression
+/// already round-trips through <c>QueryExplainer.FormatExpression</c>).
 /// </param>
 public sealed record UdfDescriptor(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string? ReturnTypeName,
-    Expression Body,
-    bool ReturnIsNotNull = false);
+    Expression? ExpressionBody,
+    bool ReturnIsNotNull = false,
+    IReadOnlyList<Statement>? StatementBody = null,
+    bool IsPure = false,
+    string? SourceText = null)
+{
+    /// <summary>
+    /// <see langword="true"/> when this descriptor is a procedural UDF
+    /// (<see cref="StatementBody"/> is non-null), <see langword="false"/> for
+    /// macro UDFs. Centralises the body-shape check so callers don't have to
+    /// remember which slot is the discriminator.
+    /// </summary>
+    public bool IsProcedural => StatementBody is not null;
+}
 
 /// <summary>
 /// Process-scoped registry of user-defined scalar functions for a single

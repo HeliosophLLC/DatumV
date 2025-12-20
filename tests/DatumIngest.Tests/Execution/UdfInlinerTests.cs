@@ -15,13 +15,13 @@ public class UdfInlinerTests : ServiceTestBase
     private static UdfDescriptor CreateUdf(string sql)
     {
         CreateFunctionStatement create = (CreateFunctionStatement)SqlParser.ParseStatement(sql);
-        // Macro-only test helper — Body is guaranteed non-null because
-        // every CREATE FUNCTION here uses the AS-expression form.
+        // Macro-only test helper — ExpressionBody is guaranteed non-null
+        // because every CREATE FUNCTION here uses the AS-expression form.
         return new UdfDescriptor(
             create.Name,
             create.Parameters,
             create.ReturnTypeName,
-            create.Body!,
+            create.ExpressionBody!,
             create.ReturnIsNotNull);
     }
 

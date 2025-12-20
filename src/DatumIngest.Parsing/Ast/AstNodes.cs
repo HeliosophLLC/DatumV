@@ -1151,16 +1151,16 @@ public sealed record UdfParameter(
 /// — registers a user-defined scalar function. Two body shapes:
 /// <list type="bullet">
 ///   <item><description><b>Macro UDF</b> — body is a single <see cref="Expression"/>
-///   (<see cref="Body"/> is set, <see cref="StatementBody"/> is <see langword="null"/>).
+///   (<see cref="ExpressionBody"/> is set, <see cref="StatementBody"/> is <see langword="null"/>).
 ///   The planner inlines the body at every call site, with parameter references
 ///   substituted; name resolution happens in the caller's scope.</description></item>
 ///   <item><description><b>Procedural UDF</b> — body is a sequence of procedural
-///   statements (<see cref="StatementBody"/> is set, <see cref="Body"/> is
+///   statements (<see cref="StatementBody"/> is set, <see cref="ExpressionBody"/> is
 ///   <see langword="null"/>) that must terminate with a <see cref="ReturnStatement"/>.
 ///   The planner does NOT inline; the executor evaluates the body once per call
 ///   with the parameters bound in a fresh procedural frame.</description></item>
 /// </list>
-/// Exactly one of <see cref="Body"/> / <see cref="StatementBody"/> is non-null.
+/// Exactly one of <see cref="ExpressionBody"/> / <see cref="StatementBody"/> is non-null.
 /// </summary>
 /// <param name="Name">The unqualified UDF name. Call sites use the <c>udf.</c> prefix.</param>
 /// <param name="Parameters">The declared parameters in order.</param>
@@ -1179,9 +1179,11 @@ public sealed record UdfParameter(
 /// NULL return value at the call site throws with the UDF name in the
 /// message. Defaults to <see langword="false"/>.
 /// </param>
-/// <param name="Body">
+/// <param name="ExpressionBody">
 /// The macro-form expression evaluated at every call site with parameter
 /// references substituted, or <see langword="null"/> for procedural UDFs.
+/// Named to parallel <see cref="StatementBody"/> so call sites disambiguate
+/// the two body shapes by reading the property name alone.
 /// </param>
 /// <param name="StatementBody">
 /// The procedural-form statement sequence (the body of <c>BEGIN…END</c>),
@@ -1201,7 +1203,7 @@ public sealed record CreateFunctionStatement(
     string Name,
     IReadOnlyList<UdfParameter> Parameters,
     string? ReturnTypeName,
-    Expression? Body,
+    Expression? ExpressionBody,
     IReadOnlyList<Statement>? StatementBody = null,
     bool IsPure = false,
     bool IfNotExists = false,

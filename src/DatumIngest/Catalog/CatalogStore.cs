@@ -26,11 +26,26 @@ namespace DatumIngest.Catalog;
 ///       "name": "shout",
 ///       "parameters": [{"name": "s", "type": "STRING"}],
 ///       "return_type": null,
+///       "body_kind": "macro",
 ///       "body": "upper(s)"
+///     },
+///     {
+///       "name": "rewrite",
+///       "parameters": [{"name": "x", "type": "STRING"}],
+///       "return_type": "STRING",
+///       "body_kind": "procedural",
+///       "is_pure": true,
+///       "source_text": "CREATE FUNCTION rewrite(@x STRING) RETURNS STRING BEGIN ... END"
 ///     }
 ///   ]
 /// }
 /// </code>
+/// <para>
+/// <c>body_kind</c> defaults to <c>"macro"</c> when absent so files written by
+/// older binaries keep loading; the procedural form reparses
+/// <c>source_text</c> through the regular SQL parser instead of carrying a
+/// dedicated Statement formatter.
+/// </para>
 /// <para>
 /// Failure handling at load:
 /// </para>
@@ -277,6 +292,19 @@ public sealed class CatalogStore
     private static UdfDescriptor? TryRehydrate(
         CatalogFileUdfEntry entry, UdfRegistry udfs, List<string> warnings)
     {
+        // body_kind selects the rehydration path. The default ("macro") keeps
+        // forward-compatibility with files written by binaries that predate the
+        // procedural-UDF format; a missing or unrecognised kind falls back to
+        // macro because that's the original (and still most common) shape.
+        string kind = entry.BodyKind ?? UdfBodyKindMacro;
+        return kind.Equals(UdfBodyKindProcedural, StringComparison.OrdinalIgnoreCase)
+            ? TryRehydrateProcedural(entry, warnings)
+            : TryRehydrateMacro(entry, udfs, warnings);
+    }
+
+    private static UdfDescriptor? TryRehydrateMacro(
+        CatalogFileUdfEntry entry, UdfRegistry udfs, List<string> warnings)
+    {
         if (entry.Body is null)
         {
             warnings.Add($"Skipping UDF '{entry.Name}': body is missing.");
@@ -303,26 +331,8 @@ public sealed class CatalogStore
             return null;
         }
 
-        IReadOnlyList<UdfParameter> parameters;
-        try
-        {
-            parameters = entry.Parameters is null
-                ? []
-                : entry.Parameters
-                    .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
-                    .Select(p => new UdfParameter(
-                        p.Name!,
-                        p.Type!,
-                        p.IsNotNull,
-                        p.Default is null ? null : ParseExpressionFragment(p.Default)))
-                    .ToList();
-        }
-        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
-        {
-            warnings.Add(
-                $"Skipping UDF '{entry.Name}': default-value expression failed to parse — {ex.Message}");
-            return null;
-        }
+        IReadOnlyList<UdfParameter>? parameters = TryRehydrateParameters(entry, warnings);
+        if (parameters is null) return null;
 
         UdfDescriptor descriptor = new(
             entry.Name!,
@@ -345,6 +355,96 @@ public sealed class CatalogStore
 
         return descriptor;
     }
+
+    /// <summary>
+    /// Re-parses a persisted procedural UDF entry from its source text. The
+    /// source text is the entire <c>CREATE FUNCTION</c> SQL (matching the
+    /// procedure pattern), which lets the existing <see cref="SqlParser"/>
+    /// reconstruct the statement body with its full validation pass — no
+    /// separate Statement formatter is needed.
+    /// </summary>
+    private static UdfDescriptor? TryRehydrateProcedural(
+        CatalogFileUdfEntry entry, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(entry.SourceText))
+        {
+            warnings.Add(
+                $"Skipping UDF '{entry.Name}': procedural source text is missing.");
+            return null;
+        }
+
+        Statement parsed;
+        try
+        {
+            parsed = SqlParser.ParseStatement(entry.SourceText!);
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException || ex is FormatException)
+        {
+            warnings.Add(
+                $"Skipping UDF '{entry.Name}': source failed to parse — {ex.Message}");
+            return null;
+        }
+
+        if (parsed is not CreateFunctionStatement create || create.StatementBody is null)
+        {
+            warnings.Add(
+                $"Skipping UDF '{entry.Name}': persisted source did not parse as a procedural CREATE FUNCTION statement.");
+            return null;
+        }
+
+        return new UdfDescriptor(
+            create.Name,
+            create.Parameters,
+            create.ReturnTypeName,
+            ExpressionBody: null,
+            create.ReturnIsNotNull,
+            StatementBody: create.StatementBody,
+            IsPure: create.IsPure,
+            SourceText: entry.SourceText);
+    }
+
+    /// <summary>
+    /// Parses the persisted parameter list back into <see cref="UdfParameter"/>
+    /// instances. Returns <see langword="null"/> on failure with a warning
+    /// recorded; shared between macro and procedural rehydration.
+    /// </summary>
+    private static IReadOnlyList<UdfParameter>? TryRehydrateParameters(
+        CatalogFileUdfEntry entry, List<string> warnings)
+    {
+        try
+        {
+            return entry.Parameters is null
+                ? []
+                : entry.Parameters
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Type))
+                    .Select(p => new UdfParameter(
+                        p.Name!,
+                        p.Type!,
+                        p.IsNotNull,
+                        p.Default is null ? null : ParseExpressionFragment(p.Default)))
+                    .ToList();
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
+        {
+            warnings.Add(
+                $"Skipping UDF '{entry.Name}': default-value expression failed to parse — {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Tag stored in <see cref="CatalogFileUdfEntry.BodyKind"/> for macro UDFs
+    /// (body is an inline expression). Default when the field is absent so
+    /// older catalog files keep loading.
+    /// </summary>
+    private const string UdfBodyKindMacro = "macro";
+
+    /// <summary>
+    /// Tag stored in <see cref="CatalogFileUdfEntry.BodyKind"/> for procedural
+    /// UDFs (body is a <c>BEGIN…END</c> statement sequence reparsed from
+    /// <see cref="CatalogFileUdfEntry.SourceText"/>).
+    /// </summary>
+    private const string UdfBodyKindProcedural = "procedural";
 
     /// <summary>
     /// Atomically persists the current state of <paramref name="udfs"/>
@@ -380,7 +480,15 @@ public sealed class CatalogStore
                             .ToList(),
                         ReturnType = e.ReturnTypeName,
                         ReturnIsNotNull = e.ReturnIsNotNull,
-                        Body = QueryExplainer.FormatExpression(e.Body),
+                        // Procedural UDFs persist the verbatim CREATE FUNCTION
+                        // text and a kind tag — round-tripping through the
+                        // parser is cheaper than carrying a Statement
+                        // formatter, and mirrors how procedures already
+                        // persist. Macros keep the existing per-field shape.
+                        BodyKind = e.IsProcedural ? UdfBodyKindProcedural : UdfBodyKindMacro,
+                        Body = e.IsProcedural ? null : QueryExplainer.FormatExpression(e.ExpressionBody!),
+                        SourceText = e.IsProcedural ? e.SourceText : null,
+                        IsPure = e.IsPure,
                     })
                     .ToList(),
                 Procedures = procedures.Entries.Values
@@ -434,7 +542,34 @@ internal sealed class CatalogFileUdfEntry
     public List<CatalogFileUdfParameterEntry>? Parameters { get; set; }
     public string? ReturnType { get; set; }
     public bool ReturnIsNotNull { get; set; }
+
+    /// <summary>
+    /// Macro body rendered as a SQL fragment via
+    /// <see cref="QueryExplainer.FormatExpression"/>. <see langword="null"/>
+    /// for procedural UDFs (their body lives in <see cref="SourceText"/>).
+    /// </summary>
     public string? Body { get; set; }
+
+    /// <summary>
+    /// Body shape tag: <c>"macro"</c> for inline-expression UDFs, <c>"procedural"</c>
+    /// for <c>BEGIN…END</c> bodies. Absent on entries written by binaries
+    /// that predate procedural UDFs; those entries are loaded as macros.
+    /// </summary>
+    public string? BodyKind { get; set; }
+
+    /// <summary>
+    /// Verbatim <c>CREATE FUNCTION</c> SQL for procedural UDFs. Reparsed on
+    /// load to reconstruct the statement-level body. <see langword="null"/>
+    /// for macros (whose body round-trips through <see cref="Body"/>).
+    /// </summary>
+    public string? SourceText { get; set; }
+
+    /// <summary>
+    /// Mirrors <see cref="UdfDescriptor.IsPure"/>. Defaults to <see langword="false"/>
+    /// when missing, so older catalog files load with the same semantics they
+    /// had before procedural UDFs existed.
+    /// </summary>
+    public bool IsPure { get; set; }
 }
 
 /// <summary>One declared parameter in a persisted UDF entry.</summary>

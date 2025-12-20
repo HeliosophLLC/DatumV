@@ -144,7 +144,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         TableCatalog second = OpenCatalog();
 
         Assert.True(second.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.Body);
+        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -234,6 +234,103 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         Assert.Single(second.Procedures.Entries);
         Assert.Equal(1, second.CatalogLoadReport!.LoadedUdfs);
         Assert.Equal(1, second.CatalogLoadReport.LoadedProcedures);
+    }
+
+    // ───────────────────── Procedural UDFs ─────────────────────
+
+    [Fact]
+    public void CreateProceduralUdf_PersistsBodyKindAndSourceText()
+    {
+        // Procedural UDFs serialise as body_kind="procedural" with the
+        // verbatim source_text — different from macros, which carry an
+        // expression fragment under body. The on-disk JSON should reflect
+        // both fields when the user writes a BEGIN…END function.
+        TableCatalog catalog = OpenCatalog();
+        catalog.Plan(
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        string contents = File.ReadAllText(_catalogPath);
+        Assert.Contains("\"body_kind\": \"procedural\"", contents);
+        Assert.Contains("\"source_text\":", contents);
+    }
+
+    [Fact]
+    public void Reopen_ProceduralUdf_RehydratesStatementBody()
+    {
+        const string sql =
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END";
+        TableCatalog first = OpenCatalog();
+        first.Plan(sql);
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Udfs.TryGet("sq", out UdfDescriptor? udf));
+        Assert.True(udf!.IsProcedural);
+        Assert.Null(udf.ExpressionBody);
+        Assert.NotNull(udf.StatementBody);
+        Assert.Single(udf.StatementBody);
+        Assert.Equal("INT32", udf.ReturnTypeName, ignoreCase: true);
+        Assert.Equal(sql, udf.SourceText);
+        Assert.False(udf.IsPure);
+    }
+
+    [Fact]
+    public void Reopen_PureProceduralUdf_PreservesIsPureFlag()
+    {
+        // PURE is the assertion the planner's CSE pass keys on; it must
+        // survive a catalog round-trip independently of the body bytes.
+        TableCatalog first = OpenCatalog();
+        first.Plan(
+            "CREATE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Udfs.TryGet("sq", out UdfDescriptor? udf));
+        Assert.True(udf!.IsPure);
+    }
+
+    [Fact]
+    public void Reopen_ProceduralUdf_PreservesSourceTextVerbatim()
+    {
+        // The user's exact formatting (multi-line body) must round-trip
+        // through the catalog file — system_udfs.body relies on this.
+        const string sql =
+            "CREATE FUNCTION pipeline(@x INT32) RETURNS INT32 BEGIN\n" +
+            "  DECLARE @y INT32 = @x + 1;\n" +
+            "  RETURN @y * 2\n" +
+            "END";
+        TableCatalog first = OpenCatalog();
+        first.Plan(sql);
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Udfs.TryGet("pipeline", out UdfDescriptor? udf));
+        Assert.Equal(sql, udf!.SourceText);
+    }
+
+    [Fact]
+    public void LegacyMacroEntryWithoutBodyKind_LoadsAsMacro()
+    {
+        // Forward-compat: catalog files written before procedural UDFs
+        // existed have no body_kind field. The loader should treat them
+        // as macros (the original body shape) so older state keeps working.
+        File.WriteAllText(_catalogPath,
+            """
+            {
+              "version": 1,
+              "udfs": [
+                {"name": "shout", "parameters": [{"name": "s", "type": "STRING"}], "body": "upper(s)"}
+              ]
+            }
+            """);
+
+        TableCatalog catalog = OpenCatalog();
+
+        Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
+        Assert.False(udf!.IsProcedural);
+        Assert.NotNull(udf.ExpressionBody);
+        Assert.Null(udf.StatementBody);
+        Assert.False(udf.IsPure);
     }
 
     // ───────────────────── Failure handling ─────────────────────

@@ -66,6 +66,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._procedures = new ProcedureRegistry();
         this.Tables = new();
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
+        this._routines = new RoutineRegistrar(_udfs, _procedures, _catalogStore);
 
         // Auto-register intrinsic system tables. information_schema providers
         // take `this` because they enumerate the catalog at scan time;
@@ -99,6 +100,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly UdfRegistry _udfs;
     private readonly ProcedureRegistry _procedures;
     private readonly CatalogStore? _catalogStore;
+    private readonly RoutineRegistrar _routines;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
 
@@ -208,15 +210,21 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         Statement statement = SqlParser.ParseStatement(sql);
 
-        // CREATE PROCEDURE is dispatched here (not in Plan(Statement)) so the
-        // original SQL text can be captured verbatim for catalog persistence
-        // and introspection — preserving the user's formatting and comments
-        // through round-trips. Any other statement type funnels through the
-        // standard AST-only path.
-        if (statement is CreateProcedureStatement create)
+        // CREATE PROCEDURE / procedural CREATE FUNCTION are dispatched here
+        // (not in Plan(Statement)) so the original SQL text can be captured
+        // verbatim for catalog persistence and introspection — preserving the
+        // user's formatting and comments through round-trips. Macro UDFs and
+        // every other statement type funnel through the standard AST-only path
+        // (their body round-trips cleanly through QueryExplainer.FormatExpression
+        // so the source text is unnecessary).
+        switch (statement)
         {
-            ApplyCreateProcedure(create, sql);
-            return EmptyQueryPlan.Instance;
+            case CreateProcedureStatement create:
+                _routines.ApplyCreateProcedure(create, sql);
+                return EmptyQueryPlan.Instance;
+            case CreateFunctionStatement createFn when createFn.StatementBody is not null:
+                _routines.ApplyCreateFunction(createFn, sql);
+                return EmptyQueryPlan.Instance;
         }
 
         return Plan(statement);
@@ -244,11 +252,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return PlanQuery(queryStatement.Query);
 
             case CreateFunctionStatement create:
-                ApplyCreateFunction(create);
+                _routines.ApplyCreateFunction(create);
                 return EmptyQueryPlan.Instance;
 
             case DropFunctionStatement drop:
-                ApplyDropFunction(drop);
+                _routines.ApplyDropFunction(drop);
                 return EmptyQueryPlan.Instance;
 
             case CreateProcedureStatement create:
@@ -256,11 +264,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 // BatchExecutor). ApplyCreateProcedure falls back to a synthetic
                 // description so the procedure still runs and persists; only the
                 // display text in system_procedures.source_text is affected.
-                ApplyCreateProcedure(create, sourceText: null);
+                _routines.ApplyCreateProcedure(create, sourceText: null);
                 return EmptyQueryPlan.Instance;
 
             case DropProcedureStatement drop:
-                ApplyDropProcedure(drop);
+                _routines.ApplyDropProcedure(drop);
                 return EmptyQueryPlan.Instance;
 
             case ExecStatement exec:
@@ -291,227 +299,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         QueryPlanner planner = new(this, _functions);
         IQueryOperator op = planner.Plan(inlined);
         return new QueryPlan(op, this, _functions, _backing);
-    }
-
-    private void ApplyCreateFunction(CreateFunctionStatement create)
-    {
-        // Defaults must be contiguous at the tail of the parameter list so
-        // call-site arity stays unambiguous (positional matching only).
-        ValidateDefaultsContiguous(create.Parameters, $"CREATE FUNCTION {create.Name}");
-
-        // Procedural UDFs (BEGIN…END bodies) parse correctly but execution
-        // is not yet wired up — registration would store a descriptor with
-        // no Body for the inliner to substitute. Reject explicitly until
-        // the procedural execution adapter lands.
-        if (create.StatementBody is not null)
-        {
-            throw new NotSupportedException(
-                $"CREATE FUNCTION {create.Name}: procedural UDFs (BEGIN…END bodies) " +
-                "are parsed but not yet executable. Use the macro form (AS expression) for now.");
-        }
-
-        if (create.Body is null)
-        {
-            throw new InvalidOperationException(
-                $"CREATE FUNCTION {create.Name}: function body is missing.");
-        }
-
-        // Validate the body at registration time by running the inliner on it
-        // against the current registry. This catches references to undefined
-        // UDFs in the body and direct cycles (A -> A) eagerly. Indirect
-        // cycles introduced by later registrations surface at the first call
-        // site that closes the loop, since they require visibility we don't
-        // have here.
-        try
-        {
-            UdfInliner.Inline(create.Body, _udfs);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new InvalidOperationException(
-                $"CREATE FUNCTION {create.Name}: {ex.Message}", ex);
-        }
-
-        UdfDescriptor descriptor = new(
-            create.Name,
-            create.Parameters,
-            create.ReturnTypeName,
-            create.Body,
-            create.ReturnIsNotNull);
-
-        if (create.IfNotExists && _udfs.TryGet(create.Name, out _))
-        {
-            return;
-        }
-
-        _udfs.Register(descriptor, replace: create.OrReplace);
-        _catalogStore?.Save(_udfs, _procedures);
-    }
-
-    private void ApplyDropFunction(DropFunctionStatement drop)
-    {
-        bool removed = _udfs.Unregister(drop.Name);
-        if (!removed && !drop.IfExists)
-        {
-            throw new InvalidOperationException(
-                $"UDF '{drop.Name}' is not registered. Use DROP FUNCTION IF EXISTS to make this a no-op.");
-        }
-
-        if (removed) _catalogStore?.Save(_udfs, _procedures);
-    }
-
-    private void ApplyCreateProcedure(CreateProcedureStatement create, string? sourceText)
-    {
-        // Defaults must be contiguous at the tail of the parameter list so
-        // call-site arity stays unambiguous (positional matching only).
-        ValidateDefaultsContiguous(create.Parameters, $"CREATE PROCEDURE {create.Name}");
-
-        // Validate referenced UDFs exist by inlining each expression in the
-        // body's statement tree against the current registry. Catches things
-        // like a typo'd udf.foo() before the user runs the procedure.
-        try
-        {
-            ValidateProcedureBody(create.Body);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new InvalidOperationException(
-                $"CREATE PROCEDURE {create.Name}: {ex.Message}", ex);
-        }
-
-        // When the source text isn't available (e.g. registered via the AST-only
-        // BatchExecutor path), store a placeholder so the procedure can still run
-        // and persist. The display in system_procedures.source_text will show this
-        // synthetic text rather than the user's original formatting.
-        string text = sourceText ?? $"CREATE PROCEDURE {create.Name}";
-
-        ProcedureDescriptor descriptor = new(
-            create.Name,
-            create.Parameters,
-            create.Body,
-            text);
-
-        if (create.IfNotExists && _procedures.TryGet(create.Name, out _))
-        {
-            return;
-        }
-
-        _procedures.Register(descriptor, replace: create.OrReplace);
-        _catalogStore?.Save(_udfs, _procedures);
-    }
-
-    private void ApplyDropProcedure(DropProcedureStatement drop)
-    {
-        bool removed = _procedures.Unregister(drop.Name);
-        if (!removed && !drop.IfExists)
-        {
-            throw new InvalidOperationException(
-                $"Procedure '{drop.Name}' is not registered. " +
-                "Use DROP PROCEDURE IF EXISTS to make this a no-op.");
-        }
-
-        if (removed) _catalogStore?.Save(_udfs, _procedures);
-    }
-
-    /// <summary>
-    /// Enforces that any parameters with <see cref="UdfParameter.Default"/>
-    /// values appear contiguously at the tail of the parameter list. Without
-    /// this constraint a call site like <c>foo(1, 2)</c> against
-    /// <c>foo(@a, @b = 0, @c)</c> would be ambiguous — does the second
-    /// argument bind to <c>@b</c> or (with default <c>@b</c>) to <c>@c</c>?
-    /// Disallowing the shape removes the ambiguity at registration time.
-    /// </summary>
-    private static void ValidateDefaultsContiguous(
-        IReadOnlyList<UdfParameter> parameters, string contextLabel)
-    {
-        bool sawDefault = false;
-        foreach (UdfParameter p in parameters)
-        {
-            if (p.Default is not null)
-            {
-                sawDefault = true;
-            }
-            else if (sawDefault)
-            {
-                throw new InvalidOperationException(
-                    $"{contextLabel}: parameter '@{p.Name}' has no default but follows a parameter " +
-                    "with a default. Defaults must be contiguous at the end of the parameter list.");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Walks every expression in a procedure body's statement tree and
-    /// runs the UDF inliner against it, so unresolved <c>udf.X(...)</c>
-    /// references surface at <c>CREATE PROCEDURE</c> time rather than at
-    /// the first <c>EXEC</c>. Doesn't substitute parameters — those are
-    /// resolved at runtime when the procedure is invoked.
-    /// </summary>
-    private void ValidateProcedureBody(Statement statement)
-    {
-        switch (statement)
-        {
-            case BlockStatement block:
-                foreach (Statement child in block.Statements) ValidateProcedureBody(child);
-                break;
-            case IfStatement ifs:
-                _ = UdfInliner.Inline(ifs.Predicate, _udfs);
-                ValidateProcedureBody(ifs.Then);
-                if (ifs.Else is not null) ValidateProcedureBody(ifs.Else);
-                break;
-            case WhileStatement loop:
-                _ = UdfInliner.Inline(loop.Predicate, _udfs);
-                ValidateProcedureBody(loop.Body);
-                break;
-            case ForCounterStatement forC:
-                _ = UdfInliner.Inline(forC.Start, _udfs);
-                _ = UdfInliner.Inline(forC.End, _udfs);
-                if (forC.Step is not null) _ = UdfInliner.Inline(forC.Step, _udfs);
-                ValidateProcedureBody(forC.Body);
-                break;
-            case ForInStatement forIn:
-                _ = UdfInliner.Inline(forIn.Source, _udfs);
-                ValidateProcedureBody(forIn.Body);
-                break;
-            case DeclareStatement decl:
-                if (decl.Initializer is not null) _ = UdfInliner.Inline(decl.Initializer, _udfs);
-                break;
-            case SetStatement set:
-                _ = UdfInliner.Inline(set.Value, _udfs);
-                break;
-            case QueryStatement q:
-                _ = UdfInliner.Inline(q.Query, _udfs);
-                break;
-            case ExecStatement exec:
-                _ = UdfInliner.Inline(exec.Call, _udfs);
-                break;
-            case BreakStatement:
-            case ContinueStatement:
-                // No expressions to validate; legality (must sit inside a
-                // loop) is enforced at invocation time by the executor.
-                break;
-            // Nested routine DDL inside a procedure body is rejected here so
-            // the user sees the error at CREATE PROCEDURE rather than at the
-            // first EXEC. Nested DML and table DDL are intentionally allowed
-            // — procedures should be able to mutate data and shape temp
-            // tables.
-            case CreateFunctionStatement createFn:
-                throw new InvalidOperationException(
-                    $"Nested CREATE FUNCTION '{createFn.Name}' is not allowed inside a " +
-                    "procedure body. Define UDFs at the top level before the procedure.");
-            case CreateProcedureStatement createProc:
-                throw new InvalidOperationException(
-                    $"Nested CREATE PROCEDURE '{createProc.Name}' is not allowed inside a " +
-                    "procedure body.");
-            case DropFunctionStatement dropFn:
-                throw new InvalidOperationException(
-                    $"Nested DROP FUNCTION '{dropFn.Name}' is not allowed inside a procedure body.");
-            case DropProcedureStatement dropProc:
-                throw new InvalidOperationException(
-                    $"Nested DROP PROCEDURE '{dropProc.Name}' is not allowed inside a procedure body.");
-            default:
-                break;
-        }
     }
 
     /// <summary>

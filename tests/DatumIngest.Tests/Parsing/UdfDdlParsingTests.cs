@@ -210,7 +210,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION greet(@name STRING) AS `Hello ${@name}!`");
 
-        FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.Body);
+        FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.ExpressionBody);
         Assert.Equal("concat", body.FunctionName);
     }
 
@@ -222,7 +222,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION classify(@img IMAGE) AS models.mobilenetv2(@img)");
 
-        FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.Body);
+        FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(create.ExpressionBody);
         Assert.Equal("models.mobilenetv2", body.FunctionName);
     }
 
@@ -232,7 +232,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION inc(@x INT32) AS @x + 1");
 
-        BinaryExpression body = Assert.IsType<BinaryExpression>(create.Body);
+        BinaryExpression body = Assert.IsType<BinaryExpression>(create.ExpressionBody);
         Assert.Equal(BinaryOperator.Add, body.Operator);
     }
 
@@ -247,7 +247,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
 
-        Assert.Null(create.Body);
+        Assert.Null(create.ExpressionBody);
         Assert.NotNull(create.StatementBody);
         Assert.Single(create.StatementBody);
         Assert.IsType<ReturnStatement>(create.StatementBody[0]);
@@ -410,7 +410,7 @@ public class UdfDdlParsingTests : ServiceTestBase
         CreateFunctionStatement create = Parse<CreateFunctionStatement>(
             "CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
-        Assert.NotNull(create.Body);
+        Assert.NotNull(create.ExpressionBody);
         Assert.Null(create.StatementBody);
         Assert.False(create.IsPure);
     }

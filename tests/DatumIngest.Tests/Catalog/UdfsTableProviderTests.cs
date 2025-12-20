@@ -23,6 +23,8 @@ public class UdfsTableProviderTests : ServiceTestBase
         int ParameterCount,
         string Parameters,
         string? ReturnType,
+        string BodyKind,
+        bool IsPure,
         string Body);
 
     private static async Task<List<SystemUdfRow>> ScanProviderAsync(UdfsTableProvider provider)
@@ -41,25 +43,29 @@ public class UdfsTableProviderTests : ServiceTestBase
                     ParameterCount: row[1].AsInt32(),
                     Parameters: row[2].AsString(arena),
                     ReturnType: row[3].IsNull ? null : row[3].AsString(arena),
-                    Body: row[4].AsString(arena)));
+                    BodyKind: row[4].AsString(arena),
+                    IsPure: row[5].AsBoolean(),
+                    Body: row[6].AsString(arena)));
             }
         }
         return rows;
     }
 
     [Fact]
-    public void Schema_HasFiveColumnsInDeclaredOrder()
+    public void Schema_HasSevenColumnsInDeclaredOrder()
     {
         TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog[UdfsTableProvider.TableName];
         Schema schema = provider.GetSchema();
 
-        Assert.Equal(5, schema.Columns.Count);
+        Assert.Equal(7, schema.Columns.Count);
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal("parameter_count", schema.Columns[1].Name);
         Assert.Equal("parameters", schema.Columns[2].Name);
         Assert.Equal("return_type", schema.Columns[3].Name);
-        Assert.Equal("body", schema.Columns[4].Name);
+        Assert.Equal("body_kind", schema.Columns[4].Name);
+        Assert.Equal("is_pure", schema.Columns[5].Name);
+        Assert.Equal("body", schema.Columns[6].Name);
     }
 
     [Fact]
@@ -83,6 +89,12 @@ public class UdfsTableProviderTests : ServiceTestBase
 
         Assert.Equal(DataKind.String, schema.Columns[4].Kind);
         Assert.False(schema.Columns[4].Nullable);
+
+        Assert.Equal(DataKind.Boolean, schema.Columns[5].Kind);
+        Assert.False(schema.Columns[5].Nullable);
+
+        Assert.Equal(DataKind.String, schema.Columns[6].Kind);
+        Assert.False(schema.Columns[6].Nullable);
     }
 
     [Fact]
@@ -209,6 +221,57 @@ public class UdfsTableProviderTests : ServiceTestBase
         // tokens (the inner function name and the parameter).
         Assert.Contains("upper", rows[0].Body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("name", rows[0].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MacroUdf_BodyKindIsMacro_IsPureFalse()
+    {
+        // Default for AS-expression bodies. PURE has no meaning on macros and
+        // is rejected at parse time, so is_pure is always false here.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
+
+        UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
+        List<SystemUdfRow> rows = await ScanProviderAsync(provider);
+
+        Assert.Equal("macro", rows[0].BodyKind);
+        Assert.False(rows[0].IsPure);
+    }
+
+    [Fact]
+    public async Task ProceduralUdf_BodyKindAndPureFlag_SurfaceCorrectly()
+    {
+        // Procedural body with the PURE modifier. Both flags should round-trip
+        // through registration into the system_udfs row.
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE PURE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END");
+
+        UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
+        List<SystemUdfRow> rows = await ScanProviderAsync(provider);
+
+        Assert.Equal("procedural", rows[0].BodyKind);
+        Assert.True(rows[0].IsPure);
+    }
+
+    [Fact]
+    public async Task ProceduralUdf_BodyShowsVerbatimSourceText()
+    {
+        // For procedural UDFs, the body column carries the original CREATE
+        // FUNCTION text — there's no Statement formatter, so users see the
+        // SQL they wrote (mirroring how system_procedures works).
+        const string sql =
+            "CREATE FUNCTION pipeline(@x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE @y INT32 = @x + 1; " +
+                "RETURN @y * 2 " +
+            "END";
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan(sql);
+
+        UdfsTableProvider provider = (UdfsTableProvider)catalog[UdfsTableProvider.TableName];
+        List<SystemUdfRow> rows = await ScanProviderAsync(provider);
+
+        Assert.Equal(sql, rows[0].Body);
     }
 
     [Fact]

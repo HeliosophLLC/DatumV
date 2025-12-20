@@ -62,7 +62,7 @@ public class UdfIntegrationTests : ServiceTestBase
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         // Body changed from upper to lower — verify by formatting.
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.Body);
+        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -76,7 +76,7 @@ public class UdfIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE OR ALTER FUNCTION shout(@s STRING) AS lower(@s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.Body);
+        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -90,7 +90,7 @@ public class UdfIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE FUNCTION IF NOT EXISTS shout(@s STRING) AS lower(@s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.Body);
+        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("upper", body, StringComparison.OrdinalIgnoreCase);
     }
 

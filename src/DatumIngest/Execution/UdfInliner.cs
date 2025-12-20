@@ -243,6 +243,19 @@ public static class UdfInliner
                     $"Register it via CREATE FUNCTION {name}(...) AS ... before referencing it.");
             }
 
+            // Procedural UDFs aren't macro-substituted — the planner is meant to
+            // dispatch them at runtime via the per-call execution adapter. That
+            // adapter ships in a follow-up; until it lands, fail loudly here so
+            // callers get a clear "not yet wired" message instead of an opaque
+            // NRE deeper in the substitution path.
+            if (udf.IsProcedural)
+            {
+                throw new NotSupportedException(
+                    $"UDF '{call.FunctionName}' is a procedural function (BEGIN…END body); " +
+                    "execution of procedural UDFs is not yet wired up. Use a macro UDF " +
+                    "(AS expression) for now.");
+            }
+
             // Allow trailing arguments to be omitted when the matching
             // parameters carry defaults. The minimum legal arity is the
             // count of leading parameters with no default.
@@ -295,7 +308,10 @@ public static class UdfInliner
             // Substitute parameters in the body. The body's AST may itself
             // contain udf.* calls that need recursive inlining; that happens
             // after substitution so the result is fully resolved.
-            Expression substituted = SubstituteParameters(udf.Body, paramToArg);
+            // ExpressionBody is non-null on this branch — the IsProcedural
+            // guard above already diverted procedural UDFs (whose
+            // ExpressionBody is null by invariant).
+            Expression substituted = SubstituteParameters(udf.ExpressionBody!, paramToArg);
 
             // Apply return-type and not-null annotations. CAST runs first
             // so the not-null check sees the declared kind; this mirrors

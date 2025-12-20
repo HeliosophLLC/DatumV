@@ -21,13 +21,15 @@ namespace DatumIngest.Catalog.Providers;
 /// view even if a concurrent <c>CREATE FUNCTION</c> runs.
 /// </para>
 /// <para>
-/// Schema (5 columns):
+/// Schema (7 columns):
 /// <list type="table">
 ///   <item><term>name</term><description>Unqualified UDF name. Call sites use the <c>udf.</c> prefix (<c>udf.name</c>).</description></item>
 ///   <item><term>parameter_count</term><description>Number of declared parameters. <c>0</c> for nullary UDFs.</description></item>
 ///   <item><term>parameters</term><description>Comma-separated rendition of the parameter list, <c>"name TYPE, name TYPE"</c>. Empty string for nullary UDFs.</description></item>
 ///   <item><term>return_type</term><description>Declared <c>RETURNS</c> annotation, or NULL when the UDF was registered without one.</description></item>
-///   <item><term>body</term><description>The body expression formatted via <see cref="QueryExplainer.FormatExpression"/>. Reflects the AST as parsed; whitespace and parenthesisation may differ from the user's input.</description></item>
+///   <item><term>body_kind</term><description><c>"macro"</c> for inline-expression UDFs, <c>"procedural"</c> for <c>BEGIN…END</c> bodies.</description></item>
+///   <item><term>is_pure</term><description><c>TRUE</c> for UDFs declared <c>CREATE PURE FUNCTION</c>; carries the referential-transparency assertion the planner's CSE pass honours.</description></item>
+///   <item><term>body</term><description>For macros, the body expression formatted via <see cref="QueryExplainer.FormatExpression"/>. For procedural UDFs, the verbatim <c>CREATE FUNCTION</c> source text. Either way, the column is non-null.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -118,7 +120,31 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
                     ? descriptor.ReturnTypeName + " IS NOT NULL"
                     : descriptor.ReturnTypeName,
                 arena);
-        cells[4] = DataValue.FromString(QueryExplainer.FormatExpression(descriptor.Body), arena);
+        cells[4] = DataValue.FromString(
+            descriptor.IsProcedural ? "procedural" : "macro",
+            arena);
+        cells[5] = DataValue.FromBoolean(descriptor.IsPure);
+        cells[6] = DataValue.FromString(FormatBody(descriptor), arena);
+    }
+
+    /// <summary>
+    /// Renders a UDF's body for the <c>body</c> column. Macros use the
+    /// expression formatter so the AST round-trips as a SQL fragment;
+    /// procedural UDFs surface their stored source text (the full
+    /// <c>CREATE FUNCTION</c> statement, mirroring how <c>system_procedures</c>
+    /// renders procedure bodies). Falls back to a placeholder when neither
+    /// representation is available — only reachable for descriptors built
+    /// programmatically without source text.
+    /// </summary>
+    private static string FormatBody(UdfDescriptor descriptor)
+    {
+        if (descriptor.IsProcedural)
+        {
+            return descriptor.SourceText ?? $"CREATE FUNCTION {descriptor.Name} -- procedural body unavailable";
+        }
+        return descriptor.ExpressionBody is null
+            ? $"-- {descriptor.Name}: macro body missing"
+            : QueryExplainer.FormatExpression(descriptor.ExpressionBody);
     }
 
     /// <summary>
@@ -155,10 +181,12 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
 
     private static Schema BuildSchema() => new(
     [
-        new ColumnInfo("name",            DataKind.String, nullable: false),
-        new ColumnInfo("parameter_count", DataKind.Int32,  nullable: false),
-        new ColumnInfo("parameters",      DataKind.String, nullable: false),
-        new ColumnInfo("return_type",     DataKind.String, nullable: true),
-        new ColumnInfo("body",            DataKind.String, nullable: false),
+        new ColumnInfo("name",            DataKind.String,  nullable: false),
+        new ColumnInfo("parameter_count", DataKind.Int32,   nullable: false),
+        new ColumnInfo("parameters",      DataKind.String,  nullable: false),
+        new ColumnInfo("return_type",     DataKind.String,  nullable: true),
+        new ColumnInfo("body_kind",       DataKind.String,  nullable: false),
+        new ColumnInfo("is_pure",         DataKind.Boolean, nullable: false),
+        new ColumnInfo("body",            DataKind.String,  nullable: false),
     ]);
 }
