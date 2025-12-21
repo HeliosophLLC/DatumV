@@ -1,4 +1,7 @@
 using DatumIngest.Catalog;
+using DatumIngest.Execution;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Tests.Catalog;
 
@@ -306,6 +309,43 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
 
         Assert.True(second.Udfs.TryGet("pipeline", out UdfDescriptor? udf));
         Assert.Equal(sql, udf!.SourceText);
+    }
+
+    [Fact]
+    public async Task Reopen_ProceduralUdfRegisteredViaBatchExecutor_RoundTripsBody()
+    {
+        // Regression test: the batch executor path (used by datum-devweb)
+        // parses via ParseBatchWithText and passes per-statement source
+        // slices through BatchExecutor → Plan(Statement, sourceText) so
+        // the catalog file captures the body verbatim. Without the slice,
+        // the descriptor falls back to the synthesised "CREATE FUNCTION
+        // <name>" placeholder which fails to reparse on reopen and the
+        // function disappears.
+        const string sql =
+            "CREATE OR ALTER FUNCTION RewriteCaption(@caption STRING)\n" +
+            "RETURNS STRING\n" +
+            "BEGIN\n" +
+            "  DECLARE @prefix STRING = 'rewrite: ';\n" +
+            "  RETURN concat(@prefix, @caption)\n" +
+            "END";
+
+        TableCatalog first = OpenCatalog();
+        IReadOnlyList<(Statement Statement, string SourceText)> pairs =
+            SqlParser.ParseBatchWithText(sql);
+        (Statement, string?)[] nullablePairs = new (Statement, string?)[pairs.Count];
+        for (int i = 0; i < pairs.Count; i++)
+            nullablePairs[i] = (pairs[i].Statement, pairs[i].SourceText);
+        BatchExecutor executor = new(first);
+        await executor.ExecuteAsync(nullablePairs, CancellationToken.None);
+
+        TableCatalog second = OpenCatalog();
+
+        Assert.True(second.Udfs.TryGet("RewriteCaption", out UdfDescriptor? udf));
+        Assert.True(udf!.IsProcedural);
+        Assert.Equal(sql, udf.SourceText);
+        Assert.NotNull(udf.StatementBody);
+        // 2 DECLAREs + 1 RETURN — proves the body actually rehydrated, not just the source.
+        Assert.Equal(2, udf.StatementBody.Count);
     }
 
     [Fact]

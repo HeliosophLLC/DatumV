@@ -9,7 +9,7 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Execution;
 
 /// <summary>
-/// Per-statement event emitted by <see cref="BatchExecutor.RunWithEventsAsync"/>.
+/// Per-statement event emitted by <c>BatchExecutor.RunWithEventsAsync</c>.
 /// Subtypes describe the lifecycle of a single executed statement (its cell):
 /// <see cref="CellStartedBatchEvent"/> on entry, zero or more
 /// <see cref="CellRowBatchEvent"/> while query rows produce, then exactly one
@@ -132,7 +132,7 @@ public sealed class BatchExecutor
 
     /// <summary>
     /// Creates an executor bound to <paramref name="catalog"/>. Each
-    /// <see cref="ExecuteAsync"/> call constructs a fresh
+    /// <c>ExecuteAsync</c> call constructs a fresh
     /// <see cref="BatchContext"/>; the executor itself is stateless and
     /// safe to reuse across calls.
     /// </summary>
@@ -149,8 +149,21 @@ public sealed class BatchExecutor
     /// snapshotting the final variable bindings (so tests and host code
     /// can inspect them after the batch context disposes).
     /// </summary>
-    public async Task<BatchResult> ExecuteAsync(
+    public Task<BatchResult> ExecuteAsync(
         IReadOnlyList<Statement> statements,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(WithoutSourceText(statements), cancellationToken);
+
+    /// <summary>
+    /// Variant that accepts each statement paired with the verbatim source
+    /// slice it was parsed from. The slice is forwarded to
+    /// <see cref="TableCatalog.Plan(Statement, string?)"/> for procedural
+    /// <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c> so the catalog file
+    /// captures the body verbatim. Other statement kinds ignore the slice.
+    /// Use <c>SqlParser.ParseBatchWithText</c> to obtain the pairs.
+    /// </summary>
+    public async Task<BatchResult> ExecuteAsync(
+        IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         CancellationToken cancellationToken)
     {
         using BatchContext batchContext = new();
@@ -162,6 +175,14 @@ public sealed class BatchExecutor
         // form, so the result remains valid after the arena is released.
         Dictionary<string, object?> snapshot = SnapshotRootBindings(batchContext);
         return new BatchResult(snapshot);
+    }
+
+    private static IReadOnlyList<(Statement, string?)> WithoutSourceText(
+        IReadOnlyList<Statement> statements)
+    {
+        (Statement, string?)[] pairs = new (Statement, string?)[statements.Count];
+        for (int i = 0; i < statements.Count; i++) pairs[i] = (statements[i], null);
+        return pairs;
     }
 
     /// <summary>
@@ -188,8 +209,21 @@ public sealed class BatchExecutor
     /// applies — the batch is recycled when the next event fires.
     /// </para>
     /// </remarks>
-    public async Task RunWithEventsAsync(
+    public Task RunWithEventsAsync(
         IReadOnlyList<Statement> statements,
+        Func<BatchEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken)
+        => RunWithEventsAsync(WithoutSourceText(statements), onEvent, cancellationToken);
+
+    /// <summary>
+    /// Variant of <see cref="RunWithEventsAsync(IReadOnlyList{Statement}, Func{BatchEvent, ValueTask}, CancellationToken)"/>
+    /// that threads each statement's verbatim source slice through to the
+    /// catalog for DDL persistence. See the
+    /// <see cref="ExecuteAsync(IReadOnlyList{ValueTuple{Statement, string?}}, CancellationToken)"/>
+    /// overload for the slice contract.
+    /// </summary>
+    public async Task RunWithEventsAsync(
+        IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         Func<BatchEvent, ValueTask> onEvent,
         CancellationToken cancellationToken)
     {
@@ -202,7 +236,7 @@ public sealed class BatchExecutor
         static _ => ValueTask.CompletedTask;
 
     private async Task RunInternalAsync(
-        IReadOnlyList<Statement> statements,
+        IReadOnlyList<(Statement Statement, string? SourceText)> statements,
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         CancellationToken ct)
@@ -210,10 +244,10 @@ public sealed class BatchExecutor
         int counter = 0;
         try
         {
-            foreach (Statement stmt in statements)
+            foreach ((Statement stmt, string? sourceText) in statements)
             {
                 ct.ThrowIfCancellationRequested();
-                await ExecuteOneEventfulAsync(stmt, batchContext, onEvent, () => $"c{counter++}", ct)
+                await ExecuteOneEventfulAsync(stmt, sourceText, batchContext, onEvent, () => $"c{counter++}", ct)
                     .ConfigureAwait(false);
             }
         }
@@ -236,8 +270,17 @@ public sealed class BatchExecutor
     /// for control-flow constructs so each inner iteration / branch produces
     /// its own cell.
     /// </summary>
+    private Task ExecuteOneEventfulAsync(
+        Statement stmt,
+        BatchContext batchContext,
+        Func<BatchEvent, ValueTask> onEvent,
+        Func<string> nextCellId,
+        CancellationToken ct)
+        => ExecuteOneEventfulAsync(stmt, sourceText: null, batchContext, onEvent, nextCellId, ct);
+
     private async Task ExecuteOneEventfulAsync(
         Statement stmt,
+        string? sourceText,
         BatchContext batchContext,
         Func<BatchEvent, ValueTask> onEvent,
         Func<string> nextCellId,
@@ -428,10 +471,11 @@ public sealed class BatchExecutor
                 case DropProcedureStatement:
                 case CreateProcedureStatement:
                     // DDL statements modify the catalog as a side effect and
-                    // produce no rows. Delegate to Plan(Statement) which already
-                    // handles all four types; the returned EmptyQueryPlan is
-                    // discarded because there is nothing to execute.
-                    _catalog.Plan(stmt);
+                    // produce no rows. Delegate to Plan(Statement, sourceText)
+                    // which already handles all four types; the source slice
+                    // (when non-null) is what lets procedural CREATE FUNCTION
+                    // and CREATE PROCEDURE round-trip through catalog persistence.
+                    _catalog.Plan(stmt, sourceText);
                     break;
                 default:
                     throw new NotSupportedException(

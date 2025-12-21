@@ -489,10 +489,10 @@ static async Task ExecuteQueryStreaming(
     // Parse first. Parse errors happen before we've started writing the response
     // body, so we can still return a regular 400 JSON. After the body opens,
     // errors must flow inline as NDJSON `error` events.
-    IReadOnlyList<DatumIngest.Parsing.Ast.Statement> statements;
+    IReadOnlyList<(DatumIngest.Parsing.Ast.Statement Statement, string SourceText)> statements;
     try
     {
-        statements = DatumIngest.Parsing.SqlParser.ParseBatch(sql);
+        statements = DatumIngest.Parsing.SqlParser.ParseBatchWithText(sql);
     }
     catch (Exception ex)
     {
@@ -588,7 +588,7 @@ static async Task ExecuteQueryStreaming(
 /// </summary>
 static async Task ExecuteBatchAsync(
     TableCatalog catalog,
-    IReadOnlyList<DatumIngest.Parsing.Ast.Statement> statements,
+    IReadOnlyList<(DatumIngest.Parsing.Ast.Statement Statement, string SourceText)> statements,
     int maxRows,
     Stream output,
     JsonSerializerOptions jsonOptions,
@@ -674,7 +674,12 @@ static async Task ExecuteBatchAsync(
         return ValueTask.CompletedTask;
     }
 
-    await executor.RunWithEventsAsync(statements, OnEvent, ct).ConfigureAwait(false);
+    // Widen the per-statement source text to nullable so the executor's
+    // unified pair signature accepts both the parsed-from-SQL case (always
+    // present) and the AST-only case (always null).
+    (DatumIngest.Parsing.Ast.Statement, string?)[] pairs = new (DatumIngest.Parsing.Ast.Statement, string?)[statements.Count];
+    for (int i = 0; i < statements.Count; i++) pairs[i] = (statements[i].Statement, statements[i].SourceText);
+    await executor.RunWithEventsAsync(pairs, OnEvent, ct).ConfigureAwait(false);
 }
 
 /// <summary>

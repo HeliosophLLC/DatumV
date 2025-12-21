@@ -2545,14 +2545,20 @@ public static class SqlParser
         from body in
             // Macro form: AS expression. Tried first because it's the original
             // grammar — keeps backtracking shallow for the common case.
+            // The .Try() ensures AS BEGIN...END (T-SQL convention) doesn't get
+            // consumed here and instead falls through to the procedural branches.
             ((from asKw in Token.EqualTo(SqlToken.As)
               from expr in SP.Ref(() => ExpressionParser!)
               select (Expr: (Expression?)expr, Stmts: (IReadOnlyList<Statement>?)null))
              .Try())
-            // Procedural form: BEGIN ... END. Reuses the procedural block
-            // parser (which already understands RETURN/DECLARE/SET/IF/WHILE)
-            // and unwraps the resulting BlockStatement to the bare statement
-            // sequence so the descriptor doesn't carry a redundant block node.
+            // Procedural form with optional leading AS (T-SQL convention:
+            // CREATE FUNCTION ... RETURNS T AS BEGIN ... END).
+            .Or((from asKw in Token.EqualTo(SqlToken.As)
+                 from blk in SP.Ref(() => BlockStatementParser!)
+                 select (Expr: (Expression?)null,
+                         Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
+                .Try())
+            // Procedural form: BEGIN ... END without AS.
             .Or(from blk in SP.Ref(() => BlockStatementParser!)
                 select (Expr: (Expression?)null,
                         Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
@@ -3330,6 +3336,65 @@ public static class SqlParser
         }
 
         return result.Value;
+    }
+
+    /// <summary>
+    /// Parses a SQL string containing one or more semicolon-separated statements,
+    /// returning each statement alongside the verbatim source slice it was parsed
+    /// from. Source slices are needed by callers that persist the original SQL
+    /// (notably <c>CREATE FUNCTION ... BEGIN…END</c> and <c>CREATE PROCEDURE</c>,
+    /// whose bodies don't round-trip through any AST formatter) — pass the slice
+    /// to the catalog's <c>Plan(Statement, string?)</c> overload so the catalog
+    /// file captures the body verbatim.
+    /// </summary>
+    /// <remarks>
+    /// Slices include any leading whitespace and comments captured by the
+    /// tokenizer's skip rules, but exclude the trailing semicolon that
+    /// separated this statement from the next.
+    /// </remarks>
+    /// <param name="sql">The SQL text containing one or more statements.</param>
+    /// <returns>The list of parsed statements paired with their source slices, in order.</returns>
+    /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
+    public static IReadOnlyList<(Statement Statement, string SourceText)> ParseBatchWithText(string sql)
+    {
+        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        List<(Statement, string)> result = new();
+        TokenListParser<SqlToken, Token<SqlToken>[]> semis =
+            Token.EqualTo(SqlToken.Semicolon).Many();
+
+        // Skip leading semicolons (mirrors BatchParser's tolerance of empty statements).
+        TokenListParserResult<SqlToken, Token<SqlToken>[]> leadingSemis = semis.TryParse(tokens);
+        if (leadingSemis.HasValue) tokens = leadingSemis.Remainder;
+
+        while (!tokens.IsAtEnd)
+        {
+            // Capture the absolute character position of the first token in
+            // the statement. TokenList<T>.Position is a token-stream index,
+            // not a source offset — the source offset lives on each token's
+            // Span.Position.Absolute.
+            int startAbs = tokens.ConsumeToken().Value.Span.Position.Absolute;
+
+            TokenListParserResult<SqlToken, Statement> stmtResult = SingleStatementParser.TryParse(tokens);
+            if (!stmtResult.HasValue)
+            {
+                throw new ParseException(stmtResult.ToString(), stmtResult.ErrorPosition);
+            }
+
+            int endAbs = stmtResult.Remainder.IsAtEnd
+                ? sql.Length
+                : stmtResult.Remainder.ConsumeToken().Value.Span.Position.Absolute;
+
+            string slice = sql.Substring(startAbs, endAbs - startAbs).TrimEnd();
+            result.Add((stmtResult.Value, slice));
+            tokens = stmtResult.Remainder;
+
+            // Skip the semicolon(s) separating this statement from the next.
+            TokenListParserResult<SqlToken, Token<SqlToken>[]> trailingSemis =
+                semis.TryParse(tokens);
+            if (trailingSemis.HasValue) tokens = trailingSemis.Remainder;
+        }
+
+        return result;
     }
 
     /// <summary>

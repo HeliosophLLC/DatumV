@@ -216,25 +216,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public IQueryPlan Plan(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
-
-        // CREATE PROCEDURE / procedural CREATE FUNCTION are dispatched here
-        // (not in Plan(Statement)) so the original SQL text can be captured
-        // verbatim for catalog persistence and introspection — preserving the
-        // user's formatting and comments through round-trips. Macro UDFs and
-        // every other statement type funnel through the standard AST-only path
-        // (their body round-trips cleanly through QueryExplainer.FormatExpression
-        // so the source text is unnecessary).
-        switch (statement)
-        {
-            case CreateProcedureStatement create:
-                _routines.ApplyCreateProcedure(create, sql);
-                return EmptyQueryPlan.Instance;
-            case CreateFunctionStatement createFn when createFn.StatementBody is not null:
-                _routines.ApplyCreateFunction(createFn, sql);
-                return EmptyQueryPlan.Instance;
-        }
-
-        return Plan(statement);
+        return Plan(statement, sql);
     }
 
     /// <summary>
@@ -251,7 +233,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// callers that build a procedure AST should serialize it themselves
     /// and call <see cref="Plan(string)"/>.
     /// </remarks>
-    public IQueryPlan Plan(Statement statement)
+    public IQueryPlan Plan(Statement statement) => Plan(statement, sourceText: null);
+
+    /// <summary>
+    /// Plans an already-parsed <see cref="Statement"/>, threading the original
+    /// SQL slice for DDL statements that need to round-trip the source text
+    /// through the catalog file. Procedural <c>CREATE FUNCTION</c> and
+    /// <c>CREATE PROCEDURE</c> bodies don't have a faithful AST formatter, so
+    /// without the slice they fall back to a synthesised header
+    /// (<c>CREATE FUNCTION name</c>) that won't reparse on catalog reload.
+    /// </summary>
+    /// <remarks>
+    /// Callers that have parsed via <c>SqlParser.ParseBatchWithText</c> already
+    /// have the per-statement slice and should pass it. Callers that built a
+    /// statement programmatically (no original SQL) pass <see langword="null"/>
+    /// and accept that the body persists as a placeholder.
+    /// </remarks>
+    public IQueryPlan Plan(Statement statement, string? sourceText)
     {
         switch (statement)
         {
@@ -259,7 +257,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return PlanQuery(queryStatement.Query);
 
             case CreateFunctionStatement create:
-                _routines.ApplyCreateFunction(create);
+                _routines.ApplyCreateFunction(create, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case DropFunctionStatement drop:
@@ -267,11 +265,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case CreateProcedureStatement create:
-                // Source text is null when coming from the AST-only path (e.g.
-                // BatchExecutor). ApplyCreateProcedure falls back to a synthetic
-                // description so the procedure still runs and persists; only the
-                // display text in system_procedures.source_text is affected.
-                _routines.ApplyCreateProcedure(create, sourceText: null);
+                _routines.ApplyCreateProcedure(create, sourceText);
                 return EmptyQueryPlan.Instance;
 
             case DropProcedureStatement drop:

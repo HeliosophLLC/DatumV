@@ -236,7 +236,83 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.Equal(BinaryOperator.Add, body.Operator);
     }
 
+    // ───────────────────── ParseBatchWithText (source slice capture) ─────────────────────
+
+    [Fact]
+    public void ParseBatchWithText_SingleProceduralFunction_CapturesEntireSource()
+    {
+        // Procedural CREATE FUNCTION bodies have no faithful AST formatter,
+        // so callers that go through ParseBatch lose the body when the
+        // catalog persists. ParseBatchWithText returns the verbatim slice
+        // alongside the AST so the catalog file can round-trip.
+        string sql =
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 BEGIN RETURN @x * @x END";
+
+        IReadOnlyList<(Statement Statement, string SourceText)> result =
+            SqlParser.ParseBatchWithText(sql);
+
+        Assert.Single(result);
+        Assert.IsType<CreateFunctionStatement>(result[0].Statement);
+        Assert.Equal(sql, result[0].SourceText);
+    }
+
+    [Fact]
+    public void ParseBatchWithText_MultipleStatements_SlicesByStatementBoundary()
+    {
+        // Two procedural CREATE FUNCTIONs separated by a semicolon. Each
+        // slice should contain the full source text of its own statement,
+        // excluding the separator.
+        string a = "CREATE FUNCTION inc(@x INT32) RETURNS INT32 BEGIN RETURN @x + 1 END";
+        string b = "CREATE FUNCTION dec(@x INT32) RETURNS INT32 BEGIN RETURN @x - 1 END";
+        string sql = a + ";\n" + b;
+
+        IReadOnlyList<(Statement Statement, string SourceText)> result =
+            SqlParser.ParseBatchWithText(sql);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(a, result[0].SourceText);
+        // Second slice may carry leading whitespace from the separator gap;
+        // what matters is the body is captured in full.
+        Assert.Contains("BEGIN RETURN @x - 1 END", result[1].SourceText);
+    }
+
+    [Fact]
+    public void ParseBatchWithText_ProceduralWithEmbeddedSemicolons_KeepsBodyIntact()
+    {
+        // The body's DECLARE statements end in semicolons. The slicer must
+        // recognise that those belong to the BEGIN…END body, not to the
+        // outer batch's statement separator.
+        string sql =
+            "CREATE FUNCTION step(@x INT32) RETURNS INT32 BEGIN " +
+                "DECLARE @y INT32 = @x + 1; " +
+                "DECLARE @z INT32 = @y * 2; " +
+                "RETURN @z " +
+            "END";
+
+        IReadOnlyList<(Statement Statement, string SourceText)> result =
+            SqlParser.ParseBatchWithText(sql);
+
+        Assert.Single(result);
+        Assert.Equal(sql, result[0].SourceText);
+    }
+
     // ───────────────────── Procedural UDFs (BEGIN…END body) ─────────────────────
+
+    [Fact]
+    public void Create_ProceduralBody_WithLeadingAs_ParsesAsProceduralNotMacro()
+    {
+        // T-SQL convention: CREATE FUNCTION ... RETURNS T AS BEGIN ... END.
+        // The parser should treat AS BEGIN as the procedural form, not try to
+        // parse an expression after AS (which would fail and produce a
+        // misleading "unexpected CREATE" error at position 1).
+        CreateFunctionStatement create = Parse<CreateFunctionStatement>(
+            "CREATE FUNCTION sq(@x INT32) RETURNS INT32 AS BEGIN RETURN @x * @x END");
+
+        Assert.Null(create.ExpressionBody);
+        Assert.NotNull(create.StatementBody);
+        Assert.Single(create.StatementBody);
+        Assert.IsType<ReturnStatement>(create.StatementBody[0]);
+    }
 
     [Fact]
     public void Create_ProceduralBody_PopulatesStatementBodyAndClearsExpressionBody()
