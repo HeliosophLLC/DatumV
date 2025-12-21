@@ -45,16 +45,16 @@ public sealed class SdxlTurboModelTests : ServiceTestBase
     /// <summary>
     /// End-to-end on a real prompt: the full pipeline (tokenize → dual
     /// text encoders → noise sample → UNet with added_cond_kwargs → VAE
-    /// decode → PNG) produces a valid 1024×1024 PNG decodable by Skia.
+    /// decode) produces a 1024×1024 SKBitmap.
     /// </summary>
     /// <remarks>
     /// Substantially slower than SD-Turbo: SDXL-Turbo's UNet is ~3× larger
     /// and the output is 16× more pixels. Expect ~10-30s per image
     /// depending on hardware. We don't pin specific pixel values; check
-    /// is "did the pipeline produce a valid 1024×1024 PNG."
+    /// is "did the pipeline produce a valid 1024×1024 image."
     /// </remarks>
     [Fact]
-    public async Task InferBatch_SimplePrompt_ReturnsValid1024x1024Png()
+    public async Task InferBatch_SimplePrompt_ReturnsValid1024x1024Image()
     {
         if (!ModelAvailable) return;
 
@@ -72,20 +72,10 @@ public sealed class SdxlTurboModelTests : ServiceTestBase
         Assert.False(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
 
-        byte[] pngBytes = result.AsBytes();
-        Assert.NotEmpty(pngBytes);
-        // PNG magic.
-        Assert.True(pngBytes.Length > 8);
-        Assert.Equal(0x89, pngBytes[0]);
-        Assert.Equal(0x50, pngBytes[1]);
-        Assert.Equal(0x4E, pngBytes[2]);
-        Assert.Equal(0x47, pngBytes[3]);
-
-        // Decode and verify dimensions — the SDXL part of the test name.
-        using SKBitmap decoded = SKBitmap.Decode(pngBytes);
-        Assert.NotNull(decoded);
-        Assert.Equal(1024, decoded.Width);
-        Assert.Equal(1024, decoded.Height);
+        SKBitmap bitmap = result.AsImage();
+        Assert.NotNull(bitmap);
+        Assert.Equal(1024, bitmap.Width);
+        Assert.Equal(1024, bitmap.Height);
     }
 
     /// <summary>

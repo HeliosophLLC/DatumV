@@ -207,14 +207,14 @@ public sealed class SdxlTurboModel : IModel, IDisposable
                         $"SDXL model received a null prompt at row {i}; filter nulls upstream.");
                 }
                 string prompt = promptRef.AsString();
-                byte[] pngBytes = GenerateImage(prompt, cancellationToken);
-                results[i] = ValueRef.FromBytes(DataKind.Image, pngBytes);
+                SKBitmap bitmap = GenerateImage(prompt, cancellationToken);
+                results[i] = ValueRef.FromImage(bitmap);
             }
             return results;
         }, cancellationToken);
     }
 
-    private byte[] GenerateImage(string prompt, CancellationToken cancellationToken)
+    private SKBitmap GenerateImage(string prompt, CancellationToken cancellationToken)
     {
         // 1. Tokenize once — the same input_ids feed both text encoders.
         long[] inputIds = TokenizePrompt(prompt);
@@ -295,8 +295,9 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         DenseTensor<float> rgbImage = RunVaeDecoder(cleanLatents);
         ThrowIfNotFinite(rgbImage, "VAE decoder output");
 
-        // 9. Encode as PNG.
-        return EncodeAsPng(rgbImage);
+        // 9. Materialise into an SKBitmap; PNG encoding (if any) happens at
+        //    the arena boundary in ValueRef.ToDataValue.
+        return DecodeToBitmap(rgbImage);
     }
 
     private long[] TokenizePrompt(string prompt)
@@ -443,7 +444,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         return noise;
     }
 
-    private static byte[] EncodeAsPng(DenseTensor<float> rgbImage)
+    private static SKBitmap DecodeToBitmap(DenseTensor<float> rgbImage)
     {
         int[] shape = rgbImage.Dimensions.ToArray();
         if (shape.Length != 4 || shape[0] != 1 || shape[1] != 3
@@ -458,7 +459,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         int planeSize = ImageHeight * ImageWidth;
 
         SKImageInfo info = new(ImageWidth, ImageHeight, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        using SKBitmap bitmap = new(info);
+        SKBitmap bitmap = new(info);
         nint pixelPtr = bitmap.GetPixels();
         unsafe
         {
@@ -476,8 +477,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             }
         }
 
-        using SKData encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
-        return encoded.ToArray();
+        return bitmap;
     }
 
     /// <summary>

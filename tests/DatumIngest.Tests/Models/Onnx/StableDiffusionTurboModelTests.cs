@@ -45,17 +45,16 @@ public sealed class StableDiffusionTurboModelTests : ServiceTestBase
 
     /// <summary>
     /// End-to-end on a real prompt: the full pipeline (tokenize → text encode →
-    /// noise sample → UNet → VAE decode → PNG) produces a non-empty PNG byte
-    /// array decodable by SkiaSharp at the expected 512×512 dimension.
+    /// noise sample → UNet → VAE decode) produces a 512×512 SKBitmap.
     /// </summary>
     /// <remarks>
     /// This is slow — ~2-5 seconds per generation depending on hardware. We
     /// fix the seed for reproducibility but don't pin specific pixel values
     /// (those vary across ONNX Runtime versions and GPU drivers). The check
-    /// is "did the pipeline produce a valid 512×512 PNG."
+    /// is "did the pipeline produce a valid 512×512 image."
     /// </remarks>
     [Fact]
-    public async Task InferBatch_SimplePrompt_ReturnsValid512x512Png()
+    public async Task InferBatch_SimplePrompt_ReturnsValid512x512Image()
     {
         if (!ModelAvailable) return;
 
@@ -75,27 +74,16 @@ public sealed class StableDiffusionTurboModelTests : ServiceTestBase
         Assert.False(result.IsNull);
         Assert.Equal(DataKind.Image, result.Kind);
 
-        byte[] pngBytes = result.AsBytes();
-        Assert.NotEmpty(pngBytes);
-
-        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A.
-        Assert.True(pngBytes.Length > 8);
-        Assert.Equal(0x89, pngBytes[0]);
-        Assert.Equal(0x50, pngBytes[1]);
-        Assert.Equal(0x4E, pngBytes[2]);
-        Assert.Equal(0x47, pngBytes[3]);
-
-        // Decode and verify dimensions.
-        using SKBitmap decoded = SKBitmap.Decode(pngBytes);
-        Assert.NotNull(decoded);
-        Assert.Equal(512, decoded.Width);
-        Assert.Equal(512, decoded.Height);
+        SKBitmap bitmap = result.AsImage();
+        Assert.NotNull(bitmap);
+        Assert.Equal(512, bitmap.Width);
+        Assert.Equal(512, bitmap.Height);
     }
 
     /// <summary>
     /// Two-row batch: confirms the per-prompt loop in <see cref="StableDiffusionTurboModel.InferBatchAsync"/>
     /// produces one image per row. Different prompts should produce
-    /// different bytes (with the same seed, different prompts mean
+    /// different pixel data (with the same seed, different prompts mean
     /// different text embeddings → different UNet output).
     /// </summary>
     [Fact]
@@ -118,13 +106,13 @@ public sealed class StableDiffusionTurboModelTests : ServiceTestBase
             inputs, overrides: [], cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, outputs.Count);
-        byte[] image1 = outputs[0].AsBytes();
-        byte[] image2 = outputs[1].AsBytes();
+        SKBitmap image1 = outputs[0].AsImage();
+        SKBitmap image2 = outputs[1].AsImage();
 
-        Assert.NotEmpty(image1);
-        Assert.NotEmpty(image2);
-        // Different prompts must produce different output bytes.
-        Assert.NotEqual(image1, image2);
+        Assert.Equal(512, image1.Width);
+        Assert.Equal(512, image2.Width);
+        // Different prompts must produce different pixel data.
+        Assert.NotEqual(image1.Bytes, image2.Bytes);
     }
 
     /// <summary>

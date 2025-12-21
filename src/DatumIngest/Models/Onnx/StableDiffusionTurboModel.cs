@@ -49,7 +49,7 @@ namespace DatumIngest.Models.Onnx;
 ///                                                                 ↓
 ///                                                       RGB image [-1, 1]
 ///                                                                 ↓
-///                                                       PNG bytes (Skia)
+///                                                       SKBitmap (RGBA8888)
 /// </code>
 /// </para>
 /// <para>
@@ -194,19 +194,19 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
                         $"SD-Turbo received a null prompt at row {i}; filter nulls upstream.");
                 }
                 string prompt = promptRef.AsString();
-                byte[] pngBytes = GenerateImage(prompt, cancellationToken);
-                results[i] = ValueRef.FromBytes(DataKind.Image, pngBytes);
+                SKBitmap bitmap = GenerateImage(prompt, cancellationToken);
+                results[i] = ValueRef.FromImage(bitmap);
             }
             return results;
         }, cancellationToken);
     }
 
     /// <summary>
-    /// Generates a single 512×512 image as PNG bytes. The full SD-Turbo
+    /// Generates a single 512×512 <see cref="SKBitmap"/>. The full SD-Turbo
     /// pipeline: tokenize → encode text → sample noise → run UNet → decode
-    /// VAE → encode PNG.
+    /// VAE → write into a Skia bitmap. The caller owns the returned bitmap.
     /// </summary>
-    private byte[] GenerateImage(string prompt, CancellationToken cancellationToken)
+    private SKBitmap GenerateImage(string prompt, CancellationToken cancellationToken)
     {
         // 1. Tokenize. CLIP wraps the prompt with [BOS, ..., EOS] padded with
         //    EOS to exactly 77 tokens.
@@ -262,8 +262,8 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
         // 6. VAE decode → RGB image in [-1, 1].
         DenseTensor<float> rgbImage = RunVaeDecoder(cleanLatents);
 
-        // 7. Convert [-1, 1] floats to [0, 255] uint8 RGBA bytes and PNG-encode.
-        return EncodeAsPng(rgbImage);
+        // 7. Convert [-1, 1] floats to [0, 255] uint8 RGBA bytes in an SKBitmap.
+        return DecodeToBitmap(rgbImage);
     }
 
     private long[] TokenizePrompt(string prompt)
@@ -355,10 +355,11 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
 
     /// <summary>
     /// Converts a VAE-decoded <c>[1, 3, 512, 512]</c> tensor in [-1, 1]
-    /// range to PNG bytes via SkiaSharp. Output is RGBA (alpha forced to
-    /// fully opaque); range mapped (x + 1) / 2 × 255 with clamping.
+    /// range to an <see cref="SKBitmap"/>. Output is RGBA (alpha forced to
+    /// fully opaque); range mapped (x + 1) / 2 × 255 with clamping. The
+    /// caller owns the returned bitmap.
     /// </summary>
-    private static byte[] EncodeAsPng(DenseTensor<float> rgbImage)
+    private static SKBitmap DecodeToBitmap(DenseTensor<float> rgbImage)
     {
         int[] shape = rgbImage.Dimensions.ToArray();
         if (shape.Length != 4 || shape[0] != 1 || shape[1] != 3
@@ -372,9 +373,8 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
         ReadOnlySpan<float> flat = rgbImage.Buffer.Span;
         int planeSize = ImageHeight * ImageWidth;
 
-        // Allocate Skia bitmap and fill pixel-by-pixel from the channel-planar tensor.
         SKImageInfo info = new(ImageWidth, ImageHeight, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        using SKBitmap bitmap = new(info);
+        SKBitmap bitmap = new(info);
         nint pixelPtr = bitmap.GetPixels();
         unsafe
         {
@@ -393,8 +393,7 @@ public sealed class StableDiffusionTurboModel : IModel, IDisposable
             }
         }
 
-        using SKData encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
-        return encoded.ToArray();
+        return bitmap;
     }
 
     private static byte NormalizeToByte(float value)
