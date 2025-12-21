@@ -185,9 +185,9 @@ public sealed class FoldScanOperator : IQueryOperator
             foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
             {
                 WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;
-                ComputeForSpecification(
+                await ComputeForSpecificationAsync(
                     spec, specGroup.Value, allRows, evaluator, scanResults, context.QueryMeter,
-                    context.Store, context.SidecarRegistry);
+                    context.Store, context.SidecarRegistry, context.CancellationToken).ConfigureAwait(false);
             }
 
             // ───── Step 4: emit in original input order ─────
@@ -258,7 +258,7 @@ public sealed class FoldScanOperator : IQueryOperator
     /// Partitions, sorts, and runs the fold for all scan columns that share
     /// the given window specification.
     /// </summary>
-    private void ComputeForSpecification(
+    private async ValueTask ComputeForSpecificationAsync(
         WindowSpecification spec,
         List<int> columnIndices,
         List<Row> allRows,
@@ -266,7 +266,8 @@ public sealed class FoldScanOperator : IQueryOperator
         DataValue[][] scanResults,
         QueryMeter? meter,
         IValueStore store,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        CancellationToken cancellationToken)
     {
         // Build an index array to track original positions through partitioning.
         int[] originalIndices = new int[allRows.Count];
@@ -283,7 +284,8 @@ public sealed class FoldScanOperator : IQueryOperator
         }
         else
         {
-            partitionRanges = BuildPartitions(allRows, originalIndices, spec.PartitionBy, evaluator);
+            partitionRanges = await BuildPartitionsAsync(
+                allRows, originalIndices, spec.PartitionBy, evaluator, cancellationToken).ConfigureAwait(false);
         }
 
         // For each partition, sort by ORDER BY and fold.
@@ -291,9 +293,9 @@ public sealed class FoldScanOperator : IQueryOperator
         {
             if (spec.OrderBy is { Count: > 0 })
             {
-                SortPartition(
+                await SortPartitionAsync(
                     allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator,
-                    store, sidecarRegistry);
+                    store, sidecarRegistry, cancellationToken).ConfigureAwait(false);
             }
 
             // Fold each scan column group within this partition.
@@ -302,9 +304,9 @@ public sealed class FoldScanOperator : IQueryOperator
                 FoldScanColumn column = _scanColumns[scanColumnIndex];
                 int outputOffset = GetOutputOffset(scanColumnIndex);
 
-                FoldPartition(
+                await FoldPartitionAsync(
                     column, allRows, originalIndices, startIndex, count,
-                    outputOffset, evaluator, scanResults, meter);
+                    outputOffset, evaluator, scanResults, meter, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -312,7 +314,7 @@ public sealed class FoldScanOperator : IQueryOperator
     /// <summary>
     /// Runs the fold for a single <see cref="FoldScanColumn"/> over a sorted partition.
     /// </summary>
-    private static void FoldPartition(
+    private static async ValueTask FoldPartitionAsync(
         FoldScanColumn column,
         List<Row> allRows,
         int[] originalIndices,
@@ -321,7 +323,8 @@ public sealed class FoldScanOperator : IQueryOperator
         int outputOffset,
         ExpressionEvaluator evaluator,
         DataValue[][] scanResults,
-        QueryMeter? meter)
+        QueryMeter? meter,
+        CancellationToken cancellationToken)
     {
         int accCount = column.AccumulatorNames.Count;
 
@@ -355,7 +358,7 @@ public sealed class FoldScanOperator : IQueryOperator
         DataValue[] accumulatorValues = new DataValue[accCount];
         for (int i = 0; i < accCount; i++)
         {
-            accumulatorValues[i] = evaluator.Evaluate(column.InitExpressions[i], firstRow);
+            accumulatorValues[i] = await evaluator.EvaluateAsync(column.InitExpressions[i], firstRow, cancellationToken).ConfigureAwait(false);
         }
 
         DataValue[] augmentedValues = new DataValue[augmentedFieldCount];
@@ -401,7 +404,7 @@ public sealed class FoldScanOperator : IQueryOperator
             // Evaluate body expressions → new accumulator values.
             for (int b = 0; b < accCount; b++)
             {
-                accumulatorValues[b] = evaluator.Evaluate(column.BodyExpressions[b], augmentedRow);
+                accumulatorValues[b] = await evaluator.EvaluateAsync(column.BodyExpressions[b], augmentedRow, cancellationToken).ConfigureAwait(false);
             }
 
             // Store results at the original row position.
@@ -432,18 +435,19 @@ public sealed class FoldScanOperator : IQueryOperator
     /// <summary>
     /// Groups rows into partitions based on PARTITION BY key expressions.
     /// </summary>
-    private static List<(int StartIndex, int Count)> BuildPartitions(
+    private static async ValueTask<List<(int StartIndex, int Count)>> BuildPartitionsAsync(
         List<Row> rows,
         int[] indices,
         IReadOnlyList<Expression> partitionByExpressions,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        CancellationToken cancellationToken)
     {
         if (partitionByExpressions.Count == 1)
         {
             Dictionary<DataValue, List<int>> groups = new();
             for (int i = 0; i < indices.Length; i++)
             {
-                DataValue key = evaluator.Evaluate(partitionByExpressions[0], rows[indices[i]]);
+                DataValue key = await evaluator.EvaluateAsync(partitionByExpressions[0], rows[indices[i]], cancellationToken).ConfigureAwait(false);
                 if (!groups.TryGetValue(key, out List<int>? list))
                 {
                     list = [];
@@ -473,7 +477,7 @@ public sealed class FoldScanOperator : IQueryOperator
                 DataValue[] parts = new DataValue[partitionByExpressions.Count];
                 for (int j = 0; j < partitionByExpressions.Count; j++)
                 {
-                    parts[j] = evaluator.Evaluate(partitionByExpressions[j], rows[indices[i]]);
+                    parts[j] = await evaluator.EvaluateAsync(partitionByExpressions[j], rows[indices[i]], cancellationToken).ConfigureAwait(false);
                 }
                 CompositeKey key = new(parts);
                 if (!groups.TryGetValue(key, out List<int>? list))
@@ -501,8 +505,10 @@ public sealed class FoldScanOperator : IQueryOperator
 
     /// <summary>
     /// Sorts a contiguous partition range by the given ORDER BY items.
+    /// Pre-evaluates sort keys per row so the inner comparator stays synchronous
+    /// (Array.Sort can't await).
     /// </summary>
-    private static void SortPartition(
+    private static async ValueTask SortPartitionAsync(
         List<Row> rows,
         int[] indices,
         int startIndex,
@@ -510,22 +516,38 @@ public sealed class FoldScanOperator : IQueryOperator
         IReadOnlyList<OrderByItem> orderByItems,
         ExpressionEvaluator evaluator,
         IValueStore store,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        CancellationToken cancellationToken)
     {
+        // Pre-evaluate sort keys once per (row, item).
+        DataValue[][] sortKeys = new DataValue[count][];
+        for (int i = 0; i < count; i++)
+        {
+            int rowIndex = indices[startIndex + i];
+            Row row = rows[rowIndex];
+            DataValue[] keys = new DataValue[orderByItems.Count];
+            for (int j = 0; j < orderByItems.Count; j++)
+            {
+                keys[j] = await evaluator.EvaluateAsync(orderByItems[j].Expression, row, cancellationToken).ConfigureAwait(false);
+            }
+            sortKeys[i] = keys;
+        }
+
+        int[] localIndices = new int[count];
+        for (int i = 0; i < count; i++) localIndices[i] = i;
+
         try
         {
-            Array.Sort(indices, startIndex, count, Comparer<int>.Create((a, b) =>
+            Array.Sort(localIndices, Comparer<int>.Create((a, b) =>
             {
-                Row rowA = rows[a];
-                Row rowB = rows[b];
-                foreach (OrderByItem item in orderByItems)
+                for (int k = 0; k < orderByItems.Count; k++)
                 {
-                    DataValue leftValue = evaluator.Evaluate(item.Expression, rowA);
-                    DataValue rightValue = evaluator.Evaluate(item.Expression, rowB);
+                    DataValue leftValue = sortKeys[a][k];
+                    DataValue rightValue = sortKeys[b][k];
                     int comparison = CompareDataValues(
                         leftValue, store, sidecarRegistry,
                         rightValue, store, sidecarRegistry);
-                    if (item.Direction == SortDirection.Descending)
+                    if (orderByItems[k].Direction == SortDirection.Descending)
                     {
                         comparison = -comparison;
                     }
@@ -547,6 +569,14 @@ public sealed class FoldScanOperator : IQueryOperator
                 $"Inner cause: {ex.InnerException?.Message ?? ex.Message}",
                 ex.InnerException ?? ex);
         }
+
+        // Apply the sorted order back to indices[startIndex .. startIndex+count].
+        int[] reordered = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            reordered[i] = indices[startIndex + localIndices[i]];
+        }
+        Array.Copy(reordered, 0, indices, startIndex, count);
     }
 
     private static int CompareDataValues(

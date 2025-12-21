@@ -209,7 +209,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         // Evaluate group keys and detect key change.
                         if (useSingleKey)
                         {
-                            DataValue key = evaluator.Evaluate(_groupByExpressions[0], row);
+                            DataValue key = await evaluator.EvaluateAsync(_groupByExpressions[0], row, context.CancellationToken).ConfigureAwait(false);
 
                             if (currentGroup is not null && !key.Equals(currentSingleKey!))
                             {
@@ -239,7 +239,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         {
                             for (int index = 0; index < keyCount; index++)
                             {
-                                compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
+                                compositeKeyScratch![index] = await evaluator.EvaluateAsync(_groupByExpressions[index], row, context.CancellationToken).ConfigureAwait(false);
                             }
 
                             if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
@@ -270,7 +270,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
 
                         // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
-                        EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+                        await EvaluateAggregateArgumentsIntoAsync(evaluator, row, argumentScratch, sortKeyScratch, context.CancellationToken).ConfigureAwait(false);
                         AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context, in frame);
                     }
                 }
@@ -491,8 +491,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
                             .ConfigureAwait(false))
                         {
-                            EvaluateAggregateArgumentsInto(
-                                workerEvaluator, row, workerArgScratch, workerSortScratch);
+                            await EvaluateAggregateArgumentsIntoAsync(
+                                workerEvaluator, row, workerArgScratch, workerSortScratch, cancellationToken).ConfigureAwait(false);
                             AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context, in workerAccumFrame);
                             // Row values extracted — batch-level ReturnBatch handles array return.
                         }
@@ -619,17 +619,17 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         DataValue singleKey = default;
                         if (useSingleKey)
                         {
-                            singleKey = evaluator.Evaluate(_groupByExpressions[0], row);
+                            singleKey = await evaluator.EvaluateAsync(_groupByExpressions[0], row, context.CancellationToken).ConfigureAwait(false);
                         }
                         else if (!isGlobalAggregation)
                         {
                             for (int k = 0; k < keyCount; k++)
                             {
-                                compositeKeyScratch![k] = evaluator.Evaluate(_groupByExpressions[k], row);
+                                compositeKeyScratch![k] = await evaluator.EvaluateAsync(_groupByExpressions[k], row, context.CancellationToken).ConfigureAwait(false);
                             }
                         }
 
-                        EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+                        await EvaluateAggregateArgumentsIntoAsync(evaluator, row, argumentScratch, sortKeyScratch, context.CancellationToken).ConfigureAwait(false);
 
                         if (isGlobalAggregation)
                         {
@@ -1330,11 +1330,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// input row into pre-allocated scratch buffers. Callers must create the buffers
     /// once via <see cref="CreateAggregateArgumentScratch"/> and pass them on every row.
     /// </summary>
-    private void EvaluateAggregateArgumentsInto(
+    private async ValueTask EvaluateAggregateArgumentsIntoAsync(
         ExpressionEvaluator evaluator,
         Row row,
         DataValue[][] allArguments,
-        DataValue[]?[]? allSortKeys)
+        DataValue[]?[]? allSortKeys,
+        CancellationToken cancellationToken)
     {
         for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
         {
@@ -1348,8 +1349,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             DataValue[] arguments = allArguments[aggregateIndex];
             for (int argumentIndex = 0; argumentIndex < aggregateColumn.ArgumentExpressions.Count; argumentIndex++)
             {
-                arguments[argumentIndex] = evaluator.Evaluate(
-                    aggregateColumn.ArgumentExpressions[argumentIndex], row);
+                arguments[argumentIndex] = await evaluator.EvaluateAsync(
+                    aggregateColumn.ArgumentExpressions[argumentIndex], row, cancellationToken).ConfigureAwait(false);
             }
 
             if (aggregateColumn.OrderBy is not null)
@@ -1357,8 +1358,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 DataValue[] sortKeyBuffer = allSortKeys![aggregateIndex]!;
                 for (int sortIndex = 0; sortIndex < aggregateColumn.OrderBy.Count; sortIndex++)
                 {
-                    sortKeyBuffer[sortIndex] = evaluator.Evaluate(
-                        aggregateColumn.OrderBy[sortIndex].Expression, row);
+                    sortKeyBuffer[sortIndex] = await evaluator.EvaluateAsync(
+                        aggregateColumn.OrderBy[sortIndex].Expression, row, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

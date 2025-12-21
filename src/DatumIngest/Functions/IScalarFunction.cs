@@ -44,6 +44,37 @@ public interface IScalarFunction
     ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame);
 
     /// <summary>
+    /// Async variant of <see cref="Execute"/>. The default implementation
+    /// wraps the sync method in a synchronously-completed
+    /// <see cref="ValueTask{TResult}"/> — allocation-free for sync-only
+    /// functions, which is the majority. Functions that need genuine async
+    /// (model dispatch, network I/O, file reads) override this directly and
+    /// leave <see cref="Execute"/> to throw or forward to a sync wrapper.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Argument shape change vs the sync method: <see cref="ReadOnlyMemory{T}"/>
+    /// instead of <see cref="ReadOnlySpan{T}"/>, value <see cref="EvaluationFrame"/>
+    /// instead of <c>in</c>. Spans and <c>in</c> parameters are stack-only and
+    /// can't cross an <c>await</c>, which would forbid every interesting async
+    /// implementation. The evaluator allocates the argument buffer on the heap
+    /// (<see cref="System.Buffers.ArrayPool{T}"/>) so callers see no extra
+    /// allocation — only the slice shape changes.
+    /// </para>
+    /// </remarks>
+    /// <param name="arguments">Argument values, in declaration order.</param>
+    /// <param name="frame">Per-row evaluation frame; see <see cref="Execute"/>.</param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation. Implementations that perform I/O (model
+    /// dispatch, network calls) should honour it; sync wrappers ignore it.
+    /// </param>
+    ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+        => new(Execute(arguments.Span, in frame));
+
+    /// <summary>
     /// Cost weight of a single invocation in Query Units (QU). Used for
     /// billing, governance budgets, and pre-execution cost estimation.
     /// </summary>

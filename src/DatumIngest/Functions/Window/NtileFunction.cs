@@ -36,7 +36,7 @@ public sealed class NtileFunction : IWindowFunction
 
     private sealed class NtileComputation : IWindowComputation
     {
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -44,7 +44,8 @@ public sealed class NtileFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             if (partitionRows.Count == 0)
             {
@@ -52,7 +53,7 @@ public sealed class NtileFunction : IWindowFunction
             }
 
             // Evaluate the bucket count from the first row (constant expression).
-            DataValue bucketValue = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
+            DataValue bucketValue = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[0], cancellationToken).ConfigureAwait(false);
             int bucketCount = WindowFunctionHelper.ToInt(bucketValue);
 
             if (bucketCount <= 0)

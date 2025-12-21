@@ -23,9 +23,10 @@ public sealed class ExpressionEvaluator
     /// Persistent store used for (1) per-evaluator caches (<see cref="_inValueSetCache"/>)
     /// whose <see cref="DataValue"/> entries must outlive any single batch, and
     /// (2) the <see cref="Row"/>-only overload of
-    /// <see cref="Evaluate(Expression, Row)"/> which constructs a default frame using this
-    /// store for both the source and target arenas. Callers that want true two-arena
-    /// behaviour should invoke the <see cref="EvaluationFrame"/>-based overloads instead.
+    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> which constructs
+    /// a default frame using this store for both the source and target arenas. Callers
+    /// that want true two-arena behaviour should invoke the <see cref="EvaluationFrame"/>-based
+    /// overloads instead.
     /// </summary>
     private readonly IValueStore? _store;
 
@@ -39,9 +40,10 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Optional sidecar registry for resolving <c>FlagInSidecar</c> DataValues. Threaded into
-    /// <see cref="EvaluationFrame.SidecarRegistry"/> by the simple <see cref="Evaluate(Expression, Row)"/>
-    /// overload and into the <see cref="InvocationFrame"/> built for scalar-function dispatch,
-    /// so image / byte-array functions can resolve sidecar-backed payloads.
+    /// <see cref="EvaluationFrame.SidecarRegistry"/> by the simple
+    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> overload and into the
+    /// <see cref="InvocationFrame"/> built for scalar-function dispatch, so image / byte-array
+    /// functions can resolve sidecar-backed payloads.
     /// </summary>
     private readonly SidecarRegistry? _sidecarRegistry;
 
@@ -132,7 +134,7 @@ public sealed class ExpressionEvaluator
     /// <param name="outerRow">
     /// Optional outer row from a correlated scalar subquery, or <see langword="null"/> when not inside
     /// a correlated subquery. Column references that cannot be resolved against the current row
-    /// will fall back to this row. Only consulted by the <see cref="Evaluate(Expression, Row)"/>
+    /// will fall back to this row. Only consulted by the <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/>
     /// backward-compatible overload; the <see cref="EvaluationFrame"/>-based overloads carry the
     /// outer row per-call.
     /// </param>
@@ -150,14 +152,15 @@ public sealed class ExpressionEvaluator
     /// <param name="store">
     /// Optional persistent value store used for per-evaluator caches (cast target names, IN
     /// literal sets) and as the default source/target arena for the <see cref="Row"/>-only
-    /// <see cref="Evaluate(Expression, Row)"/> overload. For true two-arena evaluation use the
-    /// <see cref="EvaluationFrame"/>-based overloads.
+    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> overload. For true two-arena
+    /// evaluation use the <see cref="EvaluationFrame"/>-based overloads.
     /// </param>
     /// <param name="sidecarRegistry">
     /// Optional registry for resolving <c>FlagInSidecar</c> DataValues (LBO payloads stored in
-    /// <c>.datum-blob</c> sidecars). Threaded into both the simple <see cref="Evaluate(Expression, Row)"/>
-    /// frame and the per-call <see cref="InvocationFrame"/> built for scalar dispatch so image /
-    /// byte-array functions can resolve sidecar-backed values.
+    /// <c>.datum-blob</c> sidecars). Threaded into both the simple
+    /// <see cref="EvaluateAsync(Expression, Row, CancellationToken)"/> frame and the per-call
+    /// <see cref="InvocationFrame"/> built for scalar dispatch so image / byte-array functions
+    /// can resolve sidecar-backed values.
     /// </param>
     /// <param name="variableScope">
     /// Optional procedural variable scope chain. When non-<see langword="null"/>,
@@ -226,7 +229,7 @@ public sealed class ExpressionEvaluator
     }
 
     /// <summary>Resolves a string DataValue against the frame's source arena.</summary>
-    private static string Str(DataValue v, in EvaluationFrame frame) => v.AsString(frame.Source);
+    private static string Str(DataValue v, EvaluationFrame frame) => v.AsString(frame.Source);
 
     // ──────────────────── Public entry points ────────────────────
 
@@ -235,20 +238,28 @@ public sealed class ExpressionEvaluator
     /// construction for both reads and writes. Convenience overload for callers that don't
     /// yet distinguish source and target arenas.
     /// </summary>
-    public DataValue Evaluate(Expression expression, Row row)
+    public ValueTask<DataValue> EvaluateAsync(
+        Expression expression, Row row, CancellationToken cancellationToken = default)
     {
         IValueStore store = _store ?? ThrowStoreRequired();
-        return Evaluate(expression, new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry));
+        return EvaluateAsync(
+            expression,
+            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry),
+            cancellationToken);
     }
 
     /// <summary>
     /// Evaluates an expression and interprets the result as a boolean, using the store
     /// supplied at construction. Convenience overload.
     /// </summary>
-    public bool EvaluateAsBoolean(Expression expression, Row row)
+    public ValueTask<bool> EvaluateAsBooleanAsync(
+        Expression expression, Row row, CancellationToken cancellationToken = default)
     {
         IValueStore store = _store ?? ThrowStoreRequired();
-        return EvaluateAsBoolean(expression, new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry));
+        return EvaluateAsBooleanAsync(
+            expression,
+            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry),
+            cancellationToken);
     }
 
     private static IValueStore ThrowStoreRequired() =>
@@ -260,8 +271,10 @@ public sealed class ExpressionEvaluator
     /// </summary>
     /// <param name="expression">The AST expression to evaluate.</param>
     /// <param name="frame">Row + arenas + outer row for this evaluation.</param>
+    /// <param name="cancellationToken">Cooperative cancellation token.</param>
     /// <returns>The computed result.</returns>
-    public DataValue Evaluate(Expression expression, in EvaluationFrame frame)
+    public async ValueTask<DataValue> EvaluateAsync(
+        Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -273,16 +286,16 @@ public sealed class ExpressionEvaluator
                 LiteralValueExpression hoisted => hoisted.Value,
                 LiteralExpression literal => EvaluateLiteral(literal, frame),
                 ColumnReference column => EvaluateColumn(column, frame),
-                BinaryExpression binary => EvaluateBinary(binary, frame),
-                UnaryExpression unary => EvaluateUnary(unary, frame),
-                FunctionCallExpression function => EvaluateFunction(function, frame),
-                InExpression inExpr => EvaluateIn(inExpr, frame),
-                BetweenExpression between => EvaluateBetween(between, frame),
-                IsNullExpression isNull => EvaluateIsNull(isNull, frame),
-                CastExpression cast => EvaluateCast(cast, frame),
-                AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, frame),
-                CaseExpression caseExpr => EvaluateCase(caseExpr, frame),
-                LikeExpression like => EvaluateLikeEscape(like, frame),
+                BinaryExpression binary => await EvaluateBinaryAsync(binary, frame, cancellationToken).ConfigureAwait(false),
+                UnaryExpression unary => await EvaluateUnaryAsync(unary, frame, cancellationToken).ConfigureAwait(false),
+                FunctionCallExpression function => await EvaluateFunctionAsync(function, frame, cancellationToken).ConfigureAwait(false),
+                InExpression inExpr => await EvaluateInAsync(inExpr, frame, cancellationToken).ConfigureAwait(false),
+                BetweenExpression between => await EvaluateBetweenAsync(between, frame, cancellationToken).ConfigureAwait(false),
+                IsNullExpression isNull => await EvaluateIsNullAsync(isNull, frame, cancellationToken).ConfigureAwait(false),
+                CastExpression cast => await EvaluateCastAsync(cast, frame, cancellationToken).ConfigureAwait(false),
+                AtTimeZoneExpression atz => await EvaluateAtTimeZoneAsync(atz, frame, cancellationToken).ConfigureAwait(false),
+                CaseExpression caseExpr => await EvaluateCaseAsync(caseExpr, frame, cancellationToken).ConfigureAwait(false),
+                LikeExpression like => await EvaluateLikeEscapeAsync(like, frame, cancellationToken).ConfigureAwait(false),
                 WindowFunctionCallExpression window => throw new InvalidOperationException(
                     $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
                     "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
@@ -302,8 +315,8 @@ public sealed class ExpressionEvaluator
                 LambdaExpression => throw new InvalidOperationException(
                     "Lambda expressions cannot be evaluated as standalone values. " +
                     "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
-                StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, frame),
-                IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, frame),
+                StructLiteralExpression structLiteral => await EvaluateStructLiteralAsync(structLiteral, frame, cancellationToken).ConfigureAwait(false),
+                IndexAccessExpression indexAccess => await EvaluateIndexAccessAsync(indexAccess, frame, cancellationToken).ConfigureAwait(false),
                 TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
                 _ => throw new InvalidOperationException(
                     $"Unsupported expression type: {expression.GetType().Name}.")
@@ -326,9 +339,10 @@ public sealed class ExpressionEvaluator
     /// Evaluates an expression and interprets the result as a boolean (truthy/falsy).
     /// Null is treated as false. Scalar 0 is false; non-zero is true.
     /// </summary>
-    public bool EvaluateAsBoolean(Expression expression, in EvaluationFrame frame)
+    public async ValueTask<bool> EvaluateAsBooleanAsync(
+        Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
-        ValueRef result = EvaluateAsValueRef(expression, frame);
+        ValueRef result = await EvaluateAsValueRefAsync(expression, frame, cancellationToken).ConfigureAwait(false);
 
         if (result.IsNull)
         {
@@ -353,7 +367,7 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private DataValue EvaluateLiteral(LiteralExpression literal, in EvaluationFrame frame)
+    private static DataValue EvaluateLiteral(LiteralExpression literal, EvaluationFrame frame)
     {
         if (literal.Value is null)
         {
@@ -452,7 +466,7 @@ public sealed class ExpressionEvaluator
     /// a scope (i.e. the query is running outside a procedural batch) or
     /// if the variable isn't bound in any enclosing frame.
     /// </summary>
-    private DataValue EvaluateVariable(VariableExpression variable, in EvaluationFrame frame)
+    private DataValue EvaluateVariable(VariableExpression variable, EvaluationFrame frame)
     {
         if (_variableScope is null || _variableStore is null)
         {
@@ -474,7 +488,7 @@ public sealed class ExpressionEvaluator
         return DataValueRetention.Stabilize(value, _variableStore, frame.Target);
     }
 
-    private static DataValue EvaluateColumn(ColumnReference column, in EvaluationFrame frame)
+    private static DataValue EvaluateColumn(ColumnReference column, EvaluationFrame frame)
     {
         Row row = frame.Row;
 
@@ -514,8 +528,9 @@ public sealed class ExpressionEvaluator
                 : $"Column '{column.ColumnName}' not found in row.");
     }
 
-    private DataValue EvaluateBinary(BinaryExpression binary, in EvaluationFrame frame) =>
-        ToDataValue(EvaluateBinaryAsValueRef(binary, frame), frame);
+    private async ValueTask<DataValue> EvaluateBinaryAsync(
+        BinaryExpression binary, EvaluationFrame frame, CancellationToken cancellationToken) =>
+        ToDataValue(await EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken).ConfigureAwait(false), frame);
 
     /// <summary>
     /// ValueRef-native binary expression evaluation. Operands are pulled in as
@@ -523,26 +538,27 @@ public sealed class ExpressionEvaluator
     /// resulting boolean without any function-result string ever crossing the
     /// arena boundary. Result is always inline (Boolean / Float32 / Duration).
     /// </summary>
-    private ValueRef EvaluateBinaryAsValueRef(BinaryExpression binary, in EvaluationFrame frame)
+    private async ValueTask<ValueRef> EvaluateBinaryAsValueRefAsync(
+        BinaryExpression binary, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        // Short-circuit for AND/OR — uses EvaluateAsBoolean which itself routes
-        // through EvaluateAsValueRef.
+        // Short-circuit for AND/OR — uses EvaluateAsBooleanAsync which itself routes
+        // through EvaluateAsValueRefAsync.
         if (binary.Operator == BinaryOperator.And)
         {
-            if (!EvaluateAsBoolean(binary.Left, frame)) return ValueRef.FromBoolean(false);
-            if (!EvaluateAsBoolean(binary.Right, frame)) return ValueRef.FromBoolean(false);
+            if (!await EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(false);
+            if (!await EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(false);
             return ValueRef.FromBoolean(true);
         }
 
         if (binary.Operator == BinaryOperator.Or)
         {
-            if (EvaluateAsBoolean(binary.Left, frame)) return ValueRef.FromBoolean(true);
-            if (EvaluateAsBoolean(binary.Right, frame)) return ValueRef.FromBoolean(true);
+            if (await EvaluateAsBooleanAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(true);
+            if (await EvaluateAsBooleanAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false)) return ValueRef.FromBoolean(true);
             return ValueRef.FromBoolean(false);
         }
 
-        ValueRef left = EvaluateAsValueRef(binary.Left, frame);
-        ValueRef right = EvaluateAsValueRef(binary.Right, frame);
+        ValueRef left = await EvaluateAsValueRefAsync(binary.Left, frame, cancellationToken).ConfigureAwait(false);
+        ValueRef right = await EvaluateAsValueRefAsync(binary.Right, frame, cancellationToken).ConfigureAwait(false);
 
         if (left.IsNull || right.IsNull)
         {
@@ -592,16 +608,18 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private DataValue EvaluateUnary(UnaryExpression unary, in EvaluationFrame frame) =>
-        ToDataValue(EvaluateUnaryAsValueRef(unary, frame), frame);
+    private async ValueTask<DataValue> EvaluateUnaryAsync(
+        UnaryExpression unary, EvaluationFrame frame, CancellationToken cancellationToken) =>
+        ToDataValue(await EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken).ConfigureAwait(false), frame);
 
     /// <summary>
     /// ValueRef-native unary expression evaluation. Result is always inline
     /// (Boolean for NOT, Float32 for negate).
     /// </summary>
-    private ValueRef EvaluateUnaryAsValueRef(UnaryExpression unary, in EvaluationFrame frame)
+    private async ValueTask<ValueRef> EvaluateUnaryAsValueRefAsync(
+        UnaryExpression unary, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        ValueRef operand = EvaluateAsValueRef(unary.Operand, frame);
+        ValueRef operand = await EvaluateAsValueRefAsync(unary.Operand, frame, cancellationToken).ConfigureAwait(false);
 
         if (operand.IsNull)
         {
@@ -612,7 +630,7 @@ public sealed class ExpressionEvaluator
 
         return unary.Operator switch
         {
-            UnaryOperator.Not => ValueRef.FromBoolean(!EvaluateAsBoolean(unary.Operand, frame)),
+            UnaryOperator.Not => ValueRef.FromBoolean(!await EvaluateAsBooleanAsync(unary.Operand, frame, cancellationToken).ConfigureAwait(false)),
             UnaryOperator.Negate => NegatePreservingKind(operand),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
@@ -652,8 +670,9 @@ public sealed class ExpressionEvaluator
         _ => ValueRef.FromFloat32(-ToFloatValueRef(operand)),
     };
 
-    private DataValue EvaluateFunction(FunctionCallExpression function, in EvaluationFrame frame) =>
-        ToDataValue(EvaluateFunctionAsValueRef(function, frame), frame);
+    private async ValueTask<DataValue> EvaluateFunctionAsync(
+        FunctionCallExpression function, EvaluationFrame frame, CancellationToken cancellationToken) =>
+        ToDataValue(await EvaluateFunctionAsValueRefAsync(function, frame, cancellationToken).ConfigureAwait(false), frame);
 
     /// <summary>
     /// Evaluates a function call directly as a <see cref="ValueRef"/>. Used as
@@ -662,7 +681,8 @@ public sealed class ExpressionEvaluator
     /// <c>outer(middle(inner(x)))</c>, only <c>outer</c>'s top-level result
     /// crosses the <see cref="ToDataValue"/> boundary.
     /// </summary>
-    private ValueRef EvaluateFunctionAsValueRef(FunctionCallExpression function, in EvaluationFrame frame)
+    private async ValueTask<ValueRef> EvaluateFunctionAsValueRefAsync(
+        FunctionCallExpression function, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         IScalarFunction? scalarFunction = _functions.TryGetScalar(function.FunctionName);
 
@@ -678,7 +698,7 @@ public sealed class ExpressionEvaluator
         {
             for (int index = 0; index < argumentCount; index++)
             {
-                arguments[index] = EvaluateAsValueRef(function.Arguments[index], frame);
+                arguments[index] = await EvaluateAsValueRefAsync(function.Arguments[index], frame, cancellationToken).ConfigureAwait(false);
             }
 
             if (_validatedScalarCalls.Add(function))
@@ -686,7 +706,7 @@ public sealed class ExpressionEvaluator
                 ValidateScalarCallSiteOrThrow(scalarFunction, function, arguments.AsSpan(0, argumentCount));
             }
 
-            ValueRef result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount), in frame);
+            ValueRef result = await scalarFunction.ExecuteAsync(arguments.AsMemory(0, argumentCount), frame, cancellationToken).ConfigureAwait(false);
             _meter?.Add(scalarFunction.QueryUnitCost);
             return result;
         }
@@ -700,20 +720,21 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Evaluates an expression as a <see cref="ValueRef"/>. Function call
-    /// expressions short-circuit to <see cref="EvaluateFunctionAsValueRef"/>
+    /// expressions short-circuit to <see cref="EvaluateFunctionAsValueRefAsync"/>
     /// to keep nested chains in managed memory; everything else falls back to
-    /// the existing <see cref="Evaluate(Expression, in EvaluationFrame)"/>
+    /// the existing <see cref="EvaluateAsync(Expression, EvaluationFrame, CancellationToken)"/>
     /// path and lifts the result via <see cref="ToValueRef"/>.
     /// </summary>
     /// <remarks>
     /// This matters for <c>outer(middle(inner(x)))</c>-style chains: each
-    /// recursive call into <see cref="EvaluateFunctionAsValueRef"/> produces a
+    /// recursive call into <see cref="EvaluateFunctionAsValueRefAsync"/> produces a
     /// managed <see cref="ValueRef"/> the next stage consumes directly, so the
     /// only arena write is the outermost call's <see cref="ToDataValue"/>.
     /// Earlier intermediates become unreachable as soon as the next stage's
     /// result is constructed and are reclaimed by the GC.
     /// </remarks>
-    public ValueRef EvaluateAsValueRef(Expression expression, in EvaluationFrame frame)
+    public async ValueTask<ValueRef> EvaluateAsValueRefAsync(
+        Expression expression, EvaluationFrame frame, CancellationToken cancellationToken = default)
     {
         // Predicate-relevant expression types route through ValueRef-native
         // handlers so no intermediate result writes to the arena. Anything else
@@ -724,16 +745,16 @@ public sealed class ExpressionEvaluator
         switch (expression)
         {
             case FunctionCallExpression functionCall:
-                return EvaluateFunctionAsValueRef(functionCall, frame);
+                return await EvaluateFunctionAsValueRefAsync(functionCall, frame, cancellationToken).ConfigureAwait(false);
             case BinaryExpression binary:
-                return EvaluateBinaryAsValueRef(binary, frame);
+                return await EvaluateBinaryAsValueRefAsync(binary, frame, cancellationToken).ConfigureAwait(false);
             case UnaryExpression unary:
-                return EvaluateUnaryAsValueRef(unary, frame);
+                return await EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken).ConfigureAwait(false);
             case IsNullExpression isNull:
-                return EvaluateIsNullAsValueRef(isNull, frame);
+                return await EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken).ConfigureAwait(false);
         }
 
-        DataValue raw = Evaluate(expression, frame);
+        DataValue raw = await EvaluateAsync(expression, frame, cancellationToken).ConfigureAwait(false);
         return ToValueRef(raw, frame);
     }
 
@@ -743,7 +764,7 @@ public sealed class ExpressionEvaluator
     /// payloads, sidecar-backed values are loaded via the registry, and inline
     /// values pass through unchanged.
     /// </summary>
-    private static ValueRef ToValueRef(DataValue value, in EvaluationFrame frame)
+    private static ValueRef ToValueRef(DataValue value, EvaluationFrame frame)
     {
         // Null values: pick the right shape (null array vs null scalar) so
         // downstream IsArray checks don't misfire on a typed-null array.
@@ -794,7 +815,7 @@ public sealed class ExpressionEvaluator
     /// <see cref="ValueRef.FromPrimitiveArray{T}"/> with the matching
     /// element type.
     /// </summary>
-    private static ValueRef ArrayDataValueToValueRef(DataValue value, in EvaluationFrame frame)
+    private static ValueRef ArrayDataValueToValueRef(DataValue value, EvaluationFrame frame)
     {
         return value.Kind switch
         {
@@ -820,7 +841,7 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private static ValueRef StringArrayToValueRef(DataValue value, in EvaluationFrame frame)
+    private static ValueRef StringArrayToValueRef(DataValue value, EvaluationFrame frame)
     {
         string[] strings = value.AsStringArray(frame.Source, frame.SidecarRegistry);
         ValueRef[] elements = new ValueRef[strings.Length];
@@ -831,7 +852,7 @@ public sealed class ExpressionEvaluator
         return ValueRef.FromArray(DataKind.String, elements);
     }
 
-    private static ValueRef BytesArrayToValueRef(DataValue value, DataKind elementKind, in EvaluationFrame frame)
+    private static ValueRef BytesArrayToValueRef(DataValue value, DataKind elementKind, EvaluationFrame frame)
     {
         byte[][] blobs = value.AsImageArray(frame.Source, frame.SidecarRegistry);
         ValueRef[] elements = new ValueRef[blobs.Length];
@@ -842,7 +863,7 @@ public sealed class ExpressionEvaluator
         return ValueRef.FromArray(elementKind, elements);
     }
 
-    private static ValueRef PrimitiveArrayToValueRef<T>(DataValue value, in EvaluationFrame frame)
+    private static ValueRef PrimitiveArrayToValueRef<T>(DataValue value, EvaluationFrame frame)
         where T : unmanaged
     {
         ReadOnlySpan<T> span = value.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
@@ -856,12 +877,13 @@ public sealed class ExpressionEvaluator
     /// frame's target store; the recursion for struct/array values is
     /// handled by ValueRef itself.
     /// </summary>
-    private static DataValue ToDataValue(ValueRef value, in EvaluationFrame frame) =>
+    private static DataValue ToDataValue(ValueRef value, EvaluationFrame frame) =>
         value.ToDataValue(frame.Target);
 
-    private DataValue EvaluateIn(InExpression inExpr, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateInAsync(
+        InExpression inExpr, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue target = Evaluate(inExpr.Expression, frame);
+        DataValue target = await EvaluateAsync(inExpr.Expression, frame, cancellationToken).ConfigureAwait(false);
 
         if (target.IsNull)
         {
@@ -904,7 +926,7 @@ public sealed class ExpressionEvaluator
         }
 
         // Slow path: values contain non-literal expressions that depend on the row.
-        return EvaluateInLinear(inExpr, target, frame);
+        return await EvaluateInLinearAsync(inExpr, target, frame, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -915,7 +937,7 @@ public sealed class ExpressionEvaluator
     /// </summary>
     private bool TryGetOrBuildLiteralValueSet(
         InExpression inExpr,
-        in EvaluationFrame frame,
+        EvaluationFrame frame,
         out HashSet<DataValue> valueSet,
         out bool hasNull)
     {
@@ -969,13 +991,14 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Linear-scan fallback for IN expressions with non-literal values.
     /// </summary>
-    private DataValue EvaluateInLinear(InExpression inExpr, DataValue target, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateInLinearAsync(
+        InExpression inExpr, DataValue target, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         bool hasNullCandidate = false;
 
         foreach (Expression valueExpression in inExpr.Values)
         {
-            DataValue candidate = Evaluate(valueExpression, frame);
+            DataValue candidate = await EvaluateAsync(valueExpression, frame, cancellationToken).ConfigureAwait(false);
             if (candidate.IsNull)
             {
                 hasNullCandidate = true;
@@ -999,11 +1022,12 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(inExpr.Negated);
     }
 
-    private DataValue EvaluateBetween(BetweenExpression between, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateBetweenAsync(
+        BetweenExpression between, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue target = Evaluate(between.Expression, frame);
-        DataValue low = Evaluate(between.Low, frame);
-        DataValue high = Evaluate(between.High, frame);
+        DataValue target = await EvaluateAsync(between.Expression, frame, cancellationToken).ConfigureAwait(false);
+        DataValue low = await EvaluateAsync(between.Low, frame, cancellationToken).ConfigureAwait(false);
+        DataValue high = await EvaluateAsync(between.High, frame, cancellationToken).ConfigureAwait(false);
 
         if (target.IsNull || low.IsNull || high.IsNull)
         {
@@ -1023,16 +1047,18 @@ public sealed class ExpressionEvaluator
         return DataValue.FromBoolean(inRange);
     }
 
-    private DataValue EvaluateIsNull(IsNullExpression isNull, in EvaluationFrame frame) =>
-        ToDataValue(EvaluateIsNullAsValueRef(isNull, frame), frame);
+    private async ValueTask<DataValue> EvaluateIsNullAsync(
+        IsNullExpression isNull, EvaluationFrame frame, CancellationToken cancellationToken) =>
+        ToDataValue(await EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken).ConfigureAwait(false), frame);
 
     /// <summary>
     /// ValueRef-native IS NULL check. Avoids reading the inner expression's
     /// payload from the arena when the predicate only needs a null/non-null bit.
     /// </summary>
-    private ValueRef EvaluateIsNullAsValueRef(IsNullExpression isNull, in EvaluationFrame frame)
+    private async ValueTask<ValueRef> EvaluateIsNullAsValueRefAsync(
+        IsNullExpression isNull, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        ValueRef value = EvaluateAsValueRef(isNull.Expression, frame);
+        ValueRef value = await EvaluateAsValueRefAsync(isNull.Expression, frame, cancellationToken).ConfigureAwait(false);
         bool result = value.IsNull;
         if (isNull.Negated)
         {
@@ -1043,7 +1069,8 @@ public sealed class ExpressionEvaluator
 
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private DataValue EvaluateCast(CastExpression cast, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateCastAsync(
+        CastExpression cast, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         IScalarFunction? castFunction = _functions.TryGetScalar("cast");
         if (castFunction is null)
@@ -1054,9 +1081,9 @@ public sealed class ExpressionEvaluator
         ValueRef[] arguments = ArrayPool<ValueRef>.Shared.Rent(2);
         try
         {
-            arguments[0] = EvaluateAsValueRef(cast.Expression, frame);
+            arguments[0] = await EvaluateAsValueRefAsync(cast.Expression, frame, cancellationToken).ConfigureAwait(false);
             arguments[1] = ValueRef.FromString(cast.TargetType);
-            ValueRef result = castFunction.Execute(arguments.AsSpan(0, 2), in frame);
+            ValueRef result = await castFunction.ExecuteAsync(arguments.AsMemory(0, 2), frame, cancellationToken).ConfigureAwait(false);
             _meter?.Add(castFunction.QueryUnitCost);
             return ToDataValue(result, frame);
         }
@@ -1072,16 +1099,17 @@ public sealed class ExpressionEvaluator
     /// specified IANA timezone. The instant in time is preserved; only the UTC offset
     /// (and therefore the displayed local time) changes.
     /// </summary>
-    private DataValue EvaluateAtTimeZone(AtTimeZoneExpression atz, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateAtTimeZoneAsync(
+        AtTimeZoneExpression atz, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue value = Evaluate(atz.Expression, frame);
+        DataValue value = await EvaluateAsync(atz.Expression, frame, cancellationToken).ConfigureAwait(false);
 
         if (value.IsNull)
         {
             return DataValue.Null(DataKind.DateTime);
         }
 
-        DataValue tzValue = Evaluate(atz.TimeZone, frame);
+        DataValue tzValue = await EvaluateAsync(atz.TimeZone, frame, cancellationToken).ConfigureAwait(false);
         string tzName = Str(tzValue, frame);
 
         if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
@@ -1102,9 +1130,10 @@ public sealed class ExpressionEvaluator
     /// Searched CASE evaluates each WHEN condition as a boolean predicate.
     /// Only the matching THEN branch is evaluated.
     /// </summary>
-    private DataValue EvaluateCase(CaseExpression caseExpression, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateCaseAsync(
+        CaseExpression caseExpression, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue result = EvaluateCaseBranch(caseExpression, frame);
+        DataValue result = await EvaluateCaseBranchAsync(caseExpression, frame, cancellationToken).ConfigureAwait(false);
 
         // Resolve target kind once per CaseExpression and coerce the result.
         if (!_caseResolvedKindCache.TryGetValue(caseExpression, out DataKind? resolvedKind))
@@ -1130,19 +1159,20 @@ public sealed class ExpressionEvaluator
     /// <summary>
     /// Evaluates the matching CASE branch without coercion — pure short-circuit logic.
     /// </summary>
-    private DataValue EvaluateCaseBranch(CaseExpression caseExpression, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateCaseBranchAsync(
+        CaseExpression caseExpression, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         if (caseExpression.Operand is not null)
         {
             // Simple CASE: compare operand against each WHEN value.
-            DataValue operand = Evaluate(caseExpression.Operand, frame);
+            DataValue operand = await EvaluateAsync(caseExpression.Operand, frame, cancellationToken).ConfigureAwait(false);
 
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
-                DataValue whenValue = Evaluate(whenClause.Condition, frame);
+                DataValue whenValue = await EvaluateAsync(whenClause.Condition, frame, cancellationToken).ConfigureAwait(false);
                 if (!operand.IsNull && !whenValue.IsNull && CompareDataValues(operand, whenValue, frame) == 0)
                 {
-                    return Evaluate(whenClause.Result, frame);
+                    return await EvaluateAsync(whenClause.Result, frame, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -1151,9 +1181,9 @@ public sealed class ExpressionEvaluator
             // Searched CASE: evaluate each WHEN condition as boolean.
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
-                if (EvaluateAsBoolean(whenClause.Condition, frame))
+                if (await EvaluateAsBooleanAsync(whenClause.Condition, frame, cancellationToken).ConfigureAwait(false))
                 {
-                    return Evaluate(whenClause.Result, frame);
+                    return await EvaluateAsync(whenClause.Result, frame, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -1161,7 +1191,7 @@ public sealed class ExpressionEvaluator
         // No match: return ELSE result or typed null.
         if (caseExpression.ElseResult is not null)
         {
-            return Evaluate(caseExpression.ElseResult, frame);
+            return await EvaluateAsync(caseExpression.ElseResult, frame, cancellationToken).ConfigureAwait(false);
         }
 
         return DataValue.Null(DataKind.Float32);
@@ -1172,7 +1202,7 @@ public sealed class ExpressionEvaluator
     /// the current row and delegating to <see cref="ExpressionTypeResolver"/>.
     /// Falls back to AST-level inference when a row-derived schema cannot be built.
     /// </summary>
-    private DataKind? ResolveCaseTargetKind(CaseExpression caseExpression, in EvaluationFrame frame)
+    private DataKind? ResolveCaseTargetKind(CaseExpression caseExpression, EvaluationFrame frame)
     {
         Row row = frame.Row;
 
@@ -1732,7 +1762,7 @@ public sealed class ExpressionEvaluator
     /// <c>column OP literal</c> shape; flipped operand order with a non-inline literal on the
     /// left is not yet supported without literal hoisting.
     /// </summary>
-    private static int CompareDataValues(DataValue left, DataValue right, in EvaluationFrame frame)
+    private static int CompareDataValues(DataValue left, DataValue right, EvaluationFrame frame)
     {
         return DataValueComparer.Compare(left, frame.Source, right, frame.Target);
     }
@@ -1795,12 +1825,13 @@ public sealed class ExpressionEvaluator
 
     // ───────────────── Struct and index-access evaluation ─────────────────
 
-    private DataValue EvaluateStructLiteral(StructLiteralExpression literal, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateStructLiteralAsync(
+        StructLiteralExpression literal, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         DataValue[] fields = new DataValue[literal.Fields.Count];
         for (int index = 0; index < literal.Fields.Count; index++)
         {
-            fields[index] = Evaluate(literal.Fields[index].Value, frame);
+            fields[index] = await EvaluateAsync(literal.Fields[index].Value, frame, cancellationToken).ConfigureAwait(false);
         }
 
         ushort typeId = 0;
@@ -1836,16 +1867,17 @@ public sealed class ExpressionEvaluator
         or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
         or DataKind.Decimal;
 
-    private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateIndexAccessAsync(
+        IndexAccessExpression indexAccess, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue source = Evaluate(indexAccess.Source, frame);
+        DataValue source = await EvaluateAsync(indexAccess.Source, frame, cancellationToken).ConfigureAwait(false);
 
         if (source.IsNull)
         {
             return source;
         }
 
-        DataValue index = Evaluate(indexAccess.Index, frame);
+        DataValue index = await EvaluateAsync(indexAccess.Index, frame, cancellationToken).ConfigureAwait(false);
 
         if (source.IsArray)
         {
@@ -1903,7 +1935,7 @@ public sealed class ExpressionEvaluator
     /// one slot's bytes via the slot block. Punted because there are no
     /// repeated-index-access hotspots today.
     /// </remarks>
-    private DataValue ReadTypedArrayElement(DataValue source, int position, in EvaluationFrame frame)
+    private DataValue ReadTypedArrayElement(DataValue source, int position, EvaluationFrame frame)
     {
         DataKind elementKind = source.Kind;
         switch (elementKind)
@@ -1943,7 +1975,7 @@ public sealed class ExpressionEvaluator
         return ReadFixedWidthArrayElement(source, position, frame);
     }
 
-    private static DataValue ReadFixedWidthArrayElement(DataValue source, int position, in EvaluationFrame frame)
+    private static DataValue ReadFixedWidthArrayElement(DataValue source, int position, EvaluationFrame frame)
     {
         DataKind elementKind = source.Kind;
         return elementKind switch
@@ -1975,7 +2007,7 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private static DataValue ReadBooleanElement(DataValue source, int position, in EvaluationFrame frame)
+    private static DataValue ReadBooleanElement(DataValue source, int position, EvaluationFrame frame)
     {
         ReadOnlySpan<byte> elements = source.AsArraySpan<byte>(frame.Source, frame.SidecarRegistry);
         if (position < 0 || position >= elements.Length)
@@ -1986,7 +2018,7 @@ public sealed class ExpressionEvaluator
     }
 
     private static DataValue ReadElement<T>(
-        DataValue source, int position, in EvaluationFrame frame,
+        DataValue source, int position, EvaluationFrame frame,
         Func<T, DataValue> wrap, DataValue outOfRangeNull) where T : unmanaged
     {
         ReadOnlySpan<T> elements = source.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
@@ -1998,7 +2030,7 @@ public sealed class ExpressionEvaluator
     }
 
     private DataValue EvaluateStructFieldAccess(
-        DataValue source, DataValue index, IndexAccessExpression indexAccess, in EvaluationFrame frame)
+        DataValue source, DataValue index, IndexAccessExpression indexAccess, EvaluationFrame frame)
     {
         DataValue[] fields = source.AsStruct(frame.Source);
         string fieldName = Str(index, frame);
@@ -2221,11 +2253,12 @@ public sealed class ExpressionEvaluator
     /// The escape character causes the following <c>%</c> or <c>_</c> to be
     /// treated as a literal instead of a wildcard.
     /// </summary>
-    private DataValue EvaluateLikeEscape(LikeExpression like, in EvaluationFrame frame)
+    private async ValueTask<DataValue> EvaluateLikeEscapeAsync(
+        LikeExpression like, EvaluationFrame frame, CancellationToken cancellationToken)
     {
-        DataValue input = Evaluate(like.Expression, frame);
-        DataValue pattern = Evaluate(like.Pattern, frame);
-        DataValue escapeValue = Evaluate(like.EscapeCharacter, frame);
+        DataValue input = await EvaluateAsync(like.Expression, frame, cancellationToken).ConfigureAwait(false);
+        DataValue pattern = await EvaluateAsync(like.Pattern, frame, cancellationToken).ConfigureAwait(false);
+        DataValue escapeValue = await EvaluateAsync(like.EscapeCharacter, frame, cancellationToken).ConfigureAwait(false);
 
         if (input.IsNull || pattern.IsNull || escapeValue.IsNull)
         {

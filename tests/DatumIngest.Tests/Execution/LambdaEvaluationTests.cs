@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -39,7 +39,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     // ───────────────── array_transform ─────────────────
 
     [Fact]
-    public void ArrayTransform_ArithmeticLambda_MultipliesElements()
+    public async Task ArrayTransform_ArithmeticLambda_MultipliesElements()
     {
         // array_transform(prices, p -> p * 2)
         FunctionCallExpression call = new("array_transform", [
@@ -54,7 +54,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("prices", MakeScalarArray(1f, 2f, 3f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
@@ -64,7 +64,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     }
 
     [Fact]
-    public void ArrayTransform_FunctionCallLambda_AppliesUpperToStrings()
+    public async Task ArrayTransform_FunctionCallLambda_AppliesUpperToStrings()
     {
         // array_transform(tags, t -> upper(t))
         FunctionCallExpression call = new("array_transform", [
@@ -76,7 +76,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("tags", MakeStringArray("hello", "world")));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
@@ -85,7 +85,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     }
 
     [Fact]
-    public void ArrayTransform_NullArray_ReturnsNull()
+    public async Task ArrayTransform_NullArray_ReturnsNull()
     {
         FunctionCallExpression call = new("array_transform", [
             new ColumnReference("values"),
@@ -99,13 +99,13 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void ArrayTransform_EmptyArray_ReturnsEmptyArray()
+    public async Task ArrayTransform_EmptyArray_ReturnsEmptyArray()
     {
         FunctionCallExpression call = new("array_transform", [
             new ColumnReference("values"),
@@ -119,14 +119,14 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Empty(elements);
     }
 
     [Fact]
-    public void ArrayTransform_ClosureCapture_ReferencesEnclosingColumn()
+    public async Task ArrayTransform_ClosureCapture_ReferencesEnclosingColumn()
     {
         // array_transform(prices, p -> p * multiplier) where multiplier is a row column
         FunctionCallExpression call = new("array_transform", [
@@ -143,7 +143,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(
             ("prices", MakeScalarArray(10f, 20f, 30f)),
             ("multiplier", DataValue.FromFloat32(1.1f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
@@ -153,7 +153,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     }
 
     [Fact]
-    public void ArrayTransform_LambdaParameterShadowsColumn()
+    public async Task ArrayTransform_LambdaParameterShadowsColumn()
     {
         // The lambda parameter "x" should shadow the row column "x".
         // array_transform(arr, x -> x + 100) where row also has column "x" = 999
@@ -171,7 +171,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(
             ("arr", MakeScalarArray(1f, 2f)),
             ("x", DataValue.FromFloat32(999f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(101f, elements[0].AsFloat32());
@@ -181,7 +181,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     // ───────────────── array_filter ─────────────────
 
     [Fact]
-    public void ArrayFilter_ComparisonLambda_KeepsMatchingElements()
+    public async Task ArrayFilter_ComparisonLambda_KeepsMatchingElements()
     {
         // array_filter(scores, s -> s > 50)
         FunctionCallExpression call = new("array_filter", [
@@ -196,7 +196,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("scores", MakeScalarArray(10f, 60f, 30f, 80f, 45f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
@@ -205,7 +205,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     }
 
     [Fact]
-    public void ArrayFilter_AllElementsMatch_ReturnsSameArray()
+    public async Task ArrayFilter_AllElementsMatch_ReturnsSameArray()
     {
         // array_filter(values, v -> v > 0)
         FunctionCallExpression call = new("array_filter", [
@@ -220,14 +220,14 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("values", MakeScalarArray(1f, 2f, 3f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(3, elements.Length);
     }
 
     [Fact]
-    public void ArrayFilter_NoElementsMatch_ReturnsEmptyArray()
+    public async Task ArrayFilter_NoElementsMatch_ReturnsEmptyArray()
     {
         // array_filter(values, v -> v > 100)
         FunctionCallExpression call = new("array_filter", [
@@ -242,14 +242,14 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("values", MakeScalarArray(1f, 2f, 3f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Empty(elements);
     }
 
     [Fact]
-    public void ArrayFilter_NullArray_ReturnsNull()
+    public async Task ArrayFilter_NullArray_ReturnsNull()
     {
         FunctionCallExpression call = new("array_filter", [
             new ColumnReference("values"),
@@ -263,13 +263,13 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("values", DataValue.NullArrayOf(DataKind.Float32)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void ArrayFilter_StringPredicate_FiltersStrings()
+    public async Task ArrayFilter_StringPredicate_FiltersStrings()
     {
         // array_filter(tags, t -> t != 'unknown')
         FunctionCallExpression call = new("array_filter", [
@@ -284,7 +284,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         ]);
 
         Row row = MakeRow(("tags", MakeStringArray("good", "unknown", "fine", "unknown")));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
@@ -293,7 +293,7 @@ public class LambdaEvaluationTests : ServiceTestBase
     }
 
     [Fact]
-    public void ArrayFilter_ClosureCapture_ReferencesEnclosingThreshold()
+    public async Task ArrayFilter_ClosureCapture_ReferencesEnclosingThreshold()
     {
         // array_filter(scores, s -> s > threshold) where threshold is a row column
         FunctionCallExpression call = new("array_filter", [
@@ -310,7 +310,7 @@ public class LambdaEvaluationTests : ServiceTestBase
         Row row = MakeRow(
             ("scores", MakeScalarArray(10f, 60f, 30f, 80f)),
             ("threshold", DataValue.FromFloat32(50f)));
-        DataValue result = _evaluator.Evaluate(call, row);
+        DataValue result = await _evaluator.EvaluateAsync(call, row);
 
         DataValue[] elements = result.AsArrayLegacyStub();
         Assert.Equal(2, elements.Length);
@@ -321,16 +321,16 @@ public class LambdaEvaluationTests : ServiceTestBase
     // ───────────────── Error cases ─────────────────
 
     [Fact]
-    public void Lambda_AsStandaloneExpression_Throws()
+    public async Task Lambda_AsStandaloneExpression_Throws()
     {
         LambdaExpression lambda = new(["x"], new ColumnReference("x"), null);
 
-        Assert.Throws<InvalidOperationException>(
-            () => _evaluator.Evaluate(lambda, MakeRow()));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _evaluator.EvaluateAsync(lambda, MakeRow()));
     }
 
     [Fact]
-    public void HigherOrderFunction_NonLambdaArgument_Throws()
+    public async Task HigherOrderFunction_NonLambdaArgument_Throws()
     {
         // array_transform(arr, not_a_lambda) — passing a column reference where a lambda is expected
         FunctionCallExpression call = new("array_transform", [
@@ -342,8 +342,8 @@ public class LambdaEvaluationTests : ServiceTestBase
             ("arr", MakeScalarArray(1f, 2f)),
             ("not_a_lambda", DataValue.FromFloat32(42f)));
 
-        Assert.Throws<InvalidOperationException>(
-            () => _evaluator.Evaluate(call, row));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _evaluator.EvaluateAsync(call, row));
     }
 
     // ───────────────── Full-stack integration ─────────────────

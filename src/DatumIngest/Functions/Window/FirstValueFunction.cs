@@ -31,7 +31,7 @@ public sealed class FirstValueFunction : IWindowFunction
 
     private sealed class FirstValueComputation : IWindowComputation
     {
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -39,11 +39,12 @@ public sealed class FirstValueFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             // Derive the null kind from the source expression so empty-frame
             // and IGNORE NULLS nulls carry the correct type.
-            DataValue sample = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
+            DataValue sample = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[0], cancellationToken).ConfigureAwait(false);
             DataValue typedNull = DataValue.Null(sample.Kind);
 
             for (int i = 0; i < partitionRows.Count; i++)
@@ -61,7 +62,7 @@ public sealed class FirstValueFunction : IWindowFunction
                     DataValue found = typedNull;
                     for (int j = start; j <= end; j++)
                     {
-                        DataValue candidate = evaluator.Evaluate(argumentExpressions[0], partitionRows[j]);
+                        DataValue candidate = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[j], cancellationToken).ConfigureAwait(false);
                         if (!candidate.IsNull)
                         {
                             found = candidate;
@@ -73,7 +74,7 @@ public sealed class FirstValueFunction : IWindowFunction
                 }
                 else
                 {
-                    results[i] = evaluator.Evaluate(argumentExpressions[0], partitionRows[start]);
+                    results[i] = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[start], cancellationToken).ConfigureAwait(false);
                 }
             }
         }

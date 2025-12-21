@@ -50,7 +50,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             _aggregate = aggregate;
         }
 
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -58,7 +58,8 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             if (partitionRows.Count == 0)
             {
@@ -68,11 +69,11 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             // Optimization: running aggregate for UNBOUNDED PRECEDING start frames.
             if (frame is null || frame.Start is UnboundedPrecedingBound)
             {
-                ComputeRunningAggregate(partitionRows, argumentExpressions, evaluator, frame, results);
+                await ComputeRunningAggregateAsync(partitionRows, argumentExpressions, evaluator, frame, results, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                ComputeSlidingAggregate(partitionRows, argumentExpressions, evaluator, frame, results);
+                await ComputeSlidingAggregateAsync(partitionRows, argumentExpressions, evaluator, frame, results, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -80,12 +81,13 @@ public sealed class AggregateWindowAdapter : IWindowFunction
         /// Fast path: single accumulator advancing forward for frames starting
         /// at UNBOUNDED PRECEDING (running SUM, running COUNT, etc.).
         /// </summary>
-        private void ComputeRunningAggregate(
+        private async ValueTask ComputeRunningAggregateAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
             WindowFrame? frame,
-            DataValue[] results)
+            DataValue[] results,
+            CancellationToken cancellationToken)
         {
             // The evaluator's store doubles as both Source and Target for window-aggregate
             // accumulator state. The window operator buffers its partition rows in memory
@@ -102,7 +104,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
 
                 for (int i = 0; i < partitionRows.Count; i++)
                 {
-                    EvaluateArguments(argumentExpressions, evaluator, partitionRows[i], argumentBuffer);
+                    await EvaluateArgumentsAsync(argumentExpressions, evaluator, partitionRows[i], argumentBuffer, cancellationToken).ConfigureAwait(false);
                     wholeAccumulator.Accumulate(argumentBuffer, in frameInv);
                 }
 
@@ -122,7 +124,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
 
             for (int i = 0; i < partitionRows.Count; i++)
             {
-                EvaluateArguments(argumentExpressions, evaluator, partitionRows[i], arguments);
+                await EvaluateArgumentsAsync(argumentExpressions, evaluator, partitionRows[i], arguments, cancellationToken).ConfigureAwait(false);
                 accumulator.Accumulate(arguments, in frameInv);
 
                 (int _, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, i, partitionRows.Count);
@@ -137,7 +139,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
                 else
                 {
                     // Degenerate case: end < current index. Recompute from scratch.
-                    results[i] = RecomputeForRow(partitionRows, argumentExpressions, evaluator, frame, i);
+                    results[i] = await RecomputeForRowAsync(partitionRows, argumentExpressions, evaluator, frame, i, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -146,25 +148,27 @@ public sealed class AggregateWindowAdapter : IWindowFunction
         /// Slow path: recompute the aggregate for each row over its frame window.
         /// Used when the frame start is not UNBOUNDED PRECEDING.
         /// </summary>
-        private void ComputeSlidingAggregate(
+        private async ValueTask ComputeSlidingAggregateAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
             WindowFrame frame,
-            DataValue[] results)
+            DataValue[] results,
+            CancellationToken cancellationToken)
         {
             for (int i = 0; i < partitionRows.Count; i++)
             {
-                results[i] = RecomputeForRow(partitionRows, argumentExpressions, evaluator, frame, i);
+                results[i] = await RecomputeForRowAsync(partitionRows, argumentExpressions, evaluator, frame, i, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private DataValue RecomputeForRow(
+        private async ValueTask<DataValue> RecomputeForRowAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
             WindowFrame? frame,
-            int currentIndex)
+            int currentIndex,
+            CancellationToken cancellationToken)
         {
             (int start, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, currentIndex, partitionRows.Count);
             InvocationFrame frameInv = BuildFrame(evaluator);
@@ -174,22 +178,23 @@ public sealed class AggregateWindowAdapter : IWindowFunction
 
             for (int j = start; j <= end; j++)
             {
-                EvaluateArguments(argumentExpressions, evaluator, partitionRows[j], arguments);
+                await EvaluateArgumentsAsync(argumentExpressions, evaluator, partitionRows[j], arguments, cancellationToken).ConfigureAwait(false);
                 accumulator.Accumulate(arguments, in frameInv);
             }
 
             return accumulator.Result(in frameInv);
         }
 
-        private static void EvaluateArguments(
+        private static async ValueTask EvaluateArgumentsAsync(
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
             Row row,
-            Span<DataValue> buffer)
+            DataValue[] buffer,
+            CancellationToken cancellationToken)
         {
             for (int i = 0; i < argumentExpressions.Count; i++)
             {
-                buffer[i] = evaluator.Evaluate(argumentExpressions[i], row);
+                buffer[i] = await evaluator.EvaluateAsync(argumentExpressions[i], row, cancellationToken).ConfigureAwait(false);
             }
         }
 

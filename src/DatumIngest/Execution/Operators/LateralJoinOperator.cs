@@ -125,7 +125,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                                         }
 
                                         schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
-                                        if (!evaluator.EvaluateAsBoolean(_onCondition, residualCheckRow.Value))
+                                        if (!await evaluator.EvaluateAsBooleanAsync(_onCondition, residualCheckRow.Value, context.CancellationToken).ConfigureAwait(false))
                                         {
                                             continue;
                                         }

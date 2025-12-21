@@ -1,4 +1,4 @@
-using DatumIngest.Catalog;
+﻿using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -21,14 +21,14 @@ public class QueryMeteringTests : ServiceTestBase
     /// Evaluating a single scalar function call adds its QU cost to the meter.
     /// </summary>
     [Fact]
-    public void EvaluateFunction_AccumulatesQueryUnits()
+    public async Task EvaluateFunction_AccumulatesQueryUnits()
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromString("hello")]);
 
         // `len` has a QU cost of 1 (default).
-        evaluator.Evaluate(
+        await evaluator.EvaluateAsync(
             new FunctionCallExpression("len", [new ColumnReference("x")]),
             row);
 
@@ -39,7 +39,7 @@ public class QueryMeteringTests : ServiceTestBase
     /// Multiple function calls accumulate their costs additively.
     /// </summary>
     [Fact]
-    public void MultipleFunctionCalls_AccumulateCosts()
+    public async Task MultipleFunctionCalls_AccumulateCosts()
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
@@ -48,7 +48,7 @@ public class QueryMeteringTests : ServiceTestBase
         // Three calls to `abs` (QU cost 1 each) → total 3 QU.
         for (int i = 0; i < 3; i++)
         {
-            evaluator.Evaluate(
+            await evaluator.EvaluateAsync(
                 new FunctionCallExpression("abs", [new ColumnReference("x")]),
                 row);
         }
@@ -60,12 +60,12 @@ public class QueryMeteringTests : ServiceTestBase
     /// When no meter is attached, function evaluation works without error.
     /// </summary>
     [Fact]
-    public void NoMeter_FunctionStillExecutes()
+    public async Task NoMeter_FunctionStillExecutes()
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
         Row row = MakeRow(["x"], [DataValue.FromFloat32(4f)]);
 
-        DataValue result = evaluator.Evaluate(
+        DataValue result = await evaluator.EvaluateAsync(
             new FunctionCallExpression("sqrt", [new ColumnReference("x")]),
             row);
 
@@ -76,7 +76,7 @@ public class QueryMeteringTests : ServiceTestBase
     /// Budget enforcement: adding costs that exceed the budget sets IsBudgetExceeded.
     /// </summary>
     [Fact]
-    public void BudgetExceeded_AfterFunctionCalls()
+    public async Task BudgetExceeded_AfterFunctionCalls()
     {
         QueryMeter meter = new(budget: 2);
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
@@ -85,7 +85,7 @@ public class QueryMeteringTests : ServiceTestBase
         // Three calls to `abs` (QU cost 1 each) → 3 QU, budget is 2.
         for (int i = 0; i < 3; i++)
         {
-            evaluator.Evaluate(
+            await evaluator.EvaluateAsync(
                 new FunctionCallExpression("abs", [new ColumnReference("x")]),
                 row);
         }
@@ -99,14 +99,14 @@ public class QueryMeteringTests : ServiceTestBase
     /// the evaluator's <c>EvaluateCast</c> path must meter it identically.
     /// </summary>
     [Fact]
-    public void EvaluateCast_AccumulatesQueryUnits()
+    public async Task EvaluateCast_AccumulatesQueryUnits()
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(3.7f)]);
 
         // CAST(x AS String) — "cast" is a Tier 1 function (QU 1).
-        evaluator.Evaluate(
+        await evaluator.EvaluateAsync(
             new CastExpression(new ColumnReference("x"), "String"),
             row);
 
@@ -117,14 +117,14 @@ public class QueryMeteringTests : ServiceTestBase
     /// Non-function expressions (literals, column references) do not add QU.
     /// </summary>
     [Fact]
-    public void NonFunctionExpression_DoesNotAccumulate()
+    public async Task NonFunctionExpression_DoesNotAccumulate()
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(42f)]);
 
-        evaluator.Evaluate(new LiteralExpression(1), row);
-        evaluator.Evaluate(new ColumnReference("x"), row);
+        await evaluator.EvaluateAsync(new LiteralExpression(1), row);
+        await evaluator.EvaluateAsync(new ColumnReference("x"), row);
 
         Assert.Equal(0, meter.QueryUnits);
     }

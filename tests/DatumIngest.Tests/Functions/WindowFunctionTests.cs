@@ -1,4 +1,4 @@
-using DatumIngest.Execution;
+﻿using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Functions.Window;
@@ -29,7 +29,7 @@ public class WindowFunctionTests : ServiceTestBase
     /// <summary>
     /// Helper that runs a window computation over a partition of rows.
     /// </summary>
-    private static DataValue[] ComputeWindow(
+    private static async Task<DataValue[]> ComputeWindowAsync(
         IWindowFunction function,
         IReadOnlyList<Row> partitionRows,
         IReadOnlyList<Expression>? argumentExpressions = null,
@@ -41,7 +41,7 @@ public class WindowFunctionTests : ServiceTestBase
         ExpressionEvaluator evaluator = CreateEvaluator();
         IWindowComputation computation = function.CreateComputation();
         DataValue[] results = new DataValue[partitionRows.Count];
-        computation.Compute(
+        await computation.ComputeAsync(
             partitionRows,
             argumentExpressions ?? [],
             evaluator,
@@ -56,7 +56,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── ROW_NUMBER ───────────────
 
     [Fact]
-    public void RowNumber_SequentialNumbersStartingAtOne()
+    public async Task RowNumber_SequentialNumbersStartingAtOne()
     {
         RowNumberFunction function = new();
         List<Row> rows =
@@ -66,7 +66,7 @@ public class WindowFunctionTests : ServiceTestBase
             MakeRow(("x", DataValue.FromFloat32(30f))),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows);
+        DataValue[] results = await ComputeWindowAsync(function, rows);
 
         Assert.Equal(1f, results[0].AsFloat32());
         Assert.Equal(2f, results[1].AsFloat32());
@@ -74,19 +74,19 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void RowNumber_SingleRow()
+    public async Task RowNumber_SingleRow()
     {
         RowNumberFunction function = new();
         List<Row> rows = [MakeRow(("x", DataValue.FromFloat32(1f)))];
 
-        DataValue[] results = ComputeWindow(function, rows);
+        DataValue[] results = await ComputeWindowAsync(function, rows);
 
         Assert.Single(results);
         Assert.Equal(1f, results[0].AsFloat32());
     }
 
     [Fact]
-    public void RowNumber_ValidateArguments_RejectsArguments()
+    public async Task RowNumber_ValidateArguments_RejectsArguments()
     {
         RowNumberFunction function = new();
         Assert.Throws<ArgumentException>(() =>
@@ -94,7 +94,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void RowNumber_ValidateArguments_AcceptsNoArguments()
+    public async Task RowNumber_ValidateArguments_AcceptsNoArguments()
     {
         RowNumberFunction function = new();
         DataKind result = function.ValidateArguments([]);
@@ -104,7 +104,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── RANK ───────────────
 
     [Fact]
-    public void Rank_WithTies_ProducesGaps()
+    public async Task Rank_WithTies_ProducesGaps()
     {
         RankFunction function = new();
         List<Row> rows =
@@ -120,7 +120,7 @@ public class WindowFunctionTests : ServiceTestBase
             new OrderByItem(new ColumnReference("score"), SortDirection.Descending),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
+        DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 3 (gap), then rank 4
         Assert.Equal(1f, results[0].AsFloat32());
@@ -130,7 +130,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Rank_NoTies_SequentialRanks()
+    public async Task Rank_NoTies_SequentialRanks()
     {
         RankFunction function = new();
         List<Row> rows =
@@ -145,7 +145,7 @@ public class WindowFunctionTests : ServiceTestBase
             new OrderByItem(new ColumnReference("score"), SortDirection.Descending),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
+        DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
         Assert.Equal(1f, results[0].AsFloat32());
         Assert.Equal(2f, results[1].AsFloat32());
@@ -155,7 +155,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── DENSE_RANK ───────────────
 
     [Fact]
-    public void DenseRank_WithTies_NoGaps()
+    public async Task DenseRank_WithTies_NoGaps()
     {
         DenseRankFunction function = new();
         List<Row> rows =
@@ -171,7 +171,7 @@ public class WindowFunctionTests : ServiceTestBase
             new OrderByItem(new ColumnReference("score"), SortDirection.Descending),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
+        DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 2 (no gap), then rank 3
         Assert.Equal(1f, results[0].AsFloat32());
@@ -183,7 +183,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── NTILE ───────────────
 
     [Fact]
-    public void Ntile_EvenDistribution()
+    public async Task Ntile_EvenDistribution()
     {
         NtileFunction function = new();
         List<Row> rows =
@@ -196,7 +196,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         // NTILE(2) on 4 rows → buckets 1,1,2,2
         IReadOnlyList<Expression> arguments = [new LiteralExpression(2)];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(1f, results[0].AsFloat32());
         Assert.Equal(1f, results[1].AsFloat32());
@@ -205,7 +205,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Ntile_UnevenDistribution()
+    public async Task Ntile_UnevenDistribution()
     {
         NtileFunction function = new();
         List<Row> rows =
@@ -219,7 +219,7 @@ public class WindowFunctionTests : ServiceTestBase
 
         // NTILE(3) on 5 rows → 2+2+1 distribution → buckets 1,1,2,2,3
         IReadOnlyList<Expression> arguments = [new LiteralExpression(3)];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(1f, results[0].AsFloat32());
         Assert.Equal(1f, results[1].AsFloat32());
@@ -229,7 +229,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Ntile_ValidateArguments_RequiresOneArgument()
+    public async Task Ntile_ValidateArguments_RequiresOneArgument()
     {
         NtileFunction function = new();
         Assert.Throws<ArgumentException>(() =>
@@ -239,7 +239,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── LAG ───────────────
 
     [Fact]
-    public void Lag_DefaultOffset_ReturnsPreviousRow()
+    public async Task Lag_DefaultOffset_ReturnsPreviousRow()
     {
         LagFunction function = new();
         List<Row> rows =
@@ -250,7 +250,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.True(results[0].IsNull);
         Assert.Equal(10f, results[1].AsFloat32());
@@ -258,7 +258,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Lag_CustomOffset()
+    public async Task Lag_CustomOffset()
     {
         LagFunction function = new();
         List<Row> rows =
@@ -276,7 +276,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(2),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.True(results[0].IsNull);
         Assert.True(results[1].IsNull);
@@ -285,7 +285,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Lag_CustomDefault()
+    public async Task Lag_CustomDefault()
     {
         LagFunction function = new();
         List<Row> rows =
@@ -302,7 +302,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(-1),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(-1, results[0].AsInt32());
         Assert.Equal(10f, results[1].AsFloat32());
@@ -311,7 +311,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── LEAD ───────────────
 
     [Fact]
-    public void Lead_DefaultOffset_ReturnsNextRow()
+    public async Task Lead_DefaultOffset_ReturnsNextRow()
     {
         LeadFunction function = new();
         List<Row> rows =
@@ -322,7 +322,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(20f, results[0].AsFloat32());
         Assert.Equal(30f, results[1].AsFloat32());
@@ -330,7 +330,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Lead_CustomOffset()
+    public async Task Lead_CustomOffset()
     {
         LeadFunction function = new();
         List<Row> rows =
@@ -348,7 +348,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(2),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(30f, results[0].AsFloat32());
         Assert.Equal(40f, results[1].AsFloat32());
@@ -357,7 +357,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void Lead_CustomDefault()
+    public async Task Lead_CustomDefault()
     {
         LeadFunction function = new();
         List<Row> rows =
@@ -374,7 +374,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(999),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(20f, results[0].AsFloat32());
         Assert.Equal(999, results[1].AsInt32());
@@ -383,7 +383,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── AggregateWindowAdapter ───────────────
 
     [Fact]
-    public void AggregateWindowAdapter_Sum_WholePartition()
+    public async Task AggregateWindowAdapter_Sum_WholePartition()
     {
         AggregateWindowAdapter function = new(new SumFunction());
         List<Row> rows =
@@ -396,7 +396,7 @@ public class WindowFunctionTests : ServiceTestBase
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
 
         // No frame → whole partition, sum = 60 for every row
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(60f, results[0].AsFloat32());
         Assert.Equal(60f, results[1].AsFloat32());
@@ -404,7 +404,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void AggregateWindowAdapter_Sum_RunningTotal()
+    public async Task AggregateWindowAdapter_Sum_RunningTotal()
     {
         AggregateWindowAdapter function = new(new SumFunction());
         List<Row> rows =
@@ -422,7 +422,7 @@ public class WindowFunctionTests : ServiceTestBase
             new UnboundedPrecedingBound(),
             new CurrentRowBound());
 
-        DataValue[] results = ComputeWindow(function, rows,
+        DataValue[] results = await ComputeWindowAsync(function, rows,
             argumentExpressions: arguments, frame: frame);
 
         Assert.Equal(10f, results[0].AsFloat32());
@@ -431,7 +431,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void AggregateWindowAdapter_Count_WholePartition()
+    public async Task AggregateWindowAdapter_Count_WholePartition()
     {
         AggregateWindowAdapter function = new(new CountFunction());
         List<Row> rows =
@@ -442,7 +442,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(3L, results[0].AsInt64());
         Assert.Equal(3L, results[1].AsInt64());
@@ -450,7 +450,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void AggregateWindowAdapter_Avg_SlidingWindow()
+    public async Task AggregateWindowAdapter_Avg_SlidingWindow()
     {
         AggregateWindowAdapter function = new(new AvgFunction());
         List<Row> rows =
@@ -469,7 +469,7 @@ public class WindowFunctionTests : ServiceTestBase
             new PrecedingBound(1),
             new FollowingBound(1));
 
-        DataValue[] results = ComputeWindow(function, rows,
+        DataValue[] results = await ComputeWindowAsync(function, rows,
             argumentExpressions: arguments, frame: frame);
 
         // Row 0: avg(10,20) = 15
@@ -485,7 +485,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── FunctionRegistry integration ───────────────
 
     [Fact]
-    public void FunctionRegistry_RegistersAllWindowFunctions()
+    public async Task FunctionRegistry_RegistersAllWindowFunctions()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -501,7 +501,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FunctionRegistry_TryGetWindowOrAggregate_FindsWindowFunction()
+    public async Task FunctionRegistry_TryGetWindowOrAggregate_FindsWindowFunction()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -511,7 +511,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FunctionRegistry_TryGetWindowOrAggregate_WrapsAggregate()
+    public async Task FunctionRegistry_TryGetWindowOrAggregate_WrapsAggregate()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -522,7 +522,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FunctionRegistry_TryGetWindowOrAggregate_ReturnsFalseForUnknown()
+    public async Task FunctionRegistry_TryGetWindowOrAggregate_ReturnsFalseForUnknown()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -530,7 +530,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FunctionRegistry_WindowFunctionNames_IncludesAllSix()
+    public async Task FunctionRegistry_WindowFunctionNames_IncludesAllSix()
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
@@ -549,7 +549,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── FIRST_VALUE ───────────────
 
     [Fact]
-    public void FirstValue_WholePartition_ReturnsFirstRow()
+    public async Task FirstValue_WholePartition_ReturnsFirstRow()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -560,7 +560,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(10f, results[0].AsFloat32());
         Assert.Equal(10f, results[1].AsFloat32());
@@ -568,7 +568,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FirstValue_WithRunningFrame_ReturnsFirstOfFrame()
+    public async Task FirstValue_WithRunningFrame_ReturnsFirstOfFrame()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -586,7 +586,7 @@ public class WindowFunctionTests : ServiceTestBase
             new UnboundedPrecedingBound(),
             new CurrentRowBound());
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments, frame: frame);
 
         // First value of the running frame is always the first partition row.
         Assert.Equal(10f, results[0].AsFloat32());
@@ -595,7 +595,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FirstValue_WithSlidingFrame_ReturnsFirstOfEachFrame()
+    public async Task FirstValue_WithSlidingFrame_ReturnsFirstOfEachFrame()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -614,7 +614,7 @@ public class WindowFunctionTests : ServiceTestBase
             new PrecedingBound(1),
             new FollowingBound(1));
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments, frame: frame);
 
         // Row 0: frame [0,1] → first = 10
         Assert.Equal(10f, results[0].AsFloat32());
@@ -627,7 +627,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FirstValue_IgnoreNulls_SkipsNullValues()
+    public async Task FirstValue_IgnoreNulls_SkipsNullValues()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -639,7 +639,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
         Assert.Equal(30f, results[0].AsFloat32());
@@ -649,7 +649,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FirstValue_IgnoreNulls_AllNulls_ReturnsNull()
+    public async Task FirstValue_IgnoreNulls_AllNulls_ReturnsNull()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -659,7 +659,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
         Assert.True(results[0].IsNull);
@@ -667,7 +667,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void FirstValue_SingleRow()
+    public async Task FirstValue_SingleRow()
     {
         FirstValueFunction function = new();
         List<Row> rows =
@@ -676,13 +676,13 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(42f, results[0].AsFloat32());
     }
 
     [Fact]
-    public void FirstValue_InvalidArgumentCount_Throws()
+    public async Task FirstValue_InvalidArgumentCount_Throws()
     {
         FirstValueFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
@@ -693,7 +693,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── LAST_VALUE ───────────────
 
     [Fact]
-    public void LastValue_WholePartition_ReturnsLastRow()
+    public async Task LastValue_WholePartition_ReturnsLastRow()
     {
         LastValueFunction function = new();
         List<Row> rows =
@@ -704,7 +704,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(30f, results[0].AsFloat32());
         Assert.Equal(30f, results[1].AsFloat32());
@@ -712,7 +712,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void LastValue_WithRunningFrame_ReturnsCurrentRow()
+    public async Task LastValue_WithRunningFrame_ReturnsCurrentRow()
     {
         LastValueFunction function = new();
         List<Row> rows =
@@ -730,7 +730,7 @@ public class WindowFunctionTests : ServiceTestBase
             new UnboundedPrecedingBound(),
             new CurrentRowBound());
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments, frame: frame);
 
         Assert.Equal(10f, results[0].AsFloat32());
         Assert.Equal(20f, results[1].AsFloat32());
@@ -738,7 +738,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void LastValue_IgnoreNulls_SkipsNullValues()
+    public async Task LastValue_IgnoreNulls_SkipsNullValues()
     {
         LastValueFunction function = new();
         List<Row> rows =
@@ -750,7 +750,7 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
         Assert.Equal(20f, results[0].AsFloat32());
@@ -760,7 +760,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void LastValue_SingleRow()
+    public async Task LastValue_SingleRow()
     {
         LastValueFunction function = new();
         List<Row> rows =
@@ -769,13 +769,13 @@ public class WindowFunctionTests : ServiceTestBase
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(99f, results[0].AsFloat32());
     }
 
     [Fact]
-    public void LastValue_InvalidArgumentCount_Throws()
+    public async Task LastValue_InvalidArgumentCount_Throws()
     {
         LastValueFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
@@ -786,7 +786,7 @@ public class WindowFunctionTests : ServiceTestBase
     // ─────────────── NTH_VALUE ───────────────
 
     [Fact]
-    public void NthValue_ReturnsNthRow()
+    public async Task NthValue_ReturnsNthRow()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -803,7 +803,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(2),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         // All rows see the same whole-partition frame, so 2nd value = 20 for all.
         Assert.Equal(20f, results[0].AsFloat32());
@@ -812,7 +812,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_N1_EqualsFirstValue()
+    public async Task NthValue_N1_EqualsFirstValue()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -827,14 +827,14 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(1),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(10f, results[0].AsFloat32());
         Assert.Equal(10f, results[1].AsFloat32());
     }
 
     [Fact]
-    public void NthValue_ExceedsFrameSize_ReturnsNull()
+    public async Task NthValue_ExceedsFrameSize_ReturnsNull()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -850,14 +850,14 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(5),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
         Assert.True(results[0].IsNull);
         Assert.True(results[1].IsNull);
     }
 
     [Fact]
-    public void NthValue_FromLast_CountsBackward()
+    public async Task NthValue_FromLast_CountsBackward()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -874,7 +874,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(1),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             fromLast: true);
 
         Assert.Equal(30f, results[0].AsFloat32());
@@ -883,7 +883,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_FromLast_N2_ReturnsSecondToLast()
+    public async Task NthValue_FromLast_N2_ReturnsSecondToLast()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -900,7 +900,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(2),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             fromLast: true);
 
         Assert.Equal(20f, results[0].AsFloat32());
@@ -909,7 +909,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_IgnoreNulls_SkipsNullValues()
+    public async Task NthValue_IgnoreNulls_SkipsNullValues()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -927,7 +927,7 @@ public class WindowFunctionTests : ServiceTestBase
             new LiteralExpression(2),
         ];
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
         Assert.Equal(20f, results[0].AsFloat32());
@@ -937,7 +937,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_WithFrame_RespectsFrameBounds()
+    public async Task NthValue_WithFrame_RespectsFrameBounds()
     {
         NthValueFunction function = new();
         List<Row> rows =
@@ -960,7 +960,7 @@ public class WindowFunctionTests : ServiceTestBase
             new CurrentRowBound(),
             new UnboundedFollowingBound());
 
-        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+        DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments, frame: frame);
 
         // Row 0: frame [0,3], 2nd = 20
         Assert.Equal(20f, results[0].AsFloat32());
@@ -973,7 +973,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_InvalidArgumentCount_Throws()
+    public async Task NthValue_InvalidArgumentCount_Throws()
     {
         NthValueFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
@@ -982,7 +982,7 @@ public class WindowFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public void NthValue_NonScalarN_Throws()
+    public async Task NthValue_NonScalarN_Throws()
     {
         NthValueFunction function = new();
         Assert.Throws<ArgumentException>(() =>

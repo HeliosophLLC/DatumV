@@ -83,7 +83,7 @@ public sealed class FilterOperator : IQueryOperator
                         Row row = inputBatch[index];
                         EvaluationFrame frame = new(row, sourceArena, targetArena, context.OuterRow, context.SidecarRegistry);
 
-                        if (!evaluator.EvaluateAsBoolean(Predicate, frame)) continue;
+                        if (!await evaluator.EvaluateAsBooleanAsync(Predicate, frame, context.CancellationToken).ConfigureAwait(false)) continue;
 
                         outputBatch ??= context.RentRowBatch(inputBatch.ColumnLookup);
 

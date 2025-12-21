@@ -29,7 +29,7 @@ public sealed class RowNumberFunction : IWindowFunction
 
     private sealed class RowNumberComputation : IWindowComputation
     {
-        public void Compute(
+        public ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -37,12 +37,14 @@ public sealed class RowNumberFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             for (int i = 0; i < partitionRows.Count; i++)
             {
                 results[i] = DataValue.FromFloat32(i + 1);
             }
+            return ValueTask.CompletedTask;
         }
     }
 }

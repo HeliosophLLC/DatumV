@@ -283,7 +283,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
                     for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                     {
-                        rowInputs[argIdx] = evaluator.EvaluateAsValueRef(_inputExpressions[argIdx], frame);
+                        rowInputs[argIdx] = await evaluator.EvaluateAsValueRefAsync(_inputExpressions[argIdx], frame, context.CancellationToken).ConfigureAwait(false);
                     }
                     inputs[chunkRowIdx] = rowInputs;
 
@@ -296,7 +296,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                         ValueRef[] rowOverrides = new ValueRef[_optionalExpressions.Count];
                         for (int i = 0; i < _optionalExpressions.Count; i++)
                         {
-                            rowOverrides[i] = evaluator.EvaluateAsValueRef(_optionalExpressions[i], frame);
+                            rowOverrides[i] = await evaluator.EvaluateAsValueRefAsync(_optionalExpressions[i], frame, context.CancellationToken).ConfigureAwait(false);
                         }
                         overrideValues[chunkRowIdx] = rowOverrides;
                     }

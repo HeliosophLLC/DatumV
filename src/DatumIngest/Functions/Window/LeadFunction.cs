@@ -36,7 +36,7 @@ public sealed class LeadFunction : IWindowFunction
 
     private sealed class LeadComputation : IWindowComputation
     {
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -44,22 +44,23 @@ public sealed class LeadFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             // Determine offset (default 1).
             int offset = 1;
             if (argumentExpressions.Count >= 2)
             {
-                DataValue offsetValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
+                DataValue offsetValue = await evaluator.EvaluateAsync(argumentExpressions[1], partitionRows[0], cancellationToken).ConfigureAwait(false);
                 offset = WindowFunctionHelper.ToInt(offsetValue);
             }
 
             // Determine default value (default: typed NULL matching the source expression).
             DataValue defaultValue = DataValue.Null(
-                evaluator.Evaluate(argumentExpressions[0], partitionRows[0]).Kind);
+                (await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[0], cancellationToken).ConfigureAwait(false)).Kind);
             if (argumentExpressions.Count >= 3)
             {
-                defaultValue = evaluator.Evaluate(argumentExpressions[2], partitionRows[0]);
+                defaultValue = await evaluator.EvaluateAsync(argumentExpressions[2], partitionRows[0], cancellationToken).ConfigureAwait(false);
             }
 
             for (int i = 0; i < partitionRows.Count; i++)
@@ -67,7 +68,7 @@ public sealed class LeadFunction : IWindowFunction
                 int sourceIndex = i + offset;
                 if (sourceIndex >= 0 && sourceIndex < partitionRows.Count)
                 {
-                    results[i] = evaluator.Evaluate(argumentExpressions[0], partitionRows[sourceIndex]);
+                    results[i] = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[sourceIndex], cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {

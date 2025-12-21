@@ -63,7 +63,8 @@ public interface IWindowComputation
     /// When <see langword="true"/>, NTH_VALUE counts from the end of the frame
     /// instead of the beginning.
     /// </param>
-    void Compute(
+    /// <param name="cancellationToken">Cooperative cancellation token.</param>
+    ValueTask ComputeAsync(
         IReadOnlyList<Row> partitionRows,
         IReadOnlyList<Expression> argumentExpressions,
         ExpressionEvaluator evaluator,
@@ -71,5 +72,6 @@ public interface IWindowComputation
         WindowFrame? frame,
         DataValue[] results,
         NullHandling nullHandling = NullHandling.RespectNulls,
-        bool fromLast = false);
+        bool fromLast = false,
+        CancellationToken cancellationToken = default);
 }

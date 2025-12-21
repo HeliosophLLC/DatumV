@@ -169,14 +169,14 @@ internal sealed class GraceHashJoinExecutor
                     {
                         if (useSingleKey)
                         {
-                            if (_evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow).IsNull)
+                            if ((await _evaluator.EvaluateAsync(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow, context.CancellationToken).ConfigureAwait(false)).IsNull)
                             {
                                 hasNullKey = true;
                             }
                         }
                         else
                         {
-                            EvaluateKeyPartsInto(keyPairs, buildRow, buildKeyIsRight, keyScratch);
+                            await EvaluateKeyPartsIntoAsync(keyPairs, buildRow, buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                             if (HasNull(keyScratch))
                             {
                                 hasNullKey = true;
@@ -184,7 +184,7 @@ internal sealed class GraceHashJoinExecutor
                         }
                     }
 
-                    int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch);
+                    int partitionIndex = await AssignPartitionAsync(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                     partitions[partitionIndex].AddBuildRow(buildRow, buildBatch.Arena);
 
                     // Only count rows that landed in memory (not appended to an already-spilled partition).
@@ -256,10 +256,11 @@ internal sealed class GraceHashJoinExecutor
                 {
                     if (!partitions[tableIndex].IsBuildSpilled)
                     {
-                        buildTables[tableIndex] = BuildPartitionTable(
+                        buildTables[tableIndex] = await BuildPartitionTableAsync(
                             partitions[tableIndex].GetInMemoryBuildRows(),
                             keyPairs,
-                            useSingleKey);
+                            useSingleKey,
+                            context.CancellationToken).ConfigureAwait(false);
                     }
                 }
 
@@ -273,7 +274,7 @@ internal sealed class GraceHashJoinExecutor
                     bool isFirst = firstProbeRow is null;
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
+                    int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                     SpillPartition partition = partitions[partitionIndex];
 
                     if (!partition.IsBuildSpilled)
@@ -281,8 +282,8 @@ internal sealed class GraceHashJoinExecutor
                         // In-memory partition: join and yield immediately.
                         // A LIMIT operator above can stop iteration here, preventing the
                         // remaining probe rows from ever being read from the source.
-                        foreach (Row result in ProbePartitionRow(
-                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool, keyScratch))
+                        await foreach (Row result in ProbePartitionRowAsync(
+                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool, keyScratch, context.CancellationToken).ConfigureAwait(false))
                         {
                             outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(result);
@@ -336,7 +337,7 @@ internal sealed class GraceHashJoinExecutor
                         Row probeRow = probeBatch[probeBatchIndex];
                         firstProbeRow ??= probeRow;
                         phase1bProbeCount++;
-                        int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
+                        int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                         SpillPartition partition = partitions[partitionIndex];
 
                         if (partition.IsBuildSpilled)
@@ -436,10 +437,11 @@ internal sealed class GraceHashJoinExecutor
     /// Builds an in-memory <see cref="PartitionBuildTable"/> from the given build-side rows,
     /// hashing each row into the appropriate lookup structure for fast probe-phase lookups.
     /// </summary>
-    private PartitionBuildTable BuildPartitionTable(
+    private async ValueTask<PartitionBuildTable> BuildPartitionTableAsync(
         IReadOnlyList<Row> buildRows,
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
-        bool useSingleKey)
+        bool useSingleKey,
+        CancellationToken cancellationToken)
     {
         bool buildKeyIsRight = !_flipped;
         List<Row> buildList = new(buildRows.Count);
@@ -452,7 +454,7 @@ internal sealed class GraceHashJoinExecutor
 
             if (useSingleKey)
             {
-                DataValue key = _evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
+                DataValue key = await _evaluator.EvaluateAsync(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow, cancellationToken).ConfigureAwait(false);
                 if (!key.IsNull)
                 {
                     ref List<(int, Row)> bucket = ref table.SingleKeyTable!.GetOrAdd(key, out bool exists);
@@ -466,7 +468,7 @@ internal sealed class GraceHashJoinExecutor
             }
             else
             {
-                DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
+                DataValue[] parts = await EvaluateKeyPartsAsync(keyPairs, buildRow, rightSide: buildKeyIsRight, cancellationToken).ConfigureAwait(false);
                 if (!HasNull(parts))
                 {
                     ref List<(int, Row)> bucket = ref table.CompositeKeyTable!.GetOrAddDefault(parts, out bool exists);
@@ -488,7 +490,7 @@ internal sealed class GraceHashJoinExecutor
     /// matching combined row. Handles INNER, LEFT outer, RIGHT outer (when flipped),
     /// LeftSemi, and LeftAntiSemi join types.
     /// </summary>
-    private IEnumerable<Row> ProbePartitionRow(
+    private async IAsyncEnumerable<Row> ProbePartitionRowAsync(
         PartitionBuildTable table,
         Row probeRow,
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
@@ -496,15 +498,16 @@ internal sealed class GraceHashJoinExecutor
         bool isSemiJoin,
         Row? nullBuildTemplate,
         LocalBufferPool bufferPool,
-        DataValue[] keyScratch)
+        DataValue[] keyScratch,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
 
         if (useSingleKey)
         {
-            DataValue probeKey = _evaluator.Evaluate(
-                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+            DataValue probeKey = await _evaluator.EvaluateAsync(
+                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, cancellationToken).ConfigureAwait(false);
             if (!probeKey.IsNull)
             {
                 table.SingleKeyTable!.TryGetValue(probeKey, out matches);
@@ -512,7 +515,7 @@ internal sealed class GraceHashJoinExecutor
         }
         else
         {
-            EvaluateKeyPartsInto(keyPairs, probeRow, !buildKeyIsRight, keyScratch);
+            await EvaluateKeyPartsIntoAsync(keyPairs, probeRow, !buildKeyIsRight, keyScratch, cancellationToken).ConfigureAwait(false);
             if (!HasNull(keyScratch))
             {
                 table.CompositeKeyTable!.TryGetValue(keyScratch.AsSpan(), out matches);
@@ -539,7 +542,7 @@ internal sealed class GraceHashJoinExecutor
 
                     table.JoinSchema.CombineInto(leftRow, rightRow, table.ResidualScratch);
 
-                    if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, table.ResidualScratchRow))
+                    if (!await _evaluator.EvaluateAsBooleanAsync(_extraction.Residual, table.ResidualScratchRow, cancellationToken).ConfigureAwait(false))
                     {
                         continue;
                     }
@@ -696,8 +699,8 @@ internal sealed class GraceHashJoinExecutor
 
                 if (useSingleKey)
                 {
-                    DataValue keyValue = _evaluator.Evaluate(
-                        buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
+                    DataValue keyValue = await _evaluator.EvaluateAsync(
+                        buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow, context.CancellationToken).ConfigureAwait(false);
                     if (!keyValue.IsNull)
                     {
                         ref List<(int, Row)> bucket = ref singleKeyTable!.GetOrAdd(keyValue, out bool exists);
@@ -711,7 +714,7 @@ internal sealed class GraceHashJoinExecutor
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
+                    DataValue[] parts = await EvaluateKeyPartsAsync(keyPairs, buildRow, rightSide: buildKeyIsRight, context.CancellationToken).ConfigureAwait(false);
                     if (!HasNull(parts))
                     {
                         ref List<(int, Row)> bucket = ref compositeKeyTable!.GetOrAddDefault(parts, out bool exists);
@@ -764,8 +767,8 @@ internal sealed class GraceHashJoinExecutor
 
                 if (useSingleKey)
                 {
-                    DataValue probeKeyValue = _evaluator.Evaluate(
-                        buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                    DataValue probeKeyValue = await _evaluator.EvaluateAsync(
+                        buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, context.CancellationToken).ConfigureAwait(false);
                     if (!probeKeyValue.IsNull)
                     {
                         singleKeyTable!.TryGetValue(probeKeyValue, out matches);
@@ -773,7 +776,7 @@ internal sealed class GraceHashJoinExecutor
                 }
                 else
                 {
-                    EvaluateKeyPartsInto(keyPairs, probeRow, !buildKeyIsRight, keyScratch);
+                    await EvaluateKeyPartsIntoAsync(keyPairs, probeRow, !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                     if (!HasNull(keyScratch))
                     {
                         compositeKeyTable!.TryGetValue(keyScratch.AsSpan(), out matches);
@@ -797,7 +800,7 @@ internal sealed class GraceHashJoinExecutor
                             }
 
                             schema.CombineInto(leftRow, rightRow, residualScratch);
-                            if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, residualScratchRow))
+                            if (!await _evaluator.EvaluateAsBooleanAsync(_extraction.Residual, residualScratchRow, context.CancellationToken).ConfigureAwait(false))
                             {
                                 continue;
                             }
@@ -950,7 +953,7 @@ internal sealed class GraceHashJoinExecutor
 
             foreach (Row buildRow in buildRows)
             {
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight, keyScratch);
+                int partitionIndex = await AssignPartitionAsync(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                 subPartitions[partitionIndex].AddBuildRow(buildRow, sourceArena);
 
                 if (estimator.ShouldSample())
@@ -969,7 +972,7 @@ internal sealed class GraceHashJoinExecutor
             // Re-partition probe rows.
             foreach (Row probeRow in probeRows)
             {
-                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight, keyScratch);
+                int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
                 SpillPartition partition = subPartitions[partitionIndex];
 
                 if (partition.IsBuildSpilled && !partition.IsProbeSpilled)
@@ -1001,21 +1004,22 @@ internal sealed class GraceHashJoinExecutor
         }
     }
 
-    private int AssignPartition(
+    private async ValueTask<int> AssignPartitionAsync(
         Row row,
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         bool useSingleKey,
         int partitionCount,
         int recursionDepth,
         bool rightSide,
-        DataValue[] keyScratch)
+        DataValue[] keyScratch,
+        CancellationToken cancellationToken)
     {
         int hash;
 
         if (useSingleKey)
         {
             Expression keyExpression = rightSide ? keyPairs[0].Right : keyPairs[0].Left;
-            DataValue keyValue = _evaluator.Evaluate(keyExpression, row);
+            DataValue keyValue = await _evaluator.EvaluateAsync(keyExpression, row, cancellationToken).ConfigureAwait(false);
             if (keyValue.IsNull)
             {
                 // Null keys go to partition 0 (they won't match anything).
@@ -1026,7 +1030,7 @@ internal sealed class GraceHashJoinExecutor
         }
         else
         {
-            EvaluateKeyPartsInto(keyPairs, row, rightSide, keyScratch);
+            await EvaluateKeyPartsIntoAsync(keyPairs, row, rightSide, keyScratch, cancellationToken).ConfigureAwait(false);
             if (HasNull(keyScratch))
             {
                 return 0;
@@ -1104,13 +1108,14 @@ internal sealed class GraceHashJoinExecutor
     /// Allocates and returns a new key-parts array. Use only when the array must
     /// be stored (e.g. as a dictionary key in the build-side hash table).
     /// </summary>
-    private DataValue[] EvaluateKeyParts(
+    private async ValueTask<DataValue[]> EvaluateKeyPartsAsync(
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         Row row,
-        bool rightSide)
+        bool rightSide,
+        CancellationToken cancellationToken)
     {
         DataValue[] parts = new DataValue[keyPairs.Count];
-        EvaluateKeyPartsInto(keyPairs, row, rightSide, parts);
+        await EvaluateKeyPartsIntoAsync(keyPairs, row, rightSide, parts, cancellationToken).ConfigureAwait(false);
         return parts;
     }
 
@@ -1119,16 +1124,17 @@ internal sealed class GraceHashJoinExecutor
     /// Avoids per-row allocation when the array is only used transiently
     /// (probing, hashing, null checks).
     /// </summary>
-    private void EvaluateKeyPartsInto(
+    private async ValueTask EvaluateKeyPartsIntoAsync(
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         Row row,
         bool rightSide,
-        DataValue[] scratch)
+        DataValue[] scratch,
+        CancellationToken cancellationToken)
     {
         for (int index = 0; index < keyPairs.Count; index++)
         {
             Expression expression = rightSide ? keyPairs[index].Right : keyPairs[index].Left;
-            scratch[index] = _evaluator.Evaluate(expression, row);
+            scratch[index] = await _evaluator.EvaluateAsync(expression, row, cancellationToken).ConfigureAwait(false);
         }
     }
 

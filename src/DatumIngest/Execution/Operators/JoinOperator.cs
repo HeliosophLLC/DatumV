@@ -419,8 +419,8 @@ public sealed class JoinOperator : IQueryOperator
 
                         if (useSingleKey)
                         {
-                            DataValue keyValue = evaluator.Evaluate(
-                                buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
+                            DataValue keyValue = await evaluator.EvaluateAsync(
+                                buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow, context.CancellationToken).ConfigureAwait(false);
                             if (keyValue.IsNull)
                             {
                                 hasNullKey = true;
@@ -437,7 +437,7 @@ public sealed class JoinOperator : IQueryOperator
                         }
                         else
                         {
-                            DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, buildRow, rightSide: buildKeyIsRight);
+                            DataValue[] parts = await EvaluateKeyPartsAsync(evaluator, keyPairs, buildRow, rightSide: buildKeyIsRight, context.CancellationToken).ConfigureAwait(false);
                             if (HasNull(parts))
                             {
                                 hasNullKey = true;
@@ -533,12 +533,12 @@ public sealed class JoinOperator : IQueryOperator
                             bool probeKeyIsNull;
                             if (useSingleKey)
                             {
-                                probeKeyIsNull = evaluator.Evaluate(
-                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
+                                probeKeyIsNull = (await evaluator.EvaluateAsync(
+                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, context.CancellationToken).ConfigureAwait(false)).IsNull;
                             }
                             else
                             {
-                                EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                                await EvaluateKeyPartsIntoAsync(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!, context.CancellationToken).ConfigureAwait(false);
                                 probeKeyIsNull = HasNull(probeKeyScratch.AsSpan(0, keyCount));
                             }
 
@@ -553,8 +553,8 @@ public sealed class JoinOperator : IQueryOperator
 
                         if (useSingleKey)
                         {
-                            DataValue probeKeyValue = evaluator.Evaluate(
-                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                            DataValue probeKeyValue = await evaluator.EvaluateAsync(
+                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, context.CancellationToken).ConfigureAwait(false);
                             if (!probeKeyValue.IsNull)
                             {
                                 singleKeyTable!.TryGetValue(probeKeyValue, out matches);
@@ -562,7 +562,7 @@ public sealed class JoinOperator : IQueryOperator
                         }
                         else
                         {
-                            EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                            await EvaluateKeyPartsIntoAsync(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!, context.CancellationToken).ConfigureAwait(false);
                             if (!HasNull(probeKeyScratch.AsSpan(0, keyCount)))
                             {
                                 compositeKeyLookup.TryGetValue(probeKeyScratch.AsSpan(0, keyCount), out matches);
@@ -585,7 +585,7 @@ public sealed class JoinOperator : IQueryOperator
                                     }
 
                                     schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
-                                    if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow.Value))
+                                    if (!await evaluator.EvaluateAsBooleanAsync(extraction.Residual, residualCheckRow.Value, context.CancellationToken).ConfigureAwait(false))
                                     {
                                         continue;
                                     }
@@ -871,13 +871,13 @@ public sealed class JoinOperator : IQueryOperator
                             bool probeKeyIsNull;
                             if (useSingleKey)
                             {
-                                probeKeyIsNull = workerEvaluator.Evaluate(
-                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
+                                probeKeyIsNull = (await workerEvaluator.EvaluateAsync(
+                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, cancellationToken).ConfigureAwait(false)).IsNull;
                             }
                             else
                             {
-                                EvaluateKeyPartsInto(
-                                    workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!);
+                                await EvaluateKeyPartsIntoAsync(
+                                    workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!, cancellationToken).ConfigureAwait(false);
                                 probeKeyIsNull = HasNull(workerKeyScratch.AsSpan(0, keyCount));
                             }
 
@@ -892,8 +892,8 @@ public sealed class JoinOperator : IQueryOperator
 
                         if (useSingleKey)
                         {
-                            DataValue probeKeyValue = workerEvaluator.Evaluate(
-                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                            DataValue probeKeyValue = await workerEvaluator.EvaluateAsync(
+                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow, cancellationToken).ConfigureAwait(false);
                             if (!probeKeyValue.IsNull)
                             {
                                 singleKeyTable!.TryGetValue(probeKeyValue, out matches);
@@ -901,8 +901,8 @@ public sealed class JoinOperator : IQueryOperator
                         }
                         else
                         {
-                            EvaluateKeyPartsInto(
-                                workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!);
+                            await EvaluateKeyPartsIntoAsync(
+                                workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!, cancellationToken).ConfigureAwait(false);
                             if (!HasNull(workerKeyScratch.AsSpan(0, keyCount)))
                             {
                                 compositeKeyLookup.TryGetValue(workerKeyScratch.AsSpan(0, keyCount), out matches);
@@ -925,7 +925,7 @@ public sealed class JoinOperator : IQueryOperator
                                     }
 
                                     workerSchema.CombineInto(leftRow, rightRow, workerResidualBuffer!);
-                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, workerResidualRow.Value))
+                                    if (!await workerEvaluator.EvaluateAsBooleanAsync(extraction.Residual, workerResidualRow.Value, cancellationToken).ConfigureAwait(false))
                                     {
                                         continue;
                                     }
@@ -1155,7 +1155,7 @@ public sealed class JoinOperator : IQueryOperator
 
                                 schema.CombineInto(leftRow, rightRow, reusableFilterBuffer);
 
-                                if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow.GetValueOrDefault()))
+                                if (!await evaluator.EvaluateAsBooleanAsync(_onCondition, reusableFilterRow.GetValueOrDefault(), context.CancellationToken).ConfigureAwait(false))
                                 {
                                     continue;
                                 }
@@ -1416,33 +1416,35 @@ public sealed class JoinOperator : IQueryOperator
     /// Evaluates the key expressions for a single row, selecting either the left
     /// or right expression from each key pair.
     /// </summary>
-    private static DataValue[] EvaluateKeyParts(
+    private static async ValueTask<DataValue[]> EvaluateKeyPartsAsync(
         ExpressionEvaluator evaluator,
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         Row row,
-        bool rightSide)
+        bool rightSide,
+        CancellationToken cancellationToken)
     {
         DataValue[] parts = new DataValue[keyPairs.Count];
-        EvaluateKeyPartsInto(evaluator, keyPairs, row, rightSide, parts);
+        await EvaluateKeyPartsIntoAsync(evaluator, keyPairs, row, rightSide, parts, cancellationToken).ConfigureAwait(false);
         return parts;
     }
 
     /// <summary>
     /// Evaluates the key expressions for a single row into a caller-provided buffer,
     /// avoiding the per-row <see cref="DataValue"/> array heap allocation that the
-    /// array-returning <see cref="EvaluateKeyParts"/> overload would otherwise incur.
+    /// array-returning <see cref="EvaluateKeyPartsAsync"/> overload would otherwise incur.
     /// </summary>
-    private static void EvaluateKeyPartsInto(
+    private static async ValueTask EvaluateKeyPartsIntoAsync(
         ExpressionEvaluator evaluator,
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         Row row,
         bool rightSide,
-        DataValue[] destination)
+        DataValue[] destination,
+        CancellationToken cancellationToken)
     {
         for (int index = 0; index < keyPairs.Count; index++)
         {
             Expression expression = rightSide ? keyPairs[index].Right : keyPairs[index].Left;
-            destination[index] = evaluator.Evaluate(expression, row);
+            destination[index] = await evaluator.EvaluateAsync(expression, row, cancellationToken).ConfigureAwait(false);
         }
     }
 

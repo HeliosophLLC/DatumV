@@ -1,4 +1,4 @@
-using DatumIngest.Execution;
+﻿using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -21,15 +21,15 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         return new Row(new ColumnLookup(names), values);
     }
 
-    private static DataValue Eval(IndexAccessExpression access, Row row, Arena arena)
+    private static async Task<DataValue> EvalAsync(IndexAccessExpression access, Row row, Arena arena)
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
         EvaluationFrame frame = new(row, arena, arena);
-        return evaluator.Evaluate(access, frame);
+        return await evaluator.EvaluateAsync(access, frame);
     }
 
     [Fact]
-    public void IndexAccess_StringArray_ReturnsElementAtPosition()
+    public async Task IndexAccess_StringArray_ReturnsElementAtPosition()
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
@@ -42,7 +42,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new ColumnReference("arr"),
                 new LiteralExpression(1));
 
-            DataValue result = Eval(access, MakeRow(("arr", stringArray)), arena);
+            DataValue result = await EvalAsync(access, MakeRow(("arr", stringArray)), arena);
 
             Assert.Equal(DataKind.String, result.Kind);
             Assert.False(result.IsArray);
@@ -52,7 +52,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     }
 
     [Fact]
-    public void IndexAccess_Float32Array_ReturnsElementAtPosition()
+    public async Task IndexAccess_Float32Array_ReturnsElementAtPosition()
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
@@ -65,7 +65,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new ColumnReference("arr"),
                 new LiteralExpression(2));
 
-            DataValue result = Eval(access, MakeRow(("arr", floatArray)), arena);
+            DataValue result = await EvalAsync(access, MakeRow(("arr", floatArray)), arena);
 
             Assert.Equal(DataKind.Float32, result.Kind);
             Assert.Equal(3.5f, result.AsFloat32());
@@ -74,7 +74,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     }
 
     [Fact]
-    public void IndexAccess_Int32Array_OutOfRange_ReturnsTypedNull()
+    public async Task IndexAccess_Int32Array_OutOfRange_ReturnsTypedNull()
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
@@ -87,7 +87,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new ColumnReference("arr"),
                 new LiteralExpression(99));
 
-            DataValue result = Eval(access, MakeRow(("arr", intArray)), arena);
+            DataValue result = await EvalAsync(access, MakeRow(("arr", intArray)), arena);
 
             Assert.True(result.IsNull);
             Assert.Equal(DataKind.Int32, result.Kind);
@@ -96,7 +96,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     }
 
     [Fact]
-    public void IndexAccess_StructArray_ReturnsStructElement()
+    public async Task IndexAccess_StructArray_ReturnsStructElement()
     {
         // YOLO output shape: Array<Struct{label, score}>. Indexing returns a Struct.
         Pool pool = GetService<Pool>();
@@ -111,7 +111,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new ColumnReference("detections"),
                 new LiteralExpression(1));
 
-            DataValue result = Eval(access, MakeRow(("detections", structArray)), arena);
+            DataValue result = await EvalAsync(access, MakeRow(("detections", structArray)), arena);
 
             Assert.Equal(DataKind.Struct, result.Kind);
             Assert.False(result.IsArray);
@@ -123,7 +123,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     }
 
     [Fact]
-    public void IndexAccess_StringArray_NamedFieldAccess_Throws()
+    public async Task IndexAccess_StringArray_NamedFieldAccess_Throws()
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
@@ -135,8 +135,8 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new ColumnReference("arr"),
                 new LiteralExpression("foo"));
 
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-                () => Eval(access, MakeRow(("arr", stringArray)), arena));
+            InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await EvalAsync(access, MakeRow(("arr", stringArray)), arena));
             Assert.Contains("Named field access", ex.Message);
             Assert.Contains("Array<String>", ex.Message);
         }

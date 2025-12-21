@@ -59,7 +59,7 @@ public sealed class FunctionSourceOperator : IQueryOperator
         ValueRef[] evaluatedArguments = new ValueRef[_arguments.Count];
         for (int index = 0; index < _arguments.Count; index++)
         {
-            evaluatedArguments[index] = evaluator.EvaluateAsValueRef(_arguments[index], frame);
+            evaluatedArguments[index] = await evaluator.EvaluateAsValueRefAsync(_arguments[index], frame, context.CancellationToken).ConfigureAwait(false);
         }
 
         await foreach (RowBatch batch in _function.ExecuteAsync(evaluatedArguments, context).ConfigureAwait(false))

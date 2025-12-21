@@ -206,8 +206,8 @@ public sealed class MergeJoinOperator : IQueryOperator
             Row leftRow = GetCurrentLeftRow();
             Row rightRow = GetCurrentRightRow();
 
-            DataValue leftKey = evaluator.Evaluate(leftKeyExpression, leftRow);
-            DataValue rightKey = evaluator.Evaluate(rightKeyExpression, rightRow);
+            DataValue leftKey = await evaluator.EvaluateAsync(leftKeyExpression, leftRow, context.CancellationToken).ConfigureAwait(false);
+            DataValue rightKey = await evaluator.EvaluateAsync(rightKeyExpression, rightRow, context.CancellationToken).ConfigureAwait(false);
 
             // NULL keys never match in SQL — emit with null-padded counterpart if required.
             if (leftKey.IsNull)
@@ -287,7 +287,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         break;
                     }
 
-                    DataValue nextRightKey = evaluator.Evaluate(rightKeyExpression, GetCurrentRightRow());
+                    DataValue nextRightKey = await evaluator.EvaluateAsync(rightKeyExpression, GetCurrentRightRow(), context.CancellationToken).ConfigureAwait(false);
 
                     if (nextRightKey.IsNull || CompareValues(rightKey, nextRightKey) != 0)
                     {
@@ -310,7 +310,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                             schema ??= CombinedRowSchema.Build(leftRow, matchedRight);
                             Row candidateRow = schema.Combine(leftRow, matchedRight);
 
-                            if (!evaluator.EvaluateAsBoolean(_extraction.Residual, candidateRow))
+                            if (!await evaluator.EvaluateAsBooleanAsync(_extraction.Residual, candidateRow, context.CancellationToken).ConfigureAwait(false))
                             {
                                 continue;
                             }
@@ -349,7 +349,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                     }
 
                     leftRow = GetCurrentLeftRow();
-                    DataValue nextLeftKey = evaluator.Evaluate(leftKeyExpression, leftRow);
+                    DataValue nextLeftKey = await evaluator.EvaluateAsync(leftKeyExpression, leftRow, context.CancellationToken).ConfigureAwait(false);
 
                     if (nextLeftKey.IsNull || CompareValues(leftKey, nextLeftKey) != 0)
                     {

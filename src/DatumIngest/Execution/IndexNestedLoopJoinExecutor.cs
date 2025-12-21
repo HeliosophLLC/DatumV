@@ -165,7 +165,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Evaluate the probe-side key.
-                DataValue probeKey = _evaluator.Evaluate(probeKeyExpression, probeRow);
+                DataValue probeKey = await _evaluator.EvaluateAsync(probeKeyExpression, probeRow, cancellationToken).ConfigureAwait(false);
 
                 if (probeKey.IsNull)
                 {
@@ -218,7 +218,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                         combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
                         bufferPool.Return(buildRow.RawValues);
 
-                        if (EvaluateResidual(residual, residualScratchRow))
+                        if (await EvaluateResidualAsync(residual, residualScratchRow, cancellationToken).ConfigureAwait(false))
                         {
                             semiMatch = true;
                             break;
@@ -260,7 +260,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                         combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
 
-                        if (!EvaluateResidual(residual, residualScratchRow))
+                        if (!await EvaluateResidualAsync(residual, residualScratchRow, cancellationToken).ConfigureAwait(false))
                         {
                             bufferPool.Return(buildRow.RawValues);
                             continue;
@@ -408,9 +408,9 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// <summary>
     /// Evaluates an optional residual predicate against a combined row.
     /// </summary>
-    private bool EvaluateResidual(Expression residual, Row row)
+    private async ValueTask<bool> EvaluateResidualAsync(Expression residual, Row row, CancellationToken cancellationToken)
     {
-        DataValue result = _evaluator.Evaluate(residual, row);
+        DataValue result = await _evaluator.EvaluateAsync(residual, row, cancellationToken).ConfigureAwait(false);
         return !result.IsNull && result.Kind == DataKind.Boolean && result.AsBoolean();
     }
 }

@@ -118,7 +118,16 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     public bool IsPure => _descriptor.IsPure;
 
     /// <inheritdoc/>
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame) =>
+        throw new NotSupportedException(
+            $"Procedural UDF 'udf.{_descriptor.Name}' must be invoked via ExecuteAsync; " +
+            "the body's expression evaluator is async-only.");
+
+    /// <inheritdoc/>
+    public async ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
         Stack<string> stack = _invocationStack.Value ??= new Stack<string>();
         foreach (string active in stack)
@@ -135,7 +144,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         stack.Push(_descriptor.Name);
         try
         {
-            return ExecuteBody(arguments, frame);
+            return await ExecuteBodyAsync(arguments, frame, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -143,7 +152,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         }
     }
 
-    private ValueRef ExecuteBody(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    private async ValueTask<ValueRef> ExecuteBodyAsync(
+        ReadOnlyMemory<ValueRef> arguments, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         // Local variables (parameters + DECLAREd) live in the call's target
         // arena. They become unreachable when the caller's row batch
@@ -151,7 +161,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         IValueStore variableStore = frame.Target;
         VariableScope scope = new();
 
-        BindParameters(arguments, frame, variableStore, scope);
+        await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 
         // Body evaluator: same FunctionRegistry the outer query uses (so
         // nested udf./scalar calls resolve identically) but a fresh,
@@ -177,7 +187,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             outerRow: null,
             sidecarRegistry: frame.SidecarRegistry);
 
-        ReturnSignal? signal = ExecuteStatements(_descriptor.StatementBody!, scope, evaluator, bodyFrame);
+        ReturnSignal? signal = await ExecuteStatementsAsync(_descriptor.StatementBody!, scope, evaluator, bodyFrame, cancellationToken).ConfigureAwait(false);
         if (signal is null)
         {
             throw new InvalidOperationException(
@@ -195,7 +205,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 new LiteralValueExpression(returnValue),
                 _descriptor.ReturnTypeName!,
                 Span: null);
-            returnValue = evaluator.Evaluate(syntheticCast, bodyFrame);
+            returnValue = await evaluator.EvaluateAsync(syntheticCast, bodyFrame, cancellationToken).ConfigureAwait(false);
         }
 
         if (_descriptor.ReturnIsNotNull && returnValue.IsNull)
@@ -207,9 +217,10 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         // Hand the value back through the caller's frame so any arena-backed
         // payload is read against frame.Target — the variable store is
         // frame.Target, so source == target and the lift is a straight read.
-        return evaluator.EvaluateAsValueRef(
+        return await evaluator.EvaluateAsValueRefAsync(
             new LiteralValueExpression(returnValue),
-            bodyFrame);
+            bodyFrame,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -220,19 +231,38 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     /// arena lifetime. <c>IS NOT NULL</c> annotations fire here (before any
     /// body code runs) so the failure points at the call boundary.
     /// </summary>
-    private void BindParameters(
-        ReadOnlySpan<ValueRef> arguments,
-        in EvaluationFrame frame,
+    private async ValueTask BindParametersAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
         IValueStore variableStore,
-        VariableScope scope)
+        VariableScope scope,
+        CancellationToken cancellationToken)
     {
-        for (int i = 0; i < _descriptor.Parameters.Count; i++)
+        // Materialise the parameter values up front (sync slice) so we can iterate
+        // an async loop that only awaits when defaults need evaluation.
+        int paramCount = _descriptor.Parameters.Count;
+        DataValue[] resolved = new DataValue[paramCount];
+        bool[] needsDefault = new bool[paramCount];
+        ReadOnlySpan<ValueRef> argSpan = arguments.Span;
+        for (int i = 0; i < paramCount; i++)
+        {
+            if (i < argSpan.Length)
+            {
+                resolved[i] = argSpan[i].ToDataValue(variableStore);
+            }
+            else
+            {
+                needsDefault[i] = true;
+            }
+        }
+
+        for (int i = 0; i < paramCount; i++)
         {
             UdfParameter param = _descriptor.Parameters[i];
             DataValue value;
-            if (i < arguments.Length)
+            if (!needsDefault[i])
             {
-                value = arguments[i].ToDataValue(variableStore);
+                value = resolved[i];
             }
             else if (param.Default is not null)
             {
@@ -251,7 +281,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                     variableStore,
                     outerRow: null,
                     sidecarRegistry: frame.SidecarRegistry);
-                value = defaultEvaluator.Evaluate(param.Default, defaultFrame);
+                value = await defaultEvaluator.EvaluateAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -282,31 +312,33 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     /// (the parser allows them but they're rejected here as out-of-loop
     /// constructs that have no useful semantics for a scalar function).
     /// </summary>
-    private static ReturnSignal? ExecuteStatements(
+    private static async ValueTask<ReturnSignal?> ExecuteStatementsAsync(
         IReadOnlyList<Statement> statements,
         VariableScope scope,
         ExpressionEvaluator evaluator,
-        in EvaluationFrame frame)
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
         foreach (Statement stmt in statements)
         {
-            ReturnSignal? signal = ExecuteStatement(stmt, scope, evaluator, frame);
+            ReturnSignal? signal = await ExecuteStatementAsync(stmt, scope, evaluator, frame, cancellationToken).ConfigureAwait(false);
             if (signal is not null) return signal;
         }
         return null;
     }
 
-    private static ReturnSignal? ExecuteStatement(
+    private static async ValueTask<ReturnSignal?> ExecuteStatementAsync(
         Statement statement,
         VariableScope scope,
         ExpressionEvaluator evaluator,
-        in EvaluationFrame frame)
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
         switch (statement)
         {
             case ReturnStatement ret:
             {
-                DataValue value = evaluator.Evaluate(ret.Value, frame);
+                DataValue value = await evaluator.EvaluateAsync(ret.Value, frame, cancellationToken).ConfigureAwait(false);
                 return new ReturnSignal(value);
             }
             case DeclareStatement decl:
@@ -317,7 +349,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                     Expression effective = decl.TypeName is not null
                         ? new CastExpression(decl.Initializer, decl.TypeName, decl.Span)
                         : decl.Initializer;
-                    declValue = evaluator.Evaluate(effective, frame);
+                    declValue = await evaluator.EvaluateAsync(effective, frame, cancellationToken).ConfigureAwait(false);
                 }
                 else if (decl.TypeName is not null
                     && TypeAnnotationResolver.TryParse(decl.TypeName, out DataKind kind, out bool isArray))
@@ -335,26 +367,26 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             }
             case SetStatement set:
             {
-                DataValue value = evaluator.Evaluate(set.Value, frame);
+                DataValue value = await evaluator.EvaluateAsync(set.Value, frame, cancellationToken).ConfigureAwait(false);
                 scope.Set(set.VariableName, value);
                 return null;
             }
             case IfStatement ifStmt:
             {
-                bool predicate = evaluator.EvaluateAsBoolean(ifStmt.Predicate, frame);
+                bool predicate = await evaluator.EvaluateAsBooleanAsync(ifStmt.Predicate, frame, cancellationToken).ConfigureAwait(false);
                 Statement? branch = predicate ? ifStmt.Then : ifStmt.Else;
-                return branch is null ? null : ExecuteStatement(branch, scope, evaluator, frame);
+                return branch is null ? null : await ExecuteStatementAsync(branch, scope, evaluator, frame, cancellationToken).ConfigureAwait(false);
             }
             case WhileStatement whileStmt:
             {
                 // Each iteration pushes a fresh frame so DECLAREs inside the
                 // body don't accumulate across iterations.
-                while (evaluator.EvaluateAsBoolean(whileStmt.Predicate, frame))
+                while (await evaluator.EvaluateAsBooleanAsync(whileStmt.Predicate, frame, cancellationToken).ConfigureAwait(false))
                 {
                     scope.PushFrame();
                     try
                     {
-                        ReturnSignal? signal = ExecuteStatement(whileStmt.Body, scope, evaluator, frame);
+                        ReturnSignal? signal = await ExecuteStatementAsync(whileStmt.Body, scope, evaluator, frame, cancellationToken).ConfigureAwait(false);
                         if (signal is not null) return signal;
                     }
                     finally
@@ -369,7 +401,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 scope.PushFrame();
                 try
                 {
-                    return ExecuteStatements(block.Statements, scope, evaluator, frame);
+                    return await ExecuteStatementsAsync(block.Statements, scope, evaluator, frame, cancellationToken).ConfigureAwait(false);
                 }
                 finally
                 {

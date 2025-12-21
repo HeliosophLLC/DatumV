@@ -176,8 +176,8 @@ public sealed class RowEnricherOperator : IQueryOperator
                     int hiddenSlotBase = sourceCopySlots.Length;
                     for (int i = 0; i < _enrichments.Count; i++)
                     {
-                        outValues[hiddenSlotBase + i] = evaluator.Evaluate(
-                            _enrichments[i].Expression, frame);
+                        outValues[hiddenSlotBase + i] = await evaluator.EvaluateAsync(
+                            _enrichments[i].Expression, frame, context.CancellationToken).ConfigureAwait(false);
                     }
 
                     outputBatch.Add(outValues);

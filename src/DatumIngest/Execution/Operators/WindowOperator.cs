@@ -147,9 +147,9 @@ public sealed class WindowOperator : IQueryOperator
             foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
             {
                 WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
-                ComputeForSpecification(
+                await ComputeForSpecificationAsync(
                     spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter,
-                    context.Store, context.SidecarRegistry);
+                    context.Store, context.SidecarRegistry, context.CancellationToken).ConfigureAwait(false);
             }
 
             // Build the output ColumnLookup once — source columns followed by
@@ -218,7 +218,7 @@ public sealed class WindowOperator : IQueryOperator
     /// Partitions, sorts, and computes window function results for all
     /// columns that share the given window specification.
     /// </summary>
-    private void ComputeForSpecification(
+    private async ValueTask ComputeForSpecificationAsync(
         WindowSpecification spec,
         List<int> columnIndices,
         List<Row> allRows,
@@ -226,7 +226,8 @@ public sealed class WindowOperator : IQueryOperator
         DataValue[][] windowResults,
         QueryMeter? meter,
         IValueStore store,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        CancellationToken cancellationToken)
     {
         // Build an index array to track original positions through partitioning.
         int[] originalIndices = new int[allRows.Count];
@@ -245,7 +246,8 @@ public sealed class WindowOperator : IQueryOperator
         else
         {
             // Hash-partition rows by PARTITION BY key values.
-            partitionRanges = BuildPartitions(allRows, originalIndices, spec.PartitionBy, evaluator);
+            partitionRanges = await BuildPartitionsAsync(
+                allRows, originalIndices, spec.PartitionBy, evaluator, cancellationToken).ConfigureAwait(false);
         }
 
         // For each partition, sort by ORDER BY and compute all window columns.
@@ -254,9 +256,9 @@ public sealed class WindowOperator : IQueryOperator
             // Sort partition rows by ORDER BY expressions (stable sort via index).
             if (spec.OrderBy is { Count: > 0 })
             {
-                SortPartition(
+                await SortPartitionAsync(
                     allRows, originalIndices, startIndex, count, spec.OrderBy, evaluator,
-                    store, sidecarRegistry);
+                    store, sidecarRegistry, cancellationToken).ConfigureAwait(false);
             }
 
             // Build partition row list for the computation interface.
@@ -275,7 +277,7 @@ public sealed class WindowOperator : IQueryOperator
 
                 IWindowComputation computation = column.Function.CreateComputation();
                 Array.Clear(partitionResults);
-                computation.Compute(
+                await computation.ComputeAsync(
                     partitionRows,
                     column.ArgumentExpressions,
                     evaluator,
@@ -283,7 +285,8 @@ public sealed class WindowOperator : IQueryOperator
                     spec.Frame,
                     partitionResults,
                     column.NullHandling,
-                    column.FromLast);
+                    column.FromLast,
+                    cancellationToken).ConfigureAwait(false);
                 meter?.Add((long)column.Function.QueryUnitCost * count);
 
                 // Write results back to the correct original row positions.
@@ -300,11 +303,12 @@ public sealed class WindowOperator : IQueryOperator
     /// Groups rows into partitions based on PARTITION BY key expressions.
     /// Returns contiguous ranges in the reordered <paramref name="indices"/> array.
     /// </summary>
-    private static List<(int StartIndex, int Count)> BuildPartitions(
+    private static async ValueTask<List<(int StartIndex, int Count)>> BuildPartitionsAsync(
         List<Row> rows,
         int[] indices,
         IReadOnlyList<Expression> partitionByExpressions,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        CancellationToken cancellationToken)
     {
         bool useSingleKey = partitionByExpressions.Count == 1;
 
@@ -313,7 +317,7 @@ public sealed class WindowOperator : IQueryOperator
             Dictionary<DataValue, List<int>> groups = new();
             for (int i = 0; i < indices.Length; i++)
             {
-                DataValue key = evaluator.Evaluate(partitionByExpressions[0], rows[indices[i]]);
+                DataValue key = await evaluator.EvaluateAsync(partitionByExpressions[0], rows[indices[i]], cancellationToken).ConfigureAwait(false);
                 if (!groups.TryGetValue(key, out List<int>? list))
                 {
                     list = new List<int>();
@@ -343,7 +347,7 @@ public sealed class WindowOperator : IQueryOperator
                 DataValue[] parts = new DataValue[partitionByExpressions.Count];
                 for (int j = 0; j < partitionByExpressions.Count; j++)
                 {
-                    parts[j] = evaluator.Evaluate(partitionByExpressions[j], rows[indices[i]]);
+                    parts[j] = await evaluator.EvaluateAsync(partitionByExpressions[j], rows[indices[i]], cancellationToken).ConfigureAwait(false);
                 }
                 CompositeKey key = new(parts);
                 if (!groups.TryGetValue(key, out List<int>? list))
@@ -372,8 +376,10 @@ public sealed class WindowOperator : IQueryOperator
     /// <summary>
     /// Sorts a contiguous partition range within the <paramref name="indices"/> array
     /// by the given ORDER BY items using the same comparison logic as <see cref="OrderByOperator"/>.
+    /// Pre-evaluates sort keys per row so the inner comparator stays synchronous
+    /// (Array.Sort can't await).
     /// </summary>
-    private static void SortPartition(
+    private static async ValueTask SortPartitionAsync(
         List<Row> rows,
         int[] indices,
         int startIndex,
@@ -381,20 +387,37 @@ public sealed class WindowOperator : IQueryOperator
         IReadOnlyList<OrderByItem> orderByItems,
         ExpressionEvaluator evaluator,
         IValueStore store,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        CancellationToken cancellationToken)
     {
-        Array.Sort(indices, startIndex, count, Comparer<int>.Create((a, b) =>
+        // Pre-evaluate sort keys once per (row, item) so the comparator can stay sync.
+        DataValue[][] sortKeys = new DataValue[count][];
+        for (int i = 0; i < count; i++)
         {
-            Row rowA = rows[a];
-            Row rowB = rows[b];
-            foreach (OrderByItem item in orderByItems)
+            int rowIndex = indices[startIndex + i];
+            Row row = rows[rowIndex];
+            DataValue[] keys = new DataValue[orderByItems.Count];
+            for (int j = 0; j < orderByItems.Count; j++)
             {
-                DataValue leftValue = evaluator.Evaluate(item.Expression, rowA);
-                DataValue rightValue = evaluator.Evaluate(item.Expression, rowB);
+                keys[j] = await evaluator.EvaluateAsync(orderByItems[j].Expression, row, cancellationToken).ConfigureAwait(false);
+            }
+            sortKeys[i] = keys;
+        }
+
+        // Build a parallel index array (0..count-1) we sort, swapping sortKeys in lockstep.
+        int[] localIndices = new int[count];
+        for (int i = 0; i < count; i++) localIndices[i] = i;
+
+        Array.Sort(localIndices, Comparer<int>.Create((a, b) =>
+        {
+            for (int k = 0; k < orderByItems.Count; k++)
+            {
+                DataValue leftValue = sortKeys[a][k];
+                DataValue rightValue = sortKeys[b][k];
                 int comparison = CompareDataValues(
                     leftValue, store, sidecarRegistry,
                     rightValue, store, sidecarRegistry);
-                if (item.Direction == SortDirection.Descending)
+                if (orderByItems[k].Direction == SortDirection.Descending)
                 {
                     comparison = -comparison;
                 }
@@ -405,6 +428,14 @@ public sealed class WindowOperator : IQueryOperator
             }
             return 0;
         }));
+
+        // Apply the sorted order back to `indices[startIndex .. startIndex+count]`.
+        int[] reordered = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            reordered[i] = indices[startIndex + localIndices[i]];
+        }
+        Array.Copy(reordered, 0, indices, startIndex, count);
     }
 
     private static int CompareDataValues(

@@ -30,7 +30,7 @@ public sealed class RankFunction : IWindowFunction
 
     private sealed class RankComputation : IWindowComputation
     {
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -38,7 +38,8 @@ public sealed class RankFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             if (partitionRows.Count == 0)
             {
@@ -49,8 +50,8 @@ public sealed class RankFunction : IWindowFunction
 
             for (int i = 1; i < partitionRows.Count; i++)
             {
-                bool isTie = WindowFunctionHelper.AreOrderByValuesEqual(
-                    partitionRows[i - 1], partitionRows[i], orderByItems, evaluator);
+                bool isTie = await WindowFunctionHelper.AreOrderByValuesEqualAsync(
+                    partitionRows[i - 1], partitionRows[i], orderByItems, evaluator, cancellationToken).ConfigureAwait(false);
                 results[i] = isTie ? results[i - 1] : DataValue.FromFloat32(i + 1);
             }
         }

@@ -38,7 +38,7 @@ public sealed class NthValueFunction : IWindowFunction
 
     private sealed class NthValueComputation : IWindowComputation
     {
-        public void Compute(
+        public async ValueTask ComputeAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -46,7 +46,8 @@ public sealed class NthValueFunction : IWindowFunction
             WindowFrame? frame,
             DataValue[] results,
             NullHandling nullHandling = NullHandling.RespectNulls,
-            bool fromLast = false)
+            bool fromLast = false,
+            CancellationToken cancellationToken = default)
         {
             if (partitionRows.Count == 0)
             {
@@ -54,7 +55,7 @@ public sealed class NthValueFunction : IWindowFunction
             }
 
             // Evaluate n (1-based) from the first row — it is a constant expression.
-            DataValue nValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
+            DataValue nValue = await evaluator.EvaluateAsync(argumentExpressions[1], partitionRows[0], cancellationToken).ConfigureAwait(false);
             int n = WindowFunctionHelper.ToInt(nValue);
 
             if (n <= 0)
@@ -64,7 +65,7 @@ public sealed class NthValueFunction : IWindowFunction
 
             // Derive the null kind from the source expression so empty-frame
             // and no-match nulls carry the correct type.
-            DataValue sample = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
+            DataValue sample = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[0], cancellationToken).ConfigureAwait(false);
             DataValue typedNull = DataValue.Null(sample.Kind);
 
             for (int i = 0; i < partitionRows.Count; i++)
@@ -78,12 +79,12 @@ public sealed class NthValueFunction : IWindowFunction
                 }
 
                 results[i] = fromLast
-                    ? FindNthFromLast(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull)
-                    : FindNthFromFirst(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull);
+                    ? await FindNthFromLastAsync(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull, cancellationToken).ConfigureAwait(false)
+                    : await FindNthFromFirstAsync(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private static DataValue FindNthFromFirst(
+        private static async ValueTask<DataValue> FindNthFromFirstAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -91,12 +92,13 @@ public sealed class NthValueFunction : IWindowFunction
             int end,
             int n,
             NullHandling nullHandling,
-            DataValue typedNull)
+            DataValue typedNull,
+            CancellationToken cancellationToken)
         {
             int count = 0;
             for (int j = start; j <= end; j++)
             {
-                DataValue value = evaluator.Evaluate(argumentExpressions[0], partitionRows[j]);
+                DataValue value = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[j], cancellationToken).ConfigureAwait(false);
 
                 if (nullHandling == NullHandling.IgnoreNulls && value.IsNull)
                 {
@@ -113,7 +115,7 @@ public sealed class NthValueFunction : IWindowFunction
             return typedNull;
         }
 
-        private static DataValue FindNthFromLast(
+        private static async ValueTask<DataValue> FindNthFromLastAsync(
             IReadOnlyList<Row> partitionRows,
             IReadOnlyList<Expression> argumentExpressions,
             ExpressionEvaluator evaluator,
@@ -121,12 +123,13 @@ public sealed class NthValueFunction : IWindowFunction
             int end,
             int n,
             NullHandling nullHandling,
-            DataValue typedNull)
+            DataValue typedNull,
+            CancellationToken cancellationToken)
         {
             int count = 0;
             for (int j = end; j >= start; j--)
             {
-                DataValue value = evaluator.Evaluate(argumentExpressions[0], partitionRows[j]);
+                DataValue value = await evaluator.EvaluateAsync(argumentExpressions[0], partitionRows[j], cancellationToken).ConfigureAwait(false);
 
                 if (nullHandling == NullHandling.IgnoreNulls && value.IsNull)
                 {

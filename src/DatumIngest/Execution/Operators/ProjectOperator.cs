@@ -168,13 +168,14 @@ public sealed class ProjectOperator : IQueryOperator
 
                         EvaluationFrame frame = new(row, sourceArena, outputBatch.Arena, context.OuterRow, context.SidecarRegistry);
 
-                        DataValue[]? projected = schema.Project(
+                        DataValue[]? projected = await schema.ProjectAsync(
                             frame,
                             evaluator,
                             pool,
                             inputBatch.Arena,
                             outputBatch.Arena,
-                            assertionDiagnostics);
+                            assertionDiagnostics,
+                            context.CancellationToken).ConfigureAwait(false);
 
                         if (projected is null)
                             continue; // Row was skipped due to ASSERT … ON FAIL SKIP
@@ -425,23 +426,25 @@ public sealed class ProjectOperator : IQueryOperator
         /// Returns <see langword="null"/> when an <c>ASSERT … ON FAIL SKIP</c>
         /// clause fails, signalling the caller to discard the row.
         /// </summary>
-        internal DataValue[]? Project(
-            in EvaluationFrame sourceFrame,
+        internal async ValueTask<DataValue[]?> ProjectAsync(
+            EvaluationFrame sourceFrame,
             ExpressionEvaluator evaluator,
             Pool pool,
             Arena sourceArena,
             Arena destinationArena,
-            AssertionDiagnostics? diagnostics)
+            AssertionDiagnostics? diagnostics,
+            CancellationToken cancellationToken)
         {
             if (_letExpressions is not null && _letExpressions.Length > 0)
             {
-                return ProjectWithLetBindings(
+                return await ProjectWithLetBindingsAsync(
                     sourceFrame,
                     evaluator,
                     pool,
                     sourceArena,
                     destinationArena,
-                    diagnostics);
+                    diagnostics,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             DataValue[]? values = null;
@@ -454,14 +457,14 @@ public sealed class ProjectOperator : IQueryOperator
                 for (int index = 0; index < _slots.Length; index++)
                 {
                     ProjectionSlot slot = _slots[index];
-                    
+
                     if (slot.SourceOrdinal >= 0)
                     {
                         values[index] = DataValueRetention.Stabilize(sourceRow[slot.SourceOrdinal], sourceArena, destinationArena);
                     }
                     else if (slot.Expression is not null)
                     {
-                        values[index] = evaluator.Evaluate(slot.Expression, sourceFrame);
+                        values[index] = await evaluator.EvaluateAsync(slot.Expression, sourceFrame, cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -473,11 +476,11 @@ public sealed class ProjectOperator : IQueryOperator
                 {
                     foreach (AssertClause assertClause in _assertions)
                     {
-                        bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceFrame);
+                        bool passed = await evaluator.EvaluateAsBooleanAsync(assertClause.Predicate, sourceFrame, cancellationToken).ConfigureAwait(false);
                         if (!passed)
                         {
                             string? message = assertClause.Message is not null
-                                ? evaluator.EvaluateAsValueRef(assertClause.Message, sourceFrame).AsString()
+                                ? (await evaluator.EvaluateAsValueRefAsync(assertClause.Message, sourceFrame, cancellationToken).ConfigureAwait(false)).AsString()
                                 : null;
                             switch (assertClause.FailureMode)
                             {
@@ -516,13 +519,14 @@ public sealed class ProjectOperator : IQueryOperator
         /// the augmented row. Returns <see langword="null"/> when a SKIP assertion
         /// fails, signalling the caller to discard the row.
         /// </summary>
-        private DataValue[]? ProjectWithLetBindings(
-            in EvaluationFrame sourceFrame,
+        private async ValueTask<DataValue[]?> ProjectWithLetBindingsAsync(
+            EvaluationFrame sourceFrame,
             ExpressionEvaluator evaluator,
             Pool pool,
             Arena sourceArena,
             Arena destinationArena,
-            AssertionDiagnostics? diagnostics)
+            AssertionDiagnostics? diagnostics,
+            CancellationToken cancellationToken)
         {
             DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
             DataValue[]? values = null;
@@ -547,7 +551,7 @@ public sealed class ProjectOperator : IQueryOperator
                 for (int index = 0; index < _letExpressions.Length; index++)
                 {
                     augmentedValues[_sourceFieldCount + index] =
-                        evaluator.Evaluate(_letExpressions[index], augmentedFrame);
+                        await evaluator.EvaluateAsync(_letExpressions[index], augmentedFrame, cancellationToken).ConfigureAwait(false);
                 }
 
                 // Evaluate ASSERT clauses against the augmented row (source + LET values).
@@ -555,11 +559,11 @@ public sealed class ProjectOperator : IQueryOperator
                 {
                     foreach (AssertClause assertClause in _assertions)
                     {
-                        bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedFrame);
+                        bool passed = await evaluator.EvaluateAsBooleanAsync(assertClause.Predicate, augmentedFrame, cancellationToken).ConfigureAwait(false);
                         if (!passed)
                         {
                             string? message = assertClause.Message is not null
-                                ? evaluator.Evaluate(assertClause.Message, augmentedFrame).ToString()
+                                ? (await evaluator.EvaluateAsync(assertClause.Message, augmentedFrame, cancellationToken).ConfigureAwait(false)).ToString()
                                 : null;
                             switch (assertClause.FailureMode)
                             {
@@ -589,7 +593,7 @@ public sealed class ProjectOperator : IQueryOperator
                     }
                     else if (slot.Expression is not null)
                     {
-                        values[index] = evaluator.Evaluate(slot.Expression, augmentedFrame);
+                        values[index] = await evaluator.EvaluateAsync(slot.Expression, augmentedFrame, cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {

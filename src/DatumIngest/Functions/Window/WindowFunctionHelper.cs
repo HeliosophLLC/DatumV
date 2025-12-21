@@ -13,11 +13,12 @@ internal static class WindowFunctionHelper
     /// Determines whether two rows are equal on all ORDER BY expressions.
     /// Used by ranking functions (RANK, DENSE_RANK) to detect ties.
     /// </summary>
-    internal static bool AreOrderByValuesEqual(
+    internal static async ValueTask<bool> AreOrderByValuesEqualAsync(
         Row rowA,
         Row rowB,
         IReadOnlyList<OrderByItem>? orderByItems,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        CancellationToken cancellationToken)
     {
         if (orderByItems is null || orderByItems.Count == 0)
         {
@@ -26,8 +27,8 @@ internal static class WindowFunctionHelper
 
         for (int i = 0; i < orderByItems.Count; i++)
         {
-            DataValue valueA = evaluator.Evaluate(orderByItems[i].Expression, rowA);
-            DataValue valueB = evaluator.Evaluate(orderByItems[i].Expression, rowB);
+            DataValue valueA = await evaluator.EvaluateAsync(orderByItems[i].Expression, rowA, cancellationToken).ConfigureAwait(false);
+            DataValue valueB = await evaluator.EvaluateAsync(orderByItems[i].Expression, rowB, cancellationToken).ConfigureAwait(false);
 
             if (!Equals(valueA, valueB))
             {
