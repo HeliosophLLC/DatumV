@@ -1,0 +1,362 @@
+using DatumIngest.Manifest;
+using DatumIngest.Parsing.Tokens;
+using Superpower.Model;
+
+namespace DatumIngest.LanguageServer;
+
+/// <summary>
+/// Resolves the function call enclosing a cursor position and produces a
+/// <see cref="SignatureHelp"/> describing the function's call shape — name,
+/// parameter list, return kind — plus which parameter the cursor is
+/// currently filling in. Editors render this as the floating tooltip that
+/// stays visible while typing arguments.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>How the lookup works.</strong> The cursor's enclosing call is
+/// the unmatched left paren reached by walking back token-by-token while
+/// tracking paren depth. The function name comes from the token immediately
+/// before that paren (with optional <c>udf.</c> or <c>models.</c>
+/// qualifier). The active parameter index is the count of commas at the
+/// call's depth between the paren and the cursor.
+/// </para>
+/// <para>
+/// <strong>What it doesn't do.</strong> It doesn't pick between overloads
+/// (we don't surface multi-signature variants today; ValidateArguments
+/// resolves overloads at runtime). It doesn't recover gracefully from
+/// deeply malformed SQL — the token stream is what it is, and a missing
+/// left paren just means no signature help fires.
+/// </para>
+/// </remarks>
+public sealed class SignatureHelpProvider
+{
+    private readonly LanguageServerManifest _manifest;
+
+    /// <summary>Creates a provider over the given manifest.</summary>
+    public SignatureHelpProvider(LanguageServerManifest manifest)
+    {
+        _manifest = manifest;
+    }
+
+    /// <summary>
+    /// Resolves the function call enclosing <paramref name="offset"/> in
+    /// <paramref name="sql"/>. Returns <see langword="null"/> when the
+    /// cursor isn't inside any function call's argument list.
+    /// </summary>
+    public SignatureHelp? GetSignatureHelp(string sql, int offset)
+    {
+        if (offset < 0 || offset > sql.Length) return null;
+
+        // Tokenize the prefix up to the cursor. Trailing partial input
+        // ("models." just typed, in-progress identifier, etc.) is handled
+        // by best-effort fallback — we don't need a perfect parse, just
+        // enough of the token stream to walk back through.
+        if (!TryTokenize(sql[..offset], out List<Token<SqlToken>> tokens))
+        {
+            return null;
+        }
+
+        if (!TryFindEnclosingCall(tokens, out string functionName, out int activeParameter))
+        {
+            return null;
+        }
+
+        return ResolveSignature(functionName, activeParameter);
+    }
+
+    /// <summary>
+    /// Tokenizes <paramref name="prefix"/>, retrying once with a trailing
+    /// sigil stripped so a partial <c>@</c> / <c>$</c> at the cursor doesn't
+    /// fail the whole pass. Mirrors <c>CompletionContext.TokenizeSafely</c>'s
+    /// behaviour.
+    /// </summary>
+    private static bool TryTokenize(string prefix, out List<Token<SqlToken>> tokens)
+    {
+        tokens = new List<Token<SqlToken>>();
+        try
+        {
+            foreach (Token<SqlToken> t in SqlTokenizer.Instance.Tokenize(prefix))
+            {
+                tokens.Add(t);
+            }
+            return true;
+        }
+        catch
+        {
+        }
+
+        if (prefix.Length > 0 && (prefix[^1] == '@' || prefix[^1] == '$'))
+        {
+            tokens = new List<Token<SqlToken>>();
+            try
+            {
+                foreach (Token<SqlToken> t in SqlTokenizer.Instance.Tokenize(prefix[..^1]))
+                {
+                    tokens.Add(t);
+                }
+                return true;
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Walks the token stream backward from the end, balancing paren depth.
+    /// Returns the function name and zero-based active parameter index when
+    /// the unmatched left paren is preceded by a callable identifier
+    /// (optionally namespace-qualified with <c>udf.</c> or <c>models.</c>).
+    /// </summary>
+    private static bool TryFindEnclosingCall(
+        IReadOnlyList<Token<SqlToken>> tokens,
+        out string functionName,
+        out int activeParameter)
+    {
+        functionName = "";
+        activeParameter = 0;
+
+        int depth = 0;
+        int commaCount = 0;
+        for (int i = tokens.Count - 1; i >= 0; i--)
+        {
+            SqlToken kind = tokens[i].Kind;
+            switch (kind)
+            {
+                case SqlToken.RightParen:
+                    depth++;
+                    continue;
+                case SqlToken.LeftParen:
+                    if (depth > 0)
+                    {
+                        depth--;
+                        continue;
+                    }
+                    // Unmatched left paren — this is the enclosing argument list.
+                    return TryReadFunctionName(tokens, i, out functionName, commaCount, out activeParameter);
+                case SqlToken.Comma:
+                    if (depth == 0) commaCount++;
+                    continue;
+                default:
+                    continue;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Reads the function name from the tokens immediately before
+    /// <paramref name="parenIndex"/>. Accepts <c>name(</c>,
+    /// <c>namespace.name(</c> and <c>NameKeyword(</c> (e.g. <c>CAST</c>,
+    /// <c>SUM</c>) — anything that the parser treats as a callable.
+    /// </summary>
+    private static bool TryReadFunctionName(
+        IReadOnlyList<Token<SqlToken>> tokens,
+        int parenIndex,
+        out string name,
+        int commaCount,
+        out int activeParameter)
+    {
+        name = "";
+        activeParameter = commaCount;
+
+        if (parenIndex == 0) return false;
+        Token<SqlToken> prev = tokens[parenIndex - 1];
+        if (!IsCallableNameToken(prev.Kind)) return false;
+
+        // Detect `qualifier.name(`. The identifier before the dot is the
+        // namespace (`udf`, `models`, or in the future `tasks` / `proc`).
+        if (parenIndex >= 3
+            && tokens[parenIndex - 2].Kind == SqlToken.Dot
+            && IsCallableNameToken(tokens[parenIndex - 3].Kind))
+        {
+            string qualifier = tokens[parenIndex - 3].ToStringValue();
+            string member = prev.ToStringValue();
+            name = $"{qualifier}.{member}";
+            return true;
+        }
+
+        name = prev.ToStringValue();
+        return true;
+    }
+
+    private static bool IsCallableNameToken(SqlToken kind) =>
+        kind == SqlToken.Identifier
+        || kind == SqlToken.TypeKeyword
+        // CAST is the only reserved keyword that doubles as a function name.
+        // Aggregates (sum/avg/min/max/count) tokenise as Identifier and so
+        // are already accepted via the first branch.
+        || kind == SqlToken.Cast;
+
+    /// <summary>
+    /// Looks up <paramref name="functionName"/> in the manifest and builds
+    /// the matching signature. Resolution order: namespaced UDF, namespaced
+    /// model, scalar / aggregate / window / table-valued. Returns
+    /// <see langword="null"/> when nothing matches — the editor then hides
+    /// the tooltip.
+    /// </summary>
+    private SignatureHelp? ResolveSignature(string functionName, int activeParameter)
+    {
+        if (functionName.StartsWith("udf.", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildUdfSignature(functionName["udf.".Length..], activeParameter);
+        }
+        if (functionName.StartsWith("models.", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildModelSignature(functionName["models.".Length..], activeParameter);
+        }
+        return BuildBuiltinSignature(functionName, activeParameter);
+    }
+
+    private SignatureHelp? BuildUdfSignature(string name, int activeParameter)
+    {
+        if (_manifest.Udfs is null) return null;
+        UdfEntry? entry = FindByName(_manifest.Udfs, name, e => e.Name);
+        if (entry is null) return null;
+
+        IReadOnlyList<ParameterSignature> parameters = entry.Parameters ?? Array.Empty<ParameterSignature>();
+        (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
+            $"udf.{entry.Name}", parameters, entry.ReturnType);
+
+        List<string> tags = new(2);
+        if (entry.BodyKind is not null) tags.Add(entry.BodyKind);
+        if (entry.IsPure) tags.Add("pure");
+        string? doc = tags.Count > 0 ? string.Join(" · ", tags) : null;
+
+        return new SignatureHelp
+        {
+            Signatures =
+            [
+                new SignatureInfo
+                {
+                    Label = label,
+                    Documentation = doc,
+                    Parameters = paramInfos,
+                },
+            ],
+            ActiveSignature = 0,
+            ActiveParameter = ClampActiveParameter(activeParameter, parameters.Count),
+        };
+    }
+
+    private SignatureHelp? BuildModelSignature(string name, int activeParameter)
+    {
+        if (_manifest.Models is null) return null;
+        ModelEntry? entry = FindByName(_manifest.Models, name, e => e.Name);
+        if (entry is null) return null;
+
+        IReadOnlyList<ParameterSignature> parameters = entry.Parameters ?? Array.Empty<ParameterSignature>();
+        (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
+            $"models.{entry.Name}", parameters, entry.OutputKind);
+
+        string? doc = entry.DisplayName is not null && entry.Backend is not null
+            ? $"{entry.DisplayName} ({entry.Backend})"
+            : entry.DisplayName ?? (entry.Backend is not null ? $"backend: {entry.Backend}" : null);
+
+        return new SignatureHelp
+        {
+            Signatures =
+            [
+                new SignatureInfo
+                {
+                    Label = label,
+                    Documentation = doc,
+                    Parameters = paramInfos,
+                },
+            ],
+            ActiveSignature = 0,
+            ActiveParameter = ClampActiveParameter(activeParameter, parameters.Count),
+        };
+    }
+
+    private SignatureHelp? BuildBuiltinSignature(string name, int activeParameter)
+    {
+        FunctionSignature? entry = FindByName(_manifest.Functions, name, e => e.Name);
+        if (entry is null) return null;
+
+        IReadOnlyList<ParameterSignature> parameters = entry.Parameters;
+        (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
+            entry.Name, parameters, entry.ReturnType);
+
+        string? doc = entry.Description;
+
+        return new SignatureHelp
+        {
+            Signatures =
+            [
+                new SignatureInfo
+                {
+                    Label = label,
+                    Documentation = doc,
+                    Parameters = paramInfos,
+                },
+            ],
+            ActiveSignature = 0,
+            ActiveParameter = ClampActiveParameter(activeParameter, parameters.Count),
+        };
+    }
+
+    /// <summary>
+    /// Builds the signature label and per-parameter sub-ranges. Parameter
+    /// labels are the substrings the editor highlights when each parameter
+    /// is active — assembling them by hand keeps the substring positions
+    /// trivially correct.
+    /// </summary>
+    private static (string Label, IReadOnlyList<ParameterInfo> Parameters) BuildLabel(
+        string callableName,
+        IReadOnlyList<ParameterSignature> parameters,
+        string? returnType)
+    {
+        if (parameters.Count == 0)
+        {
+            string emptyLabel = returnType is null ? $"{callableName}()" : $"{callableName}() → {returnType}";
+            return (emptyLabel, Array.Empty<ParameterInfo>());
+        }
+
+        string[] paramLabels = new string[parameters.Count];
+        ParameterInfo[] paramInfos = new ParameterInfo[parameters.Count];
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            ParameterSignature p = parameters[i];
+            string optMark = p.IsOptional ? "?" : "";
+            string paramLabel = $"{p.Name}: {p.Kind}{optMark}";
+            paramLabels[i] = paramLabel;
+            paramInfos[i] = new ParameterInfo { Label = paramLabel };
+        }
+
+        string label = $"{callableName}({string.Join(", ", paramLabels)})";
+        if (returnType is not null) label += $" → {returnType}";
+        return (label, paramInfos);
+    }
+
+    private static T? FindByName<T>(IReadOnlyList<T> entries, string name, Func<T, string> nameOf)
+        where T : class
+    {
+        foreach (T entry in entries)
+        {
+            if (string.Equals(nameOf(entry), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Caps the active parameter index at the last declared parameter when
+    /// the user has typed more commas than the function expects. Without
+    /// this the popup vanishes (LSP convention is to hide when the index is
+    /// out of range), but keeping the last parameter highlighted reads as
+    /// "you've gone past the end" — closer to the user's mental model than
+    /// silent dismissal.
+    /// </summary>
+    private static int ClampActiveParameter(int activeParameter, int declaredCount)
+    {
+        if (declaredCount == 0) return 0;
+        if (activeParameter < 0) return 0;
+        if (activeParameter >= declaredCount) return declaredCount - 1;
+        return activeParameter;
+    }
+}

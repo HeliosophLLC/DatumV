@@ -279,6 +279,24 @@ app.MapPost("/api/lang/hover", async (HttpRequest request, CancellationToken ct)
     return Results.Json(hover, jsonOptions);
 });
 
+app.MapPost("/api/lang/signature", async (HttpRequest request, CancellationToken ct) =>
+{
+    LangPositionRequest? body;
+    try
+    {
+        body = await JsonSerializer.DeserializeAsync<LangPositionRequest>(
+            request.Body, jsonOptions, ct).ConfigureAwait(false);
+    }
+    catch (JsonException ex)
+    {
+        return Results.Json(new { error = $"Bad request: {ex.Message}" }, jsonOptions, statusCode: 400);
+    }
+    if (body is null) return Results.Json(new { error = "sql/offset required" }, jsonOptions, statusCode: 400);
+
+    SignatureHelp? sig = languageService.GetSignatureHelp(body.Sql ?? string.Empty, body.Offset);
+    return Results.Json(sig, jsonOptions);
+});
+
 // Monarch grammar for the SQL dialect. Returned as a JSON object the
 // browser feeds into monaco.languages.setMonarchTokensProvider, replacing
 // Monaco's built-in 'sql' tokenizer with one that knows about backtick

@@ -1,6 +1,7 @@
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog;
 
@@ -112,13 +113,56 @@ public static class CatalogManifestBuilder
             models = modelEntries;
         }
 
+        // UDFs registered in the catalog flow into the manifest so the
+        // language server can offer `udf.<name>(...)` completions and surface
+        // signature info in hover tooltips. Always non-null on a live
+        // catalog (UdfRegistry exists from construction); empty list when no
+        // UDFs are registered.
+        List<UdfEntry> udfEntries = new(catalog.Udfs.Entries.Count);
+        foreach (KeyValuePair<string, UdfDescriptor> entry in catalog.Udfs.Entries)
+        {
+            UdfDescriptor descriptor = entry.Value;
+            udfEntries.Add(new UdfEntry
+            {
+                Name = descriptor.Name,
+                ReturnType = descriptor.ReturnTypeName,
+                BodyKind = descriptor.IsProcedural ? "procedural" : "macro",
+                IsPure = descriptor.IsPure,
+                Parameters = BuildUdfParameters(descriptor),
+            });
+        }
+
         return new LanguageServerManifest
         {
             Tables = tables,
             Functions = functionSigs,
             Keywords = keywords,
             Models = models,
+            Udfs = udfEntries,
         };
+    }
+
+    /// <summary>
+    /// Builds the positional parameter list for a UDF entry. Parameters
+    /// with a non-null <c>Default</c> expression are flagged optional —
+    /// the inliner falls back to the default at the call site when the
+    /// argument is omitted.
+    /// </summary>
+    private static IReadOnlyList<ParameterSignature> BuildUdfParameters(UdfDescriptor descriptor)
+    {
+        if (descriptor.Parameters.Count == 0) return Array.Empty<ParameterSignature>();
+        ParameterSignature[] sigs = new ParameterSignature[descriptor.Parameters.Count];
+        for (int i = 0; i < descriptor.Parameters.Count; i++)
+        {
+            UdfParameter p = descriptor.Parameters[i];
+            sigs[i] = new ParameterSignature
+            {
+                Name = p.Name,
+                Kind = p.TypeName,
+                IsOptional = p.Default is not null,
+            };
+        }
+        return sigs;
     }
 
     /// <summary>

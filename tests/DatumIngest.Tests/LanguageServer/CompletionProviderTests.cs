@@ -773,6 +773,93 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains("→ String", item.Detail);
     }
 
+    // ───────────────────── udf.X completions ─────────────────────
+
+    private static LanguageServerManifest CreateManifestWithUdfs()
+    {
+        return new LanguageServerManifest
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+            Udfs =
+            [
+                new UdfEntry
+                {
+                    Name = "shout",
+                    ReturnType = "STRING",
+                    BodyKind = "macro",
+                    IsPure = false,
+                    Parameters = [new ParameterSignature { Name = "name", Kind = "STRING" }],
+                },
+                new UdfEntry
+                {
+                    Name = "RewriteCaption",
+                    ReturnType = "STRING",
+                    BodyKind = "procedural",
+                    IsPure = true,
+                    Parameters = [new ParameterSignature { Name = "caption", Kind = "STRING" }],
+                },
+            ],
+        };
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUdfDot_OffersUdfNames()
+    {
+        CompletionProvider provider = new(CreateManifestWithUdfs());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+
+        Assert.Contains(items, item => item.Label == "shout" && item.Kind == CompletionItemKind.Function);
+        Assert.Contains(items, item => item.Label == "RewriteCaption" && item.Kind == CompletionItemKind.Function);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUdfDotWithPrefix_FiltersByPrefix()
+    {
+        CompletionProvider provider = new(CreateManifestWithUdfs());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT udf.Re", 13);
+
+        Assert.Contains(items, item => item.Label == "RewriteCaption");
+        Assert.DoesNotContain(items, item => item.Label == "shout");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUdfDot_DetailCarriesBodyKindAndPurity()
+    {
+        // Procedural + pure UDFs should surface both flags in Detail so users
+        // see at a glance whether they're invoking an inlined macro or a
+        // per-row procedural body, and whether CSE will fold call sites.
+        CompletionProvider provider = new(CreateManifestWithUdfs());
+
+        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+        CompletionItem rewrite = Assert.Single(items, i => i.Label == "RewriteCaption");
+        CompletionItem shout = Assert.Single(items, i => i.Label == "shout");
+
+        Assert.Contains("procedural", rewrite.Detail);
+        Assert.Contains("pure", rewrite.Detail);
+        Assert.Contains("→ STRING", rewrite.Detail);
+        Assert.Contains("macro", shout.Detail);
+        Assert.DoesNotContain("pure", shout.Detail);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUdfDot_NoUdfsRegistered_ReturnsEmpty()
+    {
+        // Empty UDF list should return no items rather than throwing.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [], Functions = [], Keywords = [], Udfs = [],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT udf.", 11);
+
+        Assert.Empty(items);
+    }
+
     // ───────────────────── Function argument surfacing ─────────────────────
 
     [Fact]

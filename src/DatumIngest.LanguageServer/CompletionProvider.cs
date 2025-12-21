@@ -145,13 +145,18 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterDot:
                 if (zone.TableQualifier is not null)
                 {
-                    // Reserved namespaces (`models.X`, future `udf.X` /
+                    // Reserved namespaces (`models.X`, `udf.X`, future
                     // `proc.X` / `tasks.X`) are dispatched ahead of the
                     // table-column lookup. The qualifier match is
                     // case-insensitive to mirror SQL's keyword conventions.
                     if (string.Equals(zone.TableQualifier, "models", StringComparison.OrdinalIgnoreCase))
                     {
                         AddModels(items);
+                        break;
+                    }
+                    if (string.Equals(zone.TableQualifier, "udf", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddUdfs(items);
                         break;
                     }
                     AddQualifiedColumns(items, zone.TableQualifier);
@@ -471,6 +476,44 @@ public sealed class CompletionProvider
                 Detail = detail,
                 InsertText = $"{model.Name}(",
                 Documentation = doc,
+                SortOrder = 1,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Surfaces every catalog UDF after the user types <c>udf.</c> Mirrors
+    /// <see cref="AddModels"/> in shape; <see cref="UdfEntry.BodyKind"/> and
+    /// <see cref="UdfEntry.IsPure"/> become hint text in the popup detail
+    /// line so users can see at a glance whether they're invoking a macro
+    /// (inlined) or a procedural body (per-row).
+    /// </summary>
+    private void AddUdfs(List<CompletionItem> items)
+    {
+        if (_manifest.Udfs is null) return;
+
+        foreach (UdfEntry udf in _manifest.Udfs)
+        {
+            string parameters = udf.Parameters is null
+                ? ""
+                : string.Join(", ", udf.Parameters.Select(FormatParameter));
+            string signature = $"udf.{udf.Name}({parameters})";
+            string returnInfo = udf.ReturnType is not null ? $" → {udf.ReturnType}" : "";
+
+            // Detail line: "[procedural pure] udf.foo(@x INT32) → STRING"
+            // Body kind comes first so the eye lands on the most important
+            // operational hint (per-row vs inlined). Empty when no kind.
+            List<string> tags = new(2);
+            if (udf.BodyKind is not null) tags.Add(udf.BodyKind);
+            if (udf.IsPure) tags.Add("pure");
+            string tagPrefix = tags.Count > 0 ? $"[{string.Join(' ', tags)}] " : "";
+
+            items.Add(new CompletionItem
+            {
+                Label = udf.Name,
+                Kind = CompletionItemKind.Function,
+                Detail = $"{tagPrefix}{signature}{returnInfo}",
+                InsertText = $"{udf.Name}(",
                 SortOrder = 1,
             });
         }

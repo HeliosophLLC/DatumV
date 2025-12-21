@@ -25,6 +25,46 @@ public sealed class LanguageServerManifest
     /// JSON manifest workflow doesn't carry models today).
     /// </summary>
     public IReadOnlyList<ModelEntry>? Models { get; init; }
+
+    /// <summary>
+    /// User-defined functions registered in the catalog's <c>UdfRegistry</c>,
+    /// surfaced for the <c>udf.&lt;name&gt;(...)</c> completion namespace.
+    /// May be <see langword="null"/> when the manifest is built without a
+    /// live catalog (offline JSON workflow).
+    /// </summary>
+    public IReadOnlyList<UdfEntry>? Udfs { get; init; }
+}
+
+/// <summary>
+/// Lightweight description of a registered UDF for completion / hover.
+/// Mirrors the subset of <c>UdfDescriptor</c> useful at edit time.
+/// </summary>
+public sealed class UdfEntry
+{
+    /// <summary>Unqualified UDF name as it appears after <c>udf.</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Return type name (e.g. <c>"String"</c>, <c>"Int32"</c>), or <see langword="null"/> when none was declared.</summary>
+    public string? ReturnType { get; init; }
+
+    /// <summary>
+    /// <c>"macro"</c> or <c>"procedural"</c> — surfaces as a hint in the
+    /// completion popup so editors can show the user which body shape they're
+    /// invoking.
+    /// </summary>
+    public string? BodyKind { get; init; }
+
+    /// <summary>
+    /// Whether the UDF was declared <c>PURE</c>. Useful for tooling that
+    /// surfaces CSE-eligibility hints.
+    /// </summary>
+    public bool IsPure { get; init; }
+
+    /// <summary>
+    /// Positional parameter shape — name, declared type, and whether a
+    /// default makes the parameter optional at the call site.
+    /// </summary>
+    public IReadOnlyList<ParameterSignature>? Parameters { get; init; }
 }
 
 /// <summary>

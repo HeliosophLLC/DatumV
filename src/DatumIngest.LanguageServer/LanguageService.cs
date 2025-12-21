@@ -12,6 +12,7 @@ public sealed class LanguageService
     private LanguageServerManifest? _manifest;
     private CompletionProvider? _completionProvider;
     private HoverProvider? _hoverProvider;
+    private SignatureHelpProvider? _signatureHelpProvider;
 
     /// <summary>
     /// Initializes the language service with a manifest JSON string.
@@ -25,6 +26,7 @@ public sealed class LanguageService
 
         _completionProvider = new CompletionProvider(_manifest);
         _hoverProvider = new HoverProvider(_manifest);
+        _signatureHelpProvider = new SignatureHelpProvider(_manifest);
     }
 
         /// <summary>
@@ -78,6 +80,18 @@ public sealed class LanguageService
     {
         EnsureInitialized();
         return _hoverProvider!.GetHover(sql, cursorOffset);
+    }
+
+    /// <summary>
+    /// Returns signature help (parameter hints) for the function call enclosing
+    /// the cursor, or null when the cursor is not inside any call's argument list.
+    /// </summary>
+    /// <param name="sql">The full SQL text in the editor.</param>
+    /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
+    public SignatureHelp? GetSignatureHelp(string sql, int cursorOffset)
+    {
+        EnsureInitialized();
+        return _signatureHelpProvider!.GetSignatureHelp(sql, cursorOffset);
     }
 
     /// <summary>

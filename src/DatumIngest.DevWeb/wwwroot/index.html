@@ -1434,9 +1434,15 @@
       // time the user pressed Enter for a fresh line — and Monaco then
       // selects the first match (alphabetically near 'ALTER'), so an
       // unsuspecting Enter to confirm gobbles the wrong word. Trigger only
-      // on intent-bearing characters: word boundary (space), member access
-      // (dot), argument separators (comma, paren).
-      triggerCharacters: [' ', '.', ',', '('],
+      // on intent-bearing characters: word boundary (space) and member
+      // access (dot). Argument separators ('(' and ',') are NOT triggers
+      // here — those fire signature help instead, and having both fire on
+      // the same character causes the completions popup to render in
+      // front of and obscure the signature tooltip. Inside an arg list
+      // the user can still pull up completions explicitly via Ctrl+Space,
+      // or just start typing — Monaco's quick-suggestions kick in on
+      // letters.
+      triggerCharacters: [' ', '.'],
       provideCompletionItems: async (model, position) => {
         const sql = model.getValue();
         const offset = model.getOffsetAt(position);
@@ -1485,6 +1491,44 @@
           range: lspRangeToMonaco(
             hover.startLine, hover.startColumn, hover.endLine, hover.endColumn),
           contents: [{ value: hover.contents }],
+        };
+      },
+    });
+
+    // Signature help (parameter hints): the floating tooltip that stays
+    // visible while the user types arguments inside a function call's
+    // parens. Triggers on `(` and `,` so the active-parameter highlight
+    // updates as the user moves between arguments. Re-trigger characters
+    // re-fire the request without dismissing the tooltip.
+    monaco.languages.registerSignatureHelpProvider('sql', {
+      signatureHelpTriggerCharacters: ['(', ','],
+      signatureHelpRetriggerCharacters: [','],
+      provideSignatureHelp: async (model, position) => {
+        const sql = model.getValue();
+        const offset = model.getOffsetAt(position);
+        let sig;
+        try {
+          sig = await postJson('/api/lang/signature', { sql, offset });
+        } catch { return null; }
+        if (!sig || !sig.signatures || sig.signatures.length === 0) return null;
+        return {
+          value: {
+            signatures: sig.signatures.map(s => ({
+              label: s.label,
+              documentation: s.documentation
+                ? { value: s.documentation, isTrusted: false }
+                : undefined,
+              parameters: (s.parameters || []).map(p => ({
+                label: p.label,
+                documentation: p.documentation
+                  ? { value: p.documentation, isTrusted: false }
+                  : undefined,
+              })),
+            })),
+            activeSignature: sig.activeSignature ?? 0,
+            activeParameter: sig.activeParameter ?? 0,
+          },
+          dispose: () => {},
         };
       },
     });
@@ -2666,7 +2710,7 @@
 
   async function loadUdfsSection() {
     const rows = await runIntrospectionQuery(
-      'SELECT name, parameters, return_type, body FROM system_udfs ORDER BY name');
+      'SELECT name, parameters, return_type, body, body_kind FROM system_udfs ORDER BY name');
     if (rows.length === 0) {
       return htmlNode('<div class="empty-state">No UDFs registered.<br><small>Use CREATE FUNCTION to add one.</small></div>');
     }
@@ -2942,11 +2986,19 @@
     return `${declares}\n\nEXEC ${prefix}.${name}(${args})`;
   }
 
-  // For UDFs we don't persist original source text — but system_udfs gives
-  // us the canonical parameters string and the formatted body, which is
-  // enough to recompose a CREATE OR ALTER FUNCTION whose round-trip is
-  // semantically identical (modulo whitespace).
+  // Macro UDFs don't persist original source — recompose from parameters,
+  // return type, and the formatted body expression. Procedural UDFs do
+  // persist their full source_text in the body column, so we rewrite the
+  // header to `CREATE OR ALTER FUNCTION` and leave the BEGIN…END body alone.
   function buildModifyTemplateFromUdfRow(udf) {
+    if ((udf.body_kind || 'macro').toLowerCase() === 'procedural') {
+      let src = udf.body || '';
+      src = src.replace(
+        /^\s*CREATE\s+(OR\s+REPLACE\s+|OR\s+ALTER\s+)?(PURE\s+)?FUNCTION\b/i,
+        (_match, _orPrefix, pureKw) =>
+          `CREATE OR ALTER ${pureKw ? 'PURE ' : ''}FUNCTION`);
+      return src || `CREATE OR ALTER FUNCTION ${udf.name}() RETURNS STRING BEGIN\n  RETURN ''\nEND`;
+    }
     const params = udf.parameters || '';
     const returns = udf.return_type ? ` RETURNS ${udf.return_type}` : '';
     const body = udf.body || 'NULL';
