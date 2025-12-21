@@ -1,3 +1,7 @@
+using System.Collections.Concurrent;
+
+using DatumIngest.Models;
+
 namespace DatumIngest.Functions;
 
 /// <summary>
@@ -15,6 +19,9 @@ public sealed class FunctionRegistry
     private readonly Dictionary<string, ITableValuedFunction> _tableValuedFunctions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IAggregateFunction> _aggregateFunctions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IWindowFunction> _windowFunctions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ModelScalarFunction> _resolvedModelFunctions =
+        new(StringComparer.OrdinalIgnoreCase);
+    private Func<ModelCatalog?>? _modelCatalogResolver;
 
     /// <summary>
     /// Registers a scalar function described by <typeparamref name="T"/>'s
@@ -183,12 +190,72 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
-    /// Looks up a scalar function by name.
+    /// Configures a resolver for the host's <see cref="ModelCatalog"/> so
+    /// <c>models.X(...)</c> calls dispatch through this registry as a
+    /// fallback when the regular scalar lookup misses. The resolver is
+    /// invoked lazily on each lookup so it sees the catalog's current state
+    /// — important because <c>TableCatalog.Models</c> is a mutable property
+    /// and may be (re)assigned after the registry is constructed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The hoisted query path (<c>ModelInvocationHoister</c> +
+    /// <c>ModelInvocationOperator</c>) doesn't go through this fallback —
+    /// the hoister extracts <c>models.X</c> calls before evaluation. This
+    /// fallback exists so unhoisted contexts (procedural UDF bodies,
+    /// directly-invoked expressions) can still reach the catalog.
+    /// </para>
+    /// </remarks>
+    /// <param name="resolver">
+    /// Callback returning the catalog (or <see langword="null"/> when no
+    /// catalog is attached). Pass <see langword="null"/> to disable the
+    /// fallback entirely.
+    /// </param>
+    public void SetModelCatalogResolver(Func<ModelCatalog?>? resolver)
+    {
+        _modelCatalogResolver = resolver;
+        _resolvedModelFunctions.Clear();
+    }
+
+    /// <summary>
+    /// Looks up a scalar function by name. Falls back to the model catalog
+    /// (when one is configured via <see cref="SetModelCatalogResolver"/>)
+    /// for names in the <c>models.</c> namespace; the resolved
+    /// <see cref="ModelScalarFunction"/> is cached so repeated lookups for
+    /// the same model name don't re-allocate an adapter.
     /// </summary>
     public IScalarFunction? TryGetScalar(string name)
     {
-        _scalarFunctions.TryGetValue(name, out IScalarFunction? function);
-        return function;
+        if (_scalarFunctions.TryGetValue(name, out IScalarFunction? function))
+        {
+            return function;
+        }
+        if (_resolvedModelFunctions.TryGetValue(name, out ModelScalarFunction? cached))
+        {
+            return cached;
+        }
+        if (TryResolveModelFunction(name, out ModelScalarFunction? resolved))
+        {
+            _resolvedModelFunctions[name] = resolved;
+            return resolved;
+        }
+        return null;
+    }
+
+    private bool TryResolveModelFunction(string name, out ModelScalarFunction resolved)
+    {
+        resolved = null!;
+        if (_modelCatalogResolver is null) return false;
+        if (!name.StartsWith("models.", StringComparison.OrdinalIgnoreCase)) return false;
+
+        ModelCatalog? catalog = _modelCatalogResolver();
+        if (catalog is null) return false;
+
+        string modelName = name["models.".Length..];
+        if (catalog.TryGetEntry(modelName) is null) return false;
+
+        resolved = new ModelScalarFunction(modelName, _modelCatalogResolver);
+        return true;
     }
 
     /// <summary>

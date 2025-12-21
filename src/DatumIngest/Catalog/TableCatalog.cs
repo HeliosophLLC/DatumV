@@ -62,6 +62,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this.Pool = pool;
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
+        // Wire the model-catalog fallback so unhoisted models.X(...) calls
+        // (procedural UDF bodies, EXEC, etc.) resolve through this catalog.
+        // The closure follows the parent-chain getter so child catalogs
+        // inherit the root's models without duplicating registrations.
+        this._functions.SetModelCatalogResolver(() => Models);
         this._udfs = new UdfRegistry();
         this._procedures = new ProcedureRegistry();
         this.Tables = new();

@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.Models;
 
 namespace DatumIngest.Tests.Catalog;
 
@@ -358,5 +359,88 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         List<DataValue> values = await CollectFirstColumnAsync(plan);
         Assert.Equal(500, values[0].AsInt32());
+    }
+
+    // ───────────────────── models.X dispatch from procedural body ─────────────────────
+
+    private static ModelCatalog BuildEchoCatalog()
+    {
+        ModelCatalog models = new(modelDirectory: Path.GetTempPath());
+        models.Register(new ModelCatalogEntry(
+            Name: "echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => EchoModel.Instance,
+            OptionalArgKinds: null));
+        return models;
+    }
+
+    [Fact]
+    public async Task ProceduralBody_CallsModel_DispatchesPerRowThroughCatalog()
+    {
+        // The reason PR 2 exists: a procedural UDF body that calls
+        // models.X(...) should dispatch per row through the model catalog.
+        // The hoister doesn't see the call (the body is opaque to the
+        // planner), so without the FunctionRegistry → ModelCatalog fallback,
+        // the body's evaluator throws "Unknown function: models.echo".
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["caption"],
+            new object?[] { "hello world" },
+            new object?[] { "another row" });
+        catalog.Models = BuildEchoCatalog();
+
+        catalog.Plan(
+            "CREATE FUNCTION wrap(@s STRING) RETURNS STRING BEGIN " +
+                "RETURN models.echo(@s) " +
+            "END");
+        IQueryPlan plan = catalog.Plan("SELECT udf.wrap(caption) FROM data");
+
+        List<string> rendered = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rendered.Add(batch[i][0].AsString(batch.Arena));
+            }
+        }
+
+        Assert.Equal(2, rendered.Count);
+        Assert.Equal("hello world", rendered[0]);
+        Assert.Equal("another row", rendered[1]);
+    }
+
+    [Fact]
+    public async Task ProceduralBody_CallsModelAfterDeclareBinding_EvaluatesOncePerRow()
+    {
+        // The motivating shape from the user's RewriteCaption use case:
+        // bind some intermediate values via DECLARE, then pass them through
+        // a model. Verifies the body's per-call VariableScope and the model
+        // dispatch path coexist correctly inside the same evaluator.
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["caption"],
+            new object?[] { "describe a forest" });
+        catalog.Models = BuildEchoCatalog();
+
+        catalog.Plan(
+            "CREATE FUNCTION rewrite(@caption STRING) RETURNS STRING BEGIN " +
+                "DECLARE @prompt STRING = concat('rewrite: ', @caption); " +
+                "RETURN models.echo(@prompt) " +
+            "END");
+        IQueryPlan plan = catalog.Plan("SELECT udf.rewrite(caption) FROM data");
+
+        List<string> rendered = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rendered.Add(batch[i][0].AsString(batch.Arena));
+            }
+        }
+
+        Assert.Single(rendered);
+        Assert.Equal("rewrite: describe a forest", rendered[0]);
     }
 }

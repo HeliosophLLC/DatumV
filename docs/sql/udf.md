@@ -499,7 +499,9 @@ inlining when loading them, so the stored form is always the as-written body.
   a `BEGIN … END` body are not resolved against the calling query's row.
   Pass columns through parameters.
 - **No scalar subqueries in procedural bodies.** `RETURN (SELECT ...)` parses
-  but fails at execution because the body evaluator runs synchronously.
+  but fails at execution because the body evaluator doesn't drive a query
+  plan — only direct expressions, function calls (including `udf.X` and
+  `models.X`), and variable references are resolvable inside the body.
 - **No BREAK/CONTINUE in procedural bodies.** These are parsed but rejected
   at runtime; use `IF`/`RETURN` to short-circuit.
 - **Subquery bodies don't see macro parameters.** A `@param` inside
