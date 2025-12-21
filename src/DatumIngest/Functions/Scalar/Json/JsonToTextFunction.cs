@@ -46,14 +46,18 @@ public sealed class JsonToTextFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<JsonToTextFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef doc = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef doc = args[0];
         if (doc.IsNull)
         {
-            return ValueRef.Null(DataKind.String);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
         }
         string text = CborJsonCodec.DecodeToJsonText(doc.AsByteSpan());
-        return ValueRef.FromString(text);
+        return new ValueTask<ValueRef>(ValueRef.FromString(text));
     }
 }

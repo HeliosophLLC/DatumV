@@ -16,7 +16,7 @@ namespace DatumIngest.Functions;
 /// <para>
 /// <c>ExpressionEvaluator</c> converts inputs at the function
 /// boundary: arena/sidecar-backed <see cref="DataValue"/>s are resolved
-/// into managed payloads before <see cref="IScalarFunction.Execute"/> is
+/// into managed payloads before <see cref="IScalarFunction.ExecuteAsync"/> is
 /// called. The function then operates entirely on managed memory and
 /// returns a <see cref="ValueRef"/>; the evaluator converts back to a
 /// <see cref="DataValue"/> (writing managed payloads to the query arena

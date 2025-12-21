@@ -52,20 +52,24 @@ public sealed class JsonValueFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<JsonValueFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef doc = arguments[0];
-        ValueRef path = arguments[1];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef doc = args[0];
+        ValueRef path = args[1];
 
         if (doc.IsNull || path.IsNull)
         {
-            return ValueRef.Null(DataKind.Unknown);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Unknown));
         }
 
         CborJsonCodec.CborWalkResult result =
             CborJsonCodec.WalkPath(doc.AsByteSpan(), path.AsString());
 
-        return result.Kind switch
+        ValueRef ret = result.Kind switch
         {
             // Missing path → SQL NULL (mirrors PG's json_value semantics).
             CborJsonCodec.CborWalkResultKind.NotFound => ValueRef.Null(DataKind.Unknown),
@@ -75,5 +79,6 @@ public sealed class JsonValueFunction : IFunction, IScalarFunction
             CborJsonCodec.CborWalkResultKind.Subdocument => ValueRef.Null(DataKind.Unknown),
             _ => ValueRef.Null(DataKind.Unknown),
         };
+        return new ValueTask<ValueRef>(ret);
     }
 }

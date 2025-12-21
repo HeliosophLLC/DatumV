@@ -43,26 +43,30 @@ public sealed class JsonTryParseFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<JsonTryParseFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
         if (input.IsNull)
         {
-            return ValueRef.Null(DataKind.Json);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Json));
         }
 
         try
         {
             byte[] cbor = CborJsonCodec.EncodeFromJsonText(input.AsString());
-            return ValueRef.FromBytes(DataKind.Json, cbor);
+            return new ValueTask<ValueRef>(ValueRef.FromBytes(DataKind.Json, cbor));
         }
         catch (System.Text.Json.JsonException)
         {
-            return ValueRef.Null(DataKind.Json);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Json));
         }
         catch (OverflowException)
         {
-            return ValueRef.Null(DataKind.Json);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Json));
         }
     }
 }

@@ -38,12 +38,16 @@ public sealed class LenFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<LenFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
         if (input.IsNull)
-            return ValueRef.Null(DataKind.Int32);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
 
-        return ValueRef.FromInt32(Encoding.UTF8.GetByteCount(input.AsString()));
+        return new ValueTask<ValueRef>(ValueRef.FromInt32(Encoding.UTF8.GetByteCount(input.AsString())));
     }
 }

@@ -32,21 +32,21 @@ public sealed class UpperLowerFunctionTests
     [InlineData("Hello, World!", "HELLO, WORLD!")]
     [InlineData("", "")]
     [InlineData("ALREADYUPPER", "ALREADYUPPER")]
-    public void Upper_Execute_ConvertsToUpper(string input, string expected)
+    public async Task Upper_Execute_ConvertsToUpper(string input, string expected)
     {
         UpperFunction function = new();
         EvaluationFrame frame = default;
-        ValueRef result = function.Execute([ValueRef.FromString(input)], in frame);
+        ValueRef result = await function.ExecuteAsync(new[] { ValueRef.FromString(input) }, frame, default);
         Assert.False(result.IsNull);
         Assert.Equal(expected, result.AsString());
     }
 
     [Fact]
-    public void Upper_Execute_NullInput_ReturnsNull()
+    public async Task Upper_Execute_NullInput_ReturnsNull()
     {
         UpperFunction function = new();
         EvaluationFrame frame = default;
-        ValueRef result = function.Execute([ValueRef.Null(DataKind.String)], in frame);
+        ValueRef result = await function.ExecuteAsync(new[] { ValueRef.Null(DataKind.String) }, frame, default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.String, result.Kind);
     }
@@ -95,21 +95,21 @@ public sealed class UpperLowerFunctionTests
     [InlineData("Hello, World!", "hello, world!")]
     [InlineData("", "")]
     [InlineData("alreadylower", "alreadylower")]
-    public void Lower_Execute_ConvertsToLower(string input, string expected)
+    public async Task Lower_Execute_ConvertsToLower(string input, string expected)
     {
         LowerFunction function = new();
         EvaluationFrame frame = default;
-        ValueRef result = function.Execute([ValueRef.FromString(input)], in frame);
+        ValueRef result = await function.ExecuteAsync(new[] { ValueRef.FromString(input) }, frame, default);
         Assert.False(result.IsNull);
         Assert.Equal(expected, result.AsString());
     }
 
     [Fact]
-    public void Lower_Execute_NullInput_ReturnsNull()
+    public async Task Lower_Execute_NullInput_ReturnsNull()
     {
         LowerFunction function = new();
         EvaluationFrame frame = default;
-        ValueRef result = function.Execute([ValueRef.Null(DataKind.String)], in frame);
+        ValueRef result = await function.ExecuteAsync(new[] { ValueRef.Null(DataKind.String) }, frame, default);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.String, result.Kind);
     }

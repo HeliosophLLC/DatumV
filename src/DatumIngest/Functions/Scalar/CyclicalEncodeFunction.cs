@@ -47,20 +47,24 @@ public sealed class CyclicalEncodeFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<CyclicalEncodeFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef valueArg = arguments[0];
-        ValueRef periodArg = arguments[1];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef valueArg = args[0];
+        ValueRef periodArg = args[1];
 
         if (valueArg.IsNull || periodArg.IsNull)
-            return ValueRef.NullArray(DataKind.Float32);
+            return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
 
         valueArg.TryToDouble(out double v);
         periodArg.TryToDouble(out double period);
 
         double angle = 2.0 * System.Math.PI * v / period;
-        return ValueRef.FromPrimitiveArray<float>(
+        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray<float>(
             [(float)System.Math.Sin(angle), (float)System.Math.Cos(angle)],
-            DataKind.Float32);
+            DataKind.Float32));
     }
 }

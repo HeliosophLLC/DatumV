@@ -46,10 +46,14 @@ public sealed class RandomStringFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<RandomStringFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        int index = Random.Shared.Next(arguments.Length);
-        return arguments[index];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        int index = Random.Shared.Next(args.Length);
+        return new ValueTask<ValueRef>(args[index]);
     }
 
     /// <inheritdoc />

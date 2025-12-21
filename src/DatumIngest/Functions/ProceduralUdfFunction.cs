@@ -9,7 +9,7 @@ namespace DatumIngest.Functions;
 /// Runtime adapter that lets a procedural UDF (a <c>CREATE FUNCTION … BEGIN…END</c>
 /// registration) participate in the same scalar-dispatch pipeline as built-in
 /// scalar functions. Constructed once per <see cref="UdfDescriptor"/> at
-/// <c>CREATE FUNCTION</c> time; <see cref="Execute"/> runs the procedural body
+/// <c>CREATE FUNCTION</c> time; <see cref="ExecuteAsync"/> runs the procedural body
 /// per call against a fresh <see cref="VariableScope"/> bound with the call-
 /// site arguments.
 /// </summary>
@@ -116,12 +116,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
 
     /// <inheritdoc/>
     public bool IsPure => _descriptor.IsPure;
-
-    /// <inheritdoc/>
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame) =>
-        throw new NotSupportedException(
-            $"Procedural UDF 'udf.{_descriptor.Name}' must be invoked via ExecuteAsync; " +
-            "the body's expression evaluator is async-only.");
 
     /// <inheritdoc/>
     public async ValueTask<ValueRef> ExecuteAsync(

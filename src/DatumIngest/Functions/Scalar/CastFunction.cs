@@ -57,10 +57,14 @@ public sealed class CastFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<CastFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
-        (DataKind targetKind, bool targetIsArray) = ResolveTarget(arguments[1]);
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
+        (DataKind targetKind, bool targetIsArray) = ResolveTarget(args[1]);
 
         // Array-typed casts are intentionally restrictive: source must already
         // be an array of the same element kind. Parsing a string into an array
@@ -70,11 +74,11 @@ public sealed class CastFunction : IFunction, IScalarFunction
         {
             if (input.IsNull)
             {
-                return ValueRef.NullArray(targetKind);
+                return new ValueTask<ValueRef>(ValueRef.NullArray(targetKind));
             }
             if (input.IsArray && input.Kind == targetKind)
             {
-                return input;
+                return new ValueTask<ValueRef>(input);
             }
             throw new InvalidOperationException(
                 $"cast() to Array<{targetKind}> requires the source to already be Array<{targetKind}>; "
@@ -92,17 +96,17 @@ public sealed class CastFunction : IFunction, IScalarFunction
 
         if (input.IsNull)
         {
-            return ValueRef.Null(targetKind);
+            return new ValueTask<ValueRef>(ValueRef.Null(targetKind));
         }
 
         if (input.Kind == targetKind)
         {
-            return input;
+            return new ValueTask<ValueRef>(input);
         }
 
         if (TryCastCore(input, targetKind, out ValueRef result))
         {
-            return result;
+            return new ValueTask<ValueRef>(result);
         }
 
         throw new InvalidOperationException(

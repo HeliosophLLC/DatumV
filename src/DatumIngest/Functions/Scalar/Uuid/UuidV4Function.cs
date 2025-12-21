@@ -33,8 +33,11 @@ public sealed class UuidV4Function : IFunction, IScalarFunction
         FunctionMetadata.Validate<UuidV4Function>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame) =>
-        ValueRef.FromUuid(Guid.NewGuid());
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken) =>
+        new(ValueRef.FromUuid(Guid.NewGuid()));
 
     /// <inheritdoc />
     public bool IsPure => false;

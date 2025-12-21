@@ -50,15 +50,19 @@ public sealed class AbsFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<AbsFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
         if (input.IsNull)
         {
-            return ValueRef.Null(input.Kind);
+            return new ValueTask<ValueRef>(ValueRef.Null(input.Kind));
         }
 
-        return input.Kind switch
+        ValueRef result = input.Kind switch
         {
             DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32
                 or DataKind.UInt64 or DataKind.UInt128 => input,
@@ -77,5 +81,6 @@ public sealed class AbsFunction : IFunction, IScalarFunction
                 Name,
                 $"does not support kind {input.Kind}."),
         };
+        return new ValueTask<ValueRef>(result);
     }
 }

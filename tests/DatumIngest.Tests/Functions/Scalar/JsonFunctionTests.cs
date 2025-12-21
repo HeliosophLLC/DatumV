@@ -20,20 +20,20 @@ public sealed class JsonFunctionTests
     // ─── json_parse ────────────────────────────────────────────────────────
 
     [Fact]
-    public void Parse_SimpleObject_ProducesJsonKind()
+    public async Task Parse_SimpleObject_ProducesJsonKind()
     {
-        ValueRef result = new JsonParseFunction().Execute(
-            [ValueRef.FromString("""{"a":1,"b":"x"}""")], in Frame);
+        ValueRef result = await new JsonParseFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("""{"a":1,"b":"x"}""") }, Frame, default);
 
         Assert.False(result.IsNull);
         Assert.Equal(DataKind.Json, result.Kind);
     }
 
     [Fact]
-    public void Parse_NullInput_ReturnsTypedNull()
+    public async Task Parse_NullInput_ReturnsTypedNull()
     {
-        ValueRef result = new JsonParseFunction().Execute(
-            [ValueRef.Null(DataKind.String)], in Frame);
+        ValueRef result = await new JsonParseFunction().ExecuteAsync(
+            new[] { ValueRef.Null(DataKind.String) }, Frame, default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Json, result.Kind);
@@ -42,10 +42,10 @@ public sealed class JsonFunctionTests
     // ─── json_try_parse ────────────────────────────────────────────────────
 
     [Fact]
-    public void TryParse_ValidJson_ReturnsJson()
+    public async Task TryParse_ValidJson_ReturnsJson()
     {
-        ValueRef result = new JsonTryParseFunction().Execute(
-            [ValueRef.FromString("""{"a":1}""")], in Frame);
+        ValueRef result = await new JsonTryParseFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("""{"a":1}""") }, Frame, default);
 
         Assert.False(result.IsNull);
         Assert.Equal(DataKind.Json, result.Kind);
@@ -53,20 +53,20 @@ public sealed class JsonFunctionTests
     }
 
     [Fact]
-    public void TryParse_InvalidJson_ReturnsTypedNull()
+    public async Task TryParse_InvalidJson_ReturnsTypedNull()
     {
-        ValueRef result = new JsonTryParseFunction().Execute(
-            [ValueRef.FromString("not json {")], in Frame);
+        ValueRef result = await new JsonTryParseFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("not json {") }, Frame, default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Json, result.Kind);
     }
 
     [Fact]
-    public void TryParse_NullInput_ReturnsTypedNull()
+    public async Task TryParse_NullInput_ReturnsTypedNull()
     {
-        ValueRef result = new JsonTryParseFunction().Execute(
-            [ValueRef.Null(DataKind.String)], in Frame);
+        ValueRef result = await new JsonTryParseFunction().ExecuteAsync(
+            new[] { ValueRef.Null(DataKind.String) }, Frame, default);
 
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Json, result.Kind);
@@ -244,32 +244,32 @@ public sealed class JsonFunctionTests
     // ─── Cast wiring ───────────────────────────────────────────────────────
 
     [Fact]
-    public void Cast_StringToJson_Parses()
+    public async Task Cast_StringToJson_Parses()
     {
         ValueRef typeArg = ValueRef.FromType(DataKind.Json);
-        ValueRef result = new CastFunction().Execute(
-            [ValueRef.FromString("""{"k":42}"""), typeArg], in Frame);
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("""{"k":42}"""), typeArg }, Frame, default);
 
         Assert.Equal(DataKind.Json, result.Kind);
         Assert.Equal(42L, ExecuteValue(result, "$.k").AsInt64());
     }
 
     [Fact]
-    public void TryCast_StringToJson_InvalidJson_ReturnsNull()
+    public async Task TryCast_StringToJson_InvalidJson_ReturnsNull()
     {
         ValueRef typeArg = ValueRef.FromType(DataKind.Json);
-        ValueRef result = new TryCastFunction().Execute(
-            [ValueRef.FromString("not valid json"), typeArg], in Frame);
+        ValueRef result = await new TryCastFunction().ExecuteAsync(
+            new[] { ValueRef.FromString("not valid json"), typeArg }, Frame, default);
 
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void Cast_JsonToString_ReturnsCanonicalText()
+    public async Task Cast_JsonToString_ReturnsCanonicalText()
     {
         ValueRef doc = Parse("""{"b":2,"a":1}""");
         ValueRef typeArg = ValueRef.FromType(DataKind.String);
-        ValueRef result = new CastFunction().Execute([doc, typeArg], in Frame);
+        ValueRef result = await new CastFunction().ExecuteAsync(new[] { doc, typeArg }, Frame, default);
 
         Assert.Equal(DataKind.String, result.Kind);
         Assert.Equal("""{"a":1,"b":2}""", result.AsString());
@@ -278,14 +278,14 @@ public sealed class JsonFunctionTests
     // ─── helpers ───────────────────────────────────────────────────────────
 
     private static ValueRef Parse(string jsonText) =>
-        new JsonParseFunction().Execute([ValueRef.FromString(jsonText)], in Frame);
+        new JsonParseFunction().ExecuteAsync(new[] { ValueRef.FromString(jsonText) }, Frame, default).GetAwaiter().GetResult();
 
     private static ValueRef ExecuteValue(ValueRef doc, string path) =>
-        new JsonValueFunction().Execute([doc, ValueRef.FromString(path)], in Frame);
+        new JsonValueFunction().ExecuteAsync(new[] { doc, ValueRef.FromString(path) }, Frame, default).GetAwaiter().GetResult();
 
     private static ValueRef ExecuteQuery(ValueRef doc, string path) =>
-        new JsonQueryFunction().Execute([doc, ValueRef.FromString(path)], in Frame);
+        new JsonQueryFunction().ExecuteAsync(new[] { doc, ValueRef.FromString(path) }, Frame, default).GetAwaiter().GetResult();
 
     private static string ToText(ValueRef doc) =>
-        new JsonToTextFunction().Execute([doc], in Frame).AsString();
+        new JsonToTextFunction().ExecuteAsync(new[] { doc }, Frame, default).GetAwaiter().GetResult().AsString();
 }

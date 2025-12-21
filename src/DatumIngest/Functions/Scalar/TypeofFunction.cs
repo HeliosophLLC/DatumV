@@ -39,8 +39,14 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<TypeofFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame) =>
-        ValueRef.FromType(arguments[0].Kind);
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        return new ValueTask<ValueRef>(ValueRef.FromType(args[0].Kind));
+    }
 
     /// <inheritdoc />
     public int QueryUnitCost => 0;

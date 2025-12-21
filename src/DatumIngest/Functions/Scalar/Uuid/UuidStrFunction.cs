@@ -34,10 +34,14 @@ public sealed class UuidStrFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<UuidStrFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
-        if (input.IsNull) return ValueRef.Null(DataKind.String);
-        return ValueRef.FromString(input.AsUuid().ToString("D"));
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
+        if (input.IsNull) return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
+        return new ValueTask<ValueRef>(ValueRef.FromString(input.AsUuid().ToString("D")));
     }
 }

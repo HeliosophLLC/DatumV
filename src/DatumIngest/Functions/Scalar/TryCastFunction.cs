@@ -36,26 +36,30 @@ public sealed class TryCastFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<TryCastFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
-        DataKind targetKind = CastFunction.ResolveTargetKind(arguments[1]);
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
+        DataKind targetKind = CastFunction.ResolveTargetKind(args[1]);
 
         if (input.IsNull)
         {
-            return ValueRef.Null(targetKind);
+            return new ValueTask<ValueRef>(ValueRef.Null(targetKind));
         }
 
         if (input.Kind == targetKind)
         {
-            return input;
+            return new ValueTask<ValueRef>(input);
         }
 
         if (CastFunction.TryCastCore(input, targetKind, out ValueRef result))
         {
-            return result;
+            return new ValueTask<ValueRef>(result);
         }
 
-        return ValueRef.Null(targetKind);
+        return new ValueTask<ValueRef>(ValueRef.Null(targetKind));
     }
 }

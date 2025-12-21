@@ -123,6 +123,6 @@ public sealed class ConcatFunctionTests
     {
         ConcatFunction function = new();
         EvaluationFrame frame = default;
-        return function.Execute(arguments, in frame);
+        return function.ExecuteAsync(arguments, frame, default).GetAwaiter().GetResult();
     }
 }

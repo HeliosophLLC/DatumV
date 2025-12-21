@@ -57,20 +57,24 @@ public sealed class ArrayToStringFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<ArrayToStringFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef arrayArg = arguments[0];
-        ValueRef delimiterArg = arguments[1];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef arrayArg = args[0];
+        ValueRef delimiterArg = args[1];
 
         if (!arrayArg.IsArray)
             throw new FunctionArgumentException(Name, "first argument must be a String array.");
 
         if (arrayArg.IsNull || delimiterArg.IsNull)
-            return ValueRef.Null(DataKind.String);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
 
         string delimiter = delimiterArg.AsString();
-        string? nullReplacement = arguments.Length >= 3 && !arguments[2].IsNull
-            ? arguments[2].AsString()
+        string? nullReplacement = args.Length >= 3 && !args[2].IsNull
+            ? args[2].AsString()
             : null;
 
         ReadOnlySpan<ValueRef> elements = arrayArg.GetArrayElements();
@@ -95,6 +99,6 @@ public sealed class ArrayToStringFunction : IFunction, IScalarFunction
             first = false;
         }
 
-        return ValueRef.FromString(sb.ToString());
+        return new ValueTask<ValueRef>(ValueRef.FromString(sb.ToString()));
     }
 }

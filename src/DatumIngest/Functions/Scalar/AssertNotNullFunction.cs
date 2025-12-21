@@ -51,17 +51,21 @@ public sealed class AssertNotNullFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<AssertNotNullFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef value = arguments[0];
-        if (!value.IsNull) return value;
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef value = args[0];
+        if (!value.IsNull) return new ValueTask<ValueRef>(value);
 
         // Pull the diagnostic message out of the second argument (always
         // a string literal injected by the inliner). Falls back to a
         // generic message for the (unusual) call-site that hand-types
         // this function with a non-literal message.
-        string message = arguments[1].Kind == DataKind.String && !arguments[1].IsNull
-            ? arguments[1].AsString()
+        string message = args[1].Kind == DataKind.String && !args[1].IsNull
+            ? args[1].AsString()
             : "value is null";
         throw new InvalidOperationException(message);
     }

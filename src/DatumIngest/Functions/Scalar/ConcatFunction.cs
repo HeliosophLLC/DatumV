@@ -45,17 +45,21 @@ public sealed class ConcatFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<ConcatFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
         StringBuilder builder = new();
-        for (int i = 0; i < arguments.Length; i++)
+        for (int i = 0; i < args.Length; i++)
         {
-            if (arguments[i].IsNull)
+            if (args[i].IsNull)
             {
                 continue;
             }
-            builder.Append(arguments[i].AsString());
+            builder.Append(args[i].AsString());
         }
-        return ValueRef.FromString(builder.ToString());
+        return new ValueTask<ValueRef>(ValueRef.FromString(builder.ToString()));
     }
 }

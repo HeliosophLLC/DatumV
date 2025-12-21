@@ -37,16 +37,20 @@ public sealed class ArrayLengthFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<ArrayLengthFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef arrayArg = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef arrayArg = args[0];
 
         if (!arrayArg.IsArray)
             throw new FunctionArgumentException(Name, "argument must be an array.");
 
         if (arrayArg.IsNull)
-            return ValueRef.Null(DataKind.Int32);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Int32));
 
-        return ValueRef.FromInt32(arrayArg.GetArrayElements().Length);
+        return new ValueTask<ValueRef>(ValueRef.FromInt32(arrayArg.GetArrayElements().Length));
     }
 }

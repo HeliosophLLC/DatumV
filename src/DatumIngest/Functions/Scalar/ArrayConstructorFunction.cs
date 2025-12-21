@@ -56,15 +56,19 @@ public sealed class ArrayConstructorFunction : IFunction, IScalarFunction
     }
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        if (arguments.Length == 0)
-            return ValueRef.FromArray(DataKind.String, []);
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args.Length == 0)
+            return new ValueTask<ValueRef>(ValueRef.FromArray(DataKind.String, []));
 
-        DataKind elementKind = arguments[0].Kind;
-        ValueRef[] elements = new ValueRef[arguments.Length];
-        for (int i = 0; i < arguments.Length; i++)
-            elements[i] = arguments[i];
-        return ValueRef.FromArray(elementKind, elements);
+        DataKind elementKind = args[0].Kind;
+        ValueRef[] elements = new ValueRef[args.Length];
+        for (int i = 0; i < args.Length; i++)
+            elements[i] = args[i];
+        return new ValueTask<ValueRef>(ValueRef.FromArray(elementKind, elements));
     }
 }

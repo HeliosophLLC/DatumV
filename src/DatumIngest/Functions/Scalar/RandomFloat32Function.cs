@@ -47,20 +47,24 @@ public sealed class RandomFloat32Function : IFunction, IScalarFunction
         FunctionMetadata.Validate<RandomFloat32Function>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull)
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull)
         {
-            return ValueRef.Null(DataKind.Float32);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Float32));
         }
 
-        arguments[0].TryToDouble(out double minD);
-        arguments[1].TryToDouble(out double maxD);
+        args[0].TryToDouble(out double minD);
+        args[1].TryToDouble(out double maxD);
 
         float min = (float)minD;
         float max = (float)maxD;
         float r = Random.Shared.NextSingle();
-        return ValueRef.FromFloat32(min + (max - min) * r);
+        return new ValueTask<ValueRef>(ValueRef.FromFloat32(min + (max - min) * r));
     }
 
     /// <inheritdoc />

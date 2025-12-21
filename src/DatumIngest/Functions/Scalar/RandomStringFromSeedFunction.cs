@@ -57,21 +57,25 @@ public sealed class RandomStringFromSeedFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<RandomStringFromSeedFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef seedArg = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef seedArg = args[0];
         if (seedArg.IsNull)
         {
-            return ValueRef.Null(DataKind.String);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
         }
 
         int seed = unchecked((int)ReadSeed(seedArg));
         Random rng = new(seed);
 
-        // arguments[0] is the seed; the variadic strings start at index 1.
-        int valueCount = arguments.Length - 1;
+        // args[0] is the seed; the variadic strings start at index 1.
+        int valueCount = args.Length - 1;
         int pick = rng.Next(valueCount);
-        return arguments[1 + pick];
+        return new ValueTask<ValueRef>(args[1 + pick]);
     }
 
     private static long ReadSeed(ValueRef v) => v.Kind switch

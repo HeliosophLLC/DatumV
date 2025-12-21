@@ -50,15 +50,19 @@ public sealed class RandomFloat32FromSeedFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<RandomFloat32FromSeedFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef seedArg = arguments[0];
-        ValueRef minArg = arguments[1];
-        ValueRef maxArg = arguments[2];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef seedArg = args[0];
+        ValueRef minArg = args[1];
+        ValueRef maxArg = args[2];
 
         if (seedArg.IsNull || minArg.IsNull || maxArg.IsNull)
         {
-            return ValueRef.Null(DataKind.Float32);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Float32));
         }
 
         int seed = unchecked((int)ReadSeed(seedArg));
@@ -70,7 +74,7 @@ public sealed class RandomFloat32FromSeedFunction : IFunction, IScalarFunction
         float min = (float)minD;
         float max = (float)maxD;
         float r = rng.NextSingle();
-        return ValueRef.FromFloat32(min + (max - min) * r);
+        return new ValueTask<ValueRef>(ValueRef.FromFloat32(min + (max - min) * r));
     }
 
     private static long ReadSeed(ValueRef v) => v.Kind switch

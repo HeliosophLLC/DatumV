@@ -48,14 +48,18 @@ public sealed class JsonQueryFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<JsonQueryFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef doc = arguments[0];
-        ValueRef path = arguments[1];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef doc = args[0];
+        ValueRef path = args[1];
 
         if (doc.IsNull || path.IsNull)
         {
-            return ValueRef.Null(DataKind.Json);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Json));
         }
 
         // Take the source's underlying segment (zero-copy). WalkPath consumes
@@ -69,7 +73,7 @@ public sealed class JsonQueryFunction : IFunction, IScalarFunction
         if (result.Kind != CborJsonCodec.CborWalkResultKind.Subdocument)
         {
             // Missing path or scalar leaf → SQL NULL.
-            return ValueRef.Null(DataKind.Json);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Json));
         }
 
         // Compose a slice over the source's backing array — no copy. The
@@ -79,6 +83,6 @@ public sealed class JsonQueryFunction : IFunction, IScalarFunction
             sourceSegment.Array!,
             sourceSegment.Offset + result.SubdocOffset,
             result.SubdocLength);
-        return ValueRef.FromJsonSlice(resultSlice);
+        return new ValueTask<ValueRef>(ValueRef.FromJsonSlice(resultSlice));
     }
 }

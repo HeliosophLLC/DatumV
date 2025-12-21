@@ -47,20 +47,24 @@ public sealed class RoundFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<RoundFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef input = arguments[0];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef input = args[0];
         if (input.IsNull)
-            return ValueRef.Null(input.Kind);
+            return new ValueTask<ValueRef>(ValueRef.Null(input.Kind));
 
         int decimals = 0;
-        if (arguments.Length >= 2 && !arguments[1].IsNull)
+        if (args.Length >= 2 && !args[1].IsNull)
         {
-            arguments[1].TryToDouble(out double d);
+            args[1].TryToDouble(out double d);
             decimals = (int)d;
         }
 
-        return input.Kind switch
+        ValueRef result = input.Kind switch
         {
             DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128 or
             DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
@@ -77,5 +81,6 @@ public sealed class RoundFunction : IFunction, IScalarFunction
 
             _ => throw new FunctionArgumentException(Name, $"does not support kind {input.Kind}."),
         };
+        return new ValueTask<ValueRef>(result);
     }
 }

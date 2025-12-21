@@ -45,17 +45,21 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
         FunctionMetadata.Validate<ImageCropFunction>(argumentKinds);
 
     /// <inheritdoc />
-    public ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame)
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
-        ValueRef imgArg = arguments[0];
-        ValueRef xArg   = arguments[1];
-        ValueRef yArg   = arguments[2];
-        ValueRef wArg   = arguments[3];
-        ValueRef hArg   = arguments[4];
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        ValueRef imgArg = args[0];
+        ValueRef xArg   = args[1];
+        ValueRef yArg   = args[2];
+        ValueRef wArg   = args[3];
+        ValueRef hArg   = args[4];
 
         if (imgArg.IsNull || xArg.IsNull || yArg.IsNull || wArg.IsNull || hArg.IsNull)
         {
-            return ValueRef.Null(DataKind.Image);
+            return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
         }
 
         SKBitmap source = imgArg.AsImage();
@@ -79,6 +83,6 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
         }
 
         // subset shares pixel memory with source — Copy() produces an owned bitmap.
-        return ValueRef.FromImage(subset.Copy());
+        return new ValueTask<ValueRef>(ValueRef.FromImage(subset.Copy()));
     }
 }

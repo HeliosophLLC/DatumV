@@ -35,44 +35,36 @@ public interface IScalarFunction
     /// objects before calling, and converts the returned
     /// <see cref="ValueRef"/> back to a <see cref="DataValue"/> after.
     /// </summary>
-    /// <param name="arguments">Argument values.</param>
-    /// <param name="frame">
-    /// Per-row evaluation frame, available for functions that need
-    /// row context (correlated columns, sidecar-bound source tables).
-    /// Most scalar functions can ignore it.
-    /// </param>
-    ValueRef Execute(ReadOnlySpan<ValueRef> arguments, in EvaluationFrame frame);
-
-    /// <summary>
-    /// Async variant of <see cref="Execute"/>. The default implementation
-    /// wraps the sync method in a synchronously-completed
-    /// <see cref="ValueTask{TResult}"/> — allocation-free for sync-only
-    /// functions, which is the majority. Functions that need genuine async
-    /// (model dispatch, network I/O, file reads) override this directly and
-    /// leave <see cref="Execute"/> to throw or forward to a sync wrapper.
-    /// </summary>
     /// <remarks>
     /// <para>
-    /// Argument shape change vs the sync method: <see cref="ReadOnlyMemory{T}"/>
-    /// instead of <see cref="ReadOnlySpan{T}"/>, value <see cref="EvaluationFrame"/>
-    /// instead of <c>in</c>. Spans and <c>in</c> parameters are stack-only and
-    /// can't cross an <c>await</c>, which would forbid every interesting async
-    /// implementation. The evaluator allocates the argument buffer on the heap
-    /// (<see cref="System.Buffers.ArrayPool{T}"/>) so callers see no extra
-    /// allocation — only the slice shape changes.
+    /// Synchronously-completing implementations return
+    /// <c>new ValueTask&lt;ValueRef&gt;(result)</c> — allocation-free, no state
+    /// machine. Implementations that perform I/O (model dispatch, network
+    /// calls) mark themselves <c>async</c> and use <c>await</c> normally.
+    /// </para>
+    /// <para>
+    /// <see cref="ReadOnlyMemory{T}"/> rather than <see cref="ReadOnlySpan{T}"/>
+    /// because spans and <c>in</c> parameters are stack-only and can't cross
+    /// an <c>await</c>. Recover the span at the top of a sync body via
+    /// <see cref="ReadOnlyMemory{T}.Span"/>; the evaluator allocates the
+    /// argument buffer on the heap so callers see no extra allocation.
     /// </para>
     /// </remarks>
     /// <param name="arguments">Argument values, in declaration order.</param>
-    /// <param name="frame">Per-row evaluation frame; see <see cref="Execute"/>.</param>
+    /// <param name="frame">
+    /// Per-row evaluation frame, available for functions that need row context
+    /// (correlated columns, sidecar-bound source tables). Most scalar functions
+    /// can ignore it.
+    /// </param>
     /// <param name="cancellationToken">
     /// Cooperative cancellation. Implementations that perform I/O (model
-    /// dispatch, network calls) should honour it; sync wrappers ignore it.
+    /// dispatch, network calls) should honour it; pure-arithmetic functions
+    /// can ignore it.
     /// </param>
     ValueTask<ValueRef> ExecuteAsync(
         ReadOnlyMemory<ValueRef> arguments,
         EvaluationFrame frame,
-        CancellationToken cancellationToken)
-        => new(Execute(arguments.Span, in frame));
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Cost weight of a single invocation in Query Units (QU). Used for
