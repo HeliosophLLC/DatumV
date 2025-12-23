@@ -91,7 +91,7 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
 
         catalog.Plan(
             "CREATE FUNCTION twin() RETURNS STRING BEGIN " +
-                "DECLARE @x FLOAT32 = random_float32(0, 1); " +
+                "DECLARE @x FLOAT32 = random(0.0, 1.0); " +
                 "RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING)) " +
             "END");
         IQueryPlan plan = catalog.Plan("SELECT udf.twin() FROM data");

@@ -388,9 +388,9 @@ public class UdfInlinerTests : ServiceTestBase
         // engine sees N independent calls when the UDF appears N times.
         UdfRegistry registry = new();
         registry.Register(CreateUdf(
-            "CREATE FUNCTION roll() AS random_float32(0.7, 1.0)"));
+            "CREATE FUNCTION roll() AS random(0.7, 1.0)"));
 
-        // Same call site twice — both inline to independent random_float32 calls.
+        // Same call site twice — both inline to independent random calls.
         QueryExpression q = SqlParser.Parse(
             "SELECT udf.roll() AS a, udf.roll() AS b FROM dual");
         QueryExpression inlined = UdfInliner.Inline(q, registry);
@@ -398,8 +398,8 @@ public class UdfInlinerTests : ServiceTestBase
         SelectStatement stmt = ((SelectQueryExpression)inlined).Statement;
         FunctionCallExpression aCall = Assert.IsType<FunctionCallExpression>(stmt.Columns[0].Expression);
         FunctionCallExpression bCall = Assert.IsType<FunctionCallExpression>(stmt.Columns[1].Expression);
-        Assert.Equal("random_float32", aCall.FunctionName);
-        Assert.Equal("random_float32", bCall.FunctionName);
+        Assert.Equal("random", aCall.FunctionName);
+        Assert.Equal("random", bCall.FunctionName);
         // Two AST nodes — not a shared reference. Each call site evaluates
         // independently; the planner will not CSE them.
         Assert.NotSame(aCall, bCall);

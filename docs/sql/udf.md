@@ -8,7 +8,7 @@ shapes with different trade-offs:
 
 - **Macro UDFs** (`AS expression`) — the body is a scalar expression inlined
   at plan time. The call site sees the substituted body; no UDF boundary
-  remains at execution. Nondeterministic primitives (`random_float32`,
+  remains at execution. Nondeterministic primitives (`random`,
   `models.*`) re-evaluate per reference, giving each call site its own
   independent roll.
 - **Procedural UDFs** (`BEGIN … END`) — the body is a statement sequence
@@ -98,13 +98,13 @@ scope each time.
 ```sql
 CREATE FUNCTION twin() RETURNS STRING
 BEGIN
-    DECLARE @x FLOAT32 = random_float32(0, 1);
+    DECLARE @x FLOAT32 = random(0.0, 1.0);
     RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))
 END
 ```
 
 `@x` is evaluated once when the DECLARE runs and reused both times it
-appears in the RETURN. A macro UDF would re-evaluate `random_float32(0, 1)`
+appears in the RETURN. A macro UDF would re-evaluate `random(0.0, 1.0)`
 at every reference, producing two different numbers.
 
 ### Body Statements
@@ -206,7 +206,7 @@ inlined at plan time, so CSE sees the expanded expression rather than a
 to know the UDF is deterministic.
 
 **Correctness note:** Declaring a UDF `PURE` when its body calls
-`random_float32`, `now()`, `models.*`, or any other impure function silently
+`random`, `now()`, `models.*`, or any other impure function silently
 makes CSE consolidate calls that should be independent. The engine trusts
 the declaration — the burden is on the author.
 
@@ -354,7 +354,7 @@ CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
             random_string('gothic', 'folk horror', 'cosmic horror'),
             random_string('possession', 'curse', 'time loop')
         ),
-        random_float32(0.7, 1.0));
+        random(0.7, 1.0));
 ```
 
 ## Cycle Detection
@@ -476,7 +476,7 @@ The on-disk format stores the body shape in `body_kind`:
       "returnIsNotNull": false,
       "body_kind": "procedural",
       "is_pure": false,
-      "source_text": "BEGIN\n    DECLARE @x FLOAT32 = random_float32(0, 1);\n    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))\nEND"
+      "source_text": "BEGIN\n    DECLARE @x FLOAT32 = random(0.0, 1.0);\n    RETURN concat(CAST(@x AS STRING), '/', CAST(@x AS STRING))\nEND"
     }
   ]
 }

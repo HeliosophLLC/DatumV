@@ -370,8 +370,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
         registry.RegisterScalar<Scalar.RandomStringFunction>();
         registry.RegisterScalar<Scalar.RandomStringFromSeedFunction>();
-        registry.RegisterScalar<Scalar.RandomFloat32Function>();
-        registry.RegisterScalar<Scalar.RandomFloat32FromSeedFunction>();
+        registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
         registry.RegisterScalar<Scalar.Uuid.UuidV7Function>();
         registry.RegisterScalar<Scalar.Uuid.UuidStrFunction>();
