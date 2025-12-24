@@ -351,8 +351,8 @@ CREATE FUNCTION dnd_rewrite_caption(@caption STRING) AS
     models.llama31_8b(
         udf.dnd_rewrite_prompt(
             @caption,
-            random_string('gothic', 'folk horror', 'cosmic horror'),
-            random_string('possession', 'curse', 'time loop')
+            random_choice(array('gothic', 'folk horror', 'cosmic horror')),
+            random_choice(array('possession', 'curse', 'time loop'))
         ),
         random(0.7, 1.0));
 ```
