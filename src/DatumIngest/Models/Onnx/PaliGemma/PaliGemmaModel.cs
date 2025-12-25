@@ -230,18 +230,18 @@ public sealed class PaliGemmaModel : OnnxModel
                     throw new InvalidOperationException(
                         $"PaliGemmaModel received a null image at row {row}; filter nulls upstream.");
                 }
-                byte[] bytes = image.AsBytes();
-                results[row] = ValueRef.FromString(CaptionOne(bytes, cancellationToken));
+                SKBitmap decoded = image.AsImage();
+                results[row] = ValueRef.FromString(CaptionOne(decoded, cancellationToken));
             }
             return results;
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private string CaptionOne(byte[] imageBytes, CancellationToken cancellationToken)
+    private string CaptionOne(SKBitmap decoded, CancellationToken cancellationToken)
     {
         // Step 1: image preprocessing → vision encoder → image embeddings.
         float[] pixelData = new float[InputChannels * _inputHeight * _inputWidth];
-        DecodeAndPackImage(imageBytes, pixelData);
+        ResizeAndPackImage(decoded, pixelData);
 
         DenseTensor<float> pixels = new(
             pixelData,
@@ -384,16 +384,12 @@ public sealed class PaliGemmaModel : OnnxModel
             "PaliGemmaModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
     /// <summary>
-    /// Decodes encoded image bytes, resizes to the model's input shape,
-    /// normalises with SigLIP statistics, and writes NCHW-layout floats
-    /// (R-plane, then G-plane, then B-plane) into <paramref name="dest"/>.
+    /// Resizes the source bitmap to the model's input shape, normalises with
+    /// SigLIP statistics, and writes NCHW-layout floats (R-plane, then
+    /// G-plane, then B-plane) into <paramref name="dest"/>.
     /// </summary>
-    private void DecodeAndPackImage(byte[] imageBytes, Span<float> dest)
+    private void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException(
-                "SkiaSharp failed to decode image bytes for PaliGemma input.");
-
         SKImageInfo target = new(_inputWidth, _inputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using SKBitmap resized = decoded.Resize(target, SKSamplingOptions.Default)
             ?? throw new InvalidOperationException(

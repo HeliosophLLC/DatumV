@@ -121,9 +121,9 @@ public sealed class MobileNetV2Model : OnnxModel
                     $"MobileNetV2 received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
 
-            byte[] imageBytes = image.AsBytes();
+            SKBitmap decoded = image.AsImage();
             int destOffset = row * perImageFloats;
-            DecodeAndPackImage(imageBytes, tensorData.AsSpan(destOffset, perImageFloats));
+            ResizeAndPackImage(decoded, tensorData.AsSpan(destOffset, perImageFloats));
         }
 
         DenseTensor<float> tensor = new(
@@ -170,16 +170,12 @@ public sealed class MobileNetV2Model : OnnxModel
     }
 
     /// <summary>
-    /// Decodes the encoded image bytes, resizes to 224×224 RGB, normalises with
-    /// the ImageNet statistics, and writes the result into <paramref name="dest"/>
-    /// in NCHW layout (R-plane, then G-plane, then B-plane).
+    /// Resizes the source bitmap to 224×224 RGB, normalises with the ImageNet
+    /// statistics, and writes the result into <paramref name="dest"/> in NCHW
+    /// layout (R-plane, then G-plane, then B-plane).
     /// </summary>
-    private static void DecodeAndPackImage(byte[] imageBytes, Span<float> dest)
+    private static void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException(
-                "SkiaSharp failed to decode image bytes for MobileNetV2 input. The bytes may be corrupted or in an unsupported format.");
-
         SKImageInfo targetInfo = new(InputWidth, InputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
             ?? throw new InvalidOperationException(

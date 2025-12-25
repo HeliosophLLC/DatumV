@@ -163,9 +163,9 @@ public sealed class YoloXModel : OnnxModel
                 throw new InvalidOperationException(
                     $"YoloXModel received a null image at row {row}; filter nulls upstream.");
             }
-            byte[] bytes = image.AsBytes();
-            DecodeAndPackBgrLetterbox(
-                bytes,
+            SKBitmap decoded = image.AsImage();
+            ResizeAndPackBgrLetterbox(
+                decoded,
                 tensorData.AsSpan(row * perImageFloats, perImageFloats),
                 _inputSize,
                 out scales[row]);
@@ -255,20 +255,17 @@ public sealed class YoloXModel : OnnxModel
             "YoloXModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
     /// <summary>
-    /// Decodes the encoded image bytes, letterbox-resizes preserving
-    /// aspect ratio, places the resized image in the top-left of the
-    /// padded square (filling the rest with gray <c>114</c>), and writes
-    /// the result to <paramref name="dest"/> in <strong>BGR NCHW</strong>
-    /// layout with <strong>no normalisation</strong> (raw 0–255 float).
-    /// Outputs the scale factor (<c>min(target/h, target/w)</c>) so post-
-    /// processing can reverse the letterbox.
+    /// Letterbox-resizes the source bitmap preserving aspect ratio, places
+    /// the resized image in the top-left of the padded square (filling the
+    /// rest with gray <c>114</c>), and writes the result to
+    /// <paramref name="dest"/> in <strong>BGR NCHW</strong> layout with
+    /// <strong>no normalisation</strong> (raw 0–255 float). Outputs the
+    /// scale factor (<c>min(target/h, target/w)</c>) so post-processing can
+    /// reverse the letterbox.
     /// </summary>
-    private static void DecodeAndPackBgrLetterbox(
-        byte[] imageBytes, Span<float> dest, int targetSize, out float scale)
+    private static void ResizeAndPackBgrLetterbox(
+        SKBitmap decoded, Span<float> dest, int targetSize, out float scale)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("SkiaSharp failed to decode image bytes for YOLOX input.");
-
         int origW = decoded.Width;
         int origH = decoded.Height;
 

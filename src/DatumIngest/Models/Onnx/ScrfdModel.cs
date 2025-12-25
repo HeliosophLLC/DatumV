@@ -187,9 +187,9 @@ public sealed class ScrfdModel : OnnxModel
                 ? rowOverrides[1].ToFloat()
                 : IouThreshold;
 
-            byte[] bytes = image.AsBytes();
+            SKBitmap decoded = image.AsImage();
             float[] tensorData = new float[planeFloats];
-            float ratio = LetterboxAndPackNchwRgb(bytes, tensorData);
+            float ratio = LetterboxAndPackNchwRgb(decoded, tensorData);
             float inverseScale = 1f / ratio;
 
             float capturedConfidence = rowConfidence;
@@ -305,11 +305,8 @@ public sealed class ScrfdModel : OnnxModel
     /// zero-pixel would produce (<c>-127.5/128</c>), matching OpenCV's
     /// <c>blobFromImage</c> behaviour on a zero-padded canvas.
     /// </summary>
-    private static float LetterboxAndPackNchwRgb(byte[] imageBytes, float[] dest)
+    private static float LetterboxAndPackNchwRgb(SKBitmap decoded, float[] dest)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("SkiaSharp failed to decode image bytes for SCRFD input.");
-
         int origW = decoded.Width;
         int origH = decoded.Height;
 

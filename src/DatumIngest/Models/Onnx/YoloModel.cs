@@ -155,8 +155,8 @@ public sealed class YoloModel : OnnxModel
                 throw new InvalidOperationException(
                     $"YoloModel received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
-            byte[] bytes = image.AsBytes();
-            DecodeAndPack(bytes, tensorData.AsSpan(row * perImageFloats, perImageFloats), out int origW, out int origH);
+            SKBitmap decoded = image.AsImage();
+            ResizeAndPack(decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats), out int origW, out int origH);
             scaleX[row] = origW / (float)InputSize;
             scaleY[row] = origH / (float)InputSize;
         }
@@ -247,10 +247,8 @@ public sealed class YoloModel : OnnxModel
         => throw new InvalidOperationException(
             "YoloModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
-    private static void DecodeAndPack(byte[] imageBytes, Span<float> dest, out int origWidth, out int origHeight)
+    private static void ResizeAndPack(SKBitmap decoded, Span<float> dest, out int origWidth, out int origHeight)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("SkiaSharp failed to decode image bytes for YOLO input.");
         origWidth = decoded.Width;
         origHeight = decoded.Height;
 

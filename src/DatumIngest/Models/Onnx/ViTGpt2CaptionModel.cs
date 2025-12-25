@@ -180,8 +180,8 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
                 throw new InvalidOperationException(
                     $"ViTGpt2CaptionModel received a null image at row {row}; filter nulls upstream.");
             }
-            byte[] bytes = image.AsBytes();
-            DecodeAndPackImage(bytes, tensorData.AsSpan(row * perImageFloats, perImageFloats));
+            SKBitmap decoded = image.AsImage();
+            ResizeAndPackImage(decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats));
         }
 
         return await Task.Run<IReadOnlyList<ValueRef>>(() =>
@@ -247,16 +247,12 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
             "ViTGpt2CaptionModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
     /// <summary>
-    /// Decodes the encoded image bytes, resizes to 224×224 RGB, normalises
-    /// with ViT statistics, and writes the result into <paramref name="dest"/>
-    /// in NCHW layout (R-plane, then G-plane, then B-plane).
+    /// Resizes the source bitmap to 224×224 RGB, normalises with ViT
+    /// statistics, and writes the result into <paramref name="dest"/> in
+    /// NCHW layout (R-plane, then G-plane, then B-plane).
     /// </summary>
-    private static void DecodeAndPackImage(byte[] imageBytes, Span<float> dest)
+    private static void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
     {
-        using SKBitmap? decoded = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException(
-                "SkiaSharp failed to decode image bytes for ViT-GPT2 input.");
-
         SKImageInfo targetInfo = new(InputWidth, InputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
             ?? throw new InvalidOperationException(
