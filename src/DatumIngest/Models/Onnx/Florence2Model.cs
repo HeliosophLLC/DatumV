@@ -60,9 +60,6 @@ public sealed class Florence2Model : OnnxModel
     private const int InputHeight = 768;
     private const int InputChannels = 3;
 
-    private static readonly float[] MeanValues = [0.485f, 0.456f, 0.406f];
-    private static readonly float[] StdValues = [0.229f, 0.224f, 0.225f];
-
     // BART special tokens used by Florence-2.
     private const int BosTokenId = 0;       // <s>
     private const int EosTokenId = 2;       // </s>
@@ -215,7 +212,10 @@ public sealed class Florence2Model : OnnxModel
                     $"Florence2Model received a null image at row {row}; filter nulls upstream.");
             }
             SKBitmap decoded = image.AsImage();
-            ResizeAndPackImage(decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats));
+            ImageTensorPrep.StretchAndPackNchw(
+                decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats),
+                InputWidth, InputHeight,
+                ImageTensorPrep.ImageNetScale, ImageTensorPrep.ImageNetBias);
         }
 
         return await Task.Run<IReadOnlyList<ValueRef>>(() =>
@@ -414,33 +414,6 @@ public sealed class Florence2Model : OnnxModel
             .Replace("</s>", string.Empty, StringComparison.Ordinal)
             .Replace("<pad>", string.Empty, StringComparison.Ordinal)
             .Replace("<unk>", string.Empty, StringComparison.Ordinal);
-    }
-
-    private static void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
-    {
-        SKImageInfo targetInfo = new(InputWidth, InputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {InputWidth}×{InputHeight} for Florence-2 input.");
-
-        int planeSize = InputHeight * InputWidth;
-        nint pixelPtr = resized.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-            for (int yx = 0; yx < planeSize; yx++)
-            {
-                int srcOffset = yx * 4;
-                float r = source[srcOffset]     / 255f;
-                float g = source[srcOffset + 1] / 255f;
-                float b = source[srcOffset + 2] / 255f;
-
-                dest[yx]                 = (r - MeanValues[0]) / StdValues[0];
-                dest[planeSize + yx]     = (g - MeanValues[1]) / StdValues[1];
-                dest[2 * planeSize + yx] = (b - MeanValues[2]) / StdValues[2];
-            }
-        }
     }
 
     private static int ArgMax(ReadOnlySpan<float> values)

@@ -164,11 +164,9 @@ public sealed class YoloXModel : OnnxModel
                     $"YoloXModel received a null image at row {row}; filter nulls upstream.");
             }
             SKBitmap decoded = image.AsImage();
-            ResizeAndPackBgrLetterbox(
-                decoded,
-                tensorData.AsSpan(row * perImageFloats, perImageFloats),
-                _inputSize,
-                out scales[row]);
+            scales[row] = ImageTensorPrep.LetterboxAndPackNchw(
+                decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats),
+                _inputSize, scale: 1f, bias: 0f, padFill: PadValue, bgr: true);
         }
 
         return await Task.Run<IReadOnlyList<ValueRef>>(() =>
@@ -253,68 +251,6 @@ public sealed class YoloXModel : OnnxModel
         int batchSize)
         => throw new InvalidOperationException(
             "YoloXModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
-
-    /// <summary>
-    /// Letterbox-resizes the source bitmap preserving aspect ratio, places
-    /// the resized image in the top-left of the padded square (filling the
-    /// rest with gray <c>114</c>), and writes the result to
-    /// <paramref name="dest"/> in <strong>BGR NCHW</strong> layout with
-    /// <strong>no normalisation</strong> (raw 0–255 float). Outputs the
-    /// scale factor (<c>min(target/h, target/w)</c>) so post-processing can
-    /// reverse the letterbox.
-    /// </summary>
-    private static void ResizeAndPackBgrLetterbox(
-        SKBitmap decoded, Span<float> dest, int targetSize, out float scale)
-    {
-        int origW = decoded.Width;
-        int origH = decoded.Height;
-
-        // Letterbox scale: fit longest side into target.
-        scale = MathF.Min(targetSize / (float)origH, targetSize / (float)origW);
-        int newW = (int)(origW * scale);
-        int newH = (int)(origH * scale);
-
-        // Resize preserving aspect ratio.
-        SKImageInfo resizedInfo = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(resizedInfo, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {newW}×{newH} for YOLOX letterbox.");
-
-        int planeSize = targetSize * targetSize;
-        // Initialise all three channel planes with the gray pad value (114).
-        // YOLOX's training preproc fills the pad region with 114 in every
-        // channel — same value for B, G, R.
-        for (int i = 0; i < planeSize; i++)
-        {
-            dest[i] = PadValue;                  // B plane
-            dest[planeSize + i] = PadValue;      // G plane
-            dest[2 * planeSize + i] = PadValue;  // R plane
-        }
-
-        // Overwrite the top-left (newH × newW) region with the resized image,
-        // re-ordering RGBA → BGR.
-        nint pixelPtr = resized.GetPixels();
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-            for (int y = 0; y < newH; y++)
-            {
-                int rowDestBase = y * targetSize;
-                int rowSrcBase = y * newW * 4;
-                for (int x = 0; x < newW; x++)
-                {
-                    int srcOffset = rowSrcBase + x * 4;
-                    int destIdx = rowDestBase + x;
-
-                    // SKColorType.Rgba8888 byte order: R(0), G(1), B(2), A(3).
-                    // YOLOX wants BGR channel order in the output tensor.
-                    dest[destIdx]                   = source[srcOffset + 2]; // B → channel 0
-                    dest[planeSize + destIdx]       = source[srcOffset + 1]; // G → channel 1
-                    dest[2 * planeSize + destIdx]   = source[srcOffset];     // R → channel 2
-                }
-            }
-        }
-    }
 
     /// <summary>
     /// Decodes a single image's <c>[anchors × 85]</c> output slice

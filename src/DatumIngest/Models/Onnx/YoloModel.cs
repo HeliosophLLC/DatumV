@@ -156,9 +156,11 @@ public sealed class YoloModel : OnnxModel
                     $"YoloModel received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
             SKBitmap decoded = image.AsImage();
-            ResizeAndPack(decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats), out int origW, out int origH);
-            scaleX[row] = origW / (float)InputSize;
-            scaleY[row] = origH / (float)InputSize;
+            scaleX[row] = decoded.Width / (float)InputSize;
+            scaleY[row] = decoded.Height / (float)InputSize;
+            ImageTensorPrep.StretchAndPackNchw(
+                decoded, tensorData.AsSpan(row * perImageFloats, perImageFloats),
+                InputSize, InputSize, 1f / 255f, 0f);
         }
 
         return await Task.Run<IReadOnlyList<ValueRef>>(() =>
@@ -246,32 +248,6 @@ public sealed class YoloModel : OnnxModel
         int batchSize)
         => throw new InvalidOperationException(
             "YoloModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
-
-    private static void ResizeAndPack(SKBitmap decoded, Span<float> dest, out int origWidth, out int origHeight)
-    {
-        origWidth = decoded.Width;
-        origHeight = decoded.Height;
-
-        SKImageInfo targetInfo = new(InputSize, InputSize, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {InputSize}×{InputSize} for YOLO input.");
-
-        int planeSize = InputSize * InputSize;
-        nint pixelPtr = resized.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-            for (int yx = 0; yx < planeSize; yx++)
-            {
-                int srcOffset = yx * 4;
-                dest[yx] = source[srcOffset] / 255f;                          // R plane
-                dest[planeSize + yx] = source[srcOffset + 1] / 255f;          // G plane
-                dest[2 * planeSize + yx] = source[srcOffset + 2] / 255f;      // B plane
-            }
-        }
-    }
 
     /// <summary>
     /// Decodes a row's <c>[84 × 8400]</c> slice (column-major: values laid out

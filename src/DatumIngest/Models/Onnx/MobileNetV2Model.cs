@@ -45,9 +45,6 @@ public sealed class MobileNetV2Model : OnnxModel
     private const int InputChannels = 3;
     private const int ClassCount = 1000;
 
-    private static readonly float[] ImageNetMean = [0.485f, 0.456f, 0.406f];
-    private static readonly float[] ImageNetStd = [0.229f, 0.224f, 0.225f];
-
     private readonly string _onnxInputName;
     private readonly IReadOnlyList<string>? _labels;
 
@@ -123,7 +120,10 @@ public sealed class MobileNetV2Model : OnnxModel
 
             SKBitmap decoded = image.AsImage();
             int destOffset = row * perImageFloats;
-            ResizeAndPackImage(decoded, tensorData.AsSpan(destOffset, perImageFloats));
+            ImageTensorPrep.StretchAndPackNchw(
+                decoded, tensorData.AsSpan(destOffset, perImageFloats),
+                InputWidth, InputHeight,
+                ImageTensorPrep.ImageNetScale, ImageTensorPrep.ImageNetBias);
         }
 
         DenseTensor<float> tensor = new(
@@ -167,41 +167,6 @@ public sealed class MobileNetV2Model : OnnxModel
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// Resizes the source bitmap to 224×224 RGB, normalises with the ImageNet
-    /// statistics, and writes the result into <paramref name="dest"/> in NCHW
-    /// layout (R-plane, then G-plane, then B-plane).
-    /// </summary>
-    private static void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
-    {
-        SKImageInfo targetInfo = new(InputWidth, InputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {InputWidth}×{InputHeight} for MobileNetV2 input.");
-
-        int planeSize = InputHeight * InputWidth;
-        nint pixelPtr = resized.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-
-            for (int yx = 0; yx < planeSize; yx++)
-            {
-                int srcOffset = yx * 4;
-                // Skia gives us RGBA; ImageNet normalisation is per-channel on
-                // the [0, 1] float range, then (x − mean) / std.
-                float r = source[srcOffset] / 255f;
-                float g = source[srcOffset + 1] / 255f;
-                float b = source[srcOffset + 2] / 255f;
-
-                dest[yx] = (r - ImageNetMean[0]) / ImageNetStd[0];
-                dest[planeSize + yx] = (g - ImageNetMean[1]) / ImageNetStd[1];
-                dest[2 * planeSize + yx] = (b - ImageNetMean[2]) / ImageNetStd[2];
-            }
-        }
     }
 
     /// <summary>

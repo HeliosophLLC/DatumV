@@ -61,13 +61,11 @@ public sealed class ScrfdModel : OnnxModel
     // Pre-computed anchor counts at 640×640 input. K = (640/stride)² × 2.
     private static readonly int[] AnchorCountsByStride = [12800, 3200, 800];
 
-    // Standard SCRFD normalisation. The reference Python uses 127.5 mean
-    // and 1/128 scale; the slight mean/scale mismatch (mean is half of
-    // 255, scale is half of 256) is inherited from the InsightFace
-    // codebase. Matching it bit-for-bit is necessary — the network was
-    // trained against exactly this normalisation.
-    private const float InputMean = 127.5f;
-    private const float InputScale = 1f / 128f;
+    // SCRFD normalisation: (rawByte − 127.5) × (1/128).
+    // The slight mean/scale mismatch (mean is half of 255, scale is half of
+    // 256) is inherited from the InsightFace codebase — match it exactly.
+    private const float ScrfdNormScale = 1f / 128f;
+    private const float ScrfdNormBias = -127.5f / 128f; // = (0 − 127.5) × (1/128)
 
     private readonly string _onnxInputName;
 
@@ -189,7 +187,10 @@ public sealed class ScrfdModel : OnnxModel
 
             SKBitmap decoded = image.AsImage();
             float[] tensorData = new float[planeFloats];
-            float ratio = LetterboxAndPackNchwRgb(decoded, tensorData);
+            // padFill == ScrfdNormBias because a zero-byte pixel normalises to (0 − 127.5) × (1/128).
+            float ratio = ImageTensorPrep.LetterboxAndPackNchw(
+                decoded, tensorData, InputSize,
+                ScrfdNormScale, ScrfdNormBias, padFill: ScrfdNormBias);
             float inverseScale = 1f / ratio;
 
             float capturedConfidence = rowConfidence;
@@ -295,62 +296,6 @@ public sealed class ScrfdModel : OnnxModel
             _bboxOutputNames[i] = bboxName;
             _kpsOutputNames[i] = kpsName;
         }
-    }
-
-    /// <summary>
-    /// Letterboxes the image into the 640×640 NCHW tensor preserving
-    /// aspect ratio. Pixels are normalised as <c>(rgb - 127.5) / 128</c>
-    /// in RGB channel order. The image is placed at the top-left; the
-    /// padded region is filled with the same normalised value that a
-    /// zero-pixel would produce (<c>-127.5/128</c>), matching OpenCV's
-    /// <c>blobFromImage</c> behaviour on a zero-padded canvas.
-    /// </summary>
-    private static float LetterboxAndPackNchwRgb(SKBitmap decoded, float[] dest)
-    {
-        int origW = decoded.Width;
-        int origH = decoded.Height;
-
-        float ratio = MathF.Min((float)InputSize / origW, (float)InputSize / origH);
-        int newW = Math.Max(1, Math.Min(InputSize, (int)MathF.Round(origW * ratio)));
-        int newH = Math.Max(1, Math.Min(InputSize, (int)MathF.Round(origH * ratio)));
-
-        SKImageInfo targetInfo = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(targetInfo, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {newW}×{newH} for SCRFD letterbox.");
-
-        // Fill the entire tensor with the "zero pixel" value first — that's
-        // what blobFromImage would emit for the padded region. The actual
-        // image pixels overwrite the top-left rectangle below.
-        const float ZeroPixelNormalised = (0f - InputMean) * InputScale; // ≈ -0.992
-        Array.Fill(dest, ZeroPixelNormalised);
-
-        nint pixelPtr = resized.GetPixels();
-        int planeSize = InputSize * InputSize;
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-            // NCHW: each channel is a contiguous H*W plane.
-            // R plane: dest[0..planeSize), G plane: [planeSize..2*planeSize),
-            // B plane: [2*planeSize..3*planeSize). Skia gives RGBA bytes,
-            // so source offset 0=R, 1=G, 2=B.
-            for (int y = 0; y < newH; y++)
-            {
-                int srcRowOffset = y * newW * 4;
-                int dstRowOffset = y * InputSize;
-                for (int x = 0; x < newW; x++)
-                {
-                    int srcOffset = srcRowOffset + x * 4;
-                    int dstPixel = dstRowOffset + x;
-                    dest[dstPixel] = (source[srcOffset + 0] - InputMean) * InputScale;                 // R plane
-                    dest[planeSize + dstPixel] = (source[srcOffset + 1] - InputMean) * InputScale;     // G plane
-                    dest[2 * planeSize + dstPixel] = (source[srcOffset + 2] - InputMean) * InputScale; // B plane
-                }
-            }
-        }
-
-        return ratio;
     }
 
     private ValueRef DecodeImage(

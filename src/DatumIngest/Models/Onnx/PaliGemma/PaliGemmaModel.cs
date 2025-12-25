@@ -1,6 +1,7 @@
 using System.Text;
 using DatumIngest.Functions;
 using DatumIngest.Model;
+using DatumIngest.Models.Onnx;
 
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -49,12 +50,7 @@ namespace DatumIngest.Models.Onnx.PaliGemma;
 /// </remarks>
 public sealed class PaliGemmaModel : OnnxModel
 {
-    // SigLIP normalisation: mean=0.5, std=0.5 → output range [-1, 1].
-    // Different from ImageNet stats (which are baked into ViT-GPT2 and
-    // Florence-2). PaliGemma was trained with this convention.
     private const int InputChannels = 3;
-    private const float SigLipMean = 0.5f;
-    private const float SigLipStd = 0.5f;
 
     // Gemma special tokens (verified against tokenizer.json from optimum
     // exports). BOS is implicit (added by tokenizer); EOS terminates
@@ -241,7 +237,8 @@ public sealed class PaliGemmaModel : OnnxModel
     {
         // Step 1: image preprocessing → vision encoder → image embeddings.
         float[] pixelData = new float[InputChannels * _inputHeight * _inputWidth];
-        ResizeAndPackImage(decoded, pixelData);
+        // SigLIP normalisation: (rawByte/255 − 0.5) / 0.5 = rawByte * (2/255) − 1
+        ImageTensorPrep.StretchAndPackNchw(decoded, pixelData, _inputWidth, _inputHeight, 2f / 255f, -1f);
 
         DenseTensor<float> pixels = new(
             pixelData,
@@ -382,39 +379,6 @@ public sealed class PaliGemmaModel : OnnxModel
         int batchSize)
         => throw new InvalidOperationException(
             "PaliGemmaModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
-
-    /// <summary>
-    /// Resizes the source bitmap to the model's input shape, normalises with
-    /// SigLIP statistics, and writes NCHW-layout floats (R-plane, then
-    /// G-plane, then B-plane) into <paramref name="dest"/>.
-    /// </summary>
-    private void ResizeAndPackImage(SKBitmap decoded, Span<float> dest)
-    {
-        SKImageInfo target = new(_inputWidth, _inputHeight, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = decoded.Resize(target, SKSamplingOptions.Default)
-            ?? throw new InvalidOperationException(
-                $"SkiaSharp failed to resize image to {_inputWidth}×{_inputHeight} for PaliGemma input.");
-
-        int planeSize = _inputHeight * _inputWidth;
-        nint pixelPtr = resized.GetPixels();
-
-        unsafe
-        {
-            byte* source = (byte*)pixelPtr;
-            for (int yx = 0; yx < planeSize; yx++)
-            {
-                int srcOffset = yx * 4;
-                float r = source[srcOffset]     / 255f;
-                float g = source[srcOffset + 1] / 255f;
-                float b = source[srcOffset + 2] / 255f;
-
-                // SigLIP normalisation: subtract 0.5, divide 0.5 → range [-1, 1].
-                dest[yx]                 = (r - SigLipMean) / SigLipStd;
-                dest[planeSize + yx]     = (g - SigLipMean) / SigLipStd;
-                dest[2 * planeSize + yx] = (b - SigLipMean) / SigLipStd;
-            }
-        }
-    }
 
     private static int ArgMax(ReadOnlySpan<float> values)
     {
