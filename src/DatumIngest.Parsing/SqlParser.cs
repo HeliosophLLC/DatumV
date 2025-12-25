@@ -1626,8 +1626,21 @@ public static class SqlParser
         select (TableSource)new FunctionSource(GetTokenText(name), args, alias, ToSpan(name));
 
     /// <summary>A table source: subquery, function call, or table reference.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>No <c>.Try()</c> on <see cref="SubquerySourceParser"/>.</strong>
+    /// A <c>(</c> at table-source position unambiguously means subquery —
+    /// no other branch starts with it — so we commit on the open paren and
+    /// let any failure inside (a malformed SELECT, an unsupported clause
+    /// variant, an OFFSET that takes an expression instead of a literal)
+    /// surface with its real position rather than backtracking to a generic
+    /// "expected identifier" at the <c>(</c>. The <c>FunctionSource</c> vs
+    /// <c>TableReference</c> branch IS genuinely ambiguous (both start with
+    /// <see cref="SqlToken.Identifier"/>), so <c>.Try()</c> stays there.
+    /// </para>
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, TableSource> TableSourceParser =
-        SubquerySourceParser.Try()
+        SubquerySourceParser
             .Or(FunctionSourceParser.Try())
             .Or(TableReferenceParser);
 

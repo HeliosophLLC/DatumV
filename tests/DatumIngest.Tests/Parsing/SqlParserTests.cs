@@ -2389,4 +2389,61 @@ public class SqlParserTests : ServiceTestBase
         BinaryExpression and = Assert.IsType<BinaryExpression>(result.Where);
         Assert.Equal(BinaryOperator.And, and.Operator);
     }
+
+    // ───────────────────── Error message quality (deep failures inside subqueries) ─────────────────────
+
+    [Fact]
+    public void OffsetWithVariable_InsideSubquery_ErrorPointsAtOffsetNotAtFromParen()
+    {
+        // Regression for the user-reported issue: `OFFSET @var` inside a
+        // subquery was reporting the failure at `FROM (` ("expected
+        // identifier or stringliteral") because TableSourceParser wrapped
+        // SubquerySourceParser in `.Try()`. With the wrap removed, `(` at
+        // table-source position commits to the subquery branch and the
+        // OFFSET-clause failure surfaces at its real position. The error
+        // text isn't load-bearing — what matters is that the line/column
+        // points at the inner OFFSET, not the outer paren.
+        const string sql =
+            "SELECT * FROM (\n" +
+            "  SELECT * FROM t LIMIT 5 OFFSET @offset\n" +
+            ") T";
+
+        ParseException ex = Assert.Throws<ParseException>(() => SqlParser.Parse(sql));
+
+        // Outer FROM-paren is on line 1 col 15. Inner OFFSET starts on line 2.
+        // The error should be on line 2, not line 1.
+        Assert.DoesNotContain("line 1", ex.Message);
+        Assert.Contains("line 2", ex.Message);
+    }
+
+    [Fact]
+    public void SubqueryWithMalformedClause_ErrorPointsAtMalformedClauseNotAtFromParen()
+    {
+        // Same shape as the OFFSET case but with a different malformed
+        // inner clause — pins the general behaviour: `(` at table-source
+        // position commits to subquery, so any inner failure surfaces at
+        // its real position.
+        const string sql =
+            "SELECT * FROM (\n" +
+            "  SELECT * FROM t WHERE\n" + // WHERE without a predicate
+            ") T";
+
+        ParseException ex = Assert.Throws<ParseException>(() => SqlParser.Parse(sql));
+
+        // Failure should be on line 2/3 (where WHERE is incomplete), not line 1.
+        Assert.DoesNotContain("line 1", ex.Message);
+    }
+
+    [Fact]
+    public void ValidSubquery_StillParsesAfterTryRemoval()
+    {
+        // Sanity check: removing `.Try()` from SubquerySourceParser must
+        // not break the happy path. A well-formed subquery in FROM still
+        // parses cleanly.
+        SelectStatement result = Parse(
+            "SELECT * FROM (SELECT id, name FROM users WHERE id > 10) AS u");
+
+        Assert.NotNull(result.From);
+        Assert.IsType<SubquerySource>(result.From.Source);
+    }
 }
