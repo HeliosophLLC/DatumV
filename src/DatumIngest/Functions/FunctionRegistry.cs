@@ -356,6 +356,7 @@ public sealed class FunctionRegistry
         // Stage 4: concat. Stage 5: upper / lower. Stage 6: cast / try_cast /
         // typeof. Anything beyond is added back when a demo demands it.
         registry.RegisterScalar<Scalar.ConcatFunction>();
+        registry.RegisterScalar<Scalar.ConcatWsFunction>();
         registry.RegisterScalar<Scalar.UpperFunction>();
         registry.RegisterScalar<Scalar.LowerFunction>();
         registry.RegisterScalar<Scalar.LenFunction>();
@@ -374,6 +375,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Uuid.UuidV7Function>();
         registry.RegisterScalar<Scalar.Uuid.UuidStrFunction>();
         registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
+        registry.RegisterScalar<Scalar.HashSplitFunction>();
         registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
         registry.RegisterScalar<Scalar.ArrayToStringFunction>();
         registry.RegisterScalar<Scalar.ArrayLengthFunction>();
