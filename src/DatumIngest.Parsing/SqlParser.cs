@@ -79,8 +79,8 @@ public static class SqlParser
     private static QueryExpression ApplyTrailingClauses(
         QueryExpression query,
         OrderByClause? orderBy,
-        int? limit,
-        int? offset,
+        Expression? limit,
+        Expression? offset,
         IntoClause? into)
     {
         bool hasTrailing = orderBy is not null || limit is not null || offset is not null || into is not null;
@@ -1961,19 +1961,28 @@ public static class SqlParser
 
     // ───────────────────── LIMIT / OFFSET ─────────────────────
 
-    /// <summary>LIMIT count</summary>
-    private static readonly TokenListParser<SqlToken, int?> LimitParser =
+    /// <summary>
+    /// LIMIT expr — accepts any scalar expression that evaluates to an
+    /// integer at execute time. The runtime evaluator resolves
+    /// <c>@var</c> references against the active procedural variable
+    /// scope, lets call sites compose <c>random(...)</c> / arithmetic /
+    /// <c>udf.X(...)</c> into a row count, and constant-folds plain
+    /// numeric literals (the most common case) without runtime cost.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression?> LimitParser =
         from limitKw in Token.EqualTo(SqlToken.Limit)
-        from value in Token.EqualTo(SqlToken.NumberLiteral)
-            .Apply(Numerics.DecimalDouble)
-        select (int?)value;
+        from value in SP.Ref(() => ExpressionParser!)
+        select (Expression?)value;
 
-    /// <summary>OFFSET count</summary>
-    private static readonly TokenListParser<SqlToken, int?> OffsetParser =
+    /// <summary>
+    /// OFFSET expr — same shape as <see cref="LimitParser"/>: any scalar
+    /// expression yielding an integer, evaluated once at the start of the
+    /// operator's run.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression?> OffsetParser =
         from offsetKw in Token.EqualTo(SqlToken.Offset)
-        from value in Token.EqualTo(SqlToken.NumberLiteral)
-            .Apply(Numerics.DecimalDouble)
-        select (int?)value;
+        from value in SP.Ref(() => ExpressionParser!)
+        select (Expression?)value;
 
     // ───────────────────── Common Table Expressions ─────────────────────
 
@@ -3821,11 +3830,11 @@ public static class SqlParser
         }
 
         // ── LIMIT ──
-        int? limitValue = null;
+        Expression? limitValue = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Limit)
         {
             TokenList<SqlToken> remaining = new(tokenArray[position..]);
-            TokenListParserResult<SqlToken, int?> limitResult =
+            TokenListParserResult<SqlToken, Expression?> limitResult =
                 LimitParser.TryParse(remaining);
 
             if (!limitResult.HasValue)
@@ -3841,11 +3850,11 @@ public static class SqlParser
         }
 
         // ── OFFSET ──
-        int? offsetValue = null;
+        Expression? offsetValue = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Offset)
         {
             TokenList<SqlToken> remaining = new(tokenArray[position..]);
-            TokenListParserResult<SqlToken, int?> offsetResult =
+            TokenListParserResult<SqlToken, Expression?> offsetResult =
                 OffsetParser.TryParse(remaining);
 
             if (!offsetResult.HasValue)

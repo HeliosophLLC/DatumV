@@ -121,7 +121,7 @@ public sealed class CrossValidateParsingTests : ServiceTestBase
 
         Assert.NotNull(result.CrossValidate);
         Assert.NotNull(result.OrderBy);
-        Assert.Equal(100, result.Limit);
+        Assert.Equal(100, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
     }
 
     [Fact]

@@ -356,22 +356,62 @@ public static class QueryExplainer
 
     private static ExplainPlanNode BuildLimitNode(LimitOperator limit, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
-        string details = limit.Offset > 0
-            ? $"limit: {limit.Limit}, offset: {limit.Offset}"
-            : $"limit: {limit.Limit}";
+        string limitText = FormatExpression(limit.LimitExpression);
+        string details = limit.OffsetExpression is not null
+            ? $"limit: {limitText}, offset: {FormatExpression(limit.OffsetExpression)}"
+            : $"limit: {limitText}";
 
         ExplainPlanNode child = BuildNode(limit.Source, stats);
-        long effectiveLimit = limit.Limit + limit.Offset;
+
+        // Estimated row count is only meaningful when LIMIT (and OFFSET) are
+        // plan-time literals. For variable / function-driven limits we don't
+        // know the row budget at plan time, so propagate the child's estimate
+        // unchanged (matches "no LIMIT clause" behaviour for cost analysis).
+        long? effectiveLimit = TryFoldEffectiveLimit(limit.LimitExpression, limit.OffsetExpression);
 
         return new ExplainPlanNode
         {
             OperatorName = "Limit",
             Details = details,
             Children = { child },
-            EstimatedRows = child.EstimatedRows.HasValue
-                ? Math.Min(effectiveLimit, child.EstimatedRows.Value)
-                : effectiveLimit,
+            EstimatedRows = effectiveLimit.HasValue
+                ? (child.EstimatedRows.HasValue
+                    ? Math.Min(effectiveLimit.Value, child.EstimatedRows.Value)
+                    : effectiveLimit.Value)
+                : child.EstimatedRows,
         };
+    }
+
+    private static long? TryFoldEffectiveLimit(Expression limit, Expression? offset)
+    {
+        long? limitN = TryFoldIntegerLiteral(limit);
+        if (limitN is null) return null;
+        if (offset is null) return limitN;
+        long? offsetN = TryFoldIntegerLiteral(offset);
+        if (offsetN is null) return null;
+        return limitN + offsetN;
+    }
+
+    private static long? TryFoldIntegerLiteral(Expression expression)
+    {
+        // Mirror the parser's narrowing pattern: LIMIT 10 boxes as sbyte,
+        // LIMIT 1000 as short, etc. EXPLAIN's estimated row count needs
+        // every integer kind to surface a numeric value.
+        if (expression is LiteralExpression lit)
+        {
+            return lit.Value switch
+            {
+                sbyte sb => sb,
+                byte b => b,
+                short sh => sh,
+                ushort us => us,
+                int i => i,
+                uint u => u,
+                long l => l,
+                _ => null,
+            };
+        }
+        return null;
     }
 
     private static ExplainPlanNode BuildAliasNode(AliasOperator alias, IReadOnlyDictionary<string, FeatureManifest>? stats)

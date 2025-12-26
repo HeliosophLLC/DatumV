@@ -26,8 +26,8 @@ public sealed record SelectStatement(
     PivotClause? Pivot = null,
     UnpivotClause? Unpivot = null,
     OrderByClause? OrderBy = null,
-    int? Limit = null,
-    int? Offset = null,
+    Expression? Limit = null,
+    Expression? Offset = null,
     bool Distinct = false,
     IReadOnlyList<CommonTableExpression>? CommonTableExpressions = null,
     IReadOnlyList<LetBinding>? LetBindings = null,
@@ -949,8 +949,8 @@ public sealed record CompoundQueryExpression(
     bool All,
     QueryExpression Right,
     OrderByClause? OrderBy = null,
-    int? Limit = null,
-    int? Offset = null,
+    Expression? Limit = null,
+    Expression? Offset = null,
     IntoClause? Into = null) : QueryExpression;
 
 // ───────────────────── Statement hierarchy ─────────────────────

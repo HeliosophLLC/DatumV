@@ -110,7 +110,7 @@ public sealed class InstrumentedOperator : IQueryOperator
             Operators.OrderByOperator orderBy => new Operators.OrderByOperator(
                 InstrumentRecursive(orderBy.Source), orderBy.OrderByItems),
             Operators.LimitOperator limit => new Operators.LimitOperator(
-                InstrumentRecursive(limit.Source), limit.Limit, limit.Offset),
+                InstrumentRecursive(limit.Source), limit.LimitExpression, limit.OffsetExpression),
             Operators.AliasOperator alias => new Operators.AliasOperator(
                 InstrumentRecursive(alias.Source), alias.Alias),
             Operators.SubqueryOperator subquery => new Operators.SubqueryOperator(

@@ -112,7 +112,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
 
         Assert.NotNull(result.CommonTableExpressions);
         SelectQueryExpression body = Assert.IsType<SelectQueryExpression>(result.CommonTableExpressions[0].Body);
-        Assert.Equal(100, body.Statement.Limit);
+        Assert.Equal(100, Convert.ToInt32(((LiteralExpression)body.Statement.Limit!).Value));
     }
 
     /// <summary>
@@ -127,7 +127,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
         Assert.NotNull(result.CommonTableExpressions);
         SelectQueryExpression body = Assert.IsType<SelectQueryExpression>(result.CommonTableExpressions[0].Body);
         Assert.NotNull(body.Statement.OrderBy);
-        Assert.Equal(50, body.Statement.Limit);
+        Assert.Equal(50, Convert.ToInt32(((LiteralExpression)body.Statement.Limit!).Value));
     }
 
     /// <summary>

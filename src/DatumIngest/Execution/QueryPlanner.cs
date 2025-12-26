@@ -215,19 +215,58 @@ public sealed class QueryPlanner
     {
         if (compound.OrderBy is not null)
         {
-            int? topNRows = compound.Limit is not null
-                ? compound.Limit.Value + (compound.Offset ?? 0)
-                : null;
-
+            // topN-pushdown only fires when LIMIT (and any OFFSET) fold to a
+            // plan-time integer. Variable / function-call / random-driven
+            // limits force a full sort followed by LIMIT — correct, just
+            // not push-down-optimised.
+            int? topNRows = TryComputeTopN(compound.Limit, compound.Offset);
             source = new OrderByOperator(source, compound.OrderBy.Items, topNRows);
         }
 
         if (compound.Limit is not null)
         {
-            source = new LimitOperator(source, compound.Limit.Value, compound.Offset ?? 0);
+            source = new LimitOperator(source, compound.Limit, compound.Offset);
         }
 
         return source;
+    }
+
+    /// <summary>
+    /// Plan-time constant-fold of LIMIT (and optional OFFSET) into a single
+    /// topN row count, used to enable OrderByOperator's bounded-heap path.
+    /// Returns <see langword="null"/> when either expression isn't a
+    /// foldable literal — the planner then falls back to a full sort.
+    /// </summary>
+    private static int? TryComputeTopN(Expression? limit, Expression? offset)
+    {
+        if (limit is null) return null;
+        int? limitN = TryFoldInt(limit);
+        if (limitN is null) return null;
+        int offsetN = offset is null ? 0 : TryFoldInt(offset) ?? -1;
+        if (offsetN < 0) return null;
+        return limitN + offsetN;
+    }
+
+    private static int? TryFoldInt(Expression expression)
+    {
+        // Numeric literal narrowing in the parser picks the smallest integer
+        // type that fits, so a literal `10` is sbyte, `1000` is short, etc.
+        // All integer kinds fold cleanly into the LIMIT/OFFSET row count.
+        if (expression is LiteralExpression lit)
+        {
+            return lit.Value switch
+            {
+                sbyte sb => sb,
+                byte b => b,
+                short sh => sh,
+                ushort us => us,
+                int i => i,
+                uint u when u <= int.MaxValue => (int)u,
+                long l when l >= int.MinValue && l <= int.MaxValue => (int)l,
+                _ => null,
+            };
+        }
+        return null;
     }
 
     /// <summary>
@@ -984,10 +1023,7 @@ public sealed class QueryPlanner
             }
             else if (!TryReplaceWithIndexScan(ref source, effectiveOrderBy))
             {
-                int? topNRows = statement.Limit is not null
-                    ? statement.Limit.Value + (statement.Offset ?? 0)
-                    : null;
-
+                int? topNRows = TryComputeTopN(statement.Limit, statement.Offset);
                 source = new OrderByOperator(source, effectiveOrderBy.Items, topNRows);
             }
         }
@@ -995,7 +1031,7 @@ public sealed class QueryPlanner
         // 7. Apply LIMIT/OFFSET.
         if (statement.Limit is not null)
         {
-            source = new LimitOperator(source, statement.Limit.Value, statement.Offset ?? 0);
+            source = new LimitOperator(source, statement.Limit, statement.Offset);
         }
 
         // 8. Trim hidden ORDER BY-aggregate passthroughs that were appended to

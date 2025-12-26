@@ -105,6 +105,64 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(3, Convert.ToInt32(result.FinalBindings["player_count"]));
     }
 
+    // ───────────────────── LIMIT / OFFSET with expressions ─────────────────────
+
+    [Fact]
+    public async Task Offset_WithProceduralVariable_SkipsCorrectRows()
+    {
+        // Regression for the user-reported issue: OFFSET (and LIMIT) used to
+        // accept only NumberLiteral. With expression support, `OFFSET @var`
+        // now resolves the variable at execute time against the procedural
+        // scope and skips the right rows.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @offset INT32 = 2; " +
+            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT 2 OFFSET @offset) s)",
+            catalog);
+
+        // ORDER BY id, OFFSET 2, LIMIT 2 → ids 3, 4 → sum = 7.
+        Assert.Equal(7L, Convert.ToInt64(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task Limit_WithProceduralVariable_BoundsRows()
+    {
+        // Symmetric to the OFFSET case: LIMIT also accepts a variable.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @top INT32 = 3; " +
+            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT @top) s)",
+            catalog);
+
+        // ORDER BY id, LIMIT 3 → ids 1, 2, 3 → sum = 6.
+        Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
+    }
+
+    [Fact]
+    public async Task Limit_WithArithmeticExpression_EvaluatesAtExecuteTime()
+    {
+        // Arbitrary expression as LIMIT — proves the parser accepts more
+        // than just a single VariableExpression and the runtime evaluator
+        // handles arithmetic the same way as everywhere else.
+        TableCatalog catalog = CreateCatalog("orders",
+            columns: ["id"],
+            [1], [2], [3], [4], [5]);
+
+        BatchResult result = await RunAsync(
+            "DECLARE @half INT32 = 1; " +
+            "DECLARE @sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT @half + 2) s)",
+            catalog);
+
+        // ORDER BY id, LIMIT 3 → ids 1, 2, 3 → sum = 6.
+        Assert.Equal(6L, Convert.ToInt64(result.FinalBindings["sum"]));
+    }
+
     // ───────────────────── DECLARE-with-subquery ─────────────────────
 
     [Fact]

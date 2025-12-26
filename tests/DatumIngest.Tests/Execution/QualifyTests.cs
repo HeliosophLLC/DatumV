@@ -84,7 +84,7 @@ public sealed class QualifyTests : ServiceTestBase
         Assert.NotNull(statement.Having);
         Assert.NotNull(statement.Qualify);
         Assert.NotNull(statement.OrderBy);
-        Assert.Equal(100, statement.Limit);
+        Assert.Equal(100, Convert.ToInt32(((LiteralExpression)statement.Limit!).Value));
     }
 
     /// <summary>

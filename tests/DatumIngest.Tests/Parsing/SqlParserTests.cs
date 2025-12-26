@@ -815,7 +815,7 @@ public class SqlParserTests : ServiceTestBase
         SelectStatement result = Parse(
             "SELECT a FROM t LIMIT 10");
 
-        Assert.Equal(10, result.Limit);
+        Assert.Equal(10, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
         Assert.Null(result.Offset);
     }
 
@@ -825,8 +825,8 @@ public class SqlParserTests : ServiceTestBase
         SelectStatement result = Parse(
             "SELECT a FROM t LIMIT 10 OFFSET 20");
 
-        Assert.Equal(10, result.Limit);
-        Assert.Equal(20, result.Offset);
+        Assert.Equal(10, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
+        Assert.Equal(20, Convert.ToInt32(((LiteralExpression)result.Offset!).Value));
     }
 
     // ───────────────────── Subqueries ─────────────────────
@@ -1229,8 +1229,8 @@ public class SqlParserTests : ServiceTestBase
         Assert.NotNull(result.Into.Shard);
         Assert.Equal(ShardMode.SampleCount, result.Into.Shard.Mode);
         Assert.NotNull(result.OrderBy);
-        Assert.Equal(100, result.Limit);
-        Assert.Equal(0, result.Offset);
+        Assert.Equal(100, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
+        Assert.Equal(0, Convert.ToInt32(((LiteralExpression)result.Offset!).Value));
     }
 
     [Fact]
@@ -1381,7 +1381,7 @@ public class SqlParserTests : ServiceTestBase
         Assert.Single(result.GroupBy.Expressions);
         Assert.Equal("total", result.Columns[1].Alias);
         Assert.NotNull(result.OrderBy);
-        Assert.Equal(10, result.Limit);
+        Assert.Equal(10, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
     }
 
     [Fact]
@@ -2393,27 +2393,21 @@ public class SqlParserTests : ServiceTestBase
     // ───────────────────── Error message quality (deep failures inside subqueries) ─────────────────────
 
     [Fact]
-    public void OffsetWithVariable_InsideSubquery_ErrorPointsAtOffsetNotAtFromParen()
+    public void OffsetWithVariable_InsideSubquery_ParsesSuccessfully()
     {
-        // Regression for the user-reported issue: `OFFSET @var` inside a
-        // subquery was reporting the failure at `FROM (` ("expected
-        // identifier or stringliteral") because TableSourceParser wrapped
-        // SubquerySourceParser in `.Try()`. With the wrap removed, `(` at
-        // table-source position commits to the subquery branch and the
-        // OFFSET-clause failure surfaces at its real position. The error
-        // text isn't load-bearing — what matters is that the line/column
-        // points at the inner OFFSET, not the outer paren.
+        // Regression for the originally-reported user issue: `OFFSET @var`
+        // inside a subquery used to fail to parse (OFFSET only accepted
+        // NumberLiteral) and the error surfaced at `FROM (` rather than at
+        // the OFFSET. Now `OFFSET expression` is supported end-to-end and
+        // this exact shape parses cleanly. The companion runtime tests in
+        // BatchExecutorTests verify the variable resolves correctly.
         const string sql =
             "SELECT * FROM (\n" +
             "  SELECT * FROM t LIMIT 5 OFFSET @offset\n" +
             ") T";
 
-        ParseException ex = Assert.Throws<ParseException>(() => SqlParser.Parse(sql));
-
-        // Outer FROM-paren is on line 1 col 15. Inner OFFSET starts on line 2.
-        // The error should be on line 2, not line 1.
-        Assert.DoesNotContain("line 1", ex.Message);
-        Assert.Contains("line 2", ex.Message);
+        QueryExpression q = SqlParser.Parse(sql);
+        Assert.NotNull(q);
     }
 
     [Fact]

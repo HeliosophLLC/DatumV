@@ -1275,7 +1275,9 @@ public static class ModelInvocationHoister
     private static IQueryOperator RewriteLimit(LimitOperator limit, Func<IQueryOperator, IQueryOperator> childRewriter)
     {
         IQueryOperator newSource = childRewriter(limit.Source);
-        return ReferenceEquals(newSource, limit.Source) ? limit : new LimitOperator(newSource, limit.Limit, limit.Offset);
+        return ReferenceEquals(newSource, limit.Source)
+            ? limit
+            : new LimitOperator(newSource, limit.LimitExpression, limit.OffsetExpression);
     }
 
     private static bool IsModelCall(FunctionCallExpression fn)

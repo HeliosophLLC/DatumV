@@ -1139,7 +1139,7 @@ public static class CommonSubexpressionEliminator
         IQueryOperator newSource = childRewriter(limit.Source);
         return ReferenceEquals(newSource, limit.Source)
             ? limit
-            : new LimitOperator(newSource, limit.Limit, limit.Offset);
+            : new LimitOperator(newSource, limit.LimitExpression, limit.OffsetExpression);
     }
 
     /// <summary>

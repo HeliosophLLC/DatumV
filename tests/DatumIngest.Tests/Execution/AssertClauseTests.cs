@@ -183,7 +183,7 @@ public sealed class AssertClauseTests : ServiceTestBase
         Assert.NotNull(statement.Assertions);
         Assert.Single(statement.Assertions);
         Assert.NotNull(statement.OrderBy);
-        Assert.Equal(5, statement.Limit);
+        Assert.Equal(5, Convert.ToInt32(((LiteralExpression)statement.Limit!).Value));
     }
 
     /// <summary>
