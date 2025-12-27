@@ -3,6 +3,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -150,13 +151,14 @@ public sealed class IndexScanOperator : IQueryOperator
                         }
                     }
 
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(row);
+                    outputBatch ??= context.RentRowBatch(row.ColumnLookup);
+                    outputBatch.Add(row.RawValues);
 
                     if (outputBatch.IsFull)
                     {
-                        yield return outputBatch;
+                        RowBatch toYield = outputBatch;
                         outputBatch = null;
+                        yield return toYield;
                     }
                 }
 
@@ -183,20 +185,23 @@ public sealed class IndexScanOperator : IQueryOperator
                     }
                 }
 
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(row);
+                outputBatch ??= context.RentRowBatch(row.ColumnLookup);
+                outputBatch.Add(row.RawValues);
 
                 if (outputBatch.IsFull)
                 {
-                    yield return outputBatch;
+                    RowBatch toYield = outputBatch;
                     outputBatch = null;
+                    yield return toYield;
                 }
             }
         }
 
         if (outputBatch is not null)
         {
-            yield return outputBatch;
+            RowBatch toYield = outputBatch;
+            outputBatch = null;
+            yield return toYield;
         }
 
         if (ExecutionTracer.IsEnabled)
@@ -209,7 +214,11 @@ public sealed class IndexScanOperator : IQueryOperator
     /// <summary>
     /// Reads the rows identified by a batch of index entries that share the same chunk.
     /// Single-entry batches fetch exactly one row; larger batches read the covering
-    /// range and yield rows in the order they appear in the batch.
+    /// range and yield rows in the order they appear in the batch. Yielded rows own
+    /// their <see cref="DataValue"/> arrays — values are copied (or stabilised) from
+    /// the seek-session's input batch into a freshly pool-rented array bound to
+    /// <see cref="ExecutionContext.Store"/>, so the caller can hand the array off to
+    /// an output batch and the input batch can be returned to the pool immediately.
     /// </summary>
     private async IAsyncEnumerable<Row> FlushIndexEntriesAsync(
         ISeekSession seekSession,
@@ -217,6 +226,8 @@ public sealed class IndexScanOperator : IQueryOperator
         ExecutionContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        Pool pool = context.Pool;
+
         if (indexEntries.Count == 1)
         {
             ValueIndexEntry entry = indexEntries[0];
@@ -225,12 +236,20 @@ public sealed class IndexScanOperator : IQueryOperator
             await foreach (RowBatch inputBatch in seekSession.SeekAsync(
                 absoluteRow, 1, cancellationToken).ConfigureAwait(false))
             {
-                for (int i = 0; i < inputBatch.Count; i++)
+                try
                 {
-                    yield return inputBatch[i];
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        Row src = inputBatch[i];
+                        DataValue[] copy = pool.RentAndCopyDataValues(
+                            src, inputBatch.Arena, context.Store);
+                        yield return new Row(src.ColumnLookup, copy);
+                    }
                 }
-
-                context.ReturnRowBatch(inputBatch);
+                finally
+                {
+                    context.ReturnRowBatch(inputBatch);
+                }
             }
 
             yield break;
@@ -254,14 +273,22 @@ public sealed class IndexScanOperator : IQueryOperator
         await foreach (RowBatch inputBatch in seekSession.SeekAsync(
             minRow, rangeCount, cancellationToken).ConfigureAwait(false))
         {
-            for (int i = 0; i < inputBatch.Count; i++)
+            try
             {
-                long fetchedRow = minRow + totalFetched;
-                rowsByOffset[fetchedRow] = inputBatch[i];
-                totalFetched++;
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    long fetchedRow = minRow + totalFetched;
+                    Row src = inputBatch[i];
+                    DataValue[] copy = pool.RentAndCopyDataValues(
+                        src, inputBatch.Arena, context.Store);
+                    rowsByOffset[fetchedRow] = new Row(src.ColumnLookup, copy);
+                    totalFetched++;
+                }
             }
-
-            context.ReturnRowBatch(inputBatch);
+            finally
+            {
+                context.ReturnRowBatch(inputBatch);
+            }
         }
 
         // Yield rows in index order (the batch order from the traversal).

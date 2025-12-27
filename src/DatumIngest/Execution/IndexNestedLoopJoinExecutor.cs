@@ -4,6 +4,7 @@ using DatumIngest.Execution.Operators;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution;
 
@@ -119,6 +120,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         BuildAliasSchema? buildAliasSchema = null;
 
         RowBatch? outputBatch = null;
+        Pool pool = context.Pool;
         LocalBufferPool bufferPool = context.LocalBufferPool;
 
         // Reusable scratch buffer for residual evaluation — allocated once, filled by CombineInto.
@@ -187,8 +189,8 @@ internal sealed class IndexNestedLoopJoinExecutor
                     // but we need to verify residual if present.
                     if (residual is null)
                     {
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(probeRow);
+                        outputBatch ??= context.RentRowBatch(probeRow.ColumnLookup);
+                        outputBatch.Add(pool.RentAndCopyDataValues(probeRow, context.Store, context.Store));
                         if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                         continue;
                     }
@@ -227,8 +229,8 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     if (semiMatch)
                     {
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(probeRow);
+                        outputBatch ??= context.RentRowBatch(probeRow.ColumnLookup);
+                        outputBatch.Add(pool.RentAndCopyDataValues(probeRow, context.Store, context.Store));
                         if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                     }
 
@@ -267,12 +269,12 @@ internal sealed class IndexNestedLoopJoinExecutor
                         }
                     }
 
-                    Row combined = combinedSchema.CombinePooled(probeRow, buildRow, bufferPool);
+                    DataValue[] combinedValues = combinedSchema.CombinePooledValues(probeRow, buildRow, bufferPool);
                     bufferPool.Return(buildRow.RawValues);
                     totalMatches++;
 
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(combined);
+                    outputBatch ??= context.RentRowBatch(combinedSchema.ColumnLookup);
+                    outputBatch.Add(combinedValues);
                     if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }
             }
@@ -316,7 +318,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 Row src = batch[0];
                 DataValue[] owned = bufferPool.Rent(src.FieldCount);
                 Array.Copy(src.RawValues, owned, src.FieldCount);
-                Row row = new(src.RawNames, owned, src.RawNameIndex);
+                Row row = new(src.ColumnLookup, owned);
                 context.ReturnRowBatch(batch);
                 return row;
             }
@@ -348,17 +350,12 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// </summary>
     private sealed class BuildAliasSchema
     {
-        private readonly string[] _names;
-        private readonly Dictionary<string, int> _nameIndex;
+        private readonly ColumnLookup _columnLookup;
         private readonly int _fieldCount;
 
-        private BuildAliasSchema(
-            string[] names,
-            Dictionary<string, int> nameIndex,
-            int fieldCount)
+        private BuildAliasSchema(ColumnLookup columnLookup, int fieldCount)
         {
-            _names = names;
-            _nameIndex = nameIndex;
+            _columnLookup = columnLookup;
             _fieldCount = fieldCount;
         }
 
@@ -383,7 +380,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 nameIndex[firstRow.ColumnNames[index]] = index;
             }
 
-            return new BuildAliasSchema(names, nameIndex, fieldCount);
+            return new BuildAliasSchema(new ColumnLookup(names, nameIndex), fieldCount);
         }
 
         /// <summary>
@@ -401,7 +398,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 values[index] = sourceRow[index];
             }
 
-            return new Row(_names, values, _nameIndex);
+            return new Row(_columnLookup, values);
         }
     }
 
