@@ -238,14 +238,16 @@ public sealed class SemiJoinSubqueryTests : ServiceTestBase
             [1f, 10f],
             [2f, 20f],
             [3f, 30f]));
-        catalog.Add(CreateProvider("returns",
+        // Avoid the table name "returns" — RETURNS is a reserved keyword
+        // (used in CREATE FUNCTION … RETURNS) and would tokenize, not identify.
+        catalog.Add(CreateProvider("order_returns",
             columns: ["order_id", "customer_id"],
             [1f, 10f],
             [3f, 30f]));
         List<Row> results = await ExecuteQueryAsync(
             "SELECT orders.id FROM orders " +
-            "WHERE orders.id NOT IN (SELECT order_id FROM returns " +
-            "WHERE returns.customer_id = orders.customer_id)",
+            "WHERE orders.id NOT IN (SELECT order_id FROM order_returns " +
+            "WHERE order_returns.customer_id = orders.customer_id)",
             catalog);
 
         // Order 2 has no matching return with customer_id=20.

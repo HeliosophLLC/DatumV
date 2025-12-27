@@ -270,7 +270,8 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Core planning logic shared by <see cref="Plan(SelectStatement)"/> and <see cref="PlanCore(SelectStatement, Func{IQueryOperator, IQueryOperator}?, IReadOnlyDictionary{string, CommonTableExpressionOperator}?)"/>.
+    /// Core planning logic shared by <see cref="Plan(SelectStatement)"/> and the
+    /// rewriting pipeline in <see cref="PlanWithSubqueriesAsync"/>.
     /// </summary>
     /// <param name="statement">The parsed SELECT statement.</param>
     /// <param name="sourceTransform">
@@ -283,10 +284,17 @@ public sealed class QueryPlanner
     /// into the CTE dictionary so the recursive member's FROM clause resolves the self-reference
     /// to the working table operator.
     /// </param>
+    /// <param name="extraReferenceExpressions">
+    /// Optional out-of-band expressions whose column references must be added to the
+    /// projection-pushdown set even though they don't appear in the rewritten statement
+    /// (e.g. ON conditions of decorrelated/semi-join descriptors injected by
+    /// <see cref="PlanWithSubqueriesAsync"/>).
+    /// </param>
     private IQueryOperator PlanCore(
         SelectStatement statement,
         Func<IQueryOperator, IQueryOperator>? sourceTransform = null,
-        IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null)
+        IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null,
+        IReadOnlyList<Expression>? extraReferenceExpressions = null)
     {
         // 0. Plan Common Table Expressions (WITH clause).
         Dictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators =
@@ -305,6 +313,26 @@ public sealed class QueryPlanner
         // Compute the set of all referenced columns for projection pushdown.
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
             CollectAllReferencedColumns(statement);
+
+        // Merge in references from out-of-band ON conditions (semi-join descriptors,
+        // decorrelated scalar subqueries). These expressions reference outer-table
+        // columns at execution time but do not appear in the rewritten statement's
+        // WHERE/JOIN clauses, so CollectAllReferencedColumns can't discover them on
+        // its own — projection pushdown would then trim a column the semi-join's
+        // probe-key evaluation needs and fail with "Column not found in row".
+        // An empty set is the SELECT * sentinel ("all columns needed"); leaving it
+        // empty preserves that semantic (the extras are already covered).
+        if (extraReferenceExpressions is not null && allReferencedColumns.Count > 0)
+        {
+            foreach (Expression expression in extraReferenceExpressions)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(expression))
+                {
+                    allReferencedColumns.Add((tableName, columnName));
+                }
+            }
+        }
 
         // 1. Build the source operator (FROM clause) with projection pushdown.
         bool hasJoins = statement.Joins is not null && statement.Joins.Count > 0;
@@ -1247,8 +1275,36 @@ public sealed class QueryPlanner
             };
         }
 
+        // Collect ON-condition expressions from the out-of-band joins so projection
+        // pushdown sees the outer-table column references they evaluate at runtime.
+        // The rewritten statement's WHERE no longer contains the IN/EXISTS subquery
+        // (rewriter consumed it), so without this list e.g. `customers.id` from
+        // `WHERE EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = customers.id)`
+        // would be trimmed from the customers scan and the semi-join's key
+        // evaluation would throw "Column 'customers.id' not found in row".
+        List<Expression>? extraReferences = null;
+        if (allDecorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
+        {
+            extraReferences = new List<Expression>(
+                allDecorrelated.Count + semiJoinResult.SemiJoins.Count);
+            foreach (SubqueryRewriter.DecorrelatedScalarJoin decorrelated in allDecorrelated)
+            {
+                if (decorrelated.OnCondition is not null)
+                {
+                    extraReferences.Add(decorrelated.OnCondition);
+                }
+            }
+            foreach (SemiJoinRewriter.SemiJoinDescriptor semiJoin in semiJoinResult.SemiJoins)
+            {
+                if (semiJoin.OnCondition is not null)
+                {
+                    extraReferences.Add(semiJoin.OnCondition);
+                }
+            }
+        }
+
         // Plan the rewritten statement through the standard pipeline with the source transform.
-        return PlanCore(rewrittenStatement, sourceTransform);
+        return PlanCore(rewrittenStatement, sourceTransform, externalCommonTableExpressionOperators: null, extraReferences);
     }
 
     /// <summary>
