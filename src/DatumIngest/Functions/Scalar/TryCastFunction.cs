@@ -43,7 +43,24 @@ public sealed class TryCastFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef input = args[0];
-        DataKind targetKind = CastFunction.ResolveTargetKind(args[1]);
+        (DataKind targetKind, bool targetIsArray) = CastFunction.ResolveTarget(args[1]);
+
+        if (targetIsArray)
+        {
+            if (input.IsNull)
+                return new ValueTask<ValueRef>(ValueRef.NullArray(targetKind));
+            if (input.IsArray && input.Kind == targetKind)
+                return new ValueTask<ValueRef>(input);
+            return new ValueTask<ValueRef>(ValueRef.NullArray(targetKind));
+        }
+
+        // Scalar target: arrays cannot be flattened. Without this, TryCastCore
+        // can succeed via the array's underlying numeric carrier (TryToDouble
+        // reads the first element / offset) and emit a misleading scalar.
+        if (input.IsArray)
+        {
+            return new ValueTask<ValueRef>(ValueRef.Null(targetKind));
+        }
 
         if (input.IsNull)
         {

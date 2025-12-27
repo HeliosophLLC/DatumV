@@ -1297,7 +1297,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         Assert.Equal(DataKind.Struct, result.Kind);
         Assert.False(result.IsNull);
-        DataValue[] fields = result.AsStruct();
+        DataValue[] fields = result.AsStruct(_evaluator.Store!);
         Assert.Equal(2, fields.Length);
         Assert.Equal(1, fields[0].AsInt32());
         Assert.Equal(2, fields[1].AsInt32());
@@ -1316,7 +1316,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
         DataValue result = await _evaluator.EvaluateAsync(literal, row);
 
-        DataValue[] fields = result.AsStruct();
+        DataValue[] fields = result.AsStruct(_evaluator.Store!);
         Assert.Equal(3.14f, fields[0].AsFloat32(), precision: 4);
         Assert.Equal("hi", fields[1].AsString());
     }
@@ -1395,7 +1395,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         ColumnInfo structColumn = new("info", false, fieldInfos);
         Schema schema = new([structColumn]);
 
-        ExpressionEvaluator evaluatorWithSchema = new(FunctionRegistry.CreateDefault(), sourceSchema: schema);
+        ExpressionEvaluator evaluatorWithSchema = new(FunctionRegistry.CreateDefault(), sourceSchema: schema, store: arena);
 
         IndexAccessExpression access = new(
             new ColumnReference("info"),
