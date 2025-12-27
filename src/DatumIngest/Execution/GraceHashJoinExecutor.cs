@@ -119,6 +119,9 @@ internal sealed class GraceHashJoinExecutor
         IQueryOperator rightOperator,
         ExecutionContext context)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
+
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
 
@@ -128,7 +131,7 @@ internal sealed class GraceHashJoinExecutor
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
-        SpillPartition[] partitions = CreatePartitions(partitionCount, context.Pool, context.LocalBufferPool, context);
+        SpillPartition[] partitions = CreatePartitions(partitionCount, pool, bufferPool, context);
 
         ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
@@ -268,62 +271,58 @@ internal sealed class GraceHashJoinExecutor
 
                 await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
-                    for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
+                    try
                     {
-                    Row probeRow = probeBatch[probeBatchIndex];
-                    bool isFirst = firstProbeRow is null;
-                    firstProbeRow ??= probeRow;
-                    phase1bProbeCount++;
-                    int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
-                    SpillPartition partition = partitions[partitionIndex];
-
-                    if (!partition.IsBuildSpilled)
-                    {
-                        // In-memory partition: join and yield immediately.
-                        // A LIMIT operator above can stop iteration here, preventing the
-                        // remaining probe rows from ever being read from the source.
-                        await foreach (Row result in ProbePartitionRowAsync(
-                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool, keyScratch, context.CancellationToken).ConfigureAwait(false))
+                        for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
                         {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(result);
-                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-                        }
+                            Row probeRow = probeBatch[probeBatchIndex];
+                            firstProbeRow ??= probeRow;
+                            phase1bProbeCount++;
+                            int partitionIndex = await AssignPartitionAsync(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch, context.CancellationToken).ConfigureAwait(false);
+                            SpillPartition partition = partitions[partitionIndex];
 
-                        // The probe row has been fully consumed — return it to the pool
-                        // so that upstream operators (e.g. AliasOperator) can reuse it.
-                        // Semi-joins yield the probe row itself, so it must not be returned.
-                        // The first probe row is retained for null-template construction
-                        // after the loop, so skip returning it.
-                        if (!isSemiJoin && !isFirst)
-                        {
-                            context.LocalBufferPool.ReturnValues(probeRow);
+                            if (!partition.IsBuildSpilled)
+                            {
+                                // In-memory partition: join and yield immediately.
+                                // A LIMIT operator above can stop iteration here, preventing the
+                                // remaining probe rows from ever being read from the source.
+                                await foreach (Row result in ProbePartitionRowAsync(
+                                    buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context, keyScratch, context.CancellationToken).ConfigureAwait(false))
+                                {
+                                    outputBatch ??= context.RentRowBatch(result.ColumnLookup);
+                                    outputBatch.Add(result.RawValues);
+                                    if (outputBatch.IsFull)
+                                    {
+                                        RowBatch toYield = outputBatch;
+                                        outputBatch = null;
+                                        yield return toYield;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // Spilled partition: buffer probe row to disk for Phase 2.
+                                if (!partition.IsProbeSpilled)
+                                {
+                                    partition.SpillProbeToDisk();
+                                }
+
+                                partition.AddProbeRow(probeRow, probeBatch.Arena);
+                            }
                         }
                     }
-                    else
+                    finally
                     {
-                        // Spilled partition: buffer probe row to disk for Phase 2.
-                        if (!partition.IsProbeSpilled)
-                        {
-                            partition.SpillProbeToDisk();
-                        }
-
-                        partition.AddProbeRow(probeRow, probeBatch.Arena);
-
-                        // The row has been serialized to disk — return its DataValue[]
-                        // to the pool so it can be reused immediately. Without this,
-                        // pooled arrays from upstream CombinePooled calls accumulate
-                        // until GC collects them, bypassing the memory budget.
-                        if (!isSemiJoin && !isFirst)
-                        {
-                            context.LocalBufferPool.ReturnValues(probeRow);
-                        }
+                        context.ReturnRowBatch(probeBatch);
                     }
-                    }
-                    context.ReturnRowBatch(probeBatch);
                 }
 
-                if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
             }
             else
             {
@@ -497,10 +496,12 @@ internal sealed class GraceHashJoinExecutor
         bool useSingleKey,
         bool isSemiJoin,
         Row? nullBuildTemplate,
-        LocalBufferPool bufferPool,
+        ExecutionContext context,
         DataValue[] keyScratch,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
 
@@ -569,7 +570,11 @@ internal sealed class GraceHashJoinExecutor
             if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                 (_joinType == JoinType.LeftAntiSemi && !hasMatch))
             {
-                yield return probeRow;
+                // probeRow's RawValues are owned by the upstream batch; copy into a
+                // fresh pool-rented array so the yielded Row can be added to the
+                // caller's outputBatch without aliasing.
+                DataValue[] copy = pool.RentAndCopyDataValues(probeRow, context.Store, context.Store);
+                yield return new Row(probeRow.ColumnLookup, copy);
             }
         }
         else if (!hasMatch)
@@ -600,7 +605,8 @@ internal sealed class GraceHashJoinExecutor
                 }
                 else
                 {
-                    yield return probeRow;
+                    DataValue[] copy = pool.RentAndCopyDataValues(probeRow, context.Store, context.Store);
+                    yield return new Row(probeRow.ColumnLookup, copy);
                 }
             }
         }
@@ -615,6 +621,8 @@ internal sealed class GraceHashJoinExecutor
         ExecutionContext context,
         bool skipInMemory = false)
     {
+        Pool pool = context.Pool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         RowBatch? outputBatch = null;
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool buildKeyIsRight = !_flipped;
@@ -736,7 +744,12 @@ internal sealed class GraceHashJoinExecutor
                 singleKeyTable = null;
                 compositeKeyTable = null;
 
-                if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
+                if (outputBatch is not null)
+                {
+                    RowBatch toYield = outputBatch;
+                    outputBatch = null;
+                    yield return toYield;
+                }
 
                 await foreach (RowBatch recursionBatch in RecursivelyRepartitionAsync(
                     buildRowList, probeRows, partition.RetentionArena, useSingleKey, recursionDepth + 1,
@@ -823,10 +836,14 @@ internal sealed class GraceHashJoinExecutor
                             schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         }
 
-                        Row combinedResult = schema!.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(combinedResult);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        outputBatch ??= context.RentRowBatch(schema!.ColumnLookup);
+                        outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
 
@@ -835,12 +852,16 @@ internal sealed class GraceHashJoinExecutor
                     if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                         (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                     {
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(probeRow);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        outputBatch ??= context.RentRowBatch(probeRow.ColumnLookup);
+                        outputBatch.Add(pool.RentAndCopyDataValues(probeRow, context.Store, context.Store));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
 
-                    // Semi-join may yield probeRow directly — skip the ReturnRow below.
                     continue;
                 }
                 else if (!hasMatch && needProbeUnmatched)
@@ -859,29 +880,26 @@ internal sealed class GraceHashJoinExecutor
                         Row leftRow = _flipped ? nullBuild.Value : probeRow;
                         Row rightRow = _flipped ? probeRow : nullBuild.Value;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        Row unmatchedProbeResult = schema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(unmatchedProbeResult);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                        outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
+                        outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                     else
                     {
-                        // No null template — yield the probe row directly.
-                        // Cannot return it to the pool since the caller still owns it.
-                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                        outputBatch.Add(probeRow);
-                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
-                        continue;
+                        outputBatch ??= context.RentRowBatch(probeRow.ColumnLookup);
+                        outputBatch.Add(pool.RentAndCopyDataValues(probeRow, context.Store, context.Store));
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
-                }
-
-                // Probe row fully consumed — return it to the pool. Semi-joins
-                // and the null-template fallback yield probeRow directly (handled
-                // with continue above), so we only reach here when probeRow was
-                // consumed by value through CombinePooled.
-                if (!isSemiJoin)
-                {
-                    context.LocalBufferPool.ReturnValues(probeRow);
                 }
             }
 
@@ -901,16 +919,25 @@ internal sealed class GraceHashJoinExecutor
                             Row leftRow = _flipped ? buildRowList[index] : nullPad.Value;
                             Row rightRow = _flipped ? nullPad.Value : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                            Row unmatchedBuildResult = buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(unmatchedBuildResult);
-                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                            outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
+                            outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
                         }
                         else
                         {
-                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                            outputBatch.Add(buildRowList[index]);
-                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                            outputBatch ??= context.RentRowBatch(buildRowList[index].ColumnLookup);
+                            outputBatch.Add(pool.RentAndCopyDataValues(buildRowList[index], context.Store, context.Store));
+                            if (outputBatch.IsFull)
+                            {
+                                RowBatch toYield = outputBatch;
+                                outputBatch = null;
+                                yield return toYield;
+                            }
                         }
                     }
                 }
@@ -919,7 +946,9 @@ internal sealed class GraceHashJoinExecutor
 
         if (outputBatch is not null)
         {
-            yield return outputBatch;
+            RowBatch toYield = outputBatch;
+            outputBatch = null;
+            yield return toYield;
         }
     }
 
@@ -1168,18 +1197,18 @@ internal sealed class GraceHashJoinExecutor
 
     /// <summary>
     /// Creates a row with the same column names as the template but all null values.
+    /// Reuses the template's <see cref="ColumnLookup"/> so the call doesn't pay
+    /// for a fresh dictionary per null pad.
     /// </summary>
     private static Row CreateNullRow(Row template)
     {
-        string[] names = new string[template.FieldCount];
         DataValue[] values = new DataValue[template.FieldCount];
 
         for (int index = 0; index < template.FieldCount; index++)
         {
-            names[index] = template.ColumnNames[index];
             values[index] = DataValue.Null(template[index].Kind);
         }
 
-        return new Row(names, values);
+        return new Row(template.ColumnLookup, values);
     }
 }

@@ -52,6 +52,18 @@ internal sealed class SpillPartition : IDisposable
     private RowBatch? _probeStaging;
 
     /// <summary>
+    /// Per-slot column lookup. Build and probe rows typically have different
+    /// schemas (different aliases), so a single shared <see cref="_spillSchema"/>
+    /// would carry the wrong column names for one side at replay time. The
+    /// spiller's row-stride uses <see cref="_spillSchema"/>'s column count
+    /// (which must match both sides' counts), but each replay yields rows
+    /// rebound to its slot's lookup so column-name resolution works on
+    /// either side.
+    /// </summary>
+    private ColumnLookup? _buildSchema;
+    private ColumnLookup? _probeSchema;
+
+    /// <summary>
     /// Batches yielded by replay that callers still hold <see cref="Row"/> references into.
     /// Returned to the pool on <see cref="Dispose"/>.
     /// </summary>
@@ -139,6 +151,7 @@ internal sealed class SpillPartition : IDisposable
     internal void AddBuildRow(Row row, Arena? sourceArena)
     {
         _spillSchema ??= row.ColumnLookup;
+        _buildSchema ??= row.ColumnLookup;
 
         if (_buildSpilled)
         {
@@ -157,6 +170,7 @@ internal sealed class SpillPartition : IDisposable
     internal void AddProbeRow(Row row, Arena? sourceArena)
     {
         _spillSchema ??= row.ColumnLookup;
+        _probeSchema ??= row.ColumnLookup;
 
         if (_probeSpilled)
         {
@@ -192,7 +206,7 @@ internal sealed class SpillPartition : IDisposable
             }
         }
 
-        return new Row(row.RawNames, copy, row.RawNameIndex);
+        return new Row(row.ColumnLookup, copy);
     }
 
     private void AppendToStaging(ref RowBatch? staging, Row row, Arena? sourceArena, int spillSlot)
@@ -356,7 +370,7 @@ internal sealed class SpillPartition : IDisposable
     internal IEnumerable<Row> ReadSpilledBuildRows()
     {
         FlushStagingToSpill(ref _buildStaging, BuildSlot);
-        return ReplaySlot(BuildSlot);
+        return ReplaySlot(BuildSlot, _buildSchema!);
     }
 
     /// <summary>
@@ -366,7 +380,7 @@ internal sealed class SpillPartition : IDisposable
     internal IEnumerable<Row> ReadSpilledProbeRows()
     {
         FlushStagingToSpill(ref _probeStaging, ProbeSlot);
-        return ReplaySlot(ProbeSlot);
+        return ReplaySlot(ProbeSlot, _probeSchema!);
     }
 
     private void FlushStagingToSpill(ref RowBatch? staging, int spillSlot)
@@ -385,7 +399,7 @@ internal sealed class SpillPartition : IDisposable
         staging = null;
     }
 
-    private IEnumerable<Row> ReplaySlot(int spillSlot)
+    private IEnumerable<Row> ReplaySlot(int spillSlot, ColumnLookup outputLookup)
     {
         if (_spiller is null)
         {
@@ -395,7 +409,7 @@ internal sealed class SpillPartition : IDisposable
         _replayBatches ??= new List<RowBatch>();
 
         IAsyncEnumerator<RowBatch> enumerator = _spiller
-            .ReplayPartitionAsync(_context, _spillSchema!, spillSlot)
+            .ReplayPartitionAsync(_context, outputLookup, spillSlot)
             .GetAsyncEnumerator(_context.CancellationToken);
 
         try
