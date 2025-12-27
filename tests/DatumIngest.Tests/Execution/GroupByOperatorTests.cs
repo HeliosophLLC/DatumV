@@ -344,7 +344,8 @@ public class GroupByOperatorTests : ServiceTestBase
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = CreateExecutionContext();
+        ExecutionContext context = CreateExecutionContext(
+            cancellationToken: cancellationTokenSource.Token);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(groupBy, context));

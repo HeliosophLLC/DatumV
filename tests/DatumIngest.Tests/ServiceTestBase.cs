@@ -146,11 +146,12 @@ public abstract class ServiceTestBase : IDisposable
         int? maxRecursionDepth = null,
         int? batchSize = null,
         int? maxStratifyClasses = null,
-        Arena? store = null)
+        Arena? store = null,
+        CancellationToken cancellationToken = default)
     {
         Pool pool = GetService<Pool>();
         return new(
-            CancellationToken.None,
+            cancellationToken,
             functionRegistry ?? FunctionRegistry.CreateDefault(),
             catalog ?? new TableCatalog(pool),
             new LocalBufferPool(),
