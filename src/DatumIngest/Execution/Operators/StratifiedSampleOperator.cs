@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -90,33 +91,46 @@ public sealed class StratifiedSampleOperator : IQueryOperator
         Random random = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;
         double threshold = _percentage / 100.0;
 
+        Pool pool = context.Pool;
         RowBatch? outputBatch = null;
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
+            try
             {
-                Row row = inputBatch[batchIndex];
-
-                if (random.NextDouble() < threshold)
+                for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
                 {
-                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                    outputBatch.Add(row);
+                    Row row = inputBatch[batchIndex];
 
-                    if (outputBatch.IsFull)
+                    if (random.NextDouble() < threshold)
                     {
-                        yield return outputBatch;
-                        outputBatch = null;
+                        // Copy values out of the input batch's arena into the per-query
+                        // store before adding to the output batch — the input batch is
+                        // returned to the pool below, which would alias-recycle the
+                        // DataValue[] arrays the output batch holds otherwise.
+                        outputBatch ??= context.RentRowBatch(row.ColumnLookup);
+                        outputBatch.Add(pool.RentAndCopyDataValues(row, inputBatch.Arena, context.Store));
+
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
             }
-
-            context.ReturnRowBatch(inputBatch);
+            finally
+            {
+                context.ReturnRowBatch(inputBatch);
+            }
         }
 
         if (outputBatch is not null)
         {
-            yield return outputBatch;
+            RowBatch toYield = outputBatch;
+            outputBatch = null;
+            yield return toYield;
         }
     }
 }

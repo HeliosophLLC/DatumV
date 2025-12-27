@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -77,6 +78,8 @@ public sealed class BalancedSampleOperator : IQueryOperator
         int maxClasses = context.MaxStratifyClasses ?? DefaultMaxClasses;
         Random random = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;
 
+        Pool pool = context.Pool;
+
         // Per-class reservoirs keyed by composite stratification key.
         // Uses CompositeKeyComparer for structural value-equality.
         Dictionary<CompositeKey, Reservoir> reservoirs = new(CompositeKeyComparer.Instance);
@@ -89,60 +92,77 @@ public sealed class BalancedSampleOperator : IQueryOperator
         DataValue[] keyScratch = new DataValue[keyCount];
 
         // --- Pass 1: Stream all rows, fill per-class reservoirs ---
+        // Each row stored in a reservoir owns its own pool-rented DataValue[] copy
+        // bound to context.Store. Without this copy, returning the input batch below
+        // would recycle the row's RawValues array out from under the reservoir.
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
+            try
             {
-                Row row = inputBatch[batchIndex];
-
-                // Extract the stratify key columns from the row.
-                for (int k = 0; k < keyCount; k++)
+                for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
                 {
-                    keyScratch[k] = row[_stratifyColumnNames[k]];
-                }
+                    Row row = inputBatch[batchIndex];
 
-                // Look up or create the reservoir for this class.
-                var lookup = reservoirs.GetAlternateLookup<ReadOnlySpan<DataValue>>();
-                if (!lookup.TryGetValue(keyScratch.AsSpan(), out Reservoir? reservoir))
-                {
-                    if (reservoirs.Count >= maxClasses)
+                    // Extract the stratify key columns from the row.
+                    for (int k = 0; k < keyCount; k++)
                     {
-                        throw new InvalidOperationException(
-                            $"TABLESAMPLE BALANCED found more than {maxClasses} distinct classes on column '{string.Join(", ", _stratifyColumnNames)}', " +
-                            $"exceeding the maximum of {maxClasses}. Use a less granular stratification column or increase the limit.");
+                        keyScratch[k] = row[_stratifyColumnNames[k]];
                     }
 
-                    CompositeKey newKey = new(keyScratch.AsSpan().ToArray());
-                    reservoir = new Reservoir(_countPerClass);
-                    reservoirs[newKey] = reservoir;
-                    classOrder.Add(newKey);
-                }
-
-                // Algorithm R: reservoir sampling
-                reservoir.SeenCount++;
-
-                if (reservoir.Count < _countPerClass)
-                {
-                    // Reservoir not yet full — add directly.
-                    reservoir.Rows[reservoir.Count] = row;
-                    reservoir.Count++;
-                }
-                else
-                {
-                    // Reservoir full — replace a random element with decreasing probability.
-                    int j = random.Next(reservoir.SeenCount);
-                    if (j < _countPerClass)
+                    // Look up or create the reservoir for this class.
+                    var lookup = reservoirs.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+                    if (!lookup.TryGetValue(keyScratch.AsSpan(), out Reservoir? reservoir))
                     {
-                        reservoir.Rows[j] = row;
+                        if (reservoirs.Count >= maxClasses)
+                        {
+                            throw new InvalidOperationException(
+                                $"TABLESAMPLE BALANCED found more than {maxClasses} distinct classes on column '{string.Join(", ", _stratifyColumnNames)}', " +
+                                $"exceeding the maximum of {maxClasses}. Use a less granular stratification column or increase the limit.");
+                        }
+
+                        CompositeKey newKey = new(keyScratch.AsSpan().ToArray());
+                        reservoir = new Reservoir(_countPerClass);
+                        reservoirs[newKey] = reservoir;
+                        classOrder.Add(newKey);
+                    }
+
+                    // Algorithm R: reservoir sampling.
+                    reservoir.SeenCount++;
+
+                    if (reservoir.Count < _countPerClass)
+                    {
+                        // Reservoir not yet full — copy and add directly.
+                        DataValue[] copy = pool.RentAndCopyDataValues(row, inputBatch.Arena, context.Store);
+                        reservoir.Rows[reservoir.Count] = new Row(row.ColumnLookup, copy);
+                        reservoir.Count++;
+                    }
+                    else
+                    {
+                        // Reservoir full — replace a random element with decreasing probability.
+                        int j = random.Next(reservoir.SeenCount);
+                        if (j < _countPerClass)
+                        {
+                            // Return the displaced row's pool-rented array before overwriting,
+                            // otherwise the long-running pass would steadily leak DataValue[]
+                            // arrays for every replacement decision.
+                            pool.ReturnRow(reservoir.Rows[j]);
+                            DataValue[] copy = pool.RentAndCopyDataValues(row, inputBatch.Arena, context.Store);
+                            reservoir.Rows[j] = new Row(row.ColumnLookup, copy);
+                        }
                     }
                 }
             }
-
-            context.ReturnRowBatch(inputBatch);
+            finally
+            {
+                context.ReturnRowBatch(inputBatch);
+            }
         }
 
         // --- Pass 2: Emit all reservoirs in class-first order ---
+        // Each reservoir row already owns its DataValue[] (pool-rented during pass 1),
+        // so handing it to outputBatch transfers ownership cleanly — when the consumer
+        // returns the output batch the array goes back to the pool exactly once.
 
         RowBatch? outputBatch = null;
 
@@ -152,20 +172,24 @@ public sealed class BalancedSampleOperator : IQueryOperator
 
             for (int i = 0; i < reservoir.Count; i++)
             {
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(reservoir.Rows[i]);
+                Row row = reservoir.Rows[i];
+                outputBatch ??= context.RentRowBatch(row.ColumnLookup);
+                outputBatch.Add(row.RawValues);
 
                 if (outputBatch.IsFull)
                 {
-                    yield return outputBatch;
+                    RowBatch toYield = outputBatch;
                     outputBatch = null;
+                    yield return toYield;
                 }
             }
         }
 
         if (outputBatch is not null)
         {
-            yield return outputBatch;
+            RowBatch toYield = outputBatch;
+            outputBatch = null;
+            yield return toYield;
         }
     }
 
