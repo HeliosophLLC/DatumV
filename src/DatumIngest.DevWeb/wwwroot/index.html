@@ -65,17 +65,18 @@
   header .spacer { flex: 1; }
   header .status { color: var(--muted); font-size: 12px; }
 
-  /* Tab strip */
+  /* Tab strip — height matches the sidebar's .section-header so the two
+     panes line up across the workspace. */
   #tab-strip {
     display: flex; align-items: stretch;
     border-bottom: 1px solid var(--border);
     background: var(--panel-2);
     overflow-x: auto;
-    min-height: 32px;
+    overflow-y: hidden;
   }
   #tab-strip .tab {
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 8px 6px 12px;
+    padding: 4px 8px 4px 12px;
     border-right: 1px solid var(--border);
     background: var(--tab-inactive);
     cursor: pointer;
@@ -86,9 +87,11 @@
   #tab-strip .tab.active {
     background: var(--tab-active);
     color: var(--fg);
-    border-bottom: 2px solid var(--accent);
-    margin-bottom: -1px;
+    box-shadow: inset 0 -2px 0 0 var(--accent);
   }
+  #tab-strip .tab.dragging { opacity: 0.4; }
+  #tab-strip .tab.drop-before { box-shadow: inset 2px 0 0 0 var(--accent); }
+  #tab-strip .tab.drop-after  { box-shadow: inset -2px 0 0 0 var(--accent); }
   #tab-strip .tab .name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 180px;
@@ -412,10 +415,24 @@
     text-align: left;
     position: sticky; top: 0;
     color: var(--muted); font-weight: 500;
+    /* Sticky headers default to z-index: auto, which puts them in the
+       same stacking context as the relatively-positioned cells (and
+       inside .cell-copy which is z-index 2). When the user scrolls,
+       the cells then paint over the sticky headers. Bump th above
+       any descendant z-index so headers stay visible. */
+    z-index: 3;
   }
   table.results th .kind {
-    color: var(--muted); font-weight: 400; font-size: 11px;
-    margin-left: 6px;
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    color: var(--accent);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    vertical-align: 1px;
+    letter-spacing: 0.02em;
   }
   /* Cells host an absolutely-positioned copy button in their top-right
      corner. Only set on td so th's sticky positioning is unaffected. */
@@ -445,6 +462,10 @@
   table.results td pre {
     margin: 0; white-space: pre-wrap; word-break: break-word;
     font-family: var(--mono); font-size: 13px;
+    max-height: 300px; overflow: auto;
+  }
+  table.results td > .json-tree {
+    max-height: 300px; overflow: auto;
   }
   table.results td img,
   table.results td video {
@@ -458,8 +479,6 @@
     border-left: 2px solid var(--accent);
     padding: 6px 10px;
     border-radius: 3px;
-    max-height: 400px;
-    overflow: auto;
   }
 
   details.trace {
@@ -488,6 +507,57 @@
     max-height: 50vh;
     color: var(--fg);
   }
+
+  /* JSON tree viewer for cells with kind=json. A small recursive renderer
+     replaces the previous flat <pre> dump: nested objects/arrays use
+     <details> for native expand/collapse, primitives are syntax-coloured.
+     Keeps the cell compact for shallow values and inspectable for deep
+     ones, without dragging in a JSON-viewer library. */
+  table.results td .json-tree {
+    font-family: var(--mono); font-size: 13px;
+    line-height: 1.4;
+    margin: 0;
+  }
+  .json-tree details {
+    display: inline-block; vertical-align: top;
+  }
+  .json-tree details > summary {
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+  }
+  .json-tree details > summary::-webkit-details-marker { display: none; }
+  .json-tree details > summary::before {
+    content: '▶';
+    display: inline-block;
+    width: 11px;
+    color: var(--muted);
+    font-size: 9px;
+    margin-right: 2px;
+    transition: transform 0.1s ease;
+  }
+  .json-tree details[open] > summary::before { transform: rotate(90deg); }
+  .json-tree .json-children {
+    margin-left: 14px;
+    border-left: 1px dashed var(--border);
+    padding-left: 8px;
+  }
+  .json-tree .json-row {
+    display: block;
+    white-space: pre-wrap;
+  }
+  .json-tree .json-key { color: var(--accent); }
+  .json-tree .json-string { color: #9bbf7f; }       /* green */
+  .json-tree .json-number { color: #6ea5e8; }       /* blue */
+  .json-tree .json-boolean { color: #c586c0; }      /* purple */
+  .json-tree .json-null { color: var(--muted); font-style: italic; }
+  .json-tree .json-summary-preview {
+    color: var(--muted);
+    margin-left: 4px;
+    font-style: italic;
+  }
+  .json-tree .json-bracket { color: var(--muted); }
+  .json-tree .json-comma { color: var(--muted); }
 
   /* Modal-ish prompt for confirm/prompt without using window.prompt */
   .modal-backdrop {
@@ -1064,9 +1134,51 @@
       }
 
       div.addEventListener('click', () => activateTab(t.id));
+      // Middle-click closes (browser-tab convention). Pinned tabs are
+      // protected — same rule as the × button.
+      div.addEventListener('auxclick', (e) => {
+        if (e.button !== 1 || t.pinned) return;
+        e.preventDefault();
+        closeTab(t.id);
+      });
+      // Suppress middle-click autoscroll on the strip.
+      div.addEventListener('mousedown', (e) => {
+        if (e.button === 1) e.preventDefault();
+      });
       div.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showTabContextMenu(e.clientX, e.clientY, t.id);
+      });
+
+      // Drag-to-reorder. Drop position is "before" if the cursor is in
+      // the left half of the target tab, "after" otherwise.
+      div.draggable = true;
+      div.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', t.id);
+        div.classList.add('dragging');
+      });
+      div.addEventListener('dragend', () => {
+        div.classList.remove('dragging');
+        clearDropIndicators();
+      });
+      div.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = div.getBoundingClientRect();
+        const before = (e.clientX - rect.left) < rect.width / 2;
+        clearDropIndicators();
+        div.classList.add(before ? 'drop-before' : 'drop-after');
+      });
+      div.addEventListener('dragleave', () => {
+        div.classList.remove('drop-before', 'drop-after');
+      });
+      div.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const draggedId = e.dataTransfer.getData('text/plain');
+        const before = div.classList.contains('drop-before');
+        clearDropIndicators();
+        moveTab(draggedId, t.id, before);
       });
       strip.appendChild(div);
     }
@@ -1202,6 +1314,29 @@
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
     persistWorkspace();
+  }
+
+  // Reorder: pull `draggedId` out of the tabs list and reinsert it
+  // adjacent to `targetId`. `before === true` puts it left of the target,
+  // false puts it right. Computing the target index AFTER removal keeps
+  // the math correct whether the source was earlier or later in the list.
+  function moveTab(draggedId, targetId, before) {
+    if (!draggedId || draggedId === targetId) return;
+    const tabs = state.workspace.tabs;
+    const fromIdx = tabs.findIndex(t => t.id === draggedId);
+    if (fromIdx < 0) return;
+    const [dragged] = tabs.splice(fromIdx, 1);
+    let toIdx = tabs.findIndex(t => t.id === targetId);
+    if (toIdx < 0) { tabs.splice(fromIdx, 0, dragged); return; }
+    if (!before) toIdx += 1;
+    tabs.splice(toIdx, 0, dragged);
+    renderTabStrip();
+    persistWorkspace();
+  }
+
+  function clearDropIndicators() {
+    document.querySelectorAll('#tab-strip .tab.drop-before, #tab-strip .tab.drop-after')
+      .forEach(el => el.classList.remove('drop-before', 'drop-after'));
   }
 
   async function closeTab(id) {
@@ -1346,6 +1481,14 @@
         renderLineHighlight: 'all',
         tabSize: 2,
         insertSpaces: true,
+
+        // Render completion / hover / parameter-hint widgets via
+        // position: fixed so they escape the editor pane's
+        // `overflow: hidden`. Without this, the popup gets clipped at
+        // the editor/results boundary and parts of it appear behind
+        // the results table when the cursor is near the bottom of the
+        // editor pane.
+        fixedOverflowWidgets: true,
 
         // Disable Monaco's word-based suggestion fallback. Default since
         // Monaco 0.34 is 'matchingDocuments', which scrapes words from
@@ -1822,21 +1965,19 @@
       return;
     }
 
-    // Modern shape: one entry per row-producing statement. Each renders
-    // as its own table so multi-statement scripts don't conflate
-    // schemas. Older persisted results without resultSets fall through
-    // to the single-table legacy path below.
-    if (Array.isArray(res.resultSets) && res.resultSets.length > 0) {
-      res.resultSets.forEach((set, index) => {
-        renderResultSet(set, container, res.resultSets.length > 1 ? index + 1 : null);
-      });
-    } else {
-      // Legacy: render the top-level schema/rows as one table. Reached
-      // for results saved before the multi-set rendering shipped.
-      renderResultSet(
-        { schema: res.schema, rows: res.rows, rowCount: res.rowCount, truncated: res.truncated },
-        container,
-        null);
+    // One entry per row-producing statement. Each renders as its own
+    // table so multi-statement scripts don't conflate schemas. The "Result N"
+    // heading only appears when there's more than one — single-statement
+    // runs render exactly as they did before.
+    const sets = res.resultSets ?? [];
+    sets.forEach((set, index) => {
+      renderResultSet(set, container, sets.length > 1 ? index + 1 : null);
+    });
+    if (sets.length === 0 && !res.error) {
+      const empty = document.createElement('div');
+      empty.className = 'meta';
+      empty.textContent = '(no rows)';
+      container.appendChild(empty);
     }
 
     // Engine trace, when the user enabled the toggle and the engine emitted
@@ -1918,6 +2059,152 @@
     td.appendChild(btn);
   }
 
+  /// Renders a parsed JSON value as a collapsible DOM tree. Used by the
+  /// json cell renderer in place of a flat pretty-printed string.
+  ///
+  /// Shape rules:
+  ///   - Primitives (string / number / boolean / null) render inline with
+  ///     a syntax-coloured span.
+  ///   - Empty objects render as `{}`, empty arrays as `[]` (no toggle).
+  ///   - Non-empty objects/arrays render as <details>: a summary line
+  ///     showing `{` plus a count preview ("3 keys" / "5 items"), and a
+  ///     children block with each entry on its own row. The preview line
+  ///     also shows a tiny inline glimpse of the first one or two values
+  ///     so collapsed structures still hint at their shape.
+  function renderJsonNode(value, depth = 0) {
+    if (value === null) {
+      const span = document.createElement('span');
+      span.className = 'json-null';
+      span.textContent = 'null';
+      return span;
+    }
+    const t = typeof value;
+    if (t === 'string') {
+      const span = document.createElement('span');
+      span.className = 'json-string';
+      span.textContent = JSON.stringify(value);
+      return span;
+    }
+    if (t === 'number') {
+      const span = document.createElement('span');
+      span.className = 'json-number';
+      span.textContent = String(value);
+      return span;
+    }
+    if (t === 'boolean') {
+      const span = document.createElement('span');
+      span.className = 'json-boolean';
+      span.textContent = value ? 'true' : 'false';
+      return span;
+    }
+    if (Array.isArray(value)) {
+      return renderJsonArray(value, depth);
+    }
+    if (t === 'object') {
+      return renderJsonObject(value, depth);
+    }
+    // Fallback for exotic types (BigInt, etc.) — shouldn't appear from
+    // JSON.parse but cover the case so the renderer never throws.
+    const span = document.createElement('span');
+    span.textContent = String(value);
+    return span;
+  }
+
+  function renderJsonObject(obj, depth) {
+    const keys = Object.keys(obj);
+    if (keys.length === 0) {
+      const span = document.createElement('span');
+      span.className = 'json-bracket';
+      span.textContent = '{}';
+      return span;
+    }
+    const details = document.createElement('details');
+    // Top level opens by default (shallow objects show their fields at
+    // a glance), nested levels stay collapsed so deep LLM-style payloads
+    // don't dominate the cell. Users click to drill down.
+    details.open = depth === 0;
+    const summary = document.createElement('summary');
+    const opener = document.createElement('span');
+    opener.className = 'json-bracket';
+    opener.textContent = '{';
+    summary.appendChild(opener);
+    const preview = document.createElement('span');
+    preview.className = 'json-summary-preview';
+    preview.textContent = `${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`;
+    summary.appendChild(preview);
+    details.appendChild(summary);
+
+    const children = document.createElement('div');
+    children.className = 'json-children';
+    keys.forEach((key, i) => {
+      const row = document.createElement('span');
+      row.className = 'json-row';
+      const k = document.createElement('span');
+      k.className = 'json-key';
+      k.textContent = JSON.stringify(key);
+      row.appendChild(k);
+      row.appendChild(document.createTextNode(': '));
+      row.appendChild(renderJsonNode(obj[key], depth + 1));
+      if (i < keys.length - 1) {
+        const comma = document.createElement('span');
+        comma.className = 'json-comma';
+        comma.textContent = ',';
+        row.appendChild(comma);
+      }
+      children.appendChild(row);
+    });
+    details.appendChild(children);
+
+    const closer = document.createElement('span');
+    closer.className = 'json-bracket';
+    closer.textContent = '}';
+    details.appendChild(closer);
+    return details;
+  }
+
+  function renderJsonArray(arr, depth) {
+    if (arr.length === 0) {
+      const span = document.createElement('span');
+      span.className = 'json-bracket';
+      span.textContent = '[]';
+      return span;
+    }
+    const details = document.createElement('details');
+    details.open = depth === 0;
+    const summary = document.createElement('summary');
+    const opener = document.createElement('span');
+    opener.className = 'json-bracket';
+    opener.textContent = '[';
+    summary.appendChild(opener);
+    const preview = document.createElement('span');
+    preview.className = 'json-summary-preview';
+    preview.textContent = `${arr.length} ${arr.length === 1 ? 'item' : 'items'}`;
+    summary.appendChild(preview);
+    details.appendChild(summary);
+
+    const children = document.createElement('div');
+    children.className = 'json-children';
+    arr.forEach((item, i) => {
+      const row = document.createElement('span');
+      row.className = 'json-row';
+      row.appendChild(renderJsonNode(item, depth + 1));
+      if (i < arr.length - 1) {
+        const comma = document.createElement('span');
+        comma.className = 'json-comma';
+        comma.textContent = ',';
+        row.appendChild(comma);
+      }
+      children.appendChild(row);
+    });
+    details.appendChild(children);
+
+    const closer = document.createElement('span');
+    closer.className = 'json-bracket';
+    closer.textContent = ']';
+    details.appendChild(closer);
+    return details;
+  }
+
   function renderCell(cell) {
     const td = document.createElement('td');
     if (cell.kind === 'null') {
@@ -1954,18 +2241,29 @@
       return td;
     }
     if (cell.kind === 'json') {
-      // Server already decoded CBOR → JSON text. Pretty-print here so the
-      // browser can show a readable indented form. If the text isn't valid
-      // JSON for some reason (shouldn't happen — the server only emits this
-      // kind on successful decode), show it as-is.
-      const pre = document.createElement('pre');
-      pre.className = 'json';
-      let display = cell.text ?? '';
-      try { display = JSON.stringify(JSON.parse(display), null, 2); }
-      catch { /* fall back to raw text */ }
-      pre.textContent = display;
-      td.appendChild(pre);
-      addCopyButton(td, () => pre.textContent);
+      // Server already decoded CBOR → JSON text. Render as a collapsible
+      // tree so deep structures stay inspectable without taking over the
+      // cell. If the text doesn't parse (shouldn't happen — the server
+      // only emits this kind on successful decode), fall back to a flat
+      // pretty-printed pre.
+      const text = cell.text ?? '';
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch {
+        const pre = document.createElement('pre');
+        pre.className = 'json';
+        pre.textContent = text;
+        td.appendChild(pre);
+        addCopyButton(td, () => pre.textContent);
+        return td;
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'json-tree';
+      wrap.appendChild(renderJsonNode(parsed));
+      td.appendChild(wrap);
+      // Copy returns the canonical pretty-printed form so users get the
+      // same text whether the tree is expanded or collapsed.
+      addCopyButton(td, () => JSON.stringify(parsed, null, 2));
       return td;
     }
     const pre = document.createElement('pre');
@@ -2019,18 +2317,14 @@
     tab.runStartedAt = performance.now();
     tab.runIsPartial = isPartial;
     tab.runningRes = {
-      // resultSets is the canonical shape — one entry per `schema` event,
-      // i.e. one per statement that produces rows. Each entry holds its
-      // own schema + rows + truncation state so multi-statement scripts
-      // render one table per statement instead of fighting over a single
-      // shared one. Top-level schema/rows/rowCount/truncated are kept
-      // populated as "last-seen" snapshots so older code paths and saved
-      // results from earlier versions keep working.
+      // One entry per `schema` event = one per row-producing statement.
+      // Each entry owns its own schema, rows, and truncation state so
+      // multi-statement scripts render one table per statement instead
+      // of fighting over a single shared one.
       resultSets: [],
-      schema: null,
-      rows: [],
+      // Aggregate row count across all sets — surfaced in the running
+      // toolbar status as "N rows so far".
       rowCount: 0,
-      truncated: false,
       elapsedMs: 0,
       trace: null,
       error: null,
@@ -2145,12 +2439,8 @@
         case 'cell_started':
           break;
         case 'schema':
-          // Each schema event opens a new result set. Multi-statement
-          // scripts emit one schema per row-producing statement; rows
-          // that follow attach to the most-recent set. Top-level schema
-          // mirrors the latest for backwards compatibility with older
-          // persisted results.
-          res.schema = event.columns;
+          // Each schema event opens a new result set. Rows that follow
+          // attach to the most-recent set.
           res.resultSets.push({
             schema: event.columns,
             rows: [],
@@ -2188,8 +2478,6 @@
           }
           break;
         case 'row':
-          res.rows.push(event.cells);
-          res.rowCount = res.rows.length;
           // Attach to the current result set (the most-recent schema's).
           // If a row arrives before any schema (defensive — shouldn't
           // happen on the wire), open a placeholder set to anchor it.
@@ -2201,11 +2489,10 @@
             }
             cur.rows.push(event.cells);
             cur.rowCount = cur.rows.length;
+            res.rowCount += 1;
           }
           break;
         case 'truncated':
-          res.truncated = true;
-          res.rowCount = event.rowCount;
           {
             const cur = res.resultSets[res.resultSets.length - 1];
             if (cur) {
@@ -3127,6 +3414,9 @@
     const t = freshTab(state.workspace.tabs.length + 1);
     t.name = name.length > 32 ? name.slice(0, 31) + '…' : name;
     t.sql = sql;
+    // Seed sqlOfLastRun so the tab opens clean — the dirty marker only
+    // appears once the user actually edits the seeded text.
+    t.sqlOfLastRun = sql;
     state.workspace.tabs.push(t);
     state.workspace.activeTabId = t.id;
     renderTabStrip();
