@@ -146,6 +146,54 @@ others use 640×640. The `YoloXModel` class auto-detects input size
 from the ONNX metadata so a single class handles both. Output format
 is identical across all sizes.
 
+### `scrfd_10g` — face detector
+
+- **What it does**: Bounding-box face detection with 5 facial landmarks
+  (left eye, right eye, nose tip, left mouth corner, right mouth corner)
+  per face. Returns
+  `Array<Struct{score, x, y, w, h, landmarks: Array<Struct{x, y}>}>`.
+- **License**: MIT (InsightFace)
+- **Source**: [github.com/deepinsight/insightface](https://github.com/deepinsight/insightface/tree/master/detection/scrfd)
+  — distributed in the `buffalo_l` model pack alongside sibling face
+  recognition / age-gender / landmark models.
+- **Files**:
+  - `det_10g.onnx` (~17 MB) — single ONNX, NCHW input, 640×640
+    letterboxed
+- **Setup**: easiest path is the `insightface` Python package, which
+  auto-downloads the model pack on first use. Copy the file out of the
+  cache:
+  ```powershell
+  pip install insightface
+  python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l').prepare(ctx_id=-1)"
+  Copy-Item ~/.insightface/models/buffalo_l/det_10g.onnx $env:DATUM_MODELS\
+  ```
+  `ctx_id=-1` forces CPU during the prepare call so the download works
+  on machines without CUDA. The same `buffalo_l` pack ships face
+  recognition (`w600k_r50.onnx`), age/gender (`genderage.onnx`), and
+  2D/3D landmarks (`2d106det.onnx`, `1k3d68.onnx`) — drop those into
+  `$DATUM_MODELS` too if you plan to chain a face pipeline.
+- **Per-call overrides**:
+  - `[0] confidence_threshold` (Float64) — drop detections below this
+    score pre-NMS. Default `0.5`.
+  - `[1] iou_threshold` (Float64) — NMS overlap threshold. Default `0.4`.
+  - Example for higher recall: `models.scrfd_10g(image, 0.3)`.
+- **Architecture**: SCRFD ("Sample and Computation Redistribution for
+  Face Detection") is the InsightFace successor to RetinaFace. Same
+  general FPN-with-anchors shape as other modern detectors but with
+  distance-based bbox regression (the four predictions are
+  left/top/right/bottom distances from the anchor centre, not
+  centre+delta+exp) and single-channel sigmoid scores instead of
+  background/foreground softmax pairs. Preprocessing is
+  `(RGB - 127.5) / 128`, NCHW, letterboxed to 640×640 with top-left
+  placement.
+- **Demo**:
+  ```sql
+  SELECT
+    photo_id,
+    models.scrfd_10g(photo) AS faces
+  FROM family_photos LIMIT 5;
+  ```
+
 ### `vit_gpt2_caption` — image captioner
 
 - **What it does**: Generates a single-sentence COCO-style caption for
@@ -330,12 +378,13 @@ the prefix passed to the decoder. We register two resolution variants:
   FROM scene_art LIMIT 3;
   ```
 
-### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`)
+### LLMs (`llama31_8b`, `phi3_mini`, `tinyllama_1b`, `gemma2_2b`, `qwen25_coder_*`, `granite31_1b`, `falcon3_1b`, `mistral_7b`)
 
-Nine LLMs spanning Meta, Microsoft, TinyLlama community, Google,
-Alibaba (three Qwen-Coder sizes), IBM, TII. All quantized to **Q4_K_M**
-for clean cross-model comparison (Qwen-Coder 7B is Q5_K_M for the small
-quality bump). Each is a single GGUF file loaded via LlamaSharp.
+Ten LLMs spanning Meta, Microsoft, TinyLlama community, Google,
+Alibaba (three Qwen-Coder sizes), IBM, TII, Mistral AI. Mostly
+quantized to **Q4_K_M** for clean cross-model comparison; Qwen-Coder 7B
+and Mistral 7B use Q5_K_M for the small quality bump. Each is a single
+GGUF file loaded via LlamaSharp.
 
 | Catalog name | Display | License | Holder |
 |---|---|---|---|
@@ -348,6 +397,7 @@ quality bump). Each is a single GGUF file loaded via LlamaSharp.
 | `qwen25_coder_7b` | Qwen 2.5 Coder 7B Instruct | Apache-2.0 | Alibaba |
 | `granite31_1b` | IBM Granite 3.1 1B A400M | Apache-2.0 | IBM |
 | `falcon3_1b` | Falcon3 1B Instruct | Falcon LLM License 2.0 | TII |
+| `mistral_7b` | Mistral 7B Instruct v0.3 | Apache-2.0 | Mistral AI |
 
 The Qwen2.5-Coder ladder is registered with size-appropriate defaults:
 the 1.5B uses a 4K context (fast iteration), while the 3B and 7B use a
@@ -431,10 +481,16 @@ huggingface-cli download bartowski/granite-3.1-1b-a400m-instruct-GGUF `
 huggingface-cli download tiiuae/Falcon3-1B-Instruct-GGUF `
   Falcon3-1B-Instruct-q4_k_m.gguf `
   --local-dir $env:DATUM_MODELS
+
+# Mistral 7B Instruct v0.3 (note Q5_K_M, not Q4_K_M)
+huggingface-cli download bartowski/Mistral-7B-Instruct-v0.3-GGUF `
+  Mistral-7B-Instruct-v0.3-Q5_K_M.gguf `
+  --local-dir $env:DATUM_MODELS
 ```
 
-Total LLM disk: ~16 GB with all three Qwen-Coder sizes. Each call holds
-one model resident; the residency manager swaps when VRAM is tight.
+Total LLM disk: ~21 GB with all three Qwen-Coder sizes plus Mistral 7B.
+Each call holds one model resident; the residency manager swaps when
+VRAM is tight.
 
 ### Whisper STT zoo (`whisper_tiny`, `whisper_base`, `whisper_small`, `whisper_medium`)
 
