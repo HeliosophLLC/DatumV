@@ -382,6 +382,20 @@
     color: var(--muted); font-size: 12px; margin-bottom: 6px;
   }
 
+  /* Per-statement result-set heading shown when a multi-statement script
+     produces more than one result. Sits above each individual table so
+     the visual grouping mirrors the SQL: one statement → one labelled
+     section. Single-result runs skip the heading entirely. */
+  .meta.result-set-label {
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 18px;
+    margin-bottom: 6px;
+  }
+  .meta.result-set-label:first-child {
+    margin-top: 0;
+  }
+
   table.results {
     border-collapse: collapse;
     font-family: var(--mono); font-size: 13px;
@@ -1743,23 +1757,29 @@
       : '';
   }
 
-  function renderResult(res, container) {
-    if (res.error) {
-      const err = document.createElement('div');
-      err.className = 'error';
-      err.textContent = res.error + (res.detail ? '\n\n' + res.detail : '');
-      container.appendChild(err);
-      return;
+  /// Renders one result set (one row-producing statement's output) as a
+  /// section: optional "Result N" label when there's more than one,
+  /// truncation warning, and the actual data table. Pulled out of
+  /// renderResult so multi-statement scripts can stamp out one section
+  /// per `schema` event.
+  function renderResultSet(set, container, label) {
+    if (label !== null && label !== undefined) {
+      const heading = document.createElement('div');
+      heading.className = 'meta result-set-label';
+      const rowCount = set.rowCount ?? (set.rows ? set.rows.length : 0);
+      heading.textContent =
+        `Result ${label} · ${rowCount.toLocaleString()} ${rowCount === 1 ? 'row' : 'rows'}`;
+      container.appendChild(heading);
     }
 
-    if (res.truncated) {
+    if (set.truncated) {
       const w = document.createElement('div');
       w.className = 'warn';
-      w.textContent = `⚠ Truncated at ${res.rowCount} rows (raise the max rows control to see more).`;
+      w.textContent = `⚠ Truncated at ${set.rowCount} rows (raise the max rows control to see more).`;
       container.appendChild(w);
     }
 
-    if (!res.schema || res.schema.length === 0) {
+    if (!set.schema || set.schema.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'meta';
       empty.textContent = '(no columns)';
@@ -1771,7 +1791,7 @@
     table.className = 'results';
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
-    for (const col of res.schema) {
+    for (const col of set.schema) {
       const th = document.createElement('th');
       th.appendChild(document.createTextNode(col.name));
       const k = document.createElement('span');
@@ -1784,13 +1804,40 @@
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    for (const row of res.rows) {
+    for (const row of set.rows) {
       const tr = document.createElement('tr');
       for (const cell of row) tr.appendChild(renderCell(cell));
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
     container.appendChild(table);
+  }
+
+  function renderResult(res, container) {
+    if (res.error) {
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = res.error + (res.detail ? '\n\n' + res.detail : '');
+      container.appendChild(err);
+      return;
+    }
+
+    // Modern shape: one entry per row-producing statement. Each renders
+    // as its own table so multi-statement scripts don't conflate
+    // schemas. Older persisted results without resultSets fall through
+    // to the single-table legacy path below.
+    if (Array.isArray(res.resultSets) && res.resultSets.length > 0) {
+      res.resultSets.forEach((set, index) => {
+        renderResultSet(set, container, res.resultSets.length > 1 ? index + 1 : null);
+      });
+    } else {
+      // Legacy: render the top-level schema/rows as one table. Reached
+      // for results saved before the multi-set rendering shipped.
+      renderResultSet(
+        { schema: res.schema, rows: res.rows, rowCount: res.rowCount, truncated: res.truncated },
+        container,
+        null);
+    }
 
     // Engine trace, when the user enabled the toggle and the engine emitted
     // anything. Collapsed by default; the summary shows the line count so
@@ -1972,6 +2019,14 @@
     tab.runStartedAt = performance.now();
     tab.runIsPartial = isPartial;
     tab.runningRes = {
+      // resultSets is the canonical shape — one entry per `schema` event,
+      // i.e. one per statement that produces rows. Each entry holds its
+      // own schema + rows + truncation state so multi-statement scripts
+      // render one table per statement instead of fighting over a single
+      // shared one. Top-level schema/rows/rowCount/truncated are kept
+      // populated as "last-seen" snapshots so older code paths and saved
+      // results from earlier versions keep working.
+      resultSets: [],
       schema: null,
       rows: [],
       rowCount: 0,
@@ -2090,7 +2145,18 @@
         case 'cell_started':
           break;
         case 'schema':
+          // Each schema event opens a new result set. Multi-statement
+          // scripts emit one schema per row-producing statement; rows
+          // that follow attach to the most-recent set. Top-level schema
+          // mirrors the latest for backwards compatibility with older
+          // persisted results.
           res.schema = event.columns;
+          res.resultSets.push({
+            schema: event.columns,
+            rows: [],
+            rowCount: 0,
+            truncated: false,
+          });
           break;
         case 'chunk':
           res.chunks.push({ model: event.model, text: event.text });
@@ -2124,10 +2190,29 @@
         case 'row':
           res.rows.push(event.cells);
           res.rowCount = res.rows.length;
+          // Attach to the current result set (the most-recent schema's).
+          // If a row arrives before any schema (defensive — shouldn't
+          // happen on the wire), open a placeholder set to anchor it.
+          {
+            let cur = res.resultSets[res.resultSets.length - 1];
+            if (!cur) {
+              cur = { schema: null, rows: [], rowCount: 0, truncated: false };
+              res.resultSets.push(cur);
+            }
+            cur.rows.push(event.cells);
+            cur.rowCount = cur.rows.length;
+          }
           break;
         case 'truncated':
           res.truncated = true;
           res.rowCount = event.rowCount;
+          {
+            const cur = res.resultSets[res.resultSets.length - 1];
+            if (cur) {
+              cur.truncated = true;
+              cur.rowCount = event.rowCount;
+            }
+          }
           break;
         case 'trace':
           res.trace = event.text;
