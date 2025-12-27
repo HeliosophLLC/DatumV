@@ -2428,10 +2428,24 @@ public static class SqlParser
     /// The <c>TEMP</c>/<c>TEMPORARY</c> keyword is optional — all tables created in a
     /// session are temporary, so <c>CREATE TABLE</c> is accepted as a synonym.
     /// </summary>
+    /// <summary>
+    /// Disambiguating prefix for <c>CREATE [TEMP|TEMPORARY] TABLE</c>.
+    /// Same pattern as <see cref="CreateFunctionPrefix"/> /
+    /// <see cref="CreateProcedurePrefix"/> — wrapped in <c>.Try()</c>
+    /// for backtracking against sibling CREATE-* parsers, with the rest
+    /// of <see cref="CreateTempTableParser"/> running without an outer
+    /// <c>.Try()</c> so column-list / AS-SELECT body failures propagate
+    /// with deep Remainder.Position.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Token<SqlToken>> CreateTempTablePrefix =
+        (from createKw in Token.EqualTo(SqlToken.Create)
+         from optionalTempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary)).OptionalOrDefault()
+         from tableKw in Token.EqualTo(SqlToken.Table)
+         select tableKw)
+        .Try();
+
     private static readonly TokenListParser<SqlToken, Statement> CreateTempTableParser =
-        from createKw in Token.EqualTo(SqlToken.Create)
-        from optionalTempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary)).OptionalOrDefault()
-        from tableKw in Token.EqualTo(SqlToken.Table)
+        from tableKw in CreateTempTablePrefix
         from ifNotExists in IfNotExistsParser
         from tableName in IdentifierOrKeywordAsName
         from asOrParen in Token.EqualTo(SqlToken.As).Try()
@@ -2537,14 +2551,31 @@ public static class SqlParser
     /// bodies because macros are inlined and CSE already operates on the
     /// substituted expression.
     /// </summary>
+    /// <summary>
+    /// The disambiguating prefix for <c>CREATE FUNCTION</c>:
+    /// <c>CREATE [OR REPLACE | OR ALTER] [PURE] FUNCTION</c>. Wrapped in
+    /// <c>.Try()</c> so it backtracks cleanly when the input is actually
+    /// <c>CREATE PROCEDURE</c> / <c>CREATE TEMP TABLE</c> / etc. — the
+    /// <c>FUNCTION</c> token is what commits us. Once the prefix matches,
+    /// the rest of <see cref="CreateFunctionParser"/> runs without a
+    /// surrounding <c>.Try()</c>, so a parse error inside the body
+    /// (e.g. <c>DECLARE x</c> missing the <c>@</c> prefix) propagates
+    /// with deep <c>Remainder.Position</c> and surfaces at the bad
+    /// statement instead of collapsing to "unexpected CREATE at column 1".
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (bool OrReplace, bool IsPure)> CreateFunctionPrefix =
+        (from createKw in Token.EqualTo(SqlToken.Create)
+         from orReplace in OrReplaceParser
+         from isPure in (
+             from pureKw in Token.EqualTo(SqlToken.Pure)
+             select true
+         ).OptionalOrDefault()
+         from functionKw in Token.EqualTo(SqlToken.Function)
+         select (orReplace, isPure))
+        .Try();
+
     private static readonly TokenListParser<SqlToken, Statement> CreateFunctionParser =
-        from createKw in Token.EqualTo(SqlToken.Create)
-        from orReplace in OrReplaceParser
-        from isPure in (
-            from pureKw in Token.EqualTo(SqlToken.Pure)
-            select true
-        ).OptionalOrDefault()
-        from functionKw in Token.EqualTo(SqlToken.Function)
+        from prefix in CreateFunctionPrefix
         from ifNotExists in IfNotExistsParser
         // UDF names are permissive: accept any keyword that can serve as an
         // unquoted name (so e.g. CREATE FUNCTION add(...) doesn't trip on
@@ -2565,22 +2596,32 @@ public static class SqlParser
             select (TypeName: (string?)typeName, IsNotNull: isNotNull)
         ).OptionalOrDefault((TypeName: (string?)null, IsNotNull: false))
         from body in
-            // Macro form: AS expression. Tried first because it's the original
-            // grammar — keeps backtracking shallow for the common case.
-            // The .Try() ensures AS BEGIN...END (T-SQL convention) doesn't get
-            // consumed here and instead falls through to the procedural branches.
-            ((from asKw in Token.EqualTo(SqlToken.As)
-              from expr in SP.Ref(() => ExpressionParser!)
-              select (Expr: (Expression?)expr, Stmts: (IReadOnlyList<Statement>?)null))
-             .Try())
-            // Procedural form with optional leading AS (T-SQL convention:
-            // CREATE FUNCTION ... RETURNS T AS BEGIN ... END).
-            .Or((from asKw in Token.EqualTo(SqlToken.As)
-                 from blk in SP.Ref(() => BlockStatementParser!)
-                 select (Expr: (Expression?)null,
-                         Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
-                .Try())
-            // Procedural form: BEGIN ... END without AS.
+            // Three body shapes: `AS expression` (macro), `AS BEGIN…END`
+            // (T-SQL procedural), and `BEGIN…END` (bare procedural). The
+            // dispatch commits as soon as enough lookahead is consumed to
+            // disambiguate, so a parse error inside a BEGIN…END body
+            // (e.g. `DECLARE x` missing the `@` prefix) propagates with
+            // deep Remainder and surfaces at the bad statement rather
+            // than collapsing to "unexpected AS / BEGIN" at the body
+            // boundary.
+            //
+            // After AS, BlockStatementParser gets first dibs: it fails
+            // without consuming when the next token isn't BEGIN, so the
+            // inner `.Or(ExpressionParser)` falls through cleanly to the
+            // macro form. Once BEGIN is consumed, BlockStatementParser
+            // commits — any inner failure is committed and propagates
+            // upward.
+            (from asKw in Token.EqualTo(SqlToken.As)
+             from result in SP.Ref(() => BlockStatementParser!).Select(blk =>
+                     (Expr: (Expression?)null,
+                      Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
+                 .Or(SP.Ref(() => ExpressionParser!).Select(expr =>
+                     (Expr: (Expression?)expr,
+                      Stmts: (IReadOnlyList<Statement>?)null)))
+             select result)
+            // Bare BEGIN…END (no AS). This branch only fires when the first
+            // post-RETURNS token is BEGIN; the AS-led branch above already
+            // failed without consuming (no AS).
             .Or(from blk in SP.Ref(() => BlockStatementParser!)
                 select (Expr: (Expression?)null,
                         Stmts: (IReadOnlyList<Statement>?)((BlockStatement)blk).Statements))
@@ -2591,9 +2632,9 @@ public static class SqlParser
             returnAnnotation.IsNotNull,
             expressionBody: body.Expr,
             statementBody: body.Stmts,
-            isPure,
+            prefix.IsPure,
             ifNotExists,
-            orReplace);
+            prefix.OrReplace);
 
     /// <summary>
     /// Constructs a <see cref="CreateFunctionStatement"/> from the parsed
@@ -2789,10 +2830,24 @@ public static class SqlParser
     /// shape as UDFs, including the <c>@</c>-prefix and optional
     /// <c>IS NOT NULL</c> annotation.
     /// </summary>
+    /// <summary>
+    /// Disambiguating prefix for <c>CREATE PROCEDURE</c>:
+    /// <c>CREATE [OR REPLACE | OR ALTER] PROCEDURE</c>. Same pattern as
+    /// <see cref="CreateFunctionPrefix"/> — wrapped in <c>.Try()</c> so
+    /// it backtracks cleanly when the input is actually CREATE FUNCTION
+    /// or CREATE TEMP TABLE; the rest of <see cref="CreateProcedureParser"/>
+    /// runs without a surrounding <c>.Try()</c> so body failures
+    /// (BEGIN…END parse errors) propagate with deep Remainder.Position.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> CreateProcedurePrefix =
+        (from createKw in Token.EqualTo(SqlToken.Create)
+         from orReplace in OrReplaceParser
+         from procedureKw in Token.EqualTo(SqlToken.Procedure)
+         select orReplace)
+        .Try();
+
     private static readonly TokenListParser<SqlToken, Statement> CreateProcedureParser =
-        from createKw in Token.EqualTo(SqlToken.Create)
-        from orReplace in OrReplaceParser
-        from procedureKw in Token.EqualTo(SqlToken.Procedure)
+        from orReplace in CreateProcedurePrefix
         from ifNotExists in IfNotExistsParser
         from name in IdentifierOrKeywordAsName
         from open in Token.EqualTo(SqlToken.LeftParen)
@@ -3193,10 +3248,22 @@ public static class SqlParser
     /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.
     /// </summary>
+    /// <remarks>
+    /// The CREATE-* parsers (<see cref="CreateFunctionParser"/>,
+    /// <see cref="CreateProcedureParser"/>, <see cref="CreateTempTableParser"/>)
+    /// each have their own <c>.Try()</c>-protected prefix that disambiguates
+    /// against the sibling CREATE-* alternatives — once a prefix matches, the
+    /// rest of the parser runs without a surrounding <c>.Try()</c> so
+    /// committed failures inside the body propagate with deep
+    /// <c>Remainder.Position</c>. Superpower's <c>Or</c> picks the branch
+    /// with the deepest remainder, so a parse error inside a procedural
+    /// body surfaces at its real position rather than collapsing to
+    /// "unexpected CREATE at column 1".
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
-        CreateFunctionParser.Try()
+        CreateFunctionParser
             .Or(DropFunctionParser.Try())
-            .Or(CreateProcedureParser.Try())
+            .Or(CreateProcedureParser)
             .Or(DropProcedureParser.Try())
             .Or(ExecFunctionParser.Try())
             // Procedural-flow statements: keyword-dispatched, all share the
@@ -3215,7 +3282,7 @@ public static class SqlParser
             .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
             .Or(SetStatementParser.Try())
-            .Or(CreateTempTableParser.Try())
+            .Or(CreateTempTableParser)
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())

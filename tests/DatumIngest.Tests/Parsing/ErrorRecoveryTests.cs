@@ -218,8 +218,15 @@ public sealed class ErrorRecoveryTests : ServiceTestBase
     [Fact]
     public void ValidSelectFromWhere_WithBadLimitValue_PreservesEarlierClauses()
     {
+        // `LIMIT )` — closing paren with no enclosing open isn't a valid
+        // expression start, so the LIMIT clause fails. Earlier clauses
+        // should still be recovered.
+        // (Note: `LIMIT abc` used to fail under the literal-only LIMIT
+        // grammar; with expression-valued LIMIT it parses fine — `abc` is
+        // an identifier expression, semantically odd but syntactically
+        // valid. Use a token that genuinely can't start an expression.)
         ParseResult result = SqlParser.TryParseRecovering(
-            "SELECT x FROM t WHERE x > 1 LIMIT abc");
+            "SELECT x FROM t WHERE x > 1 LIMIT )");
 
         Assert.False(result.IsSuccess);
         // The SELECT, FROM, and WHERE should still be captured.

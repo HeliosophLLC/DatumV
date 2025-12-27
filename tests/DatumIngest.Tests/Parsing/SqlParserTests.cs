@@ -2440,4 +2440,73 @@ public class SqlParserTests : ServiceTestBase
         Assert.NotNull(result.From);
         Assert.IsType<SubquerySource>(result.From.Source);
     }
+
+    [Fact]
+    public void DeclareMissingAtSign_InsideCreateFunctionBody_ErrorPointsAtBadDeclare()
+    {
+        // Regression for the user-reported issue: `DECLARE x String` (no @)
+        // inside a CREATE FUNCTION body produced a misleading "unexpected
+        // CREATE at line 1" error. Stock Superpower .Try() discards
+        // committed-failure metadata when backtracking; we work around that
+        // by factoring CreateFunctionParser into a `.Try()`-protected
+        // prefix (CreateFunctionPrefix matches CREATE…FUNCTION and commits)
+        // and an unprotected body. Once the prefix matches, body failures
+        // propagate with deep Remainder.Position and Superpower's `.Or()`
+        // alternation picks the deepest-Remainder branch — surfacing the
+        // real failure at the bad DECLARE.
+        const string sql =
+            "CREATE FUNCTION Test()\n" +
+            "RETURNS String\n" +
+            "AS BEGIN\n" +
+            "  DECLARE x String\n" + // missing @ on x
+            "  RETURN 'test'\n" +
+            "END";
+
+        ParseException ex = Assert.Throws<ParseException>(() => SqlParser.ParseStatement(sql));
+
+        // The bad DECLARE is on line 4. The error should point there, not
+        // at line 1 (the CREATE) or line 3 (the AS BEGIN).
+        Assert.DoesNotContain("line 1", ex.Message);
+        Assert.DoesNotContain("line 3", ex.Message);
+        Assert.Contains("line 4", ex.Message);
+    }
+
+    [Fact]
+    public void ValidCreateFunction_StillParsesAfterTryPreserveErrorSwap()
+    {
+        // Sanity check: factoring CreateFunctionParser into prefix+body
+        // and dropping the outer .Try() must not break the happy path.
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE FUNCTION Test() RETURNS String AS BEGIN " +
+            "DECLARE @x String = 'hi'; RETURN @x END");
+
+        Assert.IsType<CreateFunctionStatement>(stmt);
+    }
+
+    [Fact]
+    public void DeclareMissingAtSign_InsideCreateProcedureBody_ErrorPointsAtBadDeclare()
+    {
+        // Symmetric to the CREATE FUNCTION case: CREATE PROCEDURE has the
+        // same prefix-factored shape so a parse error in its BEGIN…END body
+        // surfaces at the bad statement, not at the outer CREATE.
+        const string sql =
+            "CREATE PROCEDURE Test() AS BEGIN\n" +
+            "  DECLARE x String\n" + // missing @ on x — line 2
+            "  RETURN\n" +
+            "END";
+
+        ParseException ex = Assert.Throws<ParseException>(() => SqlParser.ParseStatement(sql));
+
+        Assert.DoesNotContain("line 1", ex.Message);
+        Assert.Contains("line 2", ex.Message);
+    }
+
+    [Fact]
+    public void ValidCreateProcedure_StillParsesAfterPrefixRestructure()
+    {
+        Statement stmt = SqlParser.ParseStatement(
+            "CREATE PROCEDURE Test() AS BEGIN DECLARE @x String = 'hi' END");
+
+        Assert.IsType<CreateProcedureStatement>(stmt);
+    }
 }
