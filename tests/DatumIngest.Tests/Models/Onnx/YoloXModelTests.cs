@@ -88,8 +88,7 @@ public sealed class YoloXModelTests : ServiceTestBase
     /// <summary>
     /// Catalog round-trip: registering YOLOX-S via <see cref="BuiltinModels"/>
     /// resolves to a usable <see cref="YoloXModel"/> with the expected
-    /// metadata. License is Apache-2.0 (license-clean detector — the
-    /// whole point of having YOLOX in the zoo alongside YOLOv8).
+    /// metadata. License is Apache-2.0.
     /// </summary>
     [Fact]
     public void Catalog_RegisterAndResolve_YieldsYoloXModel()

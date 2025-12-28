@@ -25,7 +25,7 @@ public static class BuiltinModels
     /// <see cref="TableCatalog"/>. Builds a fresh <see cref="ModelCatalog"/>
     /// rooted at <paramref name="modelDirectory"/> (or the default —
     /// <c>DATUM_MODELS</c> env var, then per-user fallback), registers every
-    /// builtin model (<c>mobilenetv2</c>, <c>yolov8n</c>, <c>llama31_8b</c>,
+    /// builtin model (<c>mobilenetv2</c>, <c>yolox_s</c>, <c>llama31_8b</c>,
     /// <c>phi3_mini</c>), wires the model catalog onto
     /// <see cref="TableCatalog.Models"/>, and adds the <c>system_models</c>
     /// virtual table for runtime introspection.
@@ -74,7 +74,6 @@ public static class BuiltinModels
 
         // Vision models
         RegisterMobileNetV2(modelCatalog);
-        RegisterYolo(modelCatalog);
         RegisterAllYoloX(modelCatalog);  // 7 entries: nano/tiny/s/m/l/x/darknet
         RegisterScrfd10g(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
@@ -1271,66 +1270,6 @@ public static class BuiltinModels
             maxTokens: 50);
 
     /// <summary>
-    /// Default filename for the YOLOv8-nano ONNX file (the smallest variant
-    /// from Ultralytics, ~12 MB). Larger variants — yolov8s.onnx, yolov8m.onnx —
-    /// drop in by passing a different <c>modelFilename</c>.
-    /// </summary>
-    public const string YoloDefaultFilename = "yolov8n.onnx";
-
-    /// <summary>
-    /// Registers YOLOv8-nano object detection under the catalog name
-    /// <paramref name="modelName"/> (defaults to <c>"yolov8n"</c>). Returns one
-    /// detection-array per image. Sibling registrations like <c>yolov8s</c> /
-    /// <c>yolov8m</c> drop in by passing the appropriate filename + name; the
-    /// capability-level <c>tasks.detect</c> namespace will route across them.
-    /// </summary>
-    /// <param name="catalog">Catalog to register against.</param>
-    /// <param name="modelName">SQL-visible name (the <c>X</c> in <c>models.X(image)</c>). Defaults to <c>"yolov8n"</c> — Ultralytics' own size suffix.</param>
-    /// <param name="modelFilename">ONNX filename relative to <see cref="ModelCatalog.ModelDirectory"/>. Defaults to <see cref="YoloDefaultFilename"/>.</param>
-    /// <param name="confidenceThreshold">Score threshold below which a prediction is dropped pre-NMS. Defaults to 0.25.</param>
-    /// <param name="iouThreshold">IoU threshold for NMS. Defaults to 0.45.</param>
-    public static void RegisterYolo(
-        ModelCatalog catalog,
-        string modelName = "yolov8n",
-        string modelFilename = YoloDefaultFilename,
-        float confidenceThreshold = 0.25f,
-        float iouThreshold = 0.45f)
-    {
-        catalog.Register(new ModelCatalogEntry(
-            Name: modelName,
-            Backend: "onnx",
-            RelativePath: modelFilename,
-            InputKinds: [DataKind.Image],
-            // Detection array of structs — per-element kind is Struct; the IsArray
-            // bit will join the catalog surface alongside the schema-layer collapse.
-            OutputKind: DataKind.Struct,
-            IsDeterministic: true,
-            Loader: ctx =>
-            {
-                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
-                return new YoloModel(modelName, modelPath, labels: null, confidenceThreshold, iouThreshold);
-            },
-            // Optional positional overrides for per-call thresholding:
-            //   [0] confidenceThreshold (Float64) — drop predictions below this score
-            //   [1] iouThreshold        (Float64) — NMS overlap threshold
-            // Not yet wired into YoloModel (it uses its construction-time thresholds);
-            // parser will accept them for forward-compat. TODO: thread overrides through.
-            OptionalArgKinds: [DataKind.Float64, DataKind.Float64],
-            DisplayName: "YOLOv8-nano Detector",
-            Parameters: "3.2M",
-            // AGPL-3.0 is strong copyleft + propagates to network use. Personal /
-            // research / open-source-with-AGPL-compatible-license is fine; commercial
-            // SaaS that exposes detection as a service must either release source
-            // under AGPL or buy Ultralytics' separate commercial license.
-            License: "AGPL-3.0",
-            LicenseHolder: "Ultralytics",
-            SourceUrl: "https://github.com/ultralytics/ultralytics",
-            Category: "detector",
-            Modalities: ["image"],
-            Files: [modelFilename]));
-    }
-
-    /// <summary>
     /// Default filename for the SCRFD-10G ONNX file (InsightFace's
     /// successor to RetinaFace, distributed in the <c>buffalo_l</c> model
     /// pack as <c>det_10g.onnx</c>, ~17 MB).
@@ -1343,7 +1282,7 @@ public static class BuiltinModels
     /// Returns one detection-array per image, where each detection is
     /// <c>Struct{score, x, y, w, h, landmarks: Array&lt;Struct{x, y}&gt;}</c>
     /// — same shape SQL queries see for any face detector. Sibling to
-    /// <c>yolov8n</c> / YOLOX but face-specialised, with the 5 facial
+    /// YOLOX but face-specialised, with the 5 facial
     /// landmarks (eye centres, nose tip, mouth corners) that downstream
     /// face-pipeline tasks (alignment, recognition) need.
     /// </summary>
@@ -1399,7 +1338,7 @@ public static class BuiltinModels
 
     // ────────────────────────── YOLOX (Apache-2.0) ──────────────────────────
     //
-    // Megvii's YOLOX detector family — license-clean alternative to YOLOv8.
+    // Megvii's YOLOX detector family — license-clean object detector.
     // Seven sibling registrations spanning the full speed/accuracy ladder.
     // Same architecture, same COCO-80 vocab, different parameter counts.
     // Pre-built ONNX files available directly from the Megvii GitHub release
@@ -1456,8 +1395,8 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new YoloXModel(modelName, modelPath, labels: null);
             },
-            // Same optional thresholding shape as YOLOv8 (forward-compat;
-            // not yet wired into per-call overrides).
+            // Optional thresholding shape (forward-compat; not yet wired
+            // into per-call overrides).
             OptionalArgKinds: [DataKind.Float64, DataKind.Float64],
             DisplayName: $"YOLOX-{sizeLabel} Detector",
             Parameters: parameters,

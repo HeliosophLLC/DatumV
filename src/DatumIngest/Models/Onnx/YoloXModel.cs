@@ -9,15 +9,12 @@ using SkiaSharp;
 namespace DatumIngest.Models.Onnx;
 
 /// <summary>
-/// YOLOX object detector — Apache-2.0 licensed alternative to YOLOv8.
+/// YOLOX object detector — Apache-2.0 licensed.
 /// Wraps Megvii's YOLOX family (nano / tiny / s / m / l / x / darknet)
 /// behind a single model class. Returns one detection-array per image,
 /// each detection a <c>Struct{label, score, x, y, w, h}</c>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <strong>Differences from <see cref="YoloModel"/> (YOLOv8).</strong>
-/// </para>
 /// <list type="bullet">
 ///   <item><description>
 ///     <strong>Letterbox preprocessing.</strong> Resize preserving
@@ -35,9 +32,13 @@ namespace DatumIngest.Models.Onnx;
 ///   </description></item>
 ///   <item><description>
 ///     <strong>Output shape <c>[N, anchors, 85]</c>.</strong> 4 bbox
-///     (cx, cy, w, h in pixel coords) + 1 objectness + 80 class scores.
-///     YOLOv8 has no objectness; YOLOX uses
-///     <c>confidence = objectness × max(class_scores)</c>.
+///     + 1 objectness + 80 class scores. Megvii's release ONNX exports
+///     ship without the bbox decoder, so the bbox slots are raw
+///     <c>(dx, dy, log_w, log_h)</c> in grid units; the decoder
+///     <c>(raw + grid) × stride</c> / <c>exp(raw) × stride</c> is
+///     applied here to recover pixel coords. Confidence is
+///     <c>objectness × max(class_scores)</c>; both are sigmoid-activated
+///     by the head regardless of the export flag.
 ///   </description></item>
 ///   <item><description>
 ///     <strong>Variable input size.</strong> nano and tiny variants are
@@ -160,7 +161,7 @@ public sealed class YoloXModel : OnnxModel
             }
         }
 
-        // Detect dynamic batch dim — same heuristic as YoloModel.
+        // Detect dynamic batch dim — Megvii's default exports pin batch=1.
         int batchDim = inputMeta.Dimensions.Length > 0 ? inputMeta.Dimensions[0] : 1;
         bool symbolicBatchDim = inputMeta.SymbolicDimensions.Length > 0
             && !string.IsNullOrEmpty(inputMeta.SymbolicDimensions[0]);
@@ -349,9 +350,9 @@ public sealed class YoloXModel : OnnxModel
     }
 
     /// <summary>
-    /// Class-aware non-maximum suppression. Same as <see cref="YoloModel"/>'s
-    /// implementation: sort by score descending; for each kept box, suppress
-    /// any later same-class candidate with IoU above the threshold.
+    /// Class-aware non-maximum suppression: sort by score descending; for
+    /// each kept box, suppress any later same-class candidate with IoU
+    /// above the threshold.
     /// </summary>
     private static List<Detection> ApplyNms(List<Detection> candidates, float iouThreshold)
     {

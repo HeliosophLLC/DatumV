@@ -6,7 +6,7 @@ title: Models
 
 DatumIngest invokes machine-learning models through SQL functions in the
 `models.X` namespace — `models.llama31_8b(prompt)`,
-`models.yolov8n(image)`, `models.florence2_caption(image)`. This page
+`models.yolox_s(image)`, `models.florence2_caption(image)`. This page
 documents what's registered out of the box, where each weights file
 comes from, and how to set up the model directory on a fresh machine.
 
@@ -47,7 +47,7 @@ inside the models directory:
 
 ```
 $DATUM_MODELS\
-  yolov8n.onnx
+  yolox_s.onnx
   mobilenetv2-12.onnx
   Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
   ...
@@ -95,30 +95,12 @@ $DATUM_MODELS\
     -OutFile $env:DATUM_MODELS\imagenet-classes.json
   ```
 
-### `yolov8n` — object detector
-
-- **What it does**: Bounding-box detection across 80 COCO classes.
-  Returns `Array<Struct{label, score, x, y, w, h}>`.
-- **License**: ⚠️ **AGPL-3.0** (Ultralytics) — strong copyleft.
-  Personal / research / open-source-with-AGPL-compatible-license use is
-  fine; commercial SaaS that exposes detection requires either
-  re-licensing the dependent codebase under AGPL or buying Ultralytics'
-  separate commercial license. See
-  [Ultralytics licensing](https://www.ultralytics.com/license).
-- **Source**: [github.com/ultralytics/ultralytics](https://github.com/ultralytics/ultralytics)
-- **Files**:
-  - `yolov8n.onnx` (~12 MB)
-- **Setup**: Export from PyTorch (or download a pre-built ONNX from
-  the Ultralytics releases page). Variants `yolov8s`, `yolov8m`,
-  `yolov8l`, `yolov8x` drop in by registering with a different
-  filename — they trade accuracy for speed/size.
-
-### YOLOX — license-clean object detector ladder
+### YOLOX — object detector ladder
 
 Megvii's YOLOX detector family registered as seven sibling entries
 spanning the full speed/accuracy spectrum. Same architecture, same
-COCO-80 vocabulary, different parameter counts. The license-clean
-default detector for `tasks.detect` once that namespace lands.
+COCO-80 vocabulary, different parameter counts. The default detector
+for `tasks.detect` once that namespace lands.
 
 - **License**: Apache-2.0 (Megvii)
 - **Source**: [github.com/Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)

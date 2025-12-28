@@ -1,10 +1,10 @@
 namespace DatumIngest.Models.Onnx;
 
 /// <summary>
-/// The 80 COCO object-detection class names, in the canonical order Ultralytics
-/// uses for YOLOv8 outputs. Index <c>i</c> here corresponds to class score
-/// channel <c>i</c> in the ONNX graph's <c>[N, 84, 8400]</c> output (channels
-/// 4..83 are the 80 class scores).
+/// The 80 COCO object-detection class names, in the canonical COCO order
+/// shared by YOLOX and most other COCO-trained detectors. Index <c>i</c>
+/// here corresponds to class score channel <c>i</c> in the detector's
+/// per-anchor output.
 /// </summary>
 internal static class CocoLabels
 {

@@ -83,7 +83,7 @@ namespace DatumIngest.Models;
 /// </param>
 /// <param name="LicenseHolder">
 /// Who issued the license — <c>"Meta"</c>, <c>"Microsoft"</c>,
-/// <c>"Google"</c>, <c>"Alibaba"</c>, <c>"Ultralytics"</c>. Not strictly
+/// <c>"Google"</c>, <c>"Alibaba"</c>, <c>"Megvii"</c>. Not strictly
 /// the copyright holder (training data may have other rights), but the
 /// entity granting the license under which the weights are distributed.
 /// </param>
@@ -111,7 +111,7 @@ namespace DatumIngest.Models;
 /// <param name="Files">
 /// Every file the model needs to run, expressed as paths *relative to
 /// the model directory*. For single-file models this is a one-element
-/// list (<c>["yolov8n.onnx"]</c>); for multi-file models like Florence-2
+/// list (<c>["yolox_s.onnx"]</c>); for multi-file models like Florence-2
 /// or ViT-GPT2 it lists every <c>.onnx</c> + tokenizer + config file
 /// the loader will read. Surfaced via <c>system_models.file_names</c>
 /// so users can audit dependencies and reconstruct missing installs.
