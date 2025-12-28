@@ -114,7 +114,10 @@ internal static class WebCellFormatter
     {
         if (value.Kind == DataKind.Struct)
         {
-            ushort elementTypeId = value.TypeId;
+            // value.TypeId is the Array<Struct> descriptor; the element struct's
+            // TypeId lives in its ElementTypeId. Without this hop, the lookup hits
+            // the array descriptor (Fields=null) and the formatter falls back to f0..fN.
+            ushort elementTypeId = ResolveElementTypeId(value.TypeId, types);
             DataValue[][] rows = value.AsStructArray(arena, registry);
             string[] parts = new string[rows.Length];
             for (int i = 0; i < rows.Length; i++)
@@ -166,6 +169,20 @@ internal static class WebCellFormatter
             parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
         }
         return "{" + string.Join(", ", parts) + "}";
+    }
+
+    /// <summary>
+    /// Given the TypeId of an <c>Array&lt;Struct&gt;</c>, returns the element
+    /// struct's TypeId by hopping through the array descriptor's <see cref="TypeDescriptor.ElementTypeId"/>.
+    /// Returns 0 when the registry is null, the TypeId isn't an array shape, or the
+    /// element type is not registered.
+    /// </summary>
+    private static ushort ResolveElementTypeId(ushort arrayTypeId, TypeRegistry? types)
+    {
+        if (arrayTypeId == 0 || types is null) return 0;
+        TypeDescriptor? desc = types.GetDescriptor(arrayTypeId);
+        if (desc is null || !desc.IsArray) return 0;
+        return desc.ElementTypeId is { } eid ? (ushort)eid : (ushort)0;
     }
 
     private static string FormatPrimitiveArray<T>(

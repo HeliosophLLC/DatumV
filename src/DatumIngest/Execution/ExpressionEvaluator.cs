@@ -1961,18 +1961,37 @@ public sealed class ExpressionEvaluator
             case DataKind.Struct:
             {
                 DataValue[][] elements = source.AsStructArray(frame.Source, frame.SidecarRegistry);
+                // Carry the element TypeId from the source array's descriptor so the
+                // returned struct stays self-describing — without this, `arr[i]`
+                // strips the TypeId and the result renders as f0..fN.
+                ushort elementTypeId = ResolveArrayElementTypeId(source);
                 if (position < 0 || position >= elements.Length)
                 {
-                    return DataValue.NullStruct(0);
+                    return DataValue.NullStruct(elementTypeId);
                 }
                 DataValue[] fields = elements[position];
-                return DataValue.FromStruct(fields, frame.Target);
+                return DataValue.FromStruct(fields, frame.Target, elementTypeId);
             }
         }
 
         // Fixed-width primitives. The single-element read goes through
         // AsArraySpan<T>; we wrap the resulting scalar back as a DataValue.
         return ReadFixedWidthArrayElement(source, position, frame);
+    }
+
+    /// <summary>
+    /// Looks up the element TypeId for an Array&lt;Struct&gt; value via the
+    /// registry's <c>ElementTypeId</c>. Returns 0 when the registry is null,
+    /// the source has no TypeId, or the descriptor isn't an array shape.
+    /// </summary>
+    private ushort ResolveArrayElementTypeId(DataValue source)
+    {
+        if (_typeRegistry is null) return 0;
+        ushort sourceTypeId = source.TypeId;
+        if (sourceTypeId == 0) return 0;
+        TypeDescriptor? desc = _typeRegistry.GetDescriptor(sourceTypeId);
+        if (desc is null || !desc.IsArray) return 0;
+        return desc.ElementTypeId is { } eid ? (ushort)eid : (ushort)0;
     }
 
     private static DataValue ReadFixedWidthArrayElement(DataValue source, int position, EvaluationFrame frame)

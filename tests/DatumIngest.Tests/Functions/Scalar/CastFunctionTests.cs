@@ -303,12 +303,17 @@ public sealed class CastFunctionTests
     }
 
     [Fact]
-    public async Task Typeof_OnNull_ReturnsKind()
+    public async Task Typeof_OnNull_ReturnsNullTypeValue()
     {
+        // typeof(NULL) → NULL of kind Type. Aligns with the design that null
+        // values have no inhabitable type identity — comparisons fall under
+        // null-propagation, and downstream rendering shows "NULL" rather than
+        // a type name that doesn't apply.
         ValueRef result = await new TypeofFunction().ExecuteAsync(
             new[] { ValueRef.Null(DataKind.Int32) },
             Frame, default);
-        Assert.Equal(DataKind.Int32, result.AsType());
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Type, result.Kind);
     }
 
     [Fact]

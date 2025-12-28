@@ -82,7 +82,7 @@ public interface IModel
     /// </para>
     /// <para>
     /// Outputs are constructed in managed memory via <see cref="ValueRef.FromString"/>,
-    /// <see cref="ValueRef.FromStruct"/>, <see cref="ValueRef.FromArray"/>,
+    /// <see cref="ValueRef.FromStruct(ValueRef[])"/>, <see cref="ValueRef.FromArray"/>,
     /// etc. — the model never touches an arena. The operator's scatter step
     /// calls <see cref="ValueRef.ToDataValue"/> to materialise into the
     /// output batch's arena in one recursive pass. Nested structures (e.g.

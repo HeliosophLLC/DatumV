@@ -28,6 +28,116 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         return await evaluator.EvaluateAsync(access, frame);
     }
 
+    private static async Task<DataValue> EvalWithRegistryAsync(
+        IndexAccessExpression access, Row row, Arena arena, TypeRegistry registry)
+    {
+        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), typeRegistry: registry);
+        EvaluationFrame frame = new(row, arena, arena);
+        return await evaluator.EvaluateAsync(access, frame);
+    }
+
+    [Fact]
+    public async Task IndexAccess_ArrayOfStruct_StampsElementTypeIdOnResult()
+    {
+        // The motivating gap: indexing into an Array<Struct> returned a struct
+        // with TypeId=0, dropping field names. After the fix, the result
+        // carries the descriptor's ElementTypeId so renderers and typeof()
+        // can recover field names. Uses N=2 to force the InArena layout —
+        // N=1 inline arrays don't preserve TypeId (separate follow-up).
+        Pool pool = GetService<Pool>();
+        Arena arena = pool.Backing.RentArena();
+        try
+        {
+            TypeRegistry registry = new();
+            int structTypeId = registry.InternStructType(
+            [
+                new StructFieldDescriptor("label", registry.InternScalarType(DataKind.String)),
+                new StructFieldDescriptor("score", registry.InternScalarType(DataKind.Float32)),
+            ]);
+            int arrayTypeId = registry.InternArrayType(DataKind.Struct, structTypeId);
+
+            DataValue[] s0 = [DataValue.FromString("cat", arena), DataValue.FromFloat32(0.9f)];
+            DataValue[] s1 = [DataValue.FromString("dog", arena), DataValue.FromFloat32(0.7f)];
+            DataValue structArray = DataValue.FromStructArray(
+                [s0, s1], arena, (ushort)arrayTypeId);
+
+            IndexAccessExpression access = new(
+                new ColumnReference("detections"),
+                new LiteralExpression(0));
+
+            DataValue result = await EvalWithRegistryAsync(
+                access, MakeRow(("detections", structArray)), arena, registry);
+
+            Assert.Equal(DataKind.Struct, result.Kind);
+            Assert.False(result.IsArray);
+            Assert.Equal((ushort)structTypeId, result.TypeId);
+        }
+        finally { pool.Backing.TryReturn(arena); }
+    }
+
+    [Fact]
+    public async Task IndexAccess_ArrayOfStruct_OutOfRange_NullStructStillCarriesElementTypeId()
+    {
+        // Out-of-range index returns NullStruct — the TypeId still travels
+        // so callers (typeof, FormatType) can describe the shape that *would*
+        // have been returned. Uses N=2 to force the InArena layout: N=1
+        // struct arrays take an inline path that doesn't preserve TypeId
+        // (a known follow-up; deferred).
+        Pool pool = GetService<Pool>();
+        Arena arena = pool.Backing.RentArena();
+        try
+        {
+            TypeRegistry registry = new();
+            int structTypeId = registry.InternStructType(
+            [
+                new StructFieldDescriptor("x", registry.InternScalarType(DataKind.Int32)),
+            ]);
+            int arrayTypeId = registry.InternArrayType(DataKind.Struct, structTypeId);
+
+            DataValue[] s0 = [DataValue.FromInt32(1)];
+            DataValue[] s1 = [DataValue.FromInt32(2)];
+            DataValue structArray = DataValue.FromStructArray(
+                [s0, s1], arena, (ushort)arrayTypeId);
+
+            IndexAccessExpression access = new(
+                new ColumnReference("arr"),
+                new LiteralExpression(99));
+
+            DataValue result = await EvalWithRegistryAsync(
+                access, MakeRow(("arr", structArray)), arena, registry);
+
+            Assert.True(result.IsNull);
+            Assert.Equal(DataKind.Struct, result.Kind);
+            Assert.Equal((ushort)structTypeId, result.TypeId);
+        }
+        finally { pool.Backing.TryReturn(arena); }
+    }
+
+    [Fact]
+    public async Task IndexAccess_ArrayOfStruct_NoRegistry_LegacyZeroTypeIdBehaviour()
+    {
+        // Without a registry, the evaluator can't resolve ElementTypeId and
+        // the result has TypeId=0. Verifies the fix is non-breaking for tests
+        // that don't construct a registry.
+        Pool pool = GetService<Pool>();
+        Arena arena = pool.Backing.RentArena();
+        try
+        {
+            DataValue[] s0 = [DataValue.FromInt32(1)];
+            DataValue structArray = DataValue.FromStructArray([s0], arena);
+
+            IndexAccessExpression access = new(
+                new ColumnReference("arr"),
+                new LiteralExpression(0));
+
+            DataValue result = await EvalAsync(access, MakeRow(("arr", structArray)), arena);
+
+            Assert.Equal(DataKind.Struct, result.Kind);
+            Assert.Equal((ushort)0, result.TypeId);
+        }
+        finally { pool.Backing.TryReturn(arena); }
+    }
+
     [Fact]
     public async Task IndexAccess_StringArray_ReturnsElementAtPosition()
     {

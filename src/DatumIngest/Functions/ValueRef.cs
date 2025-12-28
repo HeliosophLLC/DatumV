@@ -64,6 +64,15 @@ public readonly struct ValueRef
     /// <summary>True when the value carries the IsArray flag.</summary>
     public bool IsArray => _inline.IsArray;
 
+    /// <summary>
+    /// Per-query <see cref="TypeRegistry"/> id of the underlying value's shape.
+    /// Returns 0 when no type has been registered (scalar primitives, untyped
+    /// in-flight intermediates). Stamped on materialisation by
+    /// <see cref="ToDataValue(IValueStore, ushort, TypeRegistry?)"/> when the
+    /// caller passes a registry.
+    /// </summary>
+    public ushort TypeId => _inline.TypeId;
+
     /// <summary>True when the value is a byte array (Kind=UInt8 + IsArray).</summary>
     public bool IsByteArrayKind => _inline.IsByteArrayKind;
 
@@ -186,9 +195,13 @@ public readonly struct ValueRef
     public static ValueRef FromUuid(Guid value) =>
         new(DataValue.FromUuid(value), null);
 
-    /// <summary>DataKind tag (the value of <c>typeof(x)</c>).</summary>
-    public static ValueRef FromType(DataKind value) =>
-        new(DataValue.FromType(value), null);
+    /// <summary>
+    /// DataKind tag (the value of <c>typeof(x)</c>). When <paramref name="typeId"/>
+    /// is non-zero, the tag carries a <see cref="TypeRegistry"/> id describing the
+    /// rich shape (struct field names, nested array element types).
+    /// </summary>
+    public static ValueRef FromType(DataKind value, ushort typeId = 0) =>
+        new(DataValue.FromType(value, typeId), null);
 
     /// <summary>
     /// String value carried as a managed payload. The boundary conversion
@@ -257,8 +270,18 @@ public readonly struct ValueRef
         new(DataValue.NullStruct(), fields);
 
     /// <summary>
+    /// Struct value with a registered <see cref="TypeRegistry"/> id pre-stamped
+    /// on the inline placeholder. Use this overload when the producer already
+    /// knows the struct's shape (e.g. a model emitting its declared output schema)
+    /// so <c>typeof()</c> and downstream formatters can resolve field names without
+    /// waiting for the materialisation boundary.
+    /// </summary>
+    public static ValueRef FromStruct(ValueRef[] fields, ushort typeId) =>
+        new(DataValue.NullStruct(typeId), fields);
+
+    /// <summary>
     /// Array value carried as a recursive <see cref="ValueRef"/>[] payload.
-    /// Same deferred-materialisation contract as <see cref="FromStruct"/>:
+    /// Same deferred-materialisation contract as <see cref="FromStruct(ValueRef[])"/>:
     /// nested non-inline elements stay managed until the boundary recurses.
     /// The inline carrier uses the typed-array shape (<see cref="DataValue.Kind"/> =
     /// <paramref name="elementKind"/>, <see cref="DataValue.IsArray"/> = true).
@@ -632,7 +655,7 @@ public readonly struct ValueRef
     /// and skip this method entirely. The arena stays cold.
     /// </para>
     /// </remarks>
-    public DataValue ToDataValue(IValueStore targetStore, ushort typeId = 0)
+    public DataValue ToDataValue(IValueStore targetStore, ushort typeId = 0, TypeRegistry? types = null)
     {
         if (IsNull)
         {
@@ -663,11 +686,13 @@ public readonly struct ValueRef
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),
             ValueRef[] elements when _inline.IsArray =>
-                BuildTypedArray(_inline.Kind, elements, targetStore, typeId),
+                BuildTypedArray(_inline.Kind, elements, targetStore, typeId, types),
             // typeId stamped here so model outputs and other top-level struct ValueRefs
-            // get a registered type-id at the single arena-write boundary.
+            // get a registered type-id at the single arena-write boundary. When `types` is
+            // provided, field TypeIds are looked up from the descriptor and propagated
+            // recursively so nested struct fields stay self-describing.
             ValueRef[] fields when _inline.Kind == DataKind.Struct =>
-                DataValue.FromStruct(MaterialiseEach(fields, targetStore), targetStore, typeId),
+                DataValue.FromStruct(MaterialiseEach(fields, targetStore, typeId, types), targetStore, typeId),
             // Bulk primitive-array path: a typed T[] payload (Float32, Int32, …)
             // produced by FromPrimitiveArray<T>. Dispatch by kind to the matching
             // typed-span factory; bytes copy once into the target arena.
@@ -683,14 +708,28 @@ public readonly struct ValueRef
     /// Recursively materialises an array of child <see cref="ValueRef"/>s into
     /// a <see cref="DataValue"/>[] against <paramref name="target"/>. Used by
     /// <see cref="ToDataValue"/> for the struct recursive arm; each leaf's
-    /// arena write happens exactly once during the descent.
+    /// arena write happens exactly once during the descent. When
+    /// <paramref name="types"/> and <paramref name="parentStructTypeId"/> are
+    /// provided, each child's TypeId is looked up from the parent's descriptor
+    /// and propagated, keeping nested struct/array fields self-describing.
     /// </summary>
-    private static DataValue[] MaterialiseEach(ValueRef[] children, IValueStore target)
+    private static DataValue[] MaterialiseEach(
+        ValueRef[] children,
+        IValueStore target,
+        ushort parentStructTypeId = 0,
+        TypeRegistry? types = null)
     {
+        TypeDescriptor? parentDesc = parentStructTypeId != 0 && types is not null
+            ? types.GetDescriptor(parentStructTypeId)
+            : null;
+        IReadOnlyList<StructFieldDescriptor>? fields = parentDesc?.Fields;
         DataValue[] resolved = new DataValue[children.Length];
         for (int i = 0; i < children.Length; i++)
         {
-            resolved[i] = children[i].ToDataValue(target);
+            ushort fieldTypeId = fields is not null && i < fields.Count
+                ? (ushort)fields[i].TypeId
+                : (ushort)0;
+            resolved[i] = children[i].ToDataValue(target, fieldTypeId, types);
         }
         return resolved;
     }
@@ -706,13 +745,14 @@ public readonly struct ValueRef
         DataKind elementKind,
         ValueRef[] elements,
         IValueStore target,
-        ushort typeId = 0)
+        ushort typeId = 0,
+        TypeRegistry? types = null)
     {
         return elementKind switch
         {
             DataKind.String => BuildStringArray(elements, target),
             DataKind.Image => BuildImageArray(elements, target),
-            DataKind.Struct => BuildStructArray(elements, target, typeId),
+            DataKind.Struct => BuildStructArray(elements, target, typeId, types),
             // DateTime is intentionally not supported here: the per-element
             // byte-size convention used by typed arrays elsewhere in the
             // engine treats DateTime as 8 bytes (ticks only) and silently
@@ -759,8 +799,24 @@ public readonly struct ValueRef
         return DataValue.FromImageArray(images, target);
     }
 
-    private static DataValue BuildStructArray(ValueRef[] elements, IValueStore target, ushort typeId = 0)
+    private static DataValue BuildStructArray(
+        ValueRef[] elements,
+        IValueStore target,
+        ushort typeId = 0,
+        TypeRegistry? types = null)
     {
+        // The array's typeId points at an Array<Struct> descriptor whose
+        // ElementTypeId is the element struct's TypeId. Look it up once so each
+        // inner row's field TypeIds can be propagated recursively.
+        ushort elementStructTypeId = 0;
+        IReadOnlyList<StructFieldDescriptor>? elementFields = null;
+        if (typeId != 0 && types is not null && types.GetDescriptor(typeId) is { } arrayDesc
+            && arrayDesc.ElementTypeId is { } eid)
+        {
+            elementStructTypeId = (ushort)eid;
+            elementFields = types.GetDescriptor(elementStructTypeId)?.Fields;
+        }
+
         DataValue[][] rows = new DataValue[elements.Length][];
         for (int i = 0; i < elements.Length; i++)
         {
@@ -769,7 +825,10 @@ public readonly struct ValueRef
             DataValue[] row = new DataValue[fields.Length];
             for (int j = 0; j < fields.Length; j++)
             {
-                row[j] = fields[j].ToDataValue(target);
+                ushort fieldTypeId = elementFields is not null && j < elementFields.Count
+                    ? (ushort)elementFields[j].TypeId
+                    : (ushort)0;
+                row[j] = fields[j].ToDataValue(target, fieldTypeId, types);
             }
             rows[i] = row;
         }

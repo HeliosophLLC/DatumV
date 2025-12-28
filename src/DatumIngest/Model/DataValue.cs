@@ -224,6 +224,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public ushort TypeId =>
         _kind == DataKind.Struct && !IsArray ? _charCount :
         _kind == DataKind.Struct && IsArray && (_flags & DataValueFlags.InArena) != 0 ? _charCount :
+        _kind == DataKind.Type ? _charCount :
         (ushort)0;
 
     /// <summary>
@@ -1623,9 +1624,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Duration, flags: 0, p0: (int)ticks, p1: (int)(ticks >> 32));
     }
 
-    /// <summary>Creates a type tag value that describes another <see cref="DataKind"/>.</summary>
-    public static DataValue FromType(DataKind value) =>
-        new(DataKind.Type, flags: 0, p0: (int)value);
+    /// <summary>
+    /// Creates a type tag value that describes another <see cref="DataKind"/>. When
+    /// <paramref name="typeId"/> is non-zero, the tag carries a <see cref="TypeRegistry"/>
+    /// id describing the rich shape (struct field names, nested array element types).
+    /// </summary>
+    public static DataValue FromType(DataKind value, ushort typeId = 0) =>
+        new(DataKind.Type, flags: 0, p0: (int)value, charCount: typeId);
 
     // ───────────────────────── Arena state ─────────────────────────
 
@@ -2282,7 +2287,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
             DataKind.Uuid     => AsUuid().ToString("D"),
-            DataKind.Type     => AsType().ToString(),
+            DataKind.Type     => FormatType(),
             // Reference types require a store — return ToString() summary without content.
             _ => ToString() ?? _kind.ToString(),
         };
@@ -2751,6 +2756,56 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.Type);
         return (DataKind)(byte)_p0;
+    }
+
+    /// <summary>
+    /// Renders the type this value describes as a human-readable string. When
+    /// <paramref name="registry"/> is provided and this value carries a non-zero
+    /// <see cref="TypeId"/>, the descriptor is looked up and field names / element
+    /// kinds are included recursively (e.g. <c>"Struct{label: String, score: Float32}"</c>,
+    /// <c>"Array&lt;Struct{kx: Float32, ky: Float32}&gt;"</c>). Falls back to
+    /// <c>AsType().ToString()</c> when the registry is null or the TypeId is 0.
+    /// </summary>
+    public string FormatType(TypeRegistry? registry = null)
+    {
+        if (IsNull) return "NULL";
+        DataKind kind = AsType();
+        ushort typeId = TypeId;
+        if (typeId != 0 && registry is not null)
+        {
+            TypeDescriptor? desc = registry.GetDescriptor(typeId);
+            if (desc is not null)
+                return FormatTypeDescriptor(desc, registry);
+        }
+        return kind.ToString();
+    }
+
+    private static string FormatTypeDescriptor(TypeDescriptor desc, TypeRegistry registry)
+    {
+        if (desc.IsArray)
+        {
+            string elementName = desc.ElementTypeId is { } eid && registry.GetDescriptor(eid) is { } ed
+                ? FormatTypeDescriptor(ed, registry)
+                : desc.Kind.ToString();
+            return $"Array<{elementName}>";
+        }
+        if (desc.Kind == DataKind.Struct && desc.Fields is { Count: > 0 } fields)
+        {
+            System.Text.StringBuilder sb = new();
+            sb.Append("Struct{");
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                StructFieldDescriptor f = fields[i];
+                string fieldTypeName = f.TypeId != TypeRegistry.NoType && registry.GetDescriptor(f.TypeId) is { } fd
+                    ? FormatTypeDescriptor(fd, registry)
+                    : "?";
+                sb.Append(f.Name).Append(": ").Append(fieldTypeName);
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+        return desc.Kind.ToString();
     }
 
     /// <summary>

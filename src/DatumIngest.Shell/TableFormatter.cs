@@ -138,7 +138,8 @@ internal static class TableFormatter
         DataValue value,
         Arena arena,
         SidecarRegistry? registry,
-        IReadOnlyList<ColumnInfo>? structFields = null)
+        IReadOnlyList<ColumnInfo>? structFields = null,
+        TypeRegistry? types = null)
     {
         // Byte arrays render as a hex preview regardless of how the column was
         // declared — the IsArray-aware branch below would format them as a
@@ -150,12 +151,12 @@ internal static class TableFormatter
 
         if (value.IsArray)
         {
-            return FormatArrayValue(value, arena, registry, structFields);
+            return FormatArrayValue(value, arena, registry, structFields, types);
         }
 
         if (value.Kind == DataKind.Struct)
         {
-            return FormatStructValue(value, arena, registry, structFields);
+            return FormatStructValue(value, arena, registry, structFields, types);
         }
 
         return value.Kind switch
@@ -233,17 +234,29 @@ internal static class TableFormatter
         DataValue value,
         Arena arena,
         SidecarRegistry? registry,
-        IReadOnlyList<ColumnInfo>? fields)
+        IReadOnlyList<ColumnInfo>? fields,
+        TypeRegistry? types = null)
     {
         DataValue[] fieldValues = value.AsStruct(arena);
+        // Fall back to the registry-resident TypeDescriptor when the caller
+        // doesn't have a ColumnInfo (procedural FOR-loop @row, model output
+        // without schema column, struct returned from index access). The
+        // TypeDescriptor carries the field names stamped at construction time.
+        TypeDescriptor? typeDesc = types is not null && value.TypeId != 0
+            ? types.GetDescriptor(value.TypeId)
+            : null;
         IEnumerable<string> parts = fieldValues.Select((fieldValue, index) =>
         {
-            string name = fields is not null && index < fields.Count ? fields[index].Name : $"f{index}";
+            string name = fields is not null && index < fields.Count
+                ? fields[index].Name
+                : typeDesc?.Fields is { } tdFields && index < tdFields.Count
+                    ? tdFields[index].Name
+                    : $"f{index}";
             IReadOnlyList<ColumnInfo>? nestedFields =
                 fields is not null && index < fields.Count ? fields[index].Fields : null;
             string formatted = fieldValue.IsNull
                 ? "NULL"
-                : FormatValue(fieldValue, arena, registry, nestedFields);
+                : FormatValue(fieldValue, arena, registry, nestedFields, types);
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";
@@ -261,14 +274,18 @@ internal static class TableFormatter
         DataValue value,
         Arena arena,
         SidecarRegistry? registry,
-        IReadOnlyList<ColumnInfo>? structFields)
+        IReadOnlyList<ColumnInfo>? structFields,
+        TypeRegistry? types = null)
     {
         if (value.Kind == DataKind.Struct)
         {
             DataValue[][] rows = value.AsStructArray(arena, registry);
+            // Hop from Array<Struct> → element struct TypeId so each row uses the
+            // element shape's field names, not the array descriptor's null Fields.
+            ushort elementTypeId = ResolveArrayElementTypeId(value.TypeId, types);
             return FormatArrayElements(
                 rows.Length,
-                index => FormatStructFromFieldArray(rows[index], arena, registry, structFields));
+                index => FormatStructFromFieldArray(rows[index], arena, registry, structFields, types, elementTypeId));
         }
 
         if (value.Kind == DataKind.String)
@@ -329,16 +346,41 @@ internal static class TableFormatter
     }
 
     private static string FormatStructFromFieldArray(
-        DataValue[] fieldValues, Arena arena, SidecarRegistry? registry, IReadOnlyList<ColumnInfo>? fields)
+        DataValue[] fieldValues,
+        Arena arena,
+        SidecarRegistry? registry,
+        IReadOnlyList<ColumnInfo>? fields,
+        TypeRegistry? types = null,
+        ushort elementTypeId = 0)
     {
+        TypeDescriptor? typeDesc = types is not null && elementTypeId != 0
+            ? types.GetDescriptor(elementTypeId)
+            : null;
         IEnumerable<string> parts = fieldValues.Select((fv, i) =>
         {
-            string name = fields is not null && i < fields.Count ? fields[i].Name : $"f{i}";
+            string name = fields is not null && i < fields.Count
+                ? fields[i].Name
+                : typeDesc?.Fields is { } tdFields && i < tdFields.Count
+                    ? tdFields[i].Name
+                    : $"f{i}";
             IReadOnlyList<ColumnInfo>? nested = fields is not null && i < fields.Count ? fields[i].Fields : null;
-            string formatted = fv.IsNull ? "NULL" : FormatValue(fv, arena, registry, nested);
+            string formatted = fv.IsNull ? "NULL" : FormatValue(fv, arena, registry, nested, types);
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";
+    }
+
+    /// <summary>
+    /// Given the TypeId of an <c>Array&lt;Struct&gt;</c>, hops through the array
+    /// descriptor's <see cref="TypeDescriptor.ElementTypeId"/> to return the
+    /// element struct's TypeId. Returns 0 when not applicable.
+    /// </summary>
+    private static ushort ResolveArrayElementTypeId(ushort arrayTypeId, TypeRegistry? types)
+    {
+        if (arrayTypeId == 0 || types is null) return 0;
+        TypeDescriptor? desc = types.GetDescriptor(arrayTypeId);
+        if (desc is null || !desc.IsArray) return 0;
+        return desc.ElementTypeId is { } eid ? (ushort)eid : (ushort)0;
     }
 
     /// <summary>

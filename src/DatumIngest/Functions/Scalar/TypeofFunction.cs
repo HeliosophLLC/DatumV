@@ -45,7 +45,32 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
         CancellationToken cancellationToken)
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
-        return new ValueTask<ValueRef>(ValueRef.FromType(args[0].Kind));
+        ValueRef arg = args[0];
+
+        // typeof(NULL) → typed null of kind Type. Downstream rendering shows "NULL"
+        // and equality comparisons against other Type values follow null-propagation.
+        if (arg.IsNull) return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Type));
+
+        DataKind kind = arg.Kind;
+        ushort typeId = arg.TypeId;
+
+        // Forcing function: a struct that has flowed through query execution
+        // without ever being stamped with a registered type is the symptom of
+        // a missing TypeRegistry plumbing site. Fail fast so the gap is fixed
+        // at the construction site, not silently rendered as f0..fN.
+        if (kind == DataKind.Struct && typeId == 0)
+        {
+            throw new InvalidOperationException(
+                "typeof() called on a struct value with no registered type. "
+                + "The struct was constructed without a TypeId — every struct "
+                + "construction site must intern its shape into the per-query "
+                + "TypeRegistry and stamp the resulting TypeId on the DataValue.");
+        }
+
+        // Scalars and primitive-element typed arrays leave TypeId=0 (no rich
+        // shape to describe). Array<Struct> carries its TypeId so
+        // `typeof(detect(img))` renders as "Array<Struct{...}>".
+        return new ValueTask<ValueRef>(ValueRef.FromType(kind, typeId));
     }
 
     /// <inheritdoc />
