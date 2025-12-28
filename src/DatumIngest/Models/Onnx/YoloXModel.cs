@@ -61,6 +61,15 @@ public sealed class YoloXModel : OnnxModel
     private readonly IReadOnlyList<string> _labels;
     private readonly bool _supportsBatching;
 
+    // Per-anchor grid offsets and strides for the YOLOX bbox decoder.
+    // Megvii's default ONNX exports (0.1.1rc0 release assets) omit the
+    // built-in decoder, so the [cx, cy, w, h] slots arrive as raw grid-
+    // relative values that need (raw + grid) * stride for centres and
+    // exp(raw) * stride for sizes.
+    private readonly float[] _gridX;
+    private readonly float[] _gridY;
+    private readonly float[] _strides;
+
     /// <summary>Score threshold below which a prediction is dropped pre-NMS. Defaults to 0.25.</summary>
     public float ConfidenceThreshold { get; }
 
@@ -132,12 +141,42 @@ public sealed class YoloXModel : OnnxModel
         int s8 = _inputSize / 8, s16 = _inputSize / 16, s32 = _inputSize / 32;
         _expectedAnchors = s8 * s8 + s16 * s16 + s32 * s32;
 
+        _gridX = new float[_expectedAnchors];
+        _gridY = new float[_expectedAnchors];
+        _strides = new float[_expectedAnchors];
+        int cursor = 0;
+        foreach ((int side, int stride) in new[] { (s8, 8), (s16, 16), (s32, 32) })
+        {
+            // meshgrid(arange(w), arange(h)) row-major: y outer, x inner.
+            for (int y = 0; y < side; y++)
+            {
+                for (int x = 0; x < side; x++)
+                {
+                    _gridX[cursor] = x;
+                    _gridY[cursor] = y;
+                    _strides[cursor] = stride;
+                    cursor++;
+                }
+            }
+        }
+
         // Detect dynamic batch dim — same heuristic as YoloModel.
         int batchDim = inputMeta.Dimensions.Length > 0 ? inputMeta.Dimensions[0] : 1;
         bool symbolicBatchDim = inputMeta.SymbolicDimensions.Length > 0
             && !string.IsNullOrEmpty(inputMeta.SymbolicDimensions[0]);
         _supportsBatching = batchDim <= 0 || symbolicBatchDim;
     }
+
+    /// <inheritdoc />
+    public override IReadOnlyList<ColumnInfo>? OutputFields =>
+    [
+        new ColumnInfo("label", DataKind.String, nullable: false),
+        new ColumnInfo("score", DataKind.Float32, nullable: false),
+        new ColumnInfo("x", DataKind.Float32, nullable: false),
+        new ColumnInfo("y", DataKind.Float32, nullable: false),
+        new ColumnInfo("w", DataKind.Float32, nullable: false),
+        new ColumnInfo("h", DataKind.Float32, nullable: false),
+    ];
 
     /// <inheritdoc />
     public override async Task<IReadOnlyList<ValueRef>> InferBatchAsync(
@@ -266,10 +305,15 @@ public sealed class YoloXModel : OnnxModel
         for (int anchor = 0; anchor < _expectedAnchors; anchor++)
         {
             int anchorBase = anchor * ValuesPerPrediction;
-            float cx = rowSlice[anchorBase];
-            float cy = rowSlice[anchorBase + 1];
-            float bw = rowSlice[anchorBase + 2];
-            float bh = rowSlice[anchorBase + 3];
+            float stride = _strides[anchor];
+            // YOLOX bbox decoder: (raw + grid) * stride for centres,
+            // exp(raw) * stride for sizes. Megvii's release ONNX exports
+            // omit this step; their onnx_inference.py demo applies it
+            // client-side and we do the same here.
+            float cx = (rowSlice[anchorBase] + _gridX[anchor]) * stride;
+            float cy = (rowSlice[anchorBase + 1] + _gridY[anchor]) * stride;
+            float bw = MathF.Exp(rowSlice[anchorBase + 2]) * stride;
+            float bh = MathF.Exp(rowSlice[anchorBase + 3]) * stride;
             float objectness = rowSlice[anchorBase + 4];
 
             // Find max class score for this anchor.
