@@ -179,6 +179,50 @@ is identical across all sizes.
   FROM family_photos LIMIT 5;
   ```
 
+### `realesrgan_general_x4` — image super-resolution
+
+- **What it does**: 4× super-resolution. Takes an `Image` of any size,
+  returns an `Image` (PNG bytes) at 4× width and 4× height. Real-ESRGAN's
+  Compact (SRVGGNet) "general-content" variant — trained on real-world
+  degradations across diverse photographic content (not anime). The
+  lightweight backbone keeps it fast enough to run per-row in a SQL
+  pipeline without tiling for typical photo sizes.
+- **License**: BSD-3-Clause (Xintao Wang)
+- **Source**: [github.com/xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
+  — upstream ships PyTorch `.pth` weights only. The single-input ONNX
+  export is mirrored at
+  [huggingface.co/OwlMaster/AllFilesRope](https://huggingface.co/OwlMaster/AllFilesRope/blob/main/realesr-general-x4v3.onnx).
+- **Files**:
+  - `realesr-general-x4v3.onnx` (~10 MB) — single-input ONNX. The
+    dual-weight (`dni_weight`-input) variant is **not** supported; the
+    loader rejects it at construction with a clear error.
+- **Setup**:
+  ```powershell
+  Invoke-WebRequest "https://huggingface.co/OwlMaster/AllFilesRope/resolve/main/realesr-general-x4v3.onnx" `
+    -OutFile $env:DATUM_MODELS\realesr-general-x4v3.onnx
+  ```
+- **Memory**: V1 runs whole-image inference, no tiling. The float NCHW
+  intermediates cost `3 × H × W × 4` bytes for input plus
+  `3 × (H·4) × (W·4) × 4` bytes for output — a 1024×1024 input at 4×
+  spends ~210 MB on intermediates. Tile-based inference (with overlap)
+  is the right follow-up if you start running this on multi-megapixel
+  photos. For typical phone-camera thumbnails (≤512×512), whole-image
+  is fine.
+- **Architecture**: SRVGGNetCompact — a stack of 3×3 conv + ReLU blocks
+  feeding a final pixel-shuffle 4× upsample. Preprocessing is raw
+  `pixel / 255` in NCHW RGB; no per-channel mean/std. Output is also
+  `[0, 1]` floats; the model class clips, scales to `[0, 255]`, and PNG-
+  encodes the result (PNG, not JPEG — JPEG-compressing a super-resolved
+  image defeats the purpose).
+- **Demo**:
+  ```sql
+  -- Upscale a folder of thumbnails to 4× their size.
+  SELECT
+    photo_id,
+    models.realesrgan_general_x4(thumb) AS hi_res
+  FROM thumbnails LIMIT 10;
+  ```
+
 ### `vit_gpt2_caption` — image captioner
 
 - **What it does**: Generates a single-sentence COCO-style caption for

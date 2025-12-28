@@ -76,6 +76,7 @@ public static class BuiltinModels
         RegisterMobileNetV2(modelCatalog);
         RegisterAllYoloX(modelCatalog);  // 7 entries: nano/tiny/s/m/l/x/darknet
         RegisterScrfd10g(modelCatalog);
+        RegisterRealesrganGeneralX4(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
 
         // Captioner zoo — Florence-2 in three caption styles plus a
@@ -1333,6 +1334,65 @@ public static class BuiltinModels
             LicenseHolder: "InsightFace",
             SourceUrl: "https://github.com/deepinsight/insightface/tree/master/detection/scrfd",
             Category: "detector",
+            Modalities: ["image"],
+            Files: [modelFilename]));
+    }
+
+    // ──────────────────── Real-ESRGAN-General x4 (BSD-3) ────────────────────
+    //
+    // Xintao Wang's Real-ESRGAN-Compact (SRVGGNet) general-content variant.
+    // 4× super-resolution, ~10 MB ONNX. Trained on real-world degradations
+    // (not anime); the lightweight Compact backbone keeps it fast enough
+    // to run per-row in a SQL pipeline without tiling for typical photos.
+
+    /// <summary>
+    /// Default filename for Real-ESRGAN-General x4 (the v3 single-input
+    /// ONNX export from the OwlMaster/AllFilesRope HuggingFace mirror).
+    /// </summary>
+    public const string RealesrganGeneralX4DefaultFilename = "realesr-general-x4v3.onnx";
+
+    /// <summary>
+    /// Registers Real-ESRGAN-General x4 under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"realesrgan_general_x4"</c>).
+    /// Image-in / image-out: PNG-encoded 4× upscale of the input.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream is <a href="https://github.com/xinntao/Real-ESRGAN">xinntao/Real-ESRGAN</a>;
+    /// xinntao only ships <c>.pth</c> weights and a PyTorch conversion script,
+    /// so the practical download is the OwlMaster/AllFilesRope HuggingFace mirror
+    /// at <c>https://huggingface.co/OwlMaster/AllFilesRope/blob/main/realesr-general-x4v3.onnx</c>.
+    /// </para>
+    /// <para>
+    /// V1 runs whole-image inference. Memory cost scales with the output
+    /// resolution: a 1024×1024 input at 4× costs ~210 MB of intermediate
+    /// floats. Tile-based inference is the right follow-up for high-res
+    /// inputs; not implemented yet.
+    /// </para>
+    /// </remarks>
+    public static void RegisterRealesrganGeneralX4(
+        ModelCatalog catalog,
+        string modelName = "realesrgan_general_x4",
+        string modelFilename = RealesrganGeneralX4DefaultFilename)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new SuperResolutionModel(modelName, modelPath, scaleFactor: 4);
+            },
+            DisplayName: "Real-ESRGAN General x4 (Compact)",
+            Parameters: "1.2M",
+            License: "BSD-3-Clause",
+            LicenseHolder: "Xintao Wang",
+            SourceUrl: "https://github.com/xinntao/Real-ESRGAN",
+            Category: "enhancer",
             Modalities: ["image"],
             Files: [modelFilename]));
     }
