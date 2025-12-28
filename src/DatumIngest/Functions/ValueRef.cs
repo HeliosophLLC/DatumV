@@ -814,9 +814,11 @@ public readonly struct ValueRef
         ushort typeId = 0,
         TypeRegistry? types = null)
     {
-        // The array's typeId points at an Array<Struct> descriptor whose
-        // ElementTypeId is the element struct's TypeId. Look it up once so each
-        // inner row's field TypeIds can be propagated recursively.
+        // The incoming `typeId` is the Array<Struct> descriptor's TypeId. Hop to
+        // its ElementTypeId — that's the per-element struct's TypeId, the value
+        // that gets stamped into every slot's reserved bytes by FromStructArray.
+        // The array container itself no longer carries a TypeId; each element is
+        // self-describing via its slot's TypeId field.
         ushort elementStructTypeId = 0;
         IReadOnlyList<StructFieldDescriptor>? elementFields = null;
         if (typeId != 0 && types is not null && types.GetDescriptor(typeId) is { } arrayDesc
@@ -841,7 +843,7 @@ public readonly struct ValueRef
             }
             rows[i] = row;
         }
-        return DataValue.FromStructArray(rows, target, typeId);
+        return DataValue.FromStructArray(rows, target, elementStructTypeId);
     }
 
     /// <summary>

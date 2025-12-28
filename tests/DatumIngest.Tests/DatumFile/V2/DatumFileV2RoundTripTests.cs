@@ -558,12 +558,14 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         {
             DataValue v0 = decoder.ReadValue(0);
             Assert.True(v0.IsInSidecar);
-            DataValue[][] structs0 = v0.AsStructArray(readArena, registry);
+            DataValue[] structs0 = v0.AsStructArray(readArena, registry);
             Assert.Equal(2, structs0.Length);
-            Assert.Equal("cat", structs0[0][0].AsString(readArena));
-            Assert.Equal(0.95f, structs0[0][1].AsFloat32());
-            Assert.Equal("dog with a longer label here", structs0[1][0].AsString(readArena));
-            Assert.Equal(0.78f, structs0[1][1].AsFloat32());
+            DataValue[] s0 = structs0[0].AsStruct(readArena);
+            DataValue[] s1 = structs0[1].AsStruct(readArena);
+            Assert.Equal("cat", s0[0].AsString(readArena));
+            Assert.Equal(0.95f, s0[1].AsFloat32());
+            Assert.Equal("dog with a longer label here", s1[0].AsString(readArena));
+            Assert.Equal(0.78f, s1[1].AsFloat32());
 
             DataValue v1 = decoder.ReadValue(1);
             Assert.True(v1.IsInSidecar);

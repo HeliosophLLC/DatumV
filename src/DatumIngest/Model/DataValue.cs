@@ -647,6 +647,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                     blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                     out long elementOffset,
                     out long elementLength,
+                    out _,
                     out _);
                 ReadOnlySpan<byte> utf8 = src.Read(elementOffset, elementLength);
                 result[i] = System.Text.Encoding.UTF8.GetString(utf8);
@@ -666,7 +667,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             MemoryMarshal.Write(slotBytes[4..8], _p1);
             MemoryMarshal.Write(slotBytes[8..12], _p2);
             MemoryMarshal.Write(slotBytes[12..16], _p3);
-            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _, out _);
             return [store.RetrieveString((int)elementOffset, (int)elementLength)];
         }
 
@@ -680,6 +681,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 out long elementOffset,
                 out long elementLength,
+                out _,
                 out _);
             arenaResult[i] = store.RetrieveString((int)elementOffset, (int)elementLength);
         }
@@ -887,6 +889,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                     blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                     out long elementOffset,
                     out long elementLength,
+                    out _,
                     out _);
                 result[i] = src.Read(elementOffset, elementLength).ToArray();
             }
@@ -902,7 +905,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             MemoryMarshal.Write(slotBytes[4..8], _p1);
             MemoryMarshal.Write(slotBytes[8..12], _p2);
             MemoryMarshal.Write(slotBytes[12..16], _p3);
-            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
+            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _, out _);
             return [store.RetrieveBytes((int)elementOffset, (int)elementLength)];
         }
 
@@ -915,6 +918,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 out long elementOffset,
                 out long elementLength,
+                out _,
                 out _);
             arenaResult[i] = store.RetrieveBytes((int)elementOffset, (int)elementLength);
         }
@@ -932,6 +936,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store, ushort typeId)
     {
+        // typeId is the *element struct's* TypeId — written into each slot's
+        // reserved bytes so every element is self-describing on read. The array
+        // container itself doesn't carry a TypeId; `_charCount` here only
+        // distinguishes the inline N=0 / N=1 cases.
         if (elements.Length == 0)
         {
             return new(
@@ -945,7 +953,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         {
             (int elementP0, int elementP1) = store.StoreDataValues(elements[0]);
             Span<byte> slotBytes = stackalloc byte[ArraySlot.SizeBytes];
-            ArraySlot.Write(slotBytes, elementP0, elementP1);
+            ArraySlot.Write(slotBytes, elementP0, elementP1, typeId);
             int p0 = MemoryMarshal.Read<int>(slotBytes[..4]);
             int p1 = MemoryMarshal.Read<int>(slotBytes[4..8]);
             int p2 = MemoryMarshal.Read<int>(slotBytes[8..12]);
@@ -964,7 +972,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementP0,
-                elementP1);
+                elementP1,
+                typeId);
         }
         (int blockP0, int blockP1) = store.StoreBytes(slotBlock);
         return new(
@@ -972,7 +981,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             flags: DataValueFlags.IsArray | DataValueFlags.InArena,
             p0: blockP0,
             p1: blockP1,
-            charCount: typeId);
+            charCount: 0);
     }
 
     /// <summary>
@@ -1122,13 +1131,21 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Reads an <c>Array&lt;Struct&gt;</c> value as a jagged
-    /// <see cref="DataValue"/>[][] — outer index is element, inner is struct field.
-    /// For sidecar-backed arrays, struct fields are deserialised on the fly from
-    /// their sidecar bytes; reference-typed fields (strings, etc.) materialise
-    /// into <paramref name="store"/> since they need a value-store target.
+    /// Reads an <c>Array&lt;Struct&gt;</c> value as a flat array of
+    /// self-describing <see cref="DataValue"/> elements. Each returned element is
+    /// a <see cref="DataKind.Struct"/> <see cref="DataValue"/> carrying its own
+    /// TypeId stamped at construction time; call <see cref="AsStruct(IValueStore)"/> on it to
+    /// access the struct's fields. The per-element TypeId rides in the slot's
+    /// reserved bytes — see <see cref="ArraySlot"/>.
     /// </summary>
-    public DataValue[][] AsStructArray(IValueStore store, SidecarRegistry? registry = null)
+    /// <remarks>
+    /// The previous shape was <c>DataValue[][]</c> (outer = element, inner =
+    /// fields). That representation couldn't carry a per-row TypeId, so
+    /// <c>typeof(arr[0])</c> and field-name rendering on indexed elements lost
+    /// shape information. The current shape preserves it: every element is a
+    /// real Struct DataValue with its own <see cref="TypeId"/>.
+    /// </remarks>
+    public DataValue[] AsStructArray(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNotReferenceArray(DataKind.Struct);
 
@@ -1137,16 +1154,23 @@ public readonly struct DataValue : IEquatable<DataValue>
             IBlobSource src = ResolveSidecarSource(registry);
             ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
-            DataValue[][] result = new DataValue[elementCount][];
+            DataValue[] result = new DataValue[elementCount];
             for (int i = 0; i < elementCount; i++)
             {
                 ArraySlot.Read(
                     blockBytes.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                     out long elementOffset,
                     out long elementLength,
+                    out ushort elementTypeId,
                     out _);
                 ReadOnlySpan<byte> structBytes = src.Read(elementOffset, elementLength);
-                result[i] = DeserializeStructFields(structBytes, store);
+                DataValue[] fields = DeserializeStructFields(structBytes, store);
+                // The sidecar's struct bytes are wire-format; re-store the field
+                // array into the in-memory arena so the synthesised Struct
+                // DataValue has the standard arena-backed layout. Reference-
+                // typed fields were already written into `store` by the
+                // deserialiser.
+                result[i] = FromStruct(fields, store, elementTypeId);
             }
             return result;
         }
@@ -1160,24 +1184,40 @@ public readonly struct DataValue : IEquatable<DataValue>
             MemoryMarshal.Write(slotBytes[4..8], _p1);
             MemoryMarshal.Write(slotBytes[8..12], _p2);
             MemoryMarshal.Write(slotBytes[12..16], _p3);
-            ArraySlot.Read(slotBytes, out long elementOffset, out long elementLength, out _);
-            return [store.RetrieveDataValues((int)elementOffset, (int)elementLength)];
+            ArraySlot.Read(
+                slotBytes,
+                out long elementOffset,
+                out long elementLength,
+                out ushort elementTypeId,
+                out _);
+            return [SynthesiseArenaStruct((int)elementOffset, (int)elementLength, elementTypeId)];
         }
 
         ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(_p0, _p1);
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
-        DataValue[][] arenaResult = new DataValue[n][];
+        DataValue[] arenaResult = new DataValue[n];
         for (int i = 0; i < n; i++)
         {
             ArraySlot.Read(
                 arenaBlock.Slice(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 out long elementOffset,
                 out long elementLength,
+                out ushort elementTypeId,
                 out _);
-            arenaResult[i] = store.RetrieveDataValues((int)elementOffset, (int)elementLength);
+            arenaResult[i] = SynthesiseArenaStruct((int)elementOffset, (int)elementLength, elementTypeId);
         }
         return arenaResult;
     }
+
+    /// <summary>
+    /// Builds a <see cref="DataKind.Struct"/> <see cref="DataValue"/> that points
+    /// at an already-stored field array at <c>(offset, count)</c> in some arena,
+    /// stamped with <paramref name="typeId"/>. No fresh arena writes — used by
+    /// <see cref="AsStructArray"/> to materialise per-element struct values from
+    /// their slot data.
+    /// </summary>
+    private static DataValue SynthesiseArenaStruct(int fieldArrayOffset, int fieldCount, ushort typeId) =>
+        new(DataKind.Struct, DataValueFlags.InArena, typeId, fieldArrayOffset, fieldCount);
 
     /// <summary>
     /// Deserialises a single struct's field bytes (uint16 fieldCount + N

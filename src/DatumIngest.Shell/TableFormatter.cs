@@ -279,13 +279,20 @@ internal static class TableFormatter
     {
         if (value.Kind == DataKind.Struct)
         {
-            DataValue[][] rows = value.AsStructArray(arena, registry);
-            // Hop from Array<Struct> → element struct TypeId so each row uses the
-            // element shape's field names, not the array descriptor's null Fields.
-            ushort elementTypeId = ResolveArrayElementTypeId(value.TypeId, types);
+            // Each element is a self-describing Struct DataValue carrying its own
+            // TypeId in the slot's reserved bytes. Pull fields per element via
+            // AsStruct and format with the element's own TypeId — no container-
+            // side ElementTypeId hop needed.
+            DataValue[] elements = value.AsStructArray(arena, registry);
             return FormatArrayElements(
-                rows.Length,
-                index => FormatStructFromFieldArray(rows[index], arena, registry, structFields, types, elementTypeId));
+                elements.Length,
+                index => FormatStructFromFieldArray(
+                    elements[index].AsStruct(arena),
+                    arena,
+                    registry,
+                    structFields,
+                    types,
+                    elements[index].TypeId));
         }
 
         if (value.Kind == DataKind.String)

@@ -224,11 +224,12 @@ public sealed class ReferenceArrayTests : ServiceTestBase
         Assert.True(value.IsArray);
         Assert.True(value.IsInline);
 
-        DataValue[][] result = value.AsStructArray(arena);
+        DataValue[] result = value.AsStructArray(arena);
         Assert.Single(result);
-        Assert.Equal(2, result[0].Length);
-        Assert.Equal("alice", result[0][0].AsString(arena));
-        Assert.Equal(42, result[0][1].AsInt32());
+        DataValue[] aliceFields = result[0].AsStruct(arena);
+        Assert.Equal(2, aliceFields.Length);
+        Assert.Equal("alice", aliceFields[0].AsString(arena));
+        Assert.Equal(42, aliceFields[1].AsInt32());
     }
 
     [Fact]
@@ -243,14 +244,17 @@ public sealed class ReferenceArrayTests : ServiceTestBase
         Assert.True(value.IsArray);
         Assert.False(value.IsInline);
 
-        DataValue[][] result = value.AsStructArray(arena);
+        DataValue[] result = value.AsStructArray(arena);
         Assert.Equal(3, result.Length);
-        Assert.Equal("alice", result[0][0].AsString(arena));
-        Assert.Equal(30, result[0][1].AsInt32());
-        Assert.Equal("bob", result[1][0].AsString(arena));
-        Assert.Equal(25, result[1][1].AsInt32());
-        Assert.Equal("carol", result[2][0].AsString(arena));
-        Assert.Equal(40, result[2][1].AsInt32());
+        DataValue[] r0 = result[0].AsStruct(arena);
+        DataValue[] r1 = result[1].AsStruct(arena);
+        DataValue[] r2 = result[2].AsStruct(arena);
+        Assert.Equal("alice", r0[0].AsString(arena));
+        Assert.Equal(30, r0[1].AsInt32());
+        Assert.Equal("bob", r1[0].AsString(arena));
+        Assert.Equal(25, r1[1].AsInt32());
+        Assert.Equal("carol", r2[0].AsString(arena));
+        Assert.Equal(40, r2[1].AsInt32());
     }
 
     [Fact]
@@ -361,12 +365,14 @@ public sealed class ReferenceArrayTests : ServiceTestBase
         DataValue stable = DataValueRetention.Stabilize(original, source, retention);
         source.Dispose();
 
-        DataValue[][] result = stable.AsStructArray(retention);
+        DataValue[] result = stable.AsStructArray(retention);
         Assert.Equal(2, result.Length);
-        Assert.Equal("alice in wonderland with a long surname", result[0][0].AsString(retention));
-        Assert.Equal(30, result[0][1].AsInt32());
-        Assert.Equal("robert with a long string for testing", result[1][0].AsString(retention));
-        Assert.Equal(25, result[1][1].AsInt32());
+        DataValue[] r0 = result[0].AsStruct(retention);
+        DataValue[] r1 = result[1].AsStruct(retention);
+        Assert.Equal("alice in wonderland with a long surname", r0[0].AsString(retention));
+        Assert.Equal(30, r0[1].AsInt32());
+        Assert.Equal("robert with a long string for testing", r1[0].AsString(retention));
+        Assert.Equal(25, r1[1].AsInt32());
     }
 
     [Fact]

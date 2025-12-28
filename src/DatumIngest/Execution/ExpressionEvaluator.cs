@@ -1960,17 +1960,19 @@ public sealed class ExpressionEvaluator
             }
             case DataKind.Struct:
             {
-                DataValue[][] elements = source.AsStructArray(frame.Source, frame.SidecarRegistry);
-                // Carry the element TypeId from the source array's descriptor so the
-                // returned struct stays self-describing — without this, `arr[i]`
-                // strips the TypeId and the result renders as f0..fN.
-                ushort elementTypeId = ResolveArrayElementTypeId(source);
+                // Each element is already a self-describing Struct DataValue with
+                // its own TypeId stamped in the slot — just pick one. No registry
+                // hop, no FromStruct rewrap, no f0..fN regression risk.
+                DataValue[] elements = source.AsStructArray(frame.Source, frame.SidecarRegistry);
                 if (position < 0 || position >= elements.Length)
                 {
-                    return DataValue.NullStruct(elementTypeId);
+                    // Borrow TypeId from any existing element so the null still
+                    // names the shape that *would* have been there. Empty arrays
+                    // can't supply one — fall back to 0.
+                    ushort fallbackTypeId = elements.Length > 0 ? elements[0].TypeId : (ushort)0;
+                    return DataValue.NullStruct(fallbackTypeId);
                 }
-                DataValue[] fields = elements[position];
-                return DataValue.FromStruct(fields, frame.Target, elementTypeId);
+                return elements[position];
             }
         }
 

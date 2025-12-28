@@ -114,15 +114,15 @@ internal static class WebCellFormatter
     {
         if (value.Kind == DataKind.Struct)
         {
-            // value.TypeId is the Array<Struct> descriptor; the element struct's
-            // TypeId lives in its ElementTypeId. Without this hop, the lookup hits
-            // the array descriptor (Fields=null) and the formatter falls back to f0..fN.
-            ushort elementTypeId = ResolveElementTypeId(value.TypeId, types);
-            DataValue[][] rows = value.AsStructArray(arena, registry);
-            string[] parts = new string[rows.Length];
-            for (int i = 0; i < rows.Length; i++)
+            // Each element is a self-describing Struct DataValue carrying its own
+            // TypeId. No container-side ElementTypeId hop — read each row's
+            // TypeId directly off the slot.
+            DataValue[] elements = value.AsStructArray(arena, registry);
+            string[] parts = new string[elements.Length];
+            for (int i = 0; i < elements.Length; i++)
             {
-                parts[i] = FormatStructFromFields(rows[i], arena, registry, types, elementTypeId);
+                DataValue[] fields = elements[i].AsStruct(arena);
+                parts[i] = FormatStructFromFields(fields, arena, registry, types, elements[i].TypeId);
             }
             return "[" + string.Join(", ", parts) + "]";
         }

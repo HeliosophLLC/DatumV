@@ -854,16 +854,13 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task EndToEnd_ArrayOfStructOutput_StampsArrayTypeIdNotElementTypeId()
+    public async Task EndToEnd_ArrayOfStructOutput_PerElementTypeIdStampedOnRows()
     {
-        // The bug: operator passed the element struct's TypeId to
-        // ToDataValue for the per-row Array<Struct> value, so the resulting
-        // DataValue carried a struct (Fields-populated) descriptor instead of
-        // an array (IsArray=true, ElementTypeId=struct) descriptor. Renderers
-        // and the evaluator's index-access path both rely on
-        // `desc.IsArray && desc.ElementTypeId` — without an array descriptor,
-        // they fall back to f0..fN. Fix: lazily intern Array<Struct> when the
-        // model's per-row value is an array, then stamp THAT TypeId.
+        // After the per-element TypeId layout, the array container itself no
+        // longer carries a TypeId — every element row is self-describing via
+        // its slot's reserved bytes. The test verifies that each emitted
+        // element stamps the model's element struct shape, recoverable through
+        // the in-flight registry without any container-side ElementTypeId hop.
         ArrayStructEchoModel model = new();
         ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
         modelCatalog.Register(new ModelCatalogEntry(
@@ -881,34 +878,47 @@ public sealed class ModelInvocationTests : ServiceTestBase
             new object?[] { "alice" });
         catalog.Models = modelCatalog;
 
-        // Drive through ExecuteQueryAsync with our own context so we can
-        // inspect the registry after execution.
         DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog);
         QueryExpression query = SqlParser.Parse("SELECT models.array_struct_echo(name) FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-        List<Row> rows = await plan.CollectRowsAsync(context);
 
-        Assert.Single(rows);
-        DataValue arrayValue = rows[0][0];
-        Assert.Equal(DataKind.Struct, arrayValue.Kind);
-        Assert.True(arrayValue.IsArray);
-        Assert.NotEqual((ushort)0, arrayValue.TypeId);
+        // Stream the result so the per-batch arena stays alive while we read
+        // AsStructArray. Capture only the registry-resolved fields we need to
+        // assert on — they survive the batch's lifetime since they live on
+        // managed TypeDescriptor objects.
+        bool sawRow = false;
+        ushort capturedElementTypeId = 0;
+        TypeDescriptor? capturedElementDesc = null;
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                sawRow = true;
+                DataValue arrayValue = batch[i][0];
+                Assert.Equal(DataKind.Struct, arrayValue.Kind);
+                Assert.True(arrayValue.IsArray);
+                // Container TypeId is intentionally 0 — elements carry shape,
+                // not the container.
+                Assert.Equal((ushort)0, arrayValue.TypeId);
 
-        // The stamped TypeId must be the *array* descriptor — IsArray=true and
-        // ElementTypeId pointing at the element struct shape.
-        TypeDescriptor? arrayDesc = context.Types.GetDescriptor(arrayValue.TypeId);
-        Assert.NotNull(arrayDesc);
-        Assert.True(arrayDesc.IsArray);
-        Assert.NotNull(arrayDesc.ElementTypeId);
+                DataValue[] elements = arrayValue.AsStructArray(batch.Arena);
+                Assert.Equal(2, elements.Length);
+                Assert.All(elements, e => Assert.Equal(DataKind.Struct, e.Kind));
+                capturedElementTypeId = elements[0].TypeId;
+                Assert.NotEqual((ushort)0, capturedElementTypeId);
+                Assert.All(elements, e => Assert.Equal(capturedElementTypeId, e.TypeId));
+                capturedElementDesc = context.Types.GetDescriptor(capturedElementTypeId);
+            }
+        }
 
-        TypeDescriptor? elementDesc = context.Types.GetDescriptor(arrayDesc.ElementTypeId.Value);
-        Assert.NotNull(elementDesc);
-        Assert.Equal(DataKind.Struct, elementDesc.Kind);
-        Assert.False(elementDesc.IsArray);
-        Assert.NotNull(elementDesc.Fields);
-        Assert.Equal(2, elementDesc.Fields.Count);
-        Assert.Equal("score", elementDesc.Fields[0].Name);
-        Assert.Equal("label", elementDesc.Fields[1].Name);
+        Assert.True(sawRow);
+        Assert.NotNull(capturedElementDesc);
+        Assert.Equal(DataKind.Struct, capturedElementDesc.Kind);
+        Assert.False(capturedElementDesc.IsArray);
+        Assert.NotNull(capturedElementDesc.Fields);
+        Assert.Equal(2, capturedElementDesc.Fields.Count);
+        Assert.Equal("score", capturedElementDesc.Fields[0].Name);
+        Assert.Equal("label", capturedElementDesc.Fields[1].Name);
     }
 }

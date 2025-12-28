@@ -32,18 +32,26 @@ public sealed class StructApiContractTests
     }
 
     [Fact]
-    public void FromStructArray_Typed_StampsTypeIdOnArray()
+    public void FromStructArray_Typed_StampsTypeIdOnEachElement()
     {
+        // Per-element TypeId layout: the typeId argument is now stamped into
+        // each slot's reserved bytes, not on the array container. Read elements
+        // back and verify each carries the TypeId.
         Arena arena = new();
         DataValue[] r0 = [DataValue.FromInt32(1)];
         DataValue[] r1 = [DataValue.FromInt32(2)];
         DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 7);
-        Assert.Equal((ushort)7, v.TypeId);
         Assert.True(v.IsArray);
+        Assert.Equal((ushort)0, v.TypeId);  // container is intentionally unused
+
+        DataValue[] elements = v.AsStructArray(arena);
+        Assert.Equal(2, elements.Length);
+        Assert.Equal((ushort)7, elements[0].TypeId);
+        Assert.Equal((ushort)7, elements[1].TypeId);
     }
 
     [Fact]
-    public void FromUntypedStructArray_HasZeroTypeId()
+    public void FromUntypedStructArray_ElementsHaveZeroTypeId()
     {
         Arena arena = new();
         DataValue[] r0 = [DataValue.FromInt32(1)];
@@ -51,6 +59,9 @@ public sealed class StructApiContractTests
         DataValue v = DataValue.FromUntypedStructArray([r0, r1], arena);
         Assert.Equal((ushort)0, v.TypeId);
         Assert.True(v.IsArray);
+
+        DataValue[] elements = v.AsStructArray(arena);
+        Assert.All(elements, e => Assert.Equal((ushort)0, e.TypeId));
     }
 
     [Fact]

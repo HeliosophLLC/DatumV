@@ -538,11 +538,12 @@ public sealed class NestedValueRefTests : ServiceTestBase
             // Top-level value: typed Array<Struct>.
             Assert.Equal(DataKind.Struct, dv.Kind);
             Assert.True(dv.IsArray);
-            DataValue[][] structs = dv.AsStructArray(arena);
+            DataValue[] structs = dv.AsStructArray(arena);
             Assert.Equal(2, structs.Length);
 
-            // Each element is a DataValue[] of struct fields.
-            DataValue[] r0 = structs[0];
+            // Each element is now a self-describing Struct DataValue. Pull its
+            // fields via AsStruct.
+            DataValue[] r0 = structs[0].AsStruct(arena);
             Assert.Equal("region_1", r0[0].AsString(arena));
             // Inner Array<String> field: typed-string-array.
             Assert.Equal(DataKind.String, r0[1].Kind);
@@ -552,7 +553,7 @@ public sealed class NestedValueRefTests : ServiceTestBase
             Assert.Equal("eggs", r0Labels[0]);
             Assert.Equal("plate", r0Labels[1]);
 
-            DataValue[] r1 = structs[1];
+            DataValue[] r1 = structs[1].AsStruct(arena);
             Assert.Equal("region_2", r1[0].AsString(arena));
             string[] r1Labels = r1[1].AsStringArray(arena);
             Assert.Single(r1Labels);

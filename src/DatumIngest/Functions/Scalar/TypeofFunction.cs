@@ -54,11 +54,16 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
         DataKind kind = arg.Kind;
         ushort typeId = arg.TypeId;
 
-        // Forcing function: a struct that has flowed through query execution
-        // without ever being stamped with a registered type is the symptom of
-        // a missing TypeRegistry plumbing site. Fail fast so the gap is fixed
-        // at the construction site, not silently rendered as f0..fN.
-        if (kind == DataKind.Struct && typeId == 0)
+        // Forcing function: a *scalar* struct that flowed through query
+        // execution without a registered type is the symptom of a missing
+        // TypeRegistry plumbing site — fail fast so the gap is fixed at the
+        // construction site, not silently rendered as f0..fN.
+        //
+        // Array<Struct> containers legitimately carry TypeId=0: the per-row
+        // TypeId rides in each slot's reserved bytes rather than on the array
+        // container, so the array itself has no shape identity to surface.
+        // Use `typeof(arr[i])` for per-element shape info.
+        if (kind == DataKind.Struct && !arg.IsArray && typeId == 0)
         {
             throw new InvalidOperationException(
                 "typeof() called on a struct value with no registered type. "
@@ -67,9 +72,6 @@ public sealed class TypeofFunction : IFunction, IScalarFunction
                 + "TypeRegistry and stamp the resulting TypeId on the DataValue.");
         }
 
-        // Scalars and primitive-element typed arrays leave TypeId=0 (no rich
-        // shape to describe). Array<Struct> carries its TypeId so
-        // `typeof(detect(img))` renders as "Array<Struct{...}>".
         return new ValueTask<ValueRef>(ValueRef.FromType(kind, typeId));
     }
 

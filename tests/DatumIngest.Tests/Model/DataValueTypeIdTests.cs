@@ -109,4 +109,82 @@ public sealed class DataValueTypeIdTests
         Assert.Equal((ushort)8, rewrapped.TypeId);
         Assert.Equal(99, rewrapped.AsStruct(arena)[0].AsInt32());
     }
+
+    // ─────────────── Array<Struct>: per-element TypeId ───────────────
+
+    [Fact]
+    public void StructArray_N1_Inline_PerElementTypeId_RoundTrips()
+    {
+        // The motivating case: a single-detection SCRFD result. The N=1 inline
+        // layout used to lose TypeId because `_charCount` carried the element
+        // count. After the slot-resident TypeId change, each element's TypeId
+        // rides in its own slot's reserved bytes — so even N=1 round-trips.
+        Arena arena = new();
+        DataValue[] fields = [DataValue.FromInt32(7), DataValue.FromBoolean(true)];
+        DataValue v = DataValue.FromStructArray([fields], arena, typeId: 99);
+
+        Assert.True(v.IsArray);
+        Assert.True(v.IsInline);
+        DataValue[] elements = v.AsStructArray(arena);
+        Assert.Single(elements);
+        Assert.Equal(DataKind.Struct, elements[0].Kind);
+        Assert.Equal((ushort)99, elements[0].TypeId);
+
+        DataValue[] elemFields = elements[0].AsStruct(arena);
+        Assert.Equal(7, elemFields[0].AsInt32());
+        Assert.True(elemFields[1].AsBoolean());
+    }
+
+    [Fact]
+    public void StructArray_N3_InArena_PerElementTypeId_RoundTrips()
+    {
+        // The N≥2 path went through the slot block. After the change every
+        // slot carries its own TypeId; per-element reads recover it.
+        Arena arena = new();
+        DataValue[] r0 = [DataValue.FromInt32(1)];
+        DataValue[] r1 = [DataValue.FromInt32(2)];
+        DataValue[] r2 = [DataValue.FromInt32(3)];
+        DataValue v = DataValue.FromStructArray([r0, r1, r2], arena, typeId: 42);
+
+        Assert.True(v.IsArray);
+        Assert.False(v.IsInline);
+        DataValue[] elements = v.AsStructArray(arena);
+        Assert.Equal(3, elements.Length);
+        Assert.All(elements, e => Assert.Equal((ushort)42, e.TypeId));
+        Assert.All(elements, e => Assert.Equal(DataKind.Struct, e.Kind));
+    }
+
+    [Fact]
+    public void StructArray_PerElement_DistinctTypeIdsViaUnsafePath_NotYetSupported()
+    {
+        // Documents current behaviour: FromStructArray takes a *single* element
+        // TypeId stamped on every slot. Heterogeneous Array<Struct> (different
+        // element shapes per row) would need a per-element-TypeId overload —
+        // not exposed today, but the slot layout supports it.
+        Arena arena = new();
+        DataValue[] r0 = [DataValue.FromInt32(1)];
+        DataValue[] r1 = [DataValue.FromInt32(2)];
+        DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 5);
+
+        DataValue[] elements = v.AsStructArray(arena);
+        Assert.Equal((ushort)5, elements[0].TypeId);
+        Assert.Equal((ushort)5, elements[1].TypeId);
+    }
+
+    [Fact]
+    public void StructArray_Container_NoLongerCarriesArrayTypeId()
+    {
+        // Array containers used to stamp the array's TypeId on `_charCount`.
+        // After the per-element layout, the container's TypeId is always 0 —
+        // each element self-describes via its slot. This test pins the
+        // contract so a regression toward the old container-TypeId model is
+        // visible.
+        Arena arena = new();
+        DataValue[] r0 = [DataValue.FromInt32(1)];
+        DataValue[] r1 = [DataValue.FromInt32(2)];
+        DataValue v = DataValue.FromStructArray([r0, r1], arena, typeId: 7);
+
+        Assert.True(v.IsArray);
+        Assert.Equal((ushort)0, v.TypeId);
+    }
 }

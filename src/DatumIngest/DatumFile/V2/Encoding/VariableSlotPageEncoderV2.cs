@@ -429,22 +429,26 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     }
 
     private static (long offset, long length) EncodeStructArrayToSidecar(
-        DataValue[][] elements,
+        DataValue[] elements,
         IValueStore store,
         IBlobSink sidecar)
     {
         byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
         for (int i = 0; i < elements.Length; i++)
         {
-            // Reuse the existing self-describing struct serialisation
-            // (uint16 fieldCount + N records). Each struct element ends up as
-            // its own opaque byte payload in the sidecar.
-            byte[] structBytes = SerializeStructFieldArray(elements[i], store);
+            // Each element is a self-describing Struct DataValue carrying its own
+            // TypeId. Pull the field array out via AsStruct, serialise to the
+            // existing wire format (uint16 fieldCount + N records), and stamp the
+            // element's TypeId into the slot's reserved bytes so reads
+            // reconstruct each row's TypeId without any container-side metadata.
+            DataValue[] fields = elements[i].AsStruct(store);
+            byte[] structBytes = SerializeStructFieldArray(fields, store);
             (long elementOffset, long elementLength) = sidecar.Append(structBytes);
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
-                elementLength);
+                elementLength,
+                elements[i].TypeId);
         }
         return sidecar.Append(slotBlock);
     }

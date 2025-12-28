@@ -215,11 +215,21 @@ public static class DataValueRetention
         IValueStore sourceStore,
         IValueStore retentionStore)
     {
-        DataValue[][] elements = value.AsStructArray(sourceStore);
+        // Each element in the source array is now a self-describing Struct
+        // DataValue carrying its own TypeId in the slot's reserved bytes. Stabilise
+        // each element's fields and pass the per-element TypeId into the rebuilt
+        // array so the new slots carry the same shape identity. We assume the
+        // array is homogeneous (every element has the same TypeId — which has
+        // always been the case in practice). If a future caller produces a
+        // heterogeneous Array<Struct>, this loop will need to be reworked to
+        // build per-element slots independently.
+        DataValue[] elements = value.AsStructArray(sourceStore);
         DataValue[][] stabilizedElements = new DataValue[elements.Length][];
+        ushort elementTypeId = 0;
         for (int i = 0; i < elements.Length; i++)
         {
-            DataValue[] sourceFields = elements[i];
+            if (i == 0) elementTypeId = elements[i].TypeId;
+            DataValue[] sourceFields = elements[i].AsStruct(sourceStore);
             DataValue[] retentionFields = new DataValue[sourceFields.Length];
             for (int j = 0; j < sourceFields.Length; j++)
             {
@@ -227,6 +237,6 @@ public static class DataValueRetention
             }
             stabilizedElements[i] = retentionFields;
         }
-        return DataValue.FromStructArray(stabilizedElements, retentionStore, value.TypeId);
+        return DataValue.FromStructArray(stabilizedElements, retentionStore, elementTypeId);
     }
 }

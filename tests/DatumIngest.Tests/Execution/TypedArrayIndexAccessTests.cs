@@ -39,11 +39,10 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     [Fact]
     public async Task IndexAccess_ArrayOfStruct_StampsElementTypeIdOnResult()
     {
-        // The motivating gap: indexing into an Array<Struct> returned a struct
-        // with TypeId=0, dropping field names. After the fix, the result
-        // carries the descriptor's ElementTypeId so renderers and typeof()
-        // can recover field names. Uses N=2 to force the InArena layout —
-        // N=1 inline arrays don't preserve TypeId (separate follow-up).
+        // After the per-element TypeId layout, FromStructArray writes the
+        // element struct's TypeId directly into each slot's reserved bytes.
+        // Index access just returns the per-element DataValue, which already
+        // carries its TypeId — no array-container hop, works for N=1 too.
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
         try
@@ -54,12 +53,46 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
                 new StructFieldDescriptor("label", registry.InternScalarType(DataKind.String)),
                 new StructFieldDescriptor("score", registry.InternScalarType(DataKind.Float32)),
             ]);
-            int arrayTypeId = registry.InternArrayType(DataKind.Struct, structTypeId);
 
             DataValue[] s0 = [DataValue.FromString("cat", arena), DataValue.FromFloat32(0.9f)];
             DataValue[] s1 = [DataValue.FromString("dog", arena), DataValue.FromFloat32(0.7f)];
             DataValue structArray = DataValue.FromStructArray(
-                [s0, s1], arena, (ushort)arrayTypeId);
+                [s0, s1], arena, (ushort)structTypeId);
+
+            IndexAccessExpression access = new(
+                new ColumnReference("detections"),
+                new LiteralExpression(0));
+
+            DataValue result = await EvalWithRegistryAsync(
+                access, MakeRow(("detections", structArray)), arena, registry);
+
+            Assert.Equal(DataKind.Struct, result.Kind);
+            Assert.False(result.IsArray);
+            Assert.Equal((ushort)structTypeId, result.TypeId);
+        }
+        finally { pool.Backing.TryReturn(arena); }
+    }
+
+    [Fact]
+    public async Task IndexAccess_ArrayOfStruct_N1Inline_StampsElementTypeId()
+    {
+        // The case that motivated the layout change — single-element struct
+        // arrays previously stripped TypeId because the inline layout used
+        // _charCount as the element count. With per-element TypeId in the
+        // slot's reserved bytes, N=1 round-trips just like N≥2.
+        Pool pool = GetService<Pool>();
+        Arena arena = pool.Backing.RentArena();
+        try
+        {
+            TypeRegistry registry = new();
+            int structTypeId = registry.InternStructType(
+            [
+                new StructFieldDescriptor("score", registry.InternScalarType(DataKind.Float32)),
+            ]);
+
+            DataValue[] s0 = [DataValue.FromFloat32(0.9f)];
+            DataValue structArray = DataValue.FromStructArray(
+                [s0], arena, (ushort)structTypeId);
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),
@@ -78,11 +111,9 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     [Fact]
     public async Task IndexAccess_ArrayOfStruct_OutOfRange_NullStructStillCarriesElementTypeId()
     {
-        // Out-of-range index returns NullStruct — the TypeId still travels
-        // so callers (typeof, FormatType) can describe the shape that *would*
-        // have been returned. Uses N=2 to force the InArena layout: N=1
-        // struct arrays take an inline path that doesn't preserve TypeId
-        // (a known follow-up; deferred).
+        // Out-of-range index returns NullStruct that borrows the TypeId from
+        // any existing element so the null still names the shape that *would*
+        // have been there. Empty arrays naturally fall back to TypeId=0.
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
         try
@@ -92,12 +123,11 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
             [
                 new StructFieldDescriptor("x", registry.InternScalarType(DataKind.Int32)),
             ]);
-            int arrayTypeId = registry.InternArrayType(DataKind.Struct, structTypeId);
 
             DataValue[] s0 = [DataValue.FromInt32(1)];
             DataValue[] s1 = [DataValue.FromInt32(2)];
             DataValue structArray = DataValue.FromStructArray(
-                [s0, s1], arena, (ushort)arrayTypeId);
+                [s0, s1], arena, (ushort)structTypeId);
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),

@@ -18,8 +18,12 @@ namespace DatumIngest.Model;
 ///     (arena offset for in-memory, sidecar absolute offset on disk).</description></item>
 ///   <item><description>bytes 8–12: 5-byte length (40-bit, ~1 TiB cap). Low 4 bytes are
 ///     a <see cref="uint"/>; byte 12 is the high 8 bits.</description></item>
-///   <item><description>bytes 13–14: reserved (zero). Held for future-use without
-///     a wire-format bump; do not consume without an RFC.</description></item>
+///   <item><description>bytes 13–14: per-element <see cref="TypeRegistry"/> id
+///     (<see cref="ushort"/>, little-endian). For <c>Array&lt;Struct&gt;</c> this
+///     names the element struct's shape so each row is self-describing without
+///     consulting the array container's TypeId. 0 = no type registered.
+///     Reserved-and-zero in slots produced before this field was defined; old
+///     wire bytes still decode cleanly (TypeId=0).</description></item>
 ///   <item><description>byte 15: codec discriminator (0 = Raw; future room for Lz4 /
 ///     Zstd / format-specific compressors per element).</description></item>
 /// </list>
@@ -53,8 +57,11 @@ internal static class ArraySlot
     /// non-negative).
     /// </param>
     /// <param name="length">Payload length in bytes. Must fit in 40 bits.</param>
+    /// <param name="typeId">
+    /// Per-element <see cref="TypeRegistry"/> id. 0 means no type registered.
+    /// </param>
     /// <param name="codec">Codec discriminator. Defaults to 0 (Raw).</param>
-    public static void Write(Span<byte> dest, long offset, long length, byte codec = 0)
+    public static void Write(Span<byte> dest, long offset, long length, ushort typeId = 0, byte codec = 0)
     {
         if (dest.Length < SizeBytes)
         {
@@ -77,8 +84,7 @@ internal static class ArraySlot
         BinaryPrimitives.WriteInt64LittleEndian(dest[..8], offset);
         BinaryPrimitives.WriteUInt32LittleEndian(dest.Slice(8, 4), unchecked((uint)length));
         dest[12] = (byte)((length >> 32) & 0xFF);
-        dest[13] = 0;
-        dest[14] = 0;
+        BinaryPrimitives.WriteUInt16LittleEndian(dest.Slice(13, 2), typeId);
         dest[15] = codec;
     }
 
@@ -86,7 +92,7 @@ internal static class ArraySlot
     /// Reads a slot from <paramref name="src"/> at offset 0. The source span must be
     /// at least <see cref="SizeBytes"/> long.
     /// </summary>
-    public static void Read(ReadOnlySpan<byte> src, out long offset, out long length, out byte codec)
+    public static void Read(ReadOnlySpan<byte> src, out long offset, out long length, out ushort typeId, out byte codec)
     {
         if (src.Length < SizeBytes)
         {
@@ -99,6 +105,7 @@ internal static class ArraySlot
         uint lengthLow = BinaryPrimitives.ReadUInt32LittleEndian(src.Slice(8, 4));
         long lengthHigh = (long)src[12] << 32;
         length = lengthHigh | lengthLow;
+        typeId = BinaryPrimitives.ReadUInt16LittleEndian(src.Slice(13, 2));
         codec = src[15];
     }
 }
