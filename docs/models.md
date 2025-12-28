@@ -133,7 +133,10 @@ is identical across all sizes.
 - **What it does**: Bounding-box face detection with 5 facial landmarks
   (left eye, right eye, nose tip, left mouth corner, right mouth corner)
   per face. Returns
-  `Array<Struct{score, x, y, w, h, landmarks: Array<Struct{x, y}>}>`.
+  `Array<Struct{label, score, x, y, w, h, landmarks: Array<Struct{x, y}>}>`.
+  `label` is always the constant string `"face"` — present so SCRFD output
+  shares the leading `(label, score, x, y, w, h)` shape used by general
+  object detectors like YOLOX.
 - **License**: MIT (InsightFace)
 - **Source**: [github.com/deepinsight/insightface](https://github.com/deepinsight/insightface/tree/master/detection/scrfd)
   — distributed in the `buffalo_l` model pack alongside sibling face

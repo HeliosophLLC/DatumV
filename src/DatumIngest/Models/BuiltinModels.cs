@@ -1280,9 +1280,10 @@ public static class BuiltinModels
     /// Registers SCRFD-10G face detection under the catalog name
     /// <paramref name="modelName"/> (defaults to <c>"scrfd_10g"</c>).
     /// Returns one detection-array per image, where each detection is
-    /// <c>Struct{score, x, y, w, h, landmarks: Array&lt;Struct{x, y}&gt;}</c>
-    /// — same shape SQL queries see for any face detector. Sibling to
-    /// YOLOX but face-specialised, with the 5 facial
+    /// <c>Struct{label, score, x, y, w, h, landmarks: Array&lt;Struct{x, y}&gt;}</c>
+    /// — <c>label</c> is the constant string <c>"face"</c> so the leading
+    /// <c>(label, score, x, y, w, h)</c> tuple lines up with general object
+    /// detectors like YOLOX. Sibling to YOLOX but face-specialised, with the 5 facial
     /// landmarks (eye centres, nose tip, mouth corners) that downstream
     /// face-pipeline tasks (alignment, recognition) need.
     /// </summary>

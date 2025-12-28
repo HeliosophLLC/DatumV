@@ -45,8 +45,11 @@ namespace DatumIngest.Models.Onnx;
 /// </para>
 /// <para>
 /// <strong>SQL surface.</strong> Each row's output column is an
-/// <c>Array&lt;Struct{score: Float32, x: Float32, y: Float32, w: Float32, h: Float32, landmarks: Array&lt;Struct{x: Float32, y: Float32}&gt;}&gt;</c>
-/// — same shape as the previous RetinaFace surface.
+/// <c>Array&lt;Struct{label: String, score: Float32, x: Float32, y: Float32, w: Float32, h: Float32, landmarks: Array&lt;Struct{x: Float32, y: Float32}&gt;}&gt;</c>.
+/// The constant <c>label = "face"</c> field exists so SCRFD output shares
+/// the leading <c>(label, score, x, y, w, h)</c> shape used by general
+/// object detectors like YOLOX — UNION ALL across detectors and the
+/// <c>tasks.detect</c> capability surface both rely on it.
 /// </para>
 /// </remarks>
 public sealed class ScrfdModel : OnnxModel
@@ -66,6 +69,12 @@ public sealed class ScrfdModel : OnnxModel
     // 256) is inherited from the InsightFace codebase — match it exactly.
     private const float ScrfdNormScale = 1f / 128f;
     private const float ScrfdNormBias = -127.5f / 128f; // = (0 − 127.5) × (1/128)
+
+    // SCRFD only ever emits faces, but every detection still carries a
+    // constant `label = "face"` so the leading (label, score, x, y, w, h)
+    // shape lines up with general-purpose detectors like YOLOX. Cached
+    // once because every detection in every batch uses the same value.
+    private static readonly ValueRef FaceLabel = ValueRef.FromString("face");
 
     private readonly string _onnxInputName;
 
@@ -130,6 +139,7 @@ public sealed class ScrfdModel : OnnxModel
     /// </remarks>
     public override IReadOnlyList<ColumnInfo>? OutputFields =>
     [
+        new ColumnInfo("label", DataKind.String, nullable: false),
         new ColumnInfo("score", DataKind.Float32, nullable: false),
         new ColumnInfo("x", DataKind.Float32, nullable: false),
         new ColumnInfo("y", DataKind.Float32, nullable: false),
@@ -469,6 +479,7 @@ public sealed class ScrfdModel : OnnxModel
 
             elements[i] = ValueRef.FromStruct(
             [
+                FaceLabel,
                 ValueRef.FromFloat32(d.Score),
                 ValueRef.FromFloat32(d.X),
                 ValueRef.FromFloat32(d.Y),
