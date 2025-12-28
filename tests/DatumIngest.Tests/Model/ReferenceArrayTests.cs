@@ -205,7 +205,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     public void StructArray_Empty_RoundTrips()
     {
         Arena arena = new();
-        DataValue value = DataValue.FromStructArray(ReadOnlySpan<DataValue[]>.Empty, arena);
+        DataValue value = DataValue.FromUntypedStructArray(ReadOnlySpan<DataValue[]>.Empty, arena);
 
         Assert.Equal(DataKind.Struct, value.Kind);
         Assert.True(value.IsArray);
@@ -218,7 +218,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     {
         Arena arena = new();
         DataValue[] fields = [DataValue.FromString("alice", arena), DataValue.FromInt32(42)];
-        DataValue value = DataValue.FromStructArray([fields], arena);
+        DataValue value = DataValue.FromUntypedStructArray([fields], arena);
 
         Assert.Equal(DataKind.Struct, value.Kind);
         Assert.True(value.IsArray);
@@ -238,7 +238,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
         DataValue[] alice = [DataValue.FromString("alice", arena), DataValue.FromInt32(30)];
         DataValue[] bob = [DataValue.FromString("bob", arena), DataValue.FromInt32(25)];
         DataValue[] carol = [DataValue.FromString("carol", arena), DataValue.FromInt32(40)];
-        DataValue value = DataValue.FromStructArray([alice, bob, carol], arena);
+        DataValue value = DataValue.FromUntypedStructArray([alice, bob, carol], arena);
 
         Assert.True(value.IsArray);
         Assert.False(value.IsInline);
@@ -258,8 +258,8 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     {
         Arena arena = new();
         DataValue[] fields = [DataValue.FromString("alice", arena), DataValue.FromInt32(30)];
-        DataValue scalar = DataValue.FromStruct(fields, arena);
-        DataValue oneElementArray = DataValue.FromStructArray([fields], arena);
+        DataValue scalar = DataValue.FromUntypedStruct(fields, arena);
+        DataValue oneElementArray = DataValue.FromUntypedStructArray([fields], arena);
 
         Assert.Equal(DataKind.Struct, scalar.Kind);
         Assert.Equal(DataKind.Struct, oneElementArray.Kind);
@@ -272,7 +272,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
     {
         Arena arena = new();
         DataValue[] fields = [DataValue.FromInt32(1)];
-        DataValue scalar = DataValue.FromStruct(fields, arena);
+        DataValue scalar = DataValue.FromUntypedStruct(fields, arena);
 
         Assert.Throws<InvalidOperationException>(() => scalar.AsStructArray(arena));
     }
@@ -356,7 +356,7 @@ public sealed class ReferenceArrayTests : ServiceTestBase
             DataValue.FromString("robert with a long string for testing", source),
             DataValue.FromInt32(25),
         ];
-        DataValue original = DataValue.FromStructArray([alice, bob], source);
+        DataValue original = DataValue.FromUntypedStructArray([alice, bob], source);
 
         DataValue stable = DataValueRetention.Stabilize(original, source, retention);
         source.Dispose();

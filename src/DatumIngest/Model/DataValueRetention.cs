@@ -19,6 +19,19 @@ namespace DatumIngest.Model;
 /// struct, so stabilisation is a no-op for them. Only non-inline reference payloads
 /// trigger a copy into the retention store.
 /// </para>
+/// <para>
+/// <strong>TypeId invariant.</strong> Stabilisation preserves <see cref="DataValue.TypeId"/>
+/// across the copy — the rebuilt struct/array carries the same TypeId as the source.
+/// This relies on the source's and destination's stores being backed by the same
+/// per-query <see cref="TypeRegistry"/>: TypeIds are query-scoped intern indices, and
+/// reusing one across registries silently rebinds it to a different shape. In practice
+/// every Stabilize call site today shares a registry — <c>ExecutionContext.Types</c>
+/// is shared with child contexts, and <c>BatchContext.Types</c> is shared across every
+/// query inside one procedural batch. If a future site stabilises a value into a store
+/// owned by a different registry, the TypeId carried across will name a
+/// different shape (or no shape) on lookup; the call site is responsible
+/// for re-interning the descriptor via the destination's registry first.
+/// </para>
 /// </remarks>
 public static class DataValueRetention
 {

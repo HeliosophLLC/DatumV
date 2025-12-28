@@ -124,7 +124,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         try
         {
             DataValue[] s0 = [DataValue.FromInt32(1)];
-            DataValue structArray = DataValue.FromStructArray([s0], arena);
+            DataValue structArray = DataValue.FromUntypedStructArray([s0], arena);
 
             IndexAccessExpression access = new(
                 new ColumnReference("arr"),
@@ -215,7 +215,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
         {
             DataValue[] s0 = [DataValue.FromString("cat", arena), DataValue.FromFloat32(0.9f)];
             DataValue[] s1 = [DataValue.FromString("dog", arena), DataValue.FromFloat32(0.7f)];
-            DataValue structArray = DataValue.FromStructArray([s0, s1], arena);
+            DataValue structArray = DataValue.FromUntypedStructArray([s0, s1], arena);
 
             IndexAccessExpression access = new(
                 new ColumnReference("detections"),

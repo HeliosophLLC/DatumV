@@ -7,10 +7,10 @@ public sealed class DataValueTypeIdTests
     // ─────────────── FromStruct + TypeId ───────────────
 
     [Fact]
-    public void FromStruct_DefaultTypeId_IsZero()
+    public void FromUntypedStruct_TypeId_IsZero()
     {
         Arena arena = new();
-        DataValue v = DataValue.FromStruct([], arena);
+        DataValue v = DataValue.FromUntypedStruct([], arena);
         Assert.Equal((ushort)0, v.TypeId);
     }
 
@@ -48,9 +48,9 @@ public sealed class DataValueTypeIdTests
     // ─────────────── NullStruct + TypeId ───────────────
 
     [Fact]
-    public void NullStruct_DefaultTypeId_IsZero()
+    public void NullUntypedStruct_TypeId_IsZero()
     {
-        DataValue v = DataValue.NullStruct();
+        DataValue v = DataValue.NullUntypedStruct();
         Assert.True(v.IsNull);
         Assert.Equal((ushort)0, v.TypeId);
     }
@@ -75,10 +75,10 @@ public sealed class DataValueTypeIdTests
     }
 
     [Fact]
-    public void Array_TypeId_IsZero()
+    public void UntypedStructArray_TypeId_IsZero()
     {
         Arena arena = new();
-        DataValue v = DataValue.FromStructArray([[DataValue.FromInt32(1)]], arena);
+        DataValue v = DataValue.FromUntypedStructArray([[DataValue.FromInt32(1)]], arena);
         Assert.Equal((ushort)0, v.TypeId);
     }
 

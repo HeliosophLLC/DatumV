@@ -148,7 +148,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Audio    => DataValue.FromAudio([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]),
         DataKind.Video    => DataValue.FromVideo([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]),
         DataKind.Json     => DataValue.FromJson([0xA1, 0x61, 0x61, 0x01]),  // {"a":1} canonical CBOR
-        DataKind.Struct   => DataValue.NullStruct(),
+        DataKind.Struct   => DataValue.NullUntypedStruct(),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
             $"No sample value defined for DataKind.{kind}. Update CreateSampleValue."),

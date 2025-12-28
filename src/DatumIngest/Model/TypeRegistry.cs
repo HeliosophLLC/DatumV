@@ -46,11 +46,17 @@ public sealed class TypeRegistry
     /// <summary>
     /// Interns the shape described by <paramref name="col"/>, recursing into struct fields.
     /// </summary>
+    /// <remarks>
+    /// IsArray takes precedence over Kind: an <c>Array&lt;Struct&gt;</c> column has both
+    /// <c>Kind == Struct</c> and <c>IsArray == true</c>, and we need the array
+    /// descriptor (<c>IsArray=true, ElementTypeId=structTypeId</c>) — not the bare
+    /// element struct — registered for the column's TypeId. Without this ordering,
+    /// downstream <c>BuildStructArray</c> hits a struct descriptor where it expects
+    /// an array descriptor, fails to resolve <c>ElementTypeId</c>, and produces
+    /// f0..fN rendering on what should be self-describing nested arrays.
+    /// </remarks>
     public int InternFromColumnInfo(ColumnInfo col)
     {
-        if (col.Kind == DataKind.Struct && col.Fields is { } fields)
-            return InternStructFromColumnInfoFields(fields);
-
         if (col.IsArray)
         {
             int? elementTypeId = col.Kind == DataKind.Struct && col.Fields is { } ef
@@ -58,6 +64,9 @@ public sealed class TypeRegistry
                 : null;
             return InternArrayType(col.Kind, elementTypeId, col.Nullable);
         }
+
+        if (col.Kind == DataKind.Struct && col.Fields is { } fields)
+            return InternStructFromColumnInfoFields(fields);
 
         return InternScalarType(col.Kind, col.Nullable);
     }

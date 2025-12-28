@@ -174,19 +174,21 @@ public sealed class ModelInvocationOperator : IQueryOperator
         ColumnLookup? outputLookup = null;
         int[]? sourceCopySlots = null;
 
-        // Intern the model's full output schema once so scatter can stamp a
-        // TypeId on every emitted struct DataValue. The interned descriptor
-        // includes nested struct/array fields (recurses via ColumnInfo.Fields),
-        // so passing context.Types into ToDataValue lets BuildStructArray /
-        // MaterialiseEach propagate field-level TypeIds bottom-up — Array<Struct>
-        // elements and nested structs (e.g. SCRFD's keypoint landmarks) end up
-        // self-describing, not just the outer model output. 0 = non-struct or
-        // schema-unknown outputs.
-        ushort outputTypeId = 0;
+        // Intern the model's element struct schema and (when the per-row value
+        // is an array) the wrapping Array<Struct> shape. OutputFields describes
+        // the *element* struct's fields; the per-row value may be that struct
+        // (e.g. MobileNetV2 → Struct{label, score}) OR an array of it (e.g.
+        // SCRFD → Array<Struct{score, x, y, w, h, landmarks}>). We don't know
+        // which until we see the first ValueRef out of the model, so the
+        // array TypeId is interned lazily inside the scatter loop.
+        ushort elementStructTypeId = 0;
         if (model.OutputFields is { } outputFields)
         {
-            outputTypeId = (ushort)context.Types.InternStructFromColumnInfoFields(outputFields);
+            elementStructTypeId = (ushort)context.Types.InternStructFromColumnInfoFields(outputFields);
         }
+        // Lazy intern of Array<Struct> TypeId on first sight of an array result.
+        // Cached so the scatter loop only computes it once per operator instance.
+        ushort arrayOfStructTypeId = 0;
 
         // RowLimit is set by a downstream LimitOperator (LIMIT + OFFSET) to
         // signal "I'll only consume this many rows total." For an expensive
@@ -379,9 +381,32 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     }
                     // Pass context.Types so ToDataValue can look up field TypeIds from
                     // the output struct's descriptor and propagate them to nested struct
-                    // fields (e.g. SCRFD's `landmarks: Array<Struct{kx, ky}>` keypoints
+                    // fields (e.g. SCRFD's `landmarks: Array<Struct{x, y}>` keypoints
                     // get stamped TypeIds, not just the outer detection struct).
-                    outValues[^1] = modelOutputs[chunkRowIdx].ToDataValue(outputBatch.Arena, outputTypeId, context.Types);
+                    //
+                    // For Array<Struct> outputs the per-row TypeId must be the *array*
+                    // shape, not the element struct — `ToDataValue` looks up
+                    // `desc.ElementTypeId` on the array's descriptor to propagate field
+                    // TypeIds to the inner rows. Stamping the element TypeId directly
+                    // on the array's DataValue would short-circuit that hop and rerun
+                    // the f0..fN regression. Intern the array TypeId lazily on first
+                    // sight of an array result.
+                    ValueRef rowValue = modelOutputs[chunkRowIdx];
+                    ushort rowTypeId;
+                    if (rowValue.IsArray && elementStructTypeId != 0)
+                    {
+                        if (arrayOfStructTypeId == 0)
+                        {
+                            arrayOfStructTypeId = (ushort)context.Types.InternArrayType(
+                                DataKind.Struct, elementTypeId: elementStructTypeId);
+                        }
+                        rowTypeId = arrayOfStructTypeId;
+                    }
+                    else
+                    {
+                        rowTypeId = elementStructTypeId;
+                    }
+                    outValues[^1] = rowValue.ToDataValue(outputBatch.Arena, rowTypeId, context.Types);
                     outputBatch.Add(outValues);
                 }
 

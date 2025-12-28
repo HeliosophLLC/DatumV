@@ -930,7 +930,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// metadata, so heterogeneous-field-count elements are allowed at the value
     /// layer (the schema layer enforces uniformity when configured).
     /// </summary>
-    public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store, ushort typeId = 0)
+    public static DataValue FromStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store, ushort typeId)
     {
         if (elements.Length == 0)
         {
@@ -974,6 +974,14 @@ public readonly struct DataValue : IEquatable<DataValue>
             p1: blockP1,
             charCount: typeId);
     }
+
+    /// <summary>
+    /// Creates an <c>Array&lt;Struct&gt;</c> value <em>without</em> a registered TypeId.
+    /// Explicit escape hatch for sites that don't have a <see cref="TypeRegistry"/> in
+    /// scope. See <see cref="FromUntypedStruct"/> for the rationale.
+    /// </summary>
+    public static DataValue FromUntypedStructArray(ReadOnlySpan<DataValue[]> elements, IValueStore store) =>
+        FromStructArray(elements, store, typeId: TypeRegistry.NoType);
 
     /// <summary>
     /// Polymorphic typed-array factory. Accepts a span of element <see cref="DataValue"/>s
@@ -1065,7 +1073,11 @@ public readonly struct DataValue : IEquatable<DataValue>
             ThrowIfNullArrayElement(elements[i], i, DataKind.Struct);
             rows[i] = elements[i].AsStruct(source);
         }
-        return FromStructArray(rows, target);
+        // Aggregate-side construction (ARRAY_AGG of struct) doesn't have a
+        // TypeRegistry in scope to resolve the element shape's TypeId — left
+        // as untyped until the aggregate path is threaded through. Existing
+        // ARRAY_AGG callers expected this behaviour.
+        return FromUntypedStructArray(rows, target);
     }
 
     private static DataValue BuildFixedWidthArrayFromDataValues(
@@ -1694,26 +1706,47 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue NullArrayOf(DataKind elementKind) =>
         new(elementKind, flags: DataValueFlags.IsNull | DataValueFlags.IsArray, p0: 0);
 
-    /// <summary>Creates a struct value using an explicit <see cref="IValueStore"/>.</summary>
+    /// <summary>
+    /// Creates a struct value with a registered <see cref="TypeRegistry"/> id stamped on it.
+    /// </summary>
     /// <param name="fields">Positional field values for the struct.</param>
     /// <param name="store">Value store that will hold the field array.</param>
     /// <param name="typeId">
-    /// Optional type-id from the query's <see cref="TypeRegistry"/>; 0 when no type is registered.
-    /// Stored in <c>_charCount</c> so the value is self-describing once the registry is populated.
+    /// Required type-id from the query's <see cref="TypeRegistry"/>. The 0 sentinel
+    /// (<see cref="TypeRegistry.NoType"/>) is allowed but should be explicit — prefer
+    /// <see cref="FromUntypedStruct"/> for callers that genuinely have no shape to record,
+    /// so the absence is searchable in code review.
     /// </param>
-    public static DataValue FromStruct(DataValue[] fields, IValueStore store, ushort typeId = 0)
+    public static DataValue FromStruct(DataValue[] fields, IValueStore store, ushort typeId)
     {
         var (p0, count) = store.StoreDataValues(fields);
         return new(DataKind.Struct, DataValueFlags.InArena, typeId, p0, count);
     }
 
-    /// <summary>Creates a typed null struct.</summary>
+    /// <summary>
+    /// Creates a struct value <em>without</em> a registered TypeId. Explicit escape
+    /// hatch for sites that don't (yet) have a <see cref="TypeRegistry"/> in scope —
+    /// test fixtures and low-level decoders that haven't been threaded through the
+    /// registry. Production code should prefer <see cref="FromStruct"/> with a real
+    /// TypeId so <c>typeof()</c> and field-name resolution keep working.
+    /// </summary>
+    public static DataValue FromUntypedStruct(DataValue[] fields, IValueStore store) =>
+        FromStruct(fields, store, typeId: TypeRegistry.NoType);
+
+    /// <summary>Creates a typed null struct that carries a <see cref="TypeRegistry"/> id.</summary>
     /// <param name="typeId">
-    /// Optional type-id from the query's <see cref="TypeRegistry"/>; 0 when no type is registered.
-    /// Propagated to null results so callers can still read the struct's shape descriptor.
+    /// Required type-id; 0 is permitted but discouraged — use <see cref="NullUntypedStruct"/>
+    /// when the call site genuinely has no shape (e.g. early null-propagation before any
+    /// type has been resolved).
     /// </param>
-    public static DataValue NullStruct(ushort typeId = 0) =>
+    public static DataValue NullStruct(ushort typeId) =>
         new(DataKind.Struct, DataValueFlags.IsNull, typeId, p0: 0, p1: 0);
+
+    /// <summary>
+    /// Typed null struct with no registered TypeId. Explicit escape hatch — see
+    /// <see cref="FromUntypedStruct"/>.
+    /// </summary>
+    public static DataValue NullUntypedStruct() => NullStruct(TypeRegistry.NoType);
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)

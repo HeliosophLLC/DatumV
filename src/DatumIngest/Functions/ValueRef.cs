@@ -267,7 +267,7 @@ public readonly struct ValueRef
     /// through and writes everything to the target arena in one pass.
     /// </summary>
     public static ValueRef FromStruct(ValueRef[] fields) =>
-        new(DataValue.NullStruct(), fields);
+        new(DataValue.NullUntypedStruct(), fields);
 
     /// <summary>
     /// Struct value with a registered <see cref="TypeRegistry"/> id pre-stamped
@@ -362,11 +362,20 @@ public readonly struct ValueRef
     }
 
     /// <summary>
-    /// Typed null struct with the given type-id. No payload — boundary materialisation
-    /// produces <see cref="DataValue.NullStruct"/>.
+    /// Typed null struct with the given <see cref="TypeRegistry"/> id. No
+    /// payload — boundary materialisation produces <see cref="DataValue.NullStruct"/>.
+    /// Required: pass a real TypeId so <c>typeof()</c> stays meaningful, or use
+    /// <see cref="NullUntypedStruct"/> when the call site genuinely has no shape.
     /// </summary>
-    public static ValueRef NullStruct(ushort typeId = 0) =>
+    public static ValueRef NullStruct(ushort typeId) =>
         new(DataValue.NullStruct(typeId), null);
+
+    /// <summary>
+    /// Typed null struct with no registered TypeId. Explicit escape hatch —
+    /// see <see cref="DataValue.FromUntypedStruct"/>.
+    /// </summary>
+    public static ValueRef NullUntypedStruct() =>
+        new(DataValue.NullUntypedStruct(), null);
 
     /// <summary>
     /// Typed null array of the given element kind. No payload — boundary

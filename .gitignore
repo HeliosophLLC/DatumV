@@ -14,3 +14,4 @@ benchmark-output.log
 traces/
 .claude/settings.local.json
 .venv/**
+tests/DatumIngest.Tests/TestResults/**

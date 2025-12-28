@@ -1381,7 +1381,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         // Row has a struct column "info" with fields [name, score].
         // Access info['score'] — evaluator needs schema to know field positions.
         Arena arena = new();
-        DataValue structValue = DataValue.FromStruct(
+        DataValue structValue = DataValue.FromUntypedStruct(
             [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)],
             arena);
 

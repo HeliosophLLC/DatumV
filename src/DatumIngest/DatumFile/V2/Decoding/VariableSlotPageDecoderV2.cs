@@ -203,7 +203,10 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         {
             fields[i] = DataValueReader.ReadDataValue(br, _eagerStore);
         }
-        return DataValue.FromStruct(fields, _eagerStore);
+        // PR3 will wire the file's per-column TypeId in here. Until then this
+        // decoder is the last legitimate FromUntypedStruct site in production —
+        // every other path stamps a real TypeId.
+        return DataValue.FromUntypedStruct(fields, _eagerStore);
     }
 
 }

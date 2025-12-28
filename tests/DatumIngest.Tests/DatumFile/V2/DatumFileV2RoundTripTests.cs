@@ -351,18 +351,18 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
             DataValue.FromString("hello world is more than fifteen bytes", writeArena),
             DataValue.FromBoolean(true),
         ];
-        r0[0] = DataValue.FromStruct(f0, writeArena);
+        r0[0] = DataValue.FromUntypedStruct(f0, writeArena);
         batch.Add(r0);
 
         // Row 1: null struct.
         DataValue[] r1 = pool.RentDataValues(1);
-        r1[0] = DataValue.NullStruct(0);
+        r1[0] = DataValue.NullUntypedStruct();
         batch.Add(r1);
 
         // Row 2: struct with one Float64 field.
         DataValue[] r2 = pool.RentDataValues(1);
         DataValue[] f2 = [DataValue.FromFloat64(3.14)];
-        r2[0] = DataValue.FromStruct(f2, writeArena);
+        r2[0] = DataValue.FromUntypedStruct(f2, writeArena);
         batch.Add(r2);
 
         string datumPath = Path.Combine(_tempDir, "struct.datum");
@@ -546,12 +546,12 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         DataValue[] r0 = pool.RentDataValues(1);
         DataValue[] s0 = [DataValue.FromString("cat", writeArena), DataValue.FromFloat32(0.95f)];
         DataValue[] s1 = [DataValue.FromString("dog with a longer label here", writeArena), DataValue.FromFloat32(0.78f)];
-        r0[0] = DataValue.FromStructArray([s0, s1], writeArena);
+        r0[0] = DataValue.FromUntypedStructArray([s0, s1], writeArena);
         batch.Add(r0);
 
         // Row 1: empty array
         DataValue[] r1 = pool.RentDataValues(1);
-        r1[0] = DataValue.FromStructArray(ReadOnlySpan<DataValue[]>.Empty, writeArena);
+        r1[0] = DataValue.FromUntypedStructArray(ReadOnlySpan<DataValue[]>.Empty, writeArena);
         batch.Add(r1);
 
         WriteAndReadArrayBatch("struct_array.datum", column, batch, (decoder, readArena, registry) =>

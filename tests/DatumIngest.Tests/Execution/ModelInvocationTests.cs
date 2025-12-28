@@ -801,4 +801,114 @@ public sealed class ModelInvocationTests : ServiceTestBase
         }
         finally { catalog.Pool.Backing.TryReturn(scratch); }
     }
+
+    /// <summary>
+    /// Mock model emitting <c>Array&lt;Struct{score: Float32, label: String}&gt;</c>
+    /// per row — mirrors SCRFD's shape (multiple detections per image, each with
+    /// a struct payload). The test verifies the operator stamps the *array*
+    /// TypeId on the per-row DataValue, not the *element struct* TypeId. Without
+    /// the fix, descriptor lookups went straight to the element struct
+    /// descriptor (Fields populated, IsArray=false), and downstream
+    /// <c>ResolveElementTypeId</c> in the evaluator/formatters returned 0
+    /// because <c>desc.IsArray</c> was false — producing the f0..fN regression.
+    /// </summary>
+    private sealed class ArrayStructEchoModel : DatumIngest.Models.IModel
+    {
+        public string Name => "array_struct_echo";
+        public bool IsDeterministic => true;
+        public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
+        public DataKind OutputKind => DataKind.Struct;
+        public IReadOnlyList<ColumnInfo>? OutputFields { get; } =
+        [
+            new ColumnInfo("score", DataKind.Float32, nullable: false),
+            new ColumnInfo("label", DataKind.String, nullable: false),
+        ];
+
+        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+            CancellationToken cancellationToken)
+        {
+            _ = overrides;
+            DatumIngest.Functions.ValueRef[] outputs =
+                new DatumIngest.Functions.ValueRef[inputs.Count];
+            for (int row = 0; row < inputs.Count; row++)
+            {
+                // Two detections per row to force the InArena layout (N>=2)
+                // so TypeId actually rides along — N=1 inline arrays strip it.
+                DatumIngest.Functions.ValueRef d0 = DatumIngest.Functions.ValueRef.FromStruct(
+                [
+                    DatumIngest.Functions.ValueRef.FromFloat32(0.9f),
+                    DatumIngest.Functions.ValueRef.FromString("first"),
+                ]);
+                DatumIngest.Functions.ValueRef d1 = DatumIngest.Functions.ValueRef.FromStruct(
+                [
+                    DatumIngest.Functions.ValueRef.FromFloat32(0.7f),
+                    DatumIngest.Functions.ValueRef.FromString("second"),
+                ]);
+                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(
+                    DataKind.Struct, [d0, d1]);
+            }
+            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+        }
+    }
+
+    [Fact]
+    public async Task EndToEnd_ArrayOfStructOutput_StampsArrayTypeIdNotElementTypeId()
+    {
+        // The bug: operator passed the element struct's TypeId to
+        // ToDataValue for the per-row Array<Struct> value, so the resulting
+        // DataValue carried a struct (Fields-populated) descriptor instead of
+        // an array (IsArray=true, ElementTypeId=struct) descriptor. Renderers
+        // and the evaluator's index-access path both rely on
+        // `desc.IsArray && desc.ElementTypeId` — without an array descriptor,
+        // they fall back to f0..fN. Fix: lazily intern Array<Struct> when the
+        // model's per-row value is an array, then stamp THAT TypeId.
+        ArrayStructEchoModel model = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "array_struct_echo",
+            Backend: "echo",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Struct,
+            IsDeterministic: true,
+            Loader: _ => model));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "alice" });
+        catalog.Models = modelCatalog;
+
+        // Drive through ExecuteQueryAsync with our own context so we can
+        // inspect the registry after execution.
+        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog);
+        QueryExpression query = SqlParser.Parse("SELECT models.array_struct_echo(name) FROM t");
+        QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+        List<Row> rows = await plan.CollectRowsAsync(context);
+
+        Assert.Single(rows);
+        DataValue arrayValue = rows[0][0];
+        Assert.Equal(DataKind.Struct, arrayValue.Kind);
+        Assert.True(arrayValue.IsArray);
+        Assert.NotEqual((ushort)0, arrayValue.TypeId);
+
+        // The stamped TypeId must be the *array* descriptor — IsArray=true and
+        // ElementTypeId pointing at the element struct shape.
+        TypeDescriptor? arrayDesc = context.Types.GetDescriptor(arrayValue.TypeId);
+        Assert.NotNull(arrayDesc);
+        Assert.True(arrayDesc.IsArray);
+        Assert.NotNull(arrayDesc.ElementTypeId);
+
+        TypeDescriptor? elementDesc = context.Types.GetDescriptor(arrayDesc.ElementTypeId.Value);
+        Assert.NotNull(elementDesc);
+        Assert.Equal(DataKind.Struct, elementDesc.Kind);
+        Assert.False(elementDesc.IsArray);
+        Assert.NotNull(elementDesc.Fields);
+        Assert.Equal(2, elementDesc.Fields.Count);
+        Assert.Equal("score", elementDesc.Fields[0].Name);
+        Assert.Equal("label", elementDesc.Fields[1].Name);
+    }
 }
