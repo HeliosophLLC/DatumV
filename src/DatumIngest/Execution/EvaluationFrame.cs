@@ -58,30 +58,44 @@ public readonly struct EvaluationFrame
     public SidecarRegistry? SidecarRegistry { get; }
 
     /// <summary>
+    /// Optional per-query <see cref="TypeRegistry"/> for resolving struct-shape
+    /// metadata (field names, nested type ids) from a <see cref="DataValue.TypeId"/>.
+    /// Threaded by frame builders from <see cref="ExecutionContext.Types"/>; left
+    /// <see langword="null"/> outside the query pipeline. Functions consuming
+    /// struct values look up <see cref="TypeDescriptor"/>s here so they can find
+    /// fields by name instead of by position.
+    /// </summary>
+    public TypeRegistry? Types { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
     /// <paramref name="sidecarRegistry"/> when the query touches sidecar-bound tables
-    /// so accessors like <c>AsImage</c> can resolve sidecar-backed values.
+    /// so accessors like <c>AsImage</c> can resolve sidecar-backed values. Pass
+    /// <paramref name="types"/> when struct-consuming scalar functions need to
+    /// resolve field names via the per-query <see cref="TypeRegistry"/>.
     /// </summary>
     public EvaluationFrame(
         Row row,
         IValueStore source,
         IValueStore target,
         Row? outerRow = null,
-        SidecarRegistry? sidecarRegistry = null)
+        SidecarRegistry? sidecarRegistry = null,
+        TypeRegistry? types = null)
     {
         Row = row;
         Source = source;
         Target = target;
         OuterRow = outerRow;
         SidecarRegistry = sidecarRegistry;
+        Types = types;
     }
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
-    /// outer-row context, and sidecar registry. Used when the evaluator descends into
-    /// a derived row (e.g. a lambda body's augmented row).
+    /// outer-row context, sidecar registry, and type registry. Used when the evaluator
+    /// descends into a derived row (e.g. a lambda body's augmented row).
     /// </summary>
-    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, SidecarRegistry);
+    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, SidecarRegistry, Types);
 }

@@ -179,7 +179,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             variableStore,
             variableStore,
             outerRow: null,
-            sidecarRegistry: frame.SidecarRegistry);
+            sidecarRegistry: frame.SidecarRegistry,
+            types: frame.Types);
 
         ReturnSignal? signal = await ExecuteStatementsAsync(_descriptor.StatementBody!, scope, evaluator, bodyFrame, cancellationToken).ConfigureAwait(false);
         if (signal is null)
@@ -274,7 +275,8 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                     variableStore,
                     variableStore,
                     outerRow: null,
-                    sidecarRegistry: frame.SidecarRegistry);
+                    sidecarRegistry: frame.SidecarRegistry,
+                    types: frame.Types);
                 value = await defaultEvaluator.EvaluateAsync(param.Default, defaultFrame, cancellationToken).ConfigureAwait(false);
             }
             else

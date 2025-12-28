@@ -155,7 +155,8 @@ public sealed class RowEnricherOperator : IQueryOperator
                         sourceBatch.Arena,
                         outputBatch.Arena,
                         context.OuterRow,
-                        context.SidecarRegistry);
+                        context.SidecarRegistry,
+                        context.Types);
 
                     DataValue[] outValues = pool.RentDataValues(outputLookup.Count);
 

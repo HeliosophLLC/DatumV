@@ -244,7 +244,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsync(
             expression,
-            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry),
+            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry, _typeRegistry),
             cancellationToken);
     }
 
@@ -258,7 +258,7 @@ public sealed class ExpressionEvaluator
         IValueStore store = _store ?? ThrowStoreRequired();
         return EvaluateAsBooleanAsync(
             expression,
-            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry),
+            new EvaluationFrame(row, store, store, _outerRow, _sidecarRegistry, _typeRegistry),
             cancellationToken);
     }
 
@@ -775,18 +775,20 @@ public sealed class ExpressionEvaluator
                 : ValueRef.Null(value.Kind);
         }
 
-        if (value.IsInline)
-        {
-            return ValueRef.FromInline(value);
-        }
-
-        // Arrays must be dispatched before the byte-blob / string scalar
-        // branches: Kind=String|Image without IsArray means a single value,
-        // but with IsArray means a typed array carrier and the element bytes
-        // need to be read through the array accessors.
+        // Arrays must be dispatched before the inline scalar branch: inline
+        // arrays (IsInlineArray flag — small typed arrays packed into the
+        // 16-byte payload) satisfy IsInline, but FromInline can't materialise
+        // their elements as the ValueRef[] downstream consumers expect from
+        // GetArrayElements. Route every IsArray value through the dispatcher
+        // first so inline and arena-backed arrays produce the same shape.
         if (value.IsArray)
         {
             return ArrayDataValueToValueRef(value, frame);
+        }
+
+        if (value.IsInline)
+        {
+            return ValueRef.FromInline(value);
         }
 
         // Non-inline single-value byte blobs.
@@ -794,6 +796,11 @@ public sealed class ExpressionEvaluator
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(frame.Source, frame.SidecarRegistry);
             return ValueRef.FromBytes(value.Kind, bytes.ToArray());
+        }
+
+        if (value.Kind == DataKind.Struct)
+        {
+            return StructDataValueToValueRef(value, frame);
         }
 
         return value.Kind switch
@@ -804,6 +811,24 @@ public sealed class ExpressionEvaluator
                 $"Cannot convert non-inline DataValue of kind {value.Kind} into a ValueRef. "
                 + "Add support to ExpressionEvaluator.ToValueRef when this kind reaches the function boundary."),
         };
+    }
+
+    /// <summary>
+    /// Lifts a single non-null Struct <see cref="DataValue"/> into a
+    /// <see cref="ValueRef"/> by reading its fields from the arena and
+    /// recursively lifting each one. The resulting ValueRef carries the
+    /// source's <see cref="DataValue.TypeId"/> on its inline carrier so
+    /// downstream consumers can resolve field names via the registry.
+    /// </summary>
+    private static ValueRef StructDataValueToValueRef(DataValue value, EvaluationFrame frame)
+    {
+        DataValue[] fieldValues = value.AsStruct(frame.Source);
+        ValueRef[] fields = new ValueRef[fieldValues.Length];
+        for (int i = 0; i < fieldValues.Length; i++)
+        {
+            fields[i] = ToValueRef(fieldValues[i], frame);
+        }
+        return ValueRef.FromStruct(fields, value.TypeId);
     }
 
     /// <summary>
@@ -821,6 +846,7 @@ public sealed class ExpressionEvaluator
         {
             DataKind.String => StringArrayToValueRef(value, frame),
             DataKind.Image => BytesArrayToValueRef(value, DataKind.Image, frame),
+            DataKind.Struct => StructArrayToValueRef(value, frame),
 
             DataKind.Boolean => PrimitiveArrayToValueRef<byte>(value, frame),
             DataKind.UInt8 => PrimitiveArrayToValueRef<byte>(value, frame),
@@ -868,6 +894,25 @@ public sealed class ExpressionEvaluator
     {
         ReadOnlySpan<T> span = value.AsArraySpan<T>(frame.Source, frame.SidecarRegistry);
         return ValueRef.FromPrimitiveArray(span.ToArray(), value.Kind);
+    }
+
+    /// <summary>
+    /// Lifts a non-inline <c>Array&lt;Struct&gt;</c> into a <see cref="ValueRef"/>
+    /// of struct-shaped <see cref="ValueRef"/>s. Each element is itself read via
+    /// <see cref="StructDataValueToValueRef"/> so nested struct/array fields
+    /// (e.g. SCRFD's <c>landmarks: Array&lt;Struct{x, y}&gt;</c>) lift through
+    /// the same recursion path. Per-element <see cref="DataValue.TypeId"/>s
+    /// are preserved.
+    /// </summary>
+    private static ValueRef StructArrayToValueRef(DataValue value, EvaluationFrame frame)
+    {
+        DataValue[] elements = value.AsStructArray(frame.Source, frame.SidecarRegistry);
+        ValueRef[] refs = new ValueRef[elements.Length];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            refs[i] = StructDataValueToValueRef(elements[i], frame);
+        }
+        return ValueRef.FromArray(DataKind.Struct, refs);
     }
 
     /// <summary>
@@ -955,7 +1000,7 @@ public sealed class ExpressionEvaluator
         // remain valid across batches. Falls back to the frame's target arena when
         // no persistent store is configured.
         IValueStore cacheStore = _store ?? frame.Target;
-        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow, frame.SidecarRegistry);
+        EvaluationFrame cacheFrame = new(frame.Row, frame.Source, cacheStore, frame.OuterRow, frame.SidecarRegistry, frame.Types);
 
         foreach (Expression valueExpression in inExpr.Values)
         {
