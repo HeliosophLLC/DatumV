@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Functions.Json;
 using DatumIngest.Model;
@@ -57,8 +58,216 @@ internal static class WebCellFormatter
             }
         }
 
+        // Structured shapes (Struct, Array<Struct>, Array<scalar>, Array<String>)
+        // route to the front-end's JSON tree renderer so the user gets a
+        // collapsible, copyable view with field-name-aware rendering rather than
+        // a one-line {f0: ..., f1: ...} blob.
+        if (ShouldRouteToJson(value))
+        {
+            object? tree = BuildJsonNode(value, arena, registry, types);
+            string text = JsonSerializer.Serialize(tree, JsonOpts);
+            return new JsonCell("json", Text: text);
+        }
+
         return new JsonCell("text", Text: FormatText(value, arena, registry, types));
     }
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = false,
+        // The front-end's JSON.parse handles whatever we emit; default escaping
+        // is fine. NumberHandling stays strict — non-finite doubles get serialized
+        // as strings via the BuildJsonNode fallbacks below.
+    };
+
+    /// <summary>
+    /// True when <paramref name="value"/> is a Struct or an array whose elements
+    /// can be rendered as JSON cleanly (struct, scalar, string). Binary kinds
+    /// (Image / Audio / Video) and their typed-array forms still go through the
+    /// text path — base64 inside a JSON tree is unwieldy and the dedicated
+    /// "media" cell already covers single-blob rendering.
+    /// </summary>
+    private static bool ShouldRouteToJson(DataValue value)
+    {
+        if (value.IsByteArrayKind) return false;          // UInt8[] → media or hex preview
+        if (value.Kind == DataKind.Image
+            || value.Kind == DataKind.Audio
+            || value.Kind == DataKind.Video) return false; // single-blob already routes elsewhere
+        if (value.Kind == DataKind.Struct) return true;
+        if (value.IsArray) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively builds an <see cref="object"/>-tree (primitives,
+    /// <c>Dictionary&lt;string, object?&gt;</c>, <c>List&lt;object?&gt;</c>)
+    /// suitable for handing to <see cref="JsonSerializer.Serialize"/>.
+    /// Struct field names come from the per-element TypeId via the
+    /// <see cref="TypeRegistry"/>; missing names fall back to <c>fN</c>.
+    /// </summary>
+    private static object? BuildJsonNode(
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types)
+    {
+        if (value.IsNull) return null;
+
+        if (value.IsArray)
+        {
+            return BuildJsonArrayNode(value, arena, registry, types);
+        }
+
+        if (value.Kind == DataKind.Struct)
+        {
+            DataValue[] fieldValues = value.AsStruct(arena);
+            TypeDescriptor? typeDesc = value.TypeId != 0 ? types?.GetDescriptor(value.TypeId) : null;
+            Dictionary<string, object?> obj = new(capacity: fieldValues.Length, StringComparer.Ordinal);
+            for (int i = 0; i < fieldValues.Length; i++)
+            {
+                string name = typeDesc?.Fields is { } tFields && i < tFields.Count
+                    ? tFields[i].Name
+                    : $"f{i}";
+                // Disambiguate clashes (rare — duplicate field name in a struct
+                // shape). Avoids a Dictionary key collision throwing mid-render.
+                if (obj.ContainsKey(name)) name = $"{name}_{i}";
+                obj[name] = BuildJsonNode(fieldValues[i], arena, registry, types);
+            }
+            return obj;
+        }
+
+        return value.Kind switch
+        {
+            DataKind.Boolean => value.AsBoolean(),
+            DataKind.UInt8 => (int)value.AsUInt8(),
+            DataKind.Int8 => (int)value.AsInt8(),
+            DataKind.UInt16 => (int)value.AsUInt16(),
+            DataKind.Int16 => (int)value.AsInt16(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int32 => value.AsInt32(),
+            // 64-bit ints can exceed JS Number.MAX_SAFE_INTEGER. Emit as number;
+            // the front-end's JSON.parse preserves precision into a regular
+            // Number even for values near the boundary, and the tree renderer
+            // shows the .toString() form. If precision becomes a real issue,
+            // promote to string here.
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.Float32 => Float32ToJson(value.AsFloat32()),
+            DataKind.Float64 => Float64ToJson(value.AsFloat64()),
+            DataKind.Decimal => value.AsDecimal(),
+            DataKind.Date => value.AsDate().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DataKind.DateTime => value.AsDateTime().ToString("O", CultureInfo.InvariantCulture),
+            DataKind.Time => value.AsTime().ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
+            DataKind.Duration => value.AsDuration().ToString(),
+            DataKind.Uuid => value.AsUuid().ToString(),
+            DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
+            // Single-blob kinds inside a struct field: surface a placeholder so
+            // the JSON tree stays readable. The dedicated "media" cell handles
+            // top-level blobs; nested blobs are rare and base64 would dominate
+            // the rendered tree.
+            DataKind.Image => $"<image: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
+            DataKind.Audio => $"<audio: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
+            DataKind.Video => $"<video: {value.AsByteSpan(arena, registry).Length:N0} bytes>",
+            DataKind.Json => DecodeJsonNodeOrFallback(value, arena, registry),
+            DataKind.Type => value.FormatType(types),
+            _ => value.ToString() ?? string.Empty,
+        };
+    }
+
+    private static List<object?> BuildJsonArrayNode(
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types)
+    {
+        // Struct arrays: each element is a self-describing Struct DataValue —
+        // recurse into BuildJsonNode for each.
+        if (value.Kind == DataKind.Struct)
+        {
+            DataValue[] elements = value.AsStructArray(arena, registry);
+            List<object?> arr = new(elements.Length);
+            for (int i = 0; i < elements.Length; i++)
+            {
+                arr.Add(BuildJsonNode(elements[i], arena, registry, types));
+            }
+            return arr;
+        }
+
+        // String arrays: cheap, emit as an array of JSON strings.
+        if (value.Kind == DataKind.String)
+        {
+            string[] strings = value.AsStringArray(arena, registry);
+            List<object?> arr = new(strings.Length);
+            for (int i = 0; i < strings.Length; i++) arr.Add(strings[i]);
+            return arr;
+        }
+
+        // Fixed-width primitive arrays: read as a typed span, box per element.
+        return value.Kind switch
+        {
+            DataKind.Boolean => CollectPrimitiveArray<byte>(value, arena, registry, b => (object)(b != 0)),
+            DataKind.UInt8 => CollectPrimitiveArray<byte>(value, arena, registry, b => (object)(int)b),
+            DataKind.Int8 => CollectPrimitiveArray<sbyte>(value, arena, registry, b => (object)(int)b),
+            DataKind.UInt16 => CollectPrimitiveArray<ushort>(value, arena, registry, v => (object)(int)v),
+            DataKind.Int16 => CollectPrimitiveArray<short>(value, arena, registry, v => (object)(int)v),
+            DataKind.UInt32 => CollectPrimitiveArray<uint>(value, arena, registry, v => (object)v),
+            DataKind.Int32 => CollectPrimitiveArray<int>(value, arena, registry, v => (object)v),
+            DataKind.UInt64 => CollectPrimitiveArray<ulong>(value, arena, registry, v => (object)v),
+            DataKind.Int64 => CollectPrimitiveArray<long>(value, arena, registry, v => (object)v),
+            DataKind.Float32 => CollectPrimitiveArray<float>(value, arena, registry, v => Float32ToJson(v)),
+            DataKind.Float64 => CollectPrimitiveArray<double>(value, arena, registry, v => Float64ToJson(v)),
+            // Image / Audio / Video arrays not handled here — ShouldRouteToJson
+            // skips binary-element arrays, so we should never reach them.
+            _ => new List<object?> { $"<Array<{value.Kind}> not yet renderable as JSON>" },
+        };
+    }
+
+    private static List<object?> CollectPrimitiveArray<T>(
+        DataValue value, Arena arena, SidecarRegistry registry, Func<T, object> box)
+        where T : unmanaged
+    {
+        ReadOnlySpan<T> span = value.AsArraySpan<T>(arena, registry);
+        List<object?> arr = new(span.Length);
+        for (int i = 0; i < span.Length; i++) arr.Add(box(span[i]));
+        return arr;
+    }
+
+    /// <summary>
+    /// JSON's number type doesn't permit NaN/Infinity. Emit those as strings so
+    /// the tree stays parseable. Finite values pass through as doubles.
+    /// </summary>
+    private static object Float32ToJson(float v) =>
+        float.IsFinite(v) ? v : v.ToString("G", CultureInfo.InvariantCulture);
+
+    private static object Float64ToJson(double v) =>
+        double.IsFinite(v) ? v : v.ToString("G", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Decodes a Json-kind cell's CBOR payload to its parsed JSON node so the
+    /// containing struct serialises with the inner JSON inline rather than as
+    /// an opaque escaped string. Falls back to a placeholder on decode failure.
+    /// </summary>
+    private static object? DecodeJsonNodeOrFallback(
+        DataValue value, Arena arena, SidecarRegistry registry)
+    {
+        ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+        try
+        {
+            string jsonText = CborJsonCodec.DecodeToJsonText(bytes);
+            using JsonDocument doc = JsonDocument.Parse(jsonText);
+            return JsonElementToObject(doc.RootElement);
+        }
+        catch
+        {
+            return $"<json decode failed; {bytes.Length:N0} bytes>";
+        }
+    }
+
+    private static object? JsonElementToObject(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.Null => null,
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Number => el.TryGetInt64(out long l) ? l : el.GetDouble(),
+        JsonValueKind.String => el.GetString(),
+        JsonValueKind.Array => el.EnumerateArray().Select(JsonElementToObject).ToList(),
+        JsonValueKind.Object => el.EnumerateObject().ToDictionary(p => p.Name, p => JsonElementToObject(p.Value)),
+        _ => el.GetRawText(),
+    };
 
     private static string FormatText(
         DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
@@ -169,20 +378,6 @@ internal static class WebCellFormatter
             parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
         }
         return "{" + string.Join(", ", parts) + "}";
-    }
-
-    /// <summary>
-    /// Given the TypeId of an <c>Array&lt;Struct&gt;</c>, returns the element
-    /// struct's TypeId by hopping through the array descriptor's <see cref="TypeDescriptor.ElementTypeId"/>.
-    /// Returns 0 when the registry is null, the TypeId isn't an array shape, or the
-    /// element type is not registered.
-    /// </summary>
-    private static ushort ResolveElementTypeId(ushort arrayTypeId, TypeRegistry? types)
-    {
-        if (arrayTypeId == 0 || types is null) return 0;
-        TypeDescriptor? desc = types.GetDescriptor(arrayTypeId);
-        if (desc is null || !desc.IsArray) return 0;
-        return desc.ElementTypeId is { } eid ? (ushort)eid : (ushort)0;
     }
 
     private static string FormatPrimitiveArray<T>(
