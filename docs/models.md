@@ -223,6 +223,69 @@ is identical across all sizes.
   FROM thumbnails LIMIT 10;
   ```
 
+### `u2net`, `u2netp` — salient-object segmentation (background masking)
+
+Xuebin Qin's U²-Net detects the dominant ("salient") object in an image and
+emits a single-channel mask sized to match the input. Two sibling exports
+share the same architecture, the same fixed 320×320 internal input, and the
+same seven-output deep-supervision head — the loader handles either file
+through one model class.
+
+| Catalog name | File | Params | Disk |
+|---|---|---|---|
+| `u2net` | `u2net.onnx` | 176M | ~170 MB |
+| `u2netp` | `u2netp.onnx` | 4.7M | ~4.7 MB |
+
+- **What it does**: Returns an `Image` whose pixel intensity is the
+  per-pixel saliency (white = foreground / object, black = background).
+  Channels are equal (R = G = B = mask value, A = 255), so any colour-space
+  consumer reads the same value — but the natural pairing is
+  [`image_cutout(image, mask)`](#image_cutout--apply-a-mask-as-alpha) which
+  uses the mask as an alpha channel.
+- **License**: Apache-2.0 (Xuebin Qin et al.)
+- **Source**: [github.com/xuebinqin/U-2-Net](https://github.com/xuebinqin/U-2-Net)
+  — upstream ships PyTorch `.pth` weights; pre-built ONNX exports are
+  widely mirrored.
+- **Setup**: drop the file(s) directly into `$DATUM_MODELS`. Common mirrors:
+  ```powershell
+  # Lite (4.7 MB) — recommended starting point.
+  Invoke-WebRequest "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" `
+    -OutFile $env:DATUM_MODELS\u2netp.onnx
+
+  # Full (170 MB) — sharper edges on fine detail (hair, fur, foliage).
+  Invoke-WebRequest "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" `
+    -OutFile $env:DATUM_MODELS\u2net.onnx
+  ```
+- **Architecture**: Nested U-shaped encoder/decoder of "ReSidual U-blocks"
+  (RSUs) — each level is itself a small U-Net, hence the U². The full and
+  lite variants share the topology; `u2netp` swaps the heavy 3×3 conv stacks
+  for cheaper depthwise-separable equivalents. Preprocessing is stretch-
+  resize to 320×320 RGB with ImageNet normalisation
+  (`mean=[0.485,0.456,0.406]`, `std=[0.229,0.224,0.225]`); post-processing
+  takes the first output (the fused saliency map d0), min-max normalises
+  per image to `[0, 1]` (matching the upstream `normPRED` step), and resizes
+  back to the input's original dimensions.
+- **Memory**: input bitmap + 320×320×3 float NCHW (~1.2 MB) + 320×320 float
+  output (~0.4 MB) + a pair of mask bitmaps for the resize-back. Per-row
+  cost is essentially fixed regardless of input resolution, since the
+  internal pipeline always operates at 320×320.
+- **`u2net` vs `u2netp`**: the lite variant matches the full one on
+  obvious foreground subjects (a person against a plain background, a
+  product photo) and starts to lose precision on fine boundaries (single
+  hairs, leaf edges, jewelry filigree). For demos and interactive use,
+  start with `u2netp` — it loads in <1s vs ~3s for the full model and
+  inference is roughly 4× faster — and reach for `u2net` only when mask
+  quality matters more than latency.
+- **Demo**:
+  ```sql
+  -- Cut the salient subject out of each photo and write the result back as PNG.
+  SELECT
+    photo_id,
+    image_cutout(photo, models.u2netp(photo)) AS subject_only
+  FROM photos
+  LIMIT 5;
+  ```
+
 ### `vit_gpt2_caption` — image captioner
 
 - **What it does**: Generates a single-sentence COCO-style caption for

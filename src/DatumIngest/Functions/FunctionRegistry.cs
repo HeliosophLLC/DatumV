@@ -381,6 +381,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.ArrayToStringFunction>();
         registry.RegisterScalar<Scalar.ArrayLengthFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
 
         // Json — parse, scalar lookup, subdocument query, text re-emit.

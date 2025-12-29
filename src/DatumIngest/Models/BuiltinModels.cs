@@ -77,6 +77,8 @@ public static class BuiltinModels
         RegisterAllYoloX(modelCatalog);  // 7 entries: nano/tiny/s/m/l/x/darknet
         RegisterScrfd10g(modelCatalog);
         RegisterRealesrganGeneralX4(modelCatalog);
+        RegisterU2Net(modelCatalog);
+        RegisterU2Netp(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
 
         // Captioner zoo — Florence-2 in three caption styles plus a
@@ -1393,6 +1395,102 @@ public static class BuiltinModels
             LicenseHolder: "Xintao Wang",
             SourceUrl: "https://github.com/xinntao/Real-ESRGAN",
             Category: "enhancer",
+            Modalities: ["image"],
+            Files: [modelFilename]));
+    }
+
+    // ─────────────────────────── U²-Net (Apache-2.0) ──────────────────────────
+    //
+    // Xuebin Qin's U²-Net salient-object detector. Two sibling exports from
+    // the upstream xuebinqin/U-2-Net repo:
+    //
+    //   • u2net.onnx   — full 176M-param network (~170 MB)
+    //   • u2netp.onnx  — distilled lite variant, 4.7M params (~4.7 MB)
+    //
+    // Both share the same input shape (320×320 RGB), the same seven-output
+    // deep-supervision head, and ImageNet-style normalisation, so a single
+    // U2NetModel class loads either file. The "p" (lite) variant trades a
+    // small amount of mask precision for a >35× size cut and matching speed
+    // gain — the right default for interactive demos and the right starting
+    // point if mask quality turns out to be sufficient.
+    //
+    // Output is a single-channel saliency mask sized to the input. Cutting
+    // the foreground out of the source image is deferred to a follow-up
+    // `cutout(image, mask)` scalar function — keeping the model class focused
+    // on inference matches how YOLOX (boxes) and SCRFD (faces) ship.
+
+    /// <summary>Default filename for U²-Net full (~170 MB).</summary>
+    public const string U2NetDefaultFilename = "u2net.onnx";
+
+    /// <summary>Default filename for U²-Net lite (u2netp, ~4.7 MB).</summary>
+    public const string U2NetpDefaultFilename = "u2netp.onnx";
+
+    /// <summary>
+    /// Registers full U²-Net under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"u2net"</c>). Image-in / image-out: a single-channel
+    /// saliency mask resized to match the input.
+    /// </summary>
+    /// <remarks>
+    /// Upstream is <a href="https://github.com/xuebinqin/U-2-Net">xuebinqin/U-2-Net</a>.
+    /// Pre-built ONNX exports are widely mirrored on HuggingFace; the canonical
+    /// filename is <c>u2net.onnx</c>.
+    /// </remarks>
+    public static void RegisterU2Net(
+        ModelCatalog catalog,
+        string modelName = "u2net",
+        string modelFilename = U2NetDefaultFilename)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new U2NetModel(modelName, modelPath);
+            },
+            DisplayName: "U²-Net (salient object segmentation)",
+            Parameters: "176M",
+            License: "Apache-2.0",
+            LicenseHolder: "Xuebin Qin et al.",
+            SourceUrl: "https://github.com/xuebinqin/U-2-Net",
+            Category: "segmenter",
+            Modalities: ["image"],
+            Files: [modelFilename]));
+    }
+
+    /// <summary>
+    /// Registers lite U²-Net (u2netp) under the catalog name <paramref name="modelName"/>
+    /// (defaults to <c>"u2netp"</c>). Same image-in / image-out signature as
+    /// <see cref="RegisterU2Net"/>; ~35× smaller weights at the cost of some
+    /// mask precision on fine boundaries.
+    /// </summary>
+    public static void RegisterU2Netp(
+        ModelCatalog catalog,
+        string modelName = "u2netp",
+        string modelFilename = U2NetpDefaultFilename)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new U2NetModel(modelName, modelPath);
+            },
+            DisplayName: "U²-Net Lite / u2netp (salient object segmentation)",
+            Parameters: "4.7M",
+            License: "Apache-2.0",
+            LicenseHolder: "Xuebin Qin et al.",
+            SourceUrl: "https://github.com/xuebinqin/U-2-Net",
+            Category: "segmenter",
             Modalities: ["image"],
             Files: [modelFilename]));
     }
