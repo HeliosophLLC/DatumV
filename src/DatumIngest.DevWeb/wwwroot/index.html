@@ -66,8 +66,8 @@
   header .status { color: var(--muted); font-size: 12px; }
 
   /* Tab strip — height matches the sidebar's .section-header so the two
-     panes line up across the workspace. */
-  #tab-strip {
+     panes line up across the workspace. One per editor group. */
+  .tab-strip {
     display: flex; align-items: stretch;
     border-bottom: 1px solid var(--border);
     background: var(--panel-2);
@@ -75,7 +75,7 @@
     overflow-y: hidden;
     height: 35px;
   }
-  #tab-strip .tab {
+  .tab-strip .tab {
     display: flex; align-items: center; gap: 6px;
     padding: 4px 8px 4px 12px;
     border-right: 1px solid var(--border);
@@ -85,45 +85,62 @@
     user-select: none;
     max-width: 240px;
   }
-  #tab-strip .tab.active {
+  .tab-strip .tab.active {
     background: var(--tab-active);
     color: var(--fg);
     box-shadow: inset 0 -2px 0 0 var(--accent);
   }
-  #tab-strip .tab.dragging { opacity: 0.4; }
-  #tab-strip .tab.drop-before { box-shadow: inset 2px 0 0 0 var(--accent); }
-  #tab-strip .tab.drop-after  { box-shadow: inset -2px 0 0 0 var(--accent); }
-  #tab-strip .tab .name {
+  .tab-strip .tab.dragging { opacity: 0.4; }
+  .tab-strip .tab.drop-before { box-shadow: inset 2px 0 0 0 var(--accent); }
+  .tab-strip .tab.drop-after  { box-shadow: inset -2px 0 0 0 var(--accent); }
+  .tab-strip .tab .name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 180px;
   }
-  #tab-strip .tab .dirty {
+  .tab-strip .tab .dirty {
     color: var(--warn); margin-left: 2px;
   }
-  #tab-strip .tab .close {
+  .tab-strip .tab .close {
     background: transparent; border: none; color: var(--muted);
     cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1;
     border-radius: 3px;
   }
-  #tab-strip .tab .close:hover { background: var(--border); color: var(--fg); }
-  #tab-strip .tab .pin {
+  .tab-strip .tab .close:hover { background: var(--border); color: var(--fg); }
+  .tab-strip .tab .pin {
     font-size: 11px; line-height: 1; margin-right: 2px; user-select: none;
   }
-  #tab-strip .tab .running-indicator {
+  .tab-strip .tab .running-indicator {
     font-size: 11px; line-height: 1; margin-right: 4px;
     user-select: none;
   }
-  #tab-strip .tab .name-input {
+  .tab-strip .tab .name-input {
     background: var(--panel); color: var(--fg);
     border: 1px solid var(--accent); border-radius: 2px;
     font: inherit; padding: 0 4px; outline: none;
     width: 160px; max-width: 180px;
   }
-  #tab-strip #new-tab {
+  .tab-strip .new-tab {
     background: transparent; border: none; color: var(--muted);
     font-size: 18px; padding: 0 12px; cursor: pointer;
   }
-  #tab-strip #new-tab:hover { color: var(--fg); }
+  .tab-strip .new-tab:hover { color: var(--fg); }
+  /* Pushes the orient-toggle to the far right of the strip; sits between
+     the tabs (+ new-tab button) and the right edge. position:sticky on
+     the toggle pins it to the strip's right edge even when many tabs
+     overflow horizontally — the toggle is always reachable without
+     scrolling the strip. */
+  .tab-strip .strip-spacer { flex: 1; min-width: 0; }
+  .tab-strip .strip-orient-toggle {
+    background: var(--panel-2);
+    border: none; color: var(--muted);
+    cursor: pointer; padding: 0 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    position: sticky; right: 0;
+    border-left: 1px solid var(--border);
+  }
+  .tab-strip .strip-orient-toggle:hover { color: var(--fg); }
+  .tab-strip .strip-orient-toggle svg { display: block; }
 
   /* Tab right-click menu */
   #tab-context-menu {
@@ -293,20 +310,131 @@
     overflow: hidden;
   }
 
-  /* Wrapper for the editor + drag-handle + results stack. Default flex
-     direction is column (vertical split); toggling `.horizontal` flips it
-     to a row so the editor sits beside the results. */
-  #editor-results-wrapper {
+  /* Container holding all editor groups. `.vertical-stack` flips the
+     two-pane layout from side-by-side (default) to one-above-the-other.
+     The drag-handle between groups (`#group-resize`) is inserted by
+     reconcileGroupDom only when more than one group exists. */
+  #group-container {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex; flex-direction: row;
+    overflow: hidden;
+  }
+  #group-container.vertical-stack {
+    flex-direction: column;
+  }
+  #group-resize {
+    width: 6px; flex-shrink: 0;
+    cursor: col-resize;
+    background: transparent;
+    margin-left: -3px; margin-right: -3px;
+    z-index: 5; position: relative;
+  }
+  /* The 6px hit area is invisible; ::before paints a 1px guideline so
+     the user can see exactly where the panes meet. ::after paints the
+     hover/drag accent fill — kept on a separate pseudo (rather than the
+     parent's `opacity`) so the floating controls pill stays at full
+     opacity when revealed. */
+  #group-resize::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 1px;
+    background: var(--border);
+    pointer-events: none;
+  }
+  #group-resize::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease-out;
+  }
+  #group-resize:hover::after, #group-resize.dragging::after {
+    opacity: 0.6;
+  }
+  #group-container.vertical-stack #group-resize {
+    width: auto; height: 6px;
+    cursor: row-resize;
+    margin-left: 0; margin-right: 0;
+    margin-top: -3px; margin-bottom: -3px;
+  }
+  #group-container.vertical-stack #group-resize::before {
+    top: 50%; left: 0; right: 0; bottom: auto;
+    width: auto; height: 1px;
+  }
+  /* Floating pill of group-level controls (merge / swap orientation),
+     centered on the resize line and revealed on hover. Buttons sit
+     on top of the handle so the user can click them without losing
+     their hover. Pointer-events stays auto on the buttons even at
+     opacity 0 so the hover region isn't a sliver. */
+  #group-resize .group-resize-controls {
+    position: absolute;
+    display: flex;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.12s ease-out;
+    z-index: 6;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+  #group-resize:hover .group-resize-controls,
+  #group-resize.dragging .group-resize-controls {
+    opacity: 1;
+  }
+  /* Side-by-side: pill is a vertical column of buttons centered on the
+     handle. Stacked: horizontal row centered on the handle. */
+  #group-resize .group-resize-controls {
+    flex-direction: column;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  #group-container.vertical-stack #group-resize .group-resize-controls {
+    flex-direction: row;
+  }
+  #group-resize .group-resize-controls button {
+    background: transparent; border: none;
+    color: var(--muted); cursor: pointer;
+    padding: 4px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 3px;
+  }
+  #group-resize .group-resize-controls button:hover {
+    color: var(--fg); background: var(--panel-2);
+  }
+
+  /* One editor group = its own tab strip + editor + results stack.
+     `data-group-id` ties DOM back to the workspace `groups[]` entry. */
+  .editor-group {
+    flex: 1; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  /* Subtle accent on the focused group's tab strip — only painted when
+     more than one group exists, so single-pane mode looks unchanged. */
+  .editor-group.focused .tab-strip {
+    box-shadow: inset 0 2px 0 0 var(--accent);
+  }
+
+  /* Wrapper for the editor + drag-handle + results stack inside one group.
+     Default flex direction is column (vertical split); toggling
+     `.horizontal` flips it to a row so the editor sits beside the
+     results. One per group. */
+  .editor-results-wrapper {
     flex: 1; min-height: 0; min-width: 0;
     display: flex; flex-direction: column;
     overflow: hidden;
   }
-  #editor-results-wrapper.horizontal {
+  .editor-results-wrapper.horizontal {
     flex-direction: row;
   }
 
   /* Editor pane */
-  #editor-pane {
+  .editor-pane {
     border-bottom: 1px solid var(--border);
     background: var(--panel);
     display: flex; flex-direction: column;
@@ -314,7 +442,7 @@
     height: 32vh;
     overflow: hidden;
   }
-  #editor-results-wrapper.horizontal #editor-pane {
+  .editor-results-wrapper.horizontal .editor-pane {
     /* Side-by-side: width replaces height; border moves to the right edge. */
     height: auto;
     min-height: 0;
@@ -327,24 +455,24 @@
   /* Drag handle between the editor and the results pane. Mirrors
      #sidebar-resize but in the row direction — full width, 6px tall hit
      area, transparent until hover. */
-  #editor-results-resize {
+  .editor-results-resize {
     height: 6px; flex-shrink: 0;
     cursor: row-resize;
     background: transparent;
     margin-top: -3px; margin-bottom: -3px;
     z-index: 5; position: relative;
   }
-  #editor-results-wrapper.horizontal #editor-results-resize {
+  .editor-results-wrapper.horizontal .editor-results-resize {
     height: auto; width: 6px;
     cursor: col-resize;
     margin-top: 0; margin-bottom: 0;
     margin-left: -3px; margin-right: -3px;
   }
-  #editor-results-resize:hover, #editor-results-resize.dragging {
+  .editor-results-resize:hover, .editor-results-resize.dragging {
     background: var(--accent);
     opacity: 0.6;
   }
-  #editor-host {
+  .editor-host {
     flex: 1;
     width: 100%;
     overflow: hidden;
@@ -359,28 +487,28 @@
     tab-size: 2;
   }
 
-  #editor-toolbar {
+  .editor-toolbar {
     display: flex; align-items: center; gap: 10px;
     padding: 6px 10px;
     background: var(--panel-2);
     border-top: 1px solid var(--border);
   }
-  #editor-toolbar button {
+  .editor-toolbar button {
     background: var(--accent); color: var(--accent-fg);
     border: none; padding: 6px 14px; border-radius: 4px;
     font-size: 13px; font-weight: 500; cursor: pointer;
   }
-  #editor-toolbar button:disabled { opacity: 0.5; cursor: default; }
-  #editor-toolbar .spacer { flex: 1; }
-  #editor-toolbar .tip { color: var(--muted); font-size: 12px; }
-  #editor-toolbar input[type="number"] {
+  .editor-toolbar button:disabled { opacity: 0.5; cursor: default; }
+  .editor-toolbar .spacer { flex: 1; }
+  .editor-toolbar .tip { color: var(--muted); font-size: 12px; }
+  .editor-toolbar input[type="number"] {
     width: 70px; background: var(--panel); color: var(--fg);
     border: 1px solid var(--border); border-radius: 3px;
     padding: 3px 6px; margin-left: 4px;
   }
 
   /* Results */
-  #results-pane {
+  .results-pane {
     flex: 1; min-height: 0;
     overflow: auto;
     padding: 0;
@@ -664,10 +792,10 @@
     </div>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
-    <button class="icon" id="orient-toggle" title="Toggle editor/results layout (vertical ↔ side-by-side)" aria-label="Toggle editor/results layout">
+    <button class="icon" id="split-toggle" title="Split editor into two side-by-side panes" aria-label="Split editor">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
-        <rect x="3" y="4" width="18" height="16" rx="1"></rect>
-        <line id="orient-toggle-divider" x1="3" y1="12" x2="21" y2="12"></line>
+        <rect x="3" y="4" width="8" height="16" rx="1"></rect>
+        <rect x="13" y="4" width="8" height="16" rx="1"></rect>
       </svg>
     </button>
     <button class="icon" id="theme-toggle" title="Toggle theme">☾</button>
@@ -727,30 +855,34 @@
     <div id="sidebar-resize" title="Drag to resize"></div>
 
     <div id="main-column">
-      <div id="tab-strip"></div>
+      <div id="group-container">
+        <div class="editor-group" data-group-id="g1">
+          <div class="tab-strip"></div>
 
-      <div id="editor-results-wrapper">
-        <div id="editor-pane">
-          <div id="editor-host"></div>
-          <div id="editor-toolbar">
-            <button id="run">Run</button>
-            <span class="tip">Ctrl/⌘+Enter</span>
-            <span class="tip">max rows
-              <input id="maxRows" type="number" value="200" min="1" max="100000">
-            </span>
-            <label class="tip" title="Capture engine execution trace for the next run">
-              <input id="traceToggle" type="checkbox">
-              trace
-            </label>
-            <span class="spacer"></span>
-            <span id="elapsed" class="tip"></span>
+          <div class="editor-results-wrapper">
+            <div class="editor-pane">
+              <div class="editor-host"></div>
+              <div class="editor-toolbar">
+                <button class="run-btn">Run</button>
+                <span class="tip">Ctrl/⌘+Enter</span>
+                <span class="tip">max rows
+                  <input class="max-rows-input" type="number" value="200" min="1" max="100000">
+                </span>
+                <label class="tip" title="Capture engine execution trace for the next run">
+                  <input class="trace-toggle" type="checkbox">
+                  trace
+                </label>
+                <span class="spacer"></span>
+                <span class="elapsed tip"></span>
+              </div>
+            </div>
+
+            <div class="editor-results-resize" title="Drag to resize"></div>
+
+            <div class="results-pane">
+              <div class="meta">Type a query and press Run.</div>
+            </div>
           </div>
-        </div>
-
-        <div id="editor-results-resize" title="Drag to resize"></div>
-
-        <div id="results-pane">
-          <div class="meta">Type a query and press Run.</div>
         </div>
       </div>
     </div>
@@ -764,7 +896,9 @@
   // Two-tier persistence:
   //   localStorage holds small JSON state — workspace registry, theme, and
   //     per-workspace { tabs: [{ id, name, sql, lastRunAt, sqlOfLastRun }],
-  //     activeTabId }. Read synchronously on boot.
+  //     groups: [{ id, tabIds, activeTabId }], focusedGroupId, deletedTabIds,
+  //     activeTabId (top-level mirror, kept for backward compat) }.
+  //     Read synchronously on boot.
   //   IndexedDB holds result payloads only, keyed by "<workspace>::<tabId>".
   //     Lazy-loaded on tab activation so the boot path stays sync.
   const STORE = {
@@ -903,7 +1037,16 @@
   }
 
   // ===== Workspaces =====
-  // A workspace is { tabs: [Tab], activeTabId }.
+  // A workspace is { tabs: [Tab], groups: [Group], focusedGroupId,
+  //                  deletedTabIds }.
+  // A group is { id, tabIds: [string], activeTabId }. The flat `tabs` array
+  // is the source of truth for tab content; `groups` is the *view layer*
+  // describing how those tabs are partitioned across editor panes. Step 2
+  // of the multi-group rollout: there is exactly one group and its tabIds
+  // mirrors `tabs.map(t => t.id)`. `state.workspace.activeTabId` is wired
+  // as a getter/setter on the workspace that delegates to the focused
+  // group, so the dozens of existing call sites continue to work
+  // unchanged. Step 3 will let groups hold disjoint tab subsets.
   // A tab in localStorage is { id, name, sql, lastRunAt, sqlOfLastRun }.
   // The runtime tab object also carries `lastResult`:
   //   undefined → not yet hydrated from IDB; fetch on activation
@@ -963,6 +1106,148 @@
       liveTickHandle: null,
     };
   }
+
+  // The group whose pane is currently focused — target for Run, keyboard
+  // shortcuts, and "active tab" reads. Falls back to the first group so
+  // a corrupt focusedGroupId can't strand the workspace.
+  function focusedGroup(ws) {
+    ws = ws || state.workspace;
+    if (!ws || !Array.isArray(ws.groups) || ws.groups.length === 0) return null;
+    return ws.groups.find(g => g.id === ws.focusedGroupId) || ws.groups[0];
+  }
+
+  // Install `activeTabId` as an accessor on the workspace that proxies the
+  // focused group's value. Lets all existing `state.workspace.activeTabId`
+  // reads/writes keep working without per-site edits during the multi-group
+  // rollout. `enumerable: false` keeps it out of JSON.stringify so any
+  // accidental serialization of the workspace doesn't double-write the
+  // field (`persistWorkspace` constructs the snapshot explicitly anyway).
+  function defineWorkspaceAccessors(ws) {
+    Object.defineProperty(ws, 'activeTabId', {
+      get() { const g = focusedGroup(this); return g ? g.activeTabId : undefined; },
+      set(v) { const g = focusedGroup(this); if (g) g.activeTabId = v; },
+      configurable: true,
+      enumerable: false,
+    });
+  }
+
+  // Find the group that contains `tabId`, or null if no group does. Each
+  // tab lives in exactly one group's tabIds; the workspace `tabs[]` array
+  // is the content store and `groups[].tabIds` partition it across panes.
+  function groupOfTab(tabId) {
+    return state.workspace.groups.find(g => g.tabIds.includes(tabId)) || null;
+  }
+
+  // Lookup a group's DOM root by id.
+  function groupElementById(groupId) {
+    return document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
+  }
+
+  // Groups whose active tab equals `tabId`. Used by the streaming pipeline
+  // to update results panes / live tickers without singling out the
+  // focused group: a tab can only be active in one group at a time, so
+  // this list is 0 or 1 entries long, but coding it as a loop keeps the
+  // call sites uniform.
+  function getDisplayingGroups(tabId) {
+    return state.workspace.groups.filter(g => g.activeTabId === tabId);
+  }
+
+  // Append a brand-new tab to the focused group's tabIds. Used by newTab,
+  // openSqlInNewTab, and the cross-window-merge path.
+  function addTabIdToFocusedGroup(tabId) {
+    const g = focusedGroup();
+    if (!g) return;
+    if (!g.tabIds.includes(tabId)) g.tabIds.push(tabId);
+  }
+
+  // Remove a tab id from whichever group owns it. Returns the group it
+  // came from so callers can decide whether to dissolve, fall back the
+  // group's activeTabId, etc.
+  function removeTabIdFromItsGroup(tabId) {
+    for (const g of state.workspace.groups) {
+      const idx = g.tabIds.indexOf(tabId);
+      if (idx >= 0) {
+        g.tabIds.splice(idx, 1);
+        return g;
+      }
+    }
+    return null;
+  }
+
+  // Tear down a group: drop it from `groups[]`, dispose its Monaco editor
+  // (if any), remove its DOM node, and re-target focus if it was the
+  // focused one. Caller is responsible for ensuring the group's tabIds is
+  // empty (or that orphaned tabs are handled elsewhere). Reconciles the
+  // group container at the end so the splitter / orient-toggle button /
+  // ratio adjust to the new group count.
+  function dissolveGroup(groupId) {
+    const idx = state.workspace.groups.findIndex(g => g.id === groupId);
+    if (idx < 0) return;
+    state.workspace.groups.splice(idx, 1);
+    const editor = monacoEditorsByGroup.get(groupId);
+    if (editor) {
+      editor.setModel(null);
+      editor.dispose();
+      monacoEditorsByGroup.delete(groupId);
+    }
+    fallbackTextareasByGroup.delete(groupId);
+    const groupEl = document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
+    if (groupEl) groupEl.remove();
+    if (state.workspace.focusedGroupId === groupId) {
+      state.workspace.focusedGroupId = state.workspace.groups[0]?.id;
+    }
+    reconcileGroupDom();
+  }
+
+  // Migrate a parsed-from-disk workspace shape in place. Old snapshots
+  // (top-level `activeTabId`, no `groups`) get a synthetic single group
+  // containing every tab id; new snapshots are accepted as-is. Either way
+  // the accessor for `activeTabId` is installed before returning.
+  function migrateWorkspaceShape(ws) {
+    const persistedActive = ws.activeTabId;
+    // Default per-group orientation: workspaces saved before this field
+    // existed inherit whatever was in the global localStorage key, so a
+    // user who'd been working in side-by-side mode keeps that on reload.
+    const fallbackOrientation =
+      localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
+        ? 'horizontal' : 'vertical';
+    if (!Array.isArray(ws.groups) || ws.groups.length === 0) {
+      const tabIds = ws.tabs.map(t => t.id);
+      const fallbackActive = tabIds.includes(persistedActive) ? persistedActive : tabIds[0];
+      ws.groups = [{
+        id: 'g1', tabIds, activeTabId: fallbackActive,
+        editorOrientation: fallbackOrientation,
+      }];
+      ws.focusedGroupId = 'g1';
+    } else {
+      // Normalise each group's tabIds to only valid ids, then make sure
+      // every tab is claimed by some group. Orphans can show up after a
+      // cross-window merge save: persistWorkspace writes `tabsToWrite`
+      // including disk-only tabs, but `groupsToWrite` mirrors only
+      // in-memory groups, so the union has tabs that no group references.
+      const claimed = new Set();
+      for (const g of ws.groups) {
+        g.tabIds = Array.isArray(g.tabIds) ? g.tabIds.filter(id => ws.tabs.some(t => t.id === id)) : [];
+        for (const id of g.tabIds) claimed.add(id);
+        if (!g.tabIds.includes(g.activeTabId)) g.activeTabId = g.tabIds[0];
+        if (g.editorOrientation !== 'horizontal' && g.editorOrientation !== 'vertical') {
+          g.editorOrientation = fallbackOrientation;
+        }
+      }
+      if (!ws.groups.find(g => g.id === ws.focusedGroupId)) {
+        ws.focusedGroupId = ws.groups[0].id;
+      }
+      const focused = ws.groups.find(g => g.id === ws.focusedGroupId) || ws.groups[0];
+      for (const t of ws.tabs) {
+        if (!claimed.has(t.id)) {
+          focused.tabIds.push(t.id);
+          if (!focused.activeTabId) focused.activeTabId = t.id;
+        }
+      }
+    }
+    defineWorkspaceAccessors(ws);
+  }
+
   function loadWorkspace(name) {
     const ws = readJson(STORE.workspace(name), null);
     if (ws && Array.isArray(ws.tabs) && ws.tabs.length > 0) {
@@ -999,10 +1284,26 @@
       // multi-window merge. Stored as a bare string[] of ids; we cap the
       // length on save to keep the snapshot small.
       ws.deletedTabIds = Array.isArray(ws.deletedTabIds) ? ws.deletedTabIds.slice() : [];
+      // Synthesise (or normalise) groups + focusedGroupId, then install
+      // the activeTabId accessor that delegates to the focused group.
+      migrateWorkspaceShape(ws);
       return ws;
     }
     const tab = freshTab(1);
-    return { tabs: [tab], activeTabId: tab.id, deletedTabIds: [] };
+    const orient =
+      localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
+        ? 'horizontal' : 'vertical';
+    const fresh = {
+      tabs: [tab],
+      groups: [{
+        id: 'g1', tabIds: [tab.id], activeTabId: tab.id,
+        editorOrientation: orient,
+      }],
+      focusedGroupId: 'g1',
+      deletedTabIds: [],
+    };
+    defineWorkspaceAccessors(fresh);
+    return fresh;
   }
   // One-time guard so we don't spam the user with a modal if every save
   // is failing (quota exhaustion tends to fail repeatedly until something
@@ -1064,9 +1365,22 @@
     const cappedTombs = tombArr.length > 500 ? tombArr.slice(tombArr.length - 500) : tombArr;
     state.workspace.deletedTabIds = cappedTombs;
 
+    // Snapshot the group layout. Each group records only its id, tab-id
+    // ordering, and which tab is active there — group memberships are
+    // partition info, not tab content. The top-level `activeTabId` field
+    // is also written so an older code revision (without group support)
+    // can still load the workspace.
+    const groupsToWrite = (state.workspace.groups || []).map(g => ({
+      id: g.id,
+      tabIds: Array.isArray(g.tabIds) ? g.tabIds.slice() : [],
+      activeTabId: g.activeTabId,
+      editorOrientation: g.editorOrientation,
+    }));
     const snapshot = {
       activeTabId: state.workspace.activeTabId,
       tabs: tabsToWrite,
+      groups: groupsToWrite,
+      focusedGroupId: state.workspace.focusedGroupId,
       deletedTabIds: cappedTombs,
     };
     const ok = writeJson(STORE.workspace(name), snapshot);
@@ -1095,7 +1409,7 @@
   // multiple tabs queue server-side — but each tab tracks its own state
   // and the UI accurately reflects "running" per tab.
   const state = {
-    workspace: null,            // { tabs, activeTabId }
+    workspace: null,            // { tabs, groups, focusedGroupId, deletedTabIds }
   };
 
   // Debounce save so rapid keystrokes don't flog localStorage.
@@ -1109,13 +1423,52 @@
     return state.workspace.tabs.find(t => t.id === state.workspace.activeTabId);
   }
 
+  // ===== Group lookup helpers =====
+  // Per-group DOM elements (tab strip, editor, results, toolbar inputs)
+  // all live under a `.editor-group[data-group-id=...]` subtree. Step 1
+  // of the multi-group refactor: there is exactly one group ('g1') and
+  // every helper defaults to it. When the split feature lands, callers
+  // that need a specific group will pass its element explicitly; the
+  // default will become "the focused group" rather than "the only group".
+  const DEFAULT_GROUP_ID = 'g1';
+  function focusedGroupEl() {
+    // Workspace may not be loaded yet during early boot; fall back to
+    // the seed group baked into the HTML so helpers don't blow up.
+    const id = state.workspace ? state.workspace.focusedGroupId : DEFAULT_GROUP_ID;
+    return document.querySelector(`.editor-group[data-group-id="${id}"]`)
+        || document.querySelector('.editor-group');
+  }
+  function tabStripEl(g)             { return (g || focusedGroupEl()).querySelector('.tab-strip'); }
+  function editorPaneEl(g)           { return (g || focusedGroupEl()).querySelector('.editor-pane'); }
+  function editorHostEl(g)           { return (g || focusedGroupEl()).querySelector('.editor-host'); }
+  function editorToolbarEl(g)        { return (g || focusedGroupEl()).querySelector('.editor-toolbar'); }
+  function editorResultsWrapperEl(g) { return (g || focusedGroupEl()).querySelector('.editor-results-wrapper'); }
+  function editorResultsResizeEl(g)  { return (g || focusedGroupEl()).querySelector('.editor-results-resize'); }
+  function resultsPaneEl(g)          { return (g || focusedGroupEl()).querySelector('.results-pane'); }
+  function runBtnEl(g)               { return (g || focusedGroupEl()).querySelector('.run-btn'); }
+  function maxRowsInputEl(g)         { return (g || focusedGroupEl()).querySelector('.max-rows-input'); }
+  function traceToggleEl(g)          { return (g || focusedGroupEl()).querySelector('.trace-toggle'); }
+  function elapsedEl(g)              { return (g || focusedGroupEl()).querySelector('.elapsed'); }
+
   // ===== Tabs =====
   function renderTabStrip() {
-    const strip = document.getElementById('tab-strip');
+    for (const g of state.workspace.groups) renderTabStripForGroup(g);
+  }
+
+  // Render one group's tab strip from its own `tabIds` (NOT the global
+  // `tabs[]` order — each group has its own ordering). The "active" tab
+  // class reflects the group's own activeTabId; clicking a tab focuses
+  // its group as a side effect, so visual focus follows interaction.
+  function renderTabStripForGroup(group) {
+    const groupEl = groupElementById(group.id);
+    if (!groupEl) return;
+    const strip = tabStripEl(groupEl);
     strip.innerHTML = '';
-    for (const t of state.workspace.tabs) {
+    for (const tabId of group.tabIds) {
+      const t = state.workspace.tabs.find(x => x.id === tabId);
+      if (!t) continue;
       const div = document.createElement('div');
-      div.className = 'tab' + (t.id === state.workspace.activeTabId ? ' active' : '')
+      div.className = 'tab' + (t.id === group.activeTabId ? ' active' : '')
         + (t.pinned ? ' pinned' : '');
       div.dataset.id = t.id;
 
@@ -1188,7 +1541,8 @@
       });
 
       // Drag-to-reorder. Drop position is "before" if the cursor is in
-      // the left half of the target tab, "after" otherwise.
+      // the left half of the target tab, "after" otherwise. Cross-group
+      // drops are step-4 territory.
       div.draggable = true;
       div.addEventListener('dragstart', (e) => {
         e.dataTransfer.effectAllowed = 'move';
@@ -1219,12 +1573,43 @@
       });
       strip.appendChild(div);
     }
+
+    // Per-group "+" button creates a tab in *this* group, regardless of
+    // which group is currently focused.
     const newBtn = document.createElement('button');
-    newBtn.id = 'new-tab';
+    newBtn.className = 'new-tab';
     newBtn.textContent = '+';
     newBtn.title = 'New tab';
-    newBtn.addEventListener('click', newTab);
+    newBtn.addEventListener('click', () => newTabInGroup(group.id));
     strip.appendChild(newBtn);
+
+    // Spacer pushes the orient-toggle to the right edge so it lines up
+    // with the editor pane's right margin and is visually clear about
+    // which pane it controls.
+    const spacer = document.createElement('span');
+    spacer.className = 'strip-spacer';
+    strip.appendChild(spacer);
+
+    // Per-pane orient toggle: flips this pane's editor/results stack
+    // between vertical (default) and horizontal (side-by-side). The
+    // divider line in the SVG previews the *target* state — clicking
+    // produces the layout the icon depicts.
+    const orientBtn = document.createElement('button');
+    orientBtn.className = 'strip-orient-toggle';
+    orientBtn.title = 'Toggle this pane\'s editor/results layout (vertical ↔ side-by-side)';
+    orientBtn.setAttribute('aria-label', 'Toggle pane layout');
+    const horizontal = group.editorOrientation === 'horizontal';
+    orientBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">' +
+      '<rect x="3" y="4" width="18" height="16" rx="1"></rect>' +
+      // Target = opposite of current: horizontal pane → click produces
+      // a vertical (stacked) layout → horizontal divider line.
+      `<line class="orient-toggle-divider" ${horizontal
+        ? 'x1="3" y1="12" x2="21" y2="12"'
+        : 'x1="12" y1="4" x2="12" y2="20"'}></line>` +
+      '</svg>';
+    orientBtn.addEventListener('click', () => toggleEditorOrientationForGroup(group));
+    strip.appendChild(orientBtn);
   }
 
   // Inline-rename: swap the .name span for an <input>. Commit on Enter or
@@ -1292,7 +1677,7 @@
 
     addItem('Rename…', () => {
       // Re-find the live name span — renderTabStrip may have rebuilt the DOM.
-      const nameEl = document.querySelector(`#tab-strip .tab[data-id="${tabId}"] .name`);
+      const nameEl = focusedGroupEl().querySelector(`.tab-strip .tab[data-id="${tabId}"] .name`);
       if (nameEl) beginRenameTab(tabId, nameEl);
     });
     addItem(tab.pinned ? 'Unpin' : 'Pin', () => togglePinTab(tabId));
@@ -1331,11 +1716,20 @@
     window.removeEventListener('resize', closeTabContextMenu, true);
   }
 
-  function newTab() {
+  function newTab() { newTabInGroup(state.workspace.focusedGroupId); }
+
+  // Create a new tab and add it to the specified group. Each group's "+"
+  // button calls this with its own group id, so + in pane B creates the
+  // tab in pane B regardless of which group is currently focused.
+  function newTabInGroup(groupId) {
+    const group = state.workspace.groups.find(g => g.id === groupId);
+    if (!group) return;
     const n = state.workspace.tabs.length + 1;
     const t = freshTab(n);
     state.workspace.tabs.push(t);
-    state.workspace.activeTabId = t.id;
+    group.tabIds.push(t.id);
+    state.workspace.focusedGroupId = group.id;
+    group.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
@@ -1344,8 +1738,13 @@
   }
 
   function activateTab(id) {
-    if (id === state.workspace.activeTabId) return;
-    state.workspace.activeTabId = id;
+    const group = groupOfTab(id);
+    if (!group) return;
+    const alreadyActive = group.id === state.workspace.focusedGroupId
+                       && group.activeTabId === id;
+    if (alreadyActive) return;
+    state.workspace.focusedGroupId = group.id;
+    group.activeTabId = id;
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
@@ -1353,26 +1752,68 @@
     persistWorkspace();
   }
 
-  // Reorder: pull `draggedId` out of the tabs list and reinsert it
-  // adjacent to `targetId`. `before === true` puts it left of the target,
-  // false puts it right. Computing the target index AFTER removal keeps
-  // the math correct whether the source was earlier or later in the list.
+  // Reorder OR move-across-groups: pull `draggedId` out of its group's
+  // tabIds and reinsert adjacent to `targetId`. `before === true` puts
+  // it left of the target, false puts it right. When src and dst are
+  // different groups the dragged tab becomes the active tab in dst,
+  // focus follows the drop, and src dissolves if it ran out of tabs.
   function moveTab(draggedId, targetId, before) {
     if (!draggedId || draggedId === targetId) return;
-    const tabs = state.workspace.tabs;
-    const fromIdx = tabs.findIndex(t => t.id === draggedId);
-    if (fromIdx < 0) return;
-    const [dragged] = tabs.splice(fromIdx, 1);
-    let toIdx = tabs.findIndex(t => t.id === targetId);
-    if (toIdx < 0) { tabs.splice(fromIdx, 0, dragged); return; }
+    const srcGroup = groupOfTab(draggedId);
+    const dstGroup = groupOfTab(targetId);
+    if (!srcGroup || !dstGroup) return;
+
+    if (srcGroup === dstGroup) {
+      // Intra-group reorder.
+      const tabIds = srcGroup.tabIds;
+      const fromIdx = tabIds.indexOf(draggedId);
+      if (fromIdx < 0) return;
+      tabIds.splice(fromIdx, 1);
+      let toIdx = tabIds.indexOf(targetId);
+      if (toIdx < 0) { tabIds.splice(fromIdx, 0, draggedId); return; }
+      if (!before) toIdx += 1;
+      tabIds.splice(toIdx, 0, draggedId);
+      renderTabStrip();
+      persistWorkspace();
+      return;
+    }
+
+    // Cross-group move.
+    const srcIdx = srcGroup.tabIds.indexOf(draggedId);
+    if (srcIdx < 0) return;
+    srcGroup.tabIds.splice(srcIdx, 1);
+
+    let toIdx = dstGroup.tabIds.indexOf(targetId);
+    if (toIdx < 0) toIdx = dstGroup.tabIds.length;
     if (!before) toIdx += 1;
-    tabs.splice(toIdx, 0, dragged);
+    dstGroup.tabIds.splice(toIdx, 0, draggedId);
+
+    // Drop activates the moved tab in dst, and focus follows the drop —
+    // the user just told us "I want this tab here", so make it current.
+    dstGroup.activeTabId = draggedId;
+    state.workspace.focusedGroupId = dstGroup.id;
+
+    // Recover src: if the active tab moved away, fall back to the first
+    // remaining; if src is now empty, dissolve it (always allowed in
+    // multi-group state since the user explicitly moved its last tab
+    // out — symmetric to closing the last tab in a non-only group).
+    if (srcGroup.tabIds.length === 0) {
+      dissolveGroup(srcGroup.id);
+    } else if (srcGroup.activeTabId === draggedId) {
+      srcGroup.activeTabId = srcGroup.tabIds[0];
+    }
+
     renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    syncToolbarToActiveTab();
     persistWorkspace();
   }
 
   function clearDropIndicators() {
-    document.querySelectorAll('#tab-strip .tab.drop-before, #tab-strip .tab.drop-after')
+    // Sweep across every group's tab strip so cross-group drag indicators
+    // are cleared too (no-op for groups that don't have any).
+    document.querySelectorAll('.tab-strip .tab.drop-before, .tab-strip .tab.drop-after')
       .forEach(el => el.classList.remove('drop-before', 'drop-after'));
   }
 
@@ -1393,16 +1834,30 @@
     // Drop the saved result for this tab from IDB. Best-effort.
     IDB.deleteResult(workspaceName(), id).catch(err =>
       console.warn(`Couldn't delete IDB result for tab ${id}:`, err));
+    const containingGroup = groupOfTab(id);
     state.workspace.tabs = state.workspace.tabs.filter(t => t.id !== id);
     // Record a tombstone so the multi-window merge in persistWorkspace
     // doesn't resurrect this tab from a stale on-disk snapshot.
     if (!Array.isArray(state.workspace.deletedTabIds)) state.workspace.deletedTabIds = [];
     state.workspace.deletedTabIds.push(id);
-    if (state.workspace.tabs.length === 0) {
-      state.workspace.tabs.push(freshTab(1));
-    }
-    if (state.workspace.activeTabId === id) {
-      state.workspace.activeTabId = state.workspace.tabs[0].id;
+    if (containingGroup) {
+      containingGroup.tabIds = containingGroup.tabIds.filter(tid => tid !== id);
+      if (containingGroup.tabIds.length === 0) {
+        if (state.workspace.groups.length === 1) {
+          // Last tab in the only group → seed a fresh tab so the user
+          // never lands in an empty workspace.
+          const fresh = freshTab(1);
+          state.workspace.tabs.push(fresh);
+          containingGroup.tabIds.push(fresh.id);
+          containingGroup.activeTabId = fresh.id;
+        } else {
+          // Multi-group: an emptied group dissolves and the surviving
+          // group becomes (or stays) focused.
+          dissolveGroup(containingGroup.id);
+        }
+      } else if (containingGroup.activeTabId === id) {
+        containingGroup.activeTabId = containingGroup.tabIds[0];
+      }
     }
     renderTabStrip();
     swapEditorToActiveTab();
@@ -1412,12 +1867,26 @@
   }
 
   // ===== Editor =====
-  // We keep one Monaco editor instance and swap models per tab. Each tab has
+  // We keep one Monaco editor *per group* and swap models per tab. Each tab has
   // its own ITextModel, so cursor position, scroll, and undo stack survive
-  // tab switches. Until Monaco loads we use a textarea fallback.
-  let monacoEditor = null;
-  const monacoModels = new Map();   // tabId -> ITextModel
-  let fallbackTextarea = null;
+  // tab switches. Until Monaco loads we use a textarea fallback (also one
+  // per group). Models stay 1:1 with tabs and are shared across editors —
+  // a tab lives in exactly one group at a time, so its model is attached
+  // to at most one editor at a time.
+  const monacoEditorsByGroup = new Map();        // groupId -> IStandaloneCodeEditor
+  const monacoModels = new Map();                // tabId -> ITextModel
+  const fallbackTextareasByGroup = new Map();    // groupId -> HTMLTextAreaElement
+
+  // Convenience accessors — reads/writes that used to operate on the lone
+  // singleton route through the focused group. When a second group exists
+  // (step 3b+) the Run button, keyboard shortcuts, and selection capture
+  // continue to target whichever pane the user last interacted with.
+  function focusedMonacoEditor() {
+    return monacoEditorsByGroup.get(state.workspace.focusedGroupId) || null;
+  }
+  function focusedFallbackTextarea() {
+    return fallbackTextareasByGroup.get(state.workspace.focusedGroupId) || null;
+  }
 
   function getOrCreateModel(tab) {
     if (!window.monaco) return null;
@@ -1438,49 +1907,130 @@
   }
 
   function swapEditorToActiveTab() {
-    const tab = activeTab();
-    if (!tab) return;
-    if (monacoEditor) {
-      const model = getOrCreateModel(tab);
-      monacoEditor.setModel(model);
-      monacoEditor.focus();
-    } else if (fallbackTextarea) {
-      fallbackTextarea.value = tab.sql;
-    }
+    for (const g of state.workspace.groups) swapEditorForGroup(g);
   }
 
-  function initFallbackEditor() {
-    const host = document.getElementById('editor-host');
-    host.innerHTML = '';
-    fallbackTextarea = document.createElement('textarea');
-    fallbackTextarea.className = 'editor-fallback';
-    fallbackTextarea.spellcheck = false;
-    fallbackTextarea.autocomplete = 'off';
-    fallbackTextarea.autocapitalize = 'off';
-    host.appendChild(fallbackTextarea);
+  // Attach the model for `group.activeTabId` to whichever editor (Monaco
+  // or fallback) belongs to that group. Focuses the editor only if it
+  // belongs to the focused group, so split-pane swaps don't yank the
+  // caret away from where the user is typing.
+  function swapEditorForGroup(group) {
+    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    if (!tab) return;
+    const editor = monacoEditorsByGroup.get(group.id);
+    if (editor) {
+      editor.setModel(getOrCreateModel(tab));
+      if (group.id === state.workspace.focusedGroupId) editor.focus();
+      return;
+    }
+    const fb = fallbackTextareasByGroup.get(group.id);
+    if (fb) fb.value = tab.sql;
+  }
 
-    fallbackTextarea.addEventListener('keydown', (e) => {
+  // Stand up the textarea fallback inside one group's editor host. Each
+  // group gets its own textarea instance keyed by groupId — tabs in that
+  // group share it the same way they share the group's Monaco editor.
+  function bootFallbackForGroup(groupId) {
+    if (fallbackTextareasByGroup.has(groupId)) return;   // already booted
+    const groupEl = document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
+    if (!groupEl) return;
+    const host = editorHostEl(groupEl);
+    host.innerHTML = '';
+    const ta = document.createElement('textarea');
+    ta.className = 'editor-fallback';
+    ta.spellcheck = false;
+    ta.autocomplete = 'off';
+    ta.autocapitalize = 'off';
+    host.appendChild(ta);
+
+    ta.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        const start = fallbackTextarea.selectionStart;
-        const end = fallbackTextarea.selectionEnd;
-        fallbackTextarea.value =
-          fallbackTextarea.value.slice(0, start) + '  ' +
-          fallbackTextarea.value.slice(end);
-        fallbackTextarea.selectionStart = fallbackTextarea.selectionEnd = start + 2;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        ta.value = ta.value.slice(0, start) + '  ' + ta.value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start + 2;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         run();
       }
     });
-    fallbackTextarea.addEventListener('input', () => {
-      const tab = activeTab();
+    ta.addEventListener('input', () => {
+      // Edits go to whichever tab is active in *this* group — not the
+      // focused group, in case the user is typing into a non-focused pane.
+      const group = state.workspace.groups.find(g => g.id === groupId);
+      if (!group) return;
+      const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
       if (!tab) return;
-      tab.sql = fallbackTextarea.value;
+      tab.sql = ta.value;
       renderTabStrip();
       scheduleSave();
     });
+
+    fallbackTextareasByGroup.set(groupId, ta);
+  }
+
+  // Stand up a Monaco editor for one group. Replaces the group's textarea
+  // fallback with a real editor and stashes it in `monacoEditorsByGroup`
+  // so `swapEditorToActiveTab` / `getEditorSelection` can find it. Called
+  // once per group after Monaco's loader resolves; called again per new
+  // group when the user splits the layout.
+  function bootMonacoForGroup(groupId) {
+    if (!window.monaco) return;
+    if (monacoEditorsByGroup.has(groupId)) return;       // already booted
+    const groupEl = document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
+    if (!groupEl) return;
+    const host = editorHostEl(groupEl);
+    host.innerHTML = '';
+    fallbackTextareasByGroup.delete(groupId);
+
+    const editor = monaco.editor.create(host, {
+      model: null,
+      language: 'sql',
+      theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
+      automaticLayout: true,
+      minimap: { enabled: false },
+      fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
+      fontSize: 14,
+      scrollBeyondLastLine: false,
+      wordWrap: 'on',
+      renderLineHighlight: 'all',
+      tabSize: 2,
+      insertSpaces: true,
+
+      // Render completion / hover / parameter-hint widgets via
+      // position: fixed so they escape the editor pane's
+      // `overflow: hidden`. Without this, the popup gets clipped at
+      // the editor/results boundary and parts of it appear behind
+      // the results table when the cursor is near the bottom of the
+      // editor pane.
+      fixedOverflowWidgets: true,
+
+      // Disable Monaco's word-based suggestion fallback. Default since
+      // Monaco 0.34 is 'matchingDocuments', which scrapes words from
+      // every open SQL tab and offers them as plain Text completions —
+      // so a tab containing `system_models` makes the column name
+      // `backend` surface in unrelated zones (e.g. typing `b` at the
+      // start of an empty file). The DatumIngest language server is
+      // schema-aware and zone-aware; the word fallback only adds noise
+      // and out-of-context column suggestions.
+      wordBasedSuggestions: 'off',
+    });
+
+    // Ctrl/Cmd+Enter is handled at window-level (see boot()) so it
+    // routes by `focusedGroupId` — which the pane's pointerdown handler
+    // updates on every click — instead of by Monaco's per-editor
+    // keyboard-focus, which can desync from the user's intent if they
+    // clicked the pane's chrome rather than its editor host.
+    editor.onDidFocusEditorWidget(() => {
+      if (state.workspace.focusedGroupId !== groupId) {
+        state.workspace.focusedGroupId = groupId;
+        syncToolbarToActiveTab();
+      }
+    });
+
+    monacoEditorsByGroup.set(groupId, editor);
   }
 
   function initMonaco() {
@@ -1501,49 +2051,9 @@
     };
 
     require(['vs/editor/editor.main'], () => {
-      const host = document.getElementById('editor-host');
-      host.innerHTML = '';
-      fallbackTextarea = null;
-
-      monacoEditor = monaco.editor.create(host, {
-        model: null,
-        language: 'sql',
-        theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
-        automaticLayout: true,
-        minimap: { enabled: false },
-        fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
-        fontSize: 14,
-        scrollBeyondLastLine: false,
-        wordWrap: 'on',
-        renderLineHighlight: 'all',
-        tabSize: 2,
-        insertSpaces: true,
-
-        // Render completion / hover / parameter-hint widgets via
-        // position: fixed so they escape the editor pane's
-        // `overflow: hidden`. Without this, the popup gets clipped at
-        // the editor/results boundary and parts of it appear behind
-        // the results table when the cursor is near the bottom of the
-        // editor pane.
-        fixedOverflowWidgets: true,
-
-        // Disable Monaco's word-based suggestion fallback. Default since
-        // Monaco 0.34 is 'matchingDocuments', which scrapes words from
-        // every open SQL tab and offers them as plain Text completions —
-        // so a tab containing `system_models` makes the column name
-        // `backend` surface in unrelated zones (e.g. typing `b` at the
-        // start of an empty file). The DatumIngest language server is
-        // schema-aware and zone-aware; the word fallback only adds noise
-        // and out-of-context column suggestions.
-        wordBasedSuggestions: 'off',
-      });
-
-      // Ctrl/Cmd+Enter runs the active query. Monaco's keybindings system is
-      // model-agnostic so this works across all per-tab models.
-      monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
-
-      // Now that Monaco exists, wire language-server providers and attach
-      // the active tab's model.
+      // Boot a Monaco editor inside every existing group, then wire
+      // language services once (providers are registered globally).
+      for (const g of state.workspace.groups) bootMonacoForGroup(g.id);
       registerLanguageProviders();
       swapEditorToActiveTab();
     }, (err) => {
@@ -1805,13 +2315,23 @@
   }
 
   // ===== Results =====
-  async function renderResultsForActiveTab() {
-    const tab = activeTab();
-    const results = document.getElementById('results-pane');
-    const elapsed = document.getElementById('elapsed');
-    // Revoke any media object URLs from the previous render — the
-    // upcoming innerHTML wipe detaches the elements, but the underlying
-    // blobs would remain pinned until the page unloads otherwise.
+  // Top-level entry: re-render every group's results pane. Each group
+  // shows results for its own activeTabId, so switching tabs in one
+  // pane doesn't disturb the other. IDB reads are independent so we
+  // run them concurrently.
+  function renderResultsForActiveTab() {
+    return Promise.all(state.workspace.groups.map(g => renderResultsForGroup(g)));
+  }
+
+  async function renderResultsForGroup(group) {
+    const groupEl = groupElementById(group.id);
+    if (!groupEl) return;
+    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    const results = resultsPaneEl(groupEl);
+    const elapsed = elapsedEl(groupEl);
+    // Revoke any media object URLs from the previous render in this
+    // pane — the upcoming innerHTML wipe detaches the elements, but the
+    // underlying blobs would remain pinned until the page unloads otherwise.
     revokeMediaObjectUrls();
     results.innerHTML = '';
     elapsed.textContent = '';
@@ -1820,7 +2340,7 @@
     // If THIS tab has an in-flight query, render the streaming view from
     // the per-tab accumulator (rebuild chunks / partial rows so the user
     // can see progress on switch-back). The live ticker resumes painting
-    // on its next 250ms tick once the active tab matches the running tab.
+    // on its next 250ms tick once the tab is the active tab in this group.
     if (tab.running && tab.runningRes) {
       renderRunningTab(tab, results);
       return;
@@ -1828,7 +2348,7 @@
 
     // tab.lastResult is undefined when hydrated from localStorage and not yet
     // fetched from IDB. Show a placeholder while we resolve it; guard against
-    // the user switching tabs before the read returns.
+    // the user switching tabs in this group before the read returns.
     if (tab.lastResult === undefined) {
       const loading = document.createElement('div');
       loading.className = 'meta';
@@ -1836,14 +2356,18 @@
       results.appendChild(loading);
       const captureTabId = tab.id;
       const captureWs = workspaceName();
+      const captureGroupId = group.id;
+      const stillActive = () => {
+        if (workspaceName() !== captureWs) return false;
+        const liveGroup = state.workspace.groups.find(g => g.id === captureGroupId);
+        return !!liveGroup && liveGroup.activeTabId === captureTabId;
+      };
       try {
         const r = await IDB.loadResult(captureWs, captureTabId);
-        if (state.workspace.activeTabId !== captureTabId
-            || workspaceName() !== captureWs) return;       // user moved on
-        tab.lastResult = r;                                 // cache, even if null
+        if (!stillActive()) return;                          // user moved on
+        tab.lastResult = r;                                   // cache, even if null
       } catch (err) {
-        if (state.workspace.activeTabId !== captureTabId
-            || workspaceName() !== captureWs) return;
+        if (!stillActive()) return;
         tab.lastResult = null;
         results.innerHTML = '';
         const errDiv = document.createElement('div');
@@ -1876,7 +2400,7 @@
   // Renders the partial state of a query that's still in flight on this
   // tab — invoked when the user switches back to a running tab. Rebuilds
   // any streaming chunks from the accumulator and lists how many rows
-  // have arrived. The live ticker on `#elapsed` paints the elapsed time
+  // have arrived. The live ticker on the `.elapsed` slot paints the elapsed time
   // from its next 250ms tick.
   function renderRunningTab(tab, container) {
     const res = tab.runningRes;
@@ -1905,22 +2429,33 @@
     }
   }
 
-  // Pushes the active tab's per-tab settings (maxRows / trace) into the
-  // shared toolbar inputs and updates the Run button's label depending on
-  // whether the active tab has a query in flight. Called on tab switch
-  // and at the start/end of each run.
+  // Refresh every group's toolbar to match its own active tab. Each
+  // group's toolbar reflects ITS active tab's settings — Run button
+  // label, maxRows, trace — so the two panes stay independent. The
+  // header status only reflects the focused group.
   function syncToolbarToActiveTab() {
-    const tab = activeTab();
-    const runBtn = document.getElementById('run');
-    const maxRowsInput = document.getElementById('maxRows');
-    const traceToggle = document.getElementById('traceToggle');
+    for (const g of state.workspace.groups) syncToolbarForGroup(g);
     const status = document.getElementById('status');
+    const tab = activeTab();
+    status.textContent = (tab && tab.running) ? 'running… (Esc to cancel)' : '';
+    // Header icons reflect focused-group state (which can change when
+    // the user clicks into a non-focused pane).
+    updateSplitButtonIcon();
+    refreshFocusedGroupHighlight();
+  }
+
+  function syncToolbarForGroup(group) {
+    const groupEl = groupElementById(group.id);
+    if (!groupEl) return;
+    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    const runBtn = runBtnEl(groupEl);
+    const maxRowsInput = maxRowsInputEl(groupEl);
+    const traceToggle = traceToggleEl(groupEl);
     if (!tab) {
       runBtn.textContent = 'Run';
       runBtn.disabled = true;
       maxRowsInput.disabled = true;
       traceToggle.disabled = true;
-      status.textContent = '';
       return;
     }
     runBtn.disabled = false;
@@ -1928,13 +2463,10 @@
     runBtn.title = tab.running
       ? 'Stop the in-flight query for this tab (Esc)'
       : 'Run the SQL in this tab (Ctrl/⌘+Enter)';
-    // Inputs reflect the active tab's saved settings — typing into them
-    // writes back to the tab via the change listeners wired in boot().
+    maxRowsInput.disabled = false;
+    traceToggle.disabled = false;
     maxRowsInput.value = tab.maxRows || 200;
     traceToggle.checked = tab.trace === true;
-    status.textContent = tab.running
-      ? 'running… (Esc to cancel)'
-      : '';
   }
 
   /// Renders one result set (one row-producing statement's output) as a
@@ -2315,13 +2847,15 @@
   // selection (caret only). The textarea fallback uses selectionStart/End.
   // Returns the selected text (untrimmed) or "" when nothing is highlighted.
   function getEditorSelection() {
-    if (monacoEditor) {
-      const sel = monacoEditor.getSelection();
+    const editor = focusedMonacoEditor();
+    if (editor) {
+      const sel = editor.getSelection();
       if (!sel || sel.isEmpty()) return '';
-      return monacoEditor.getModel().getValueInRange(sel);
+      return editor.getModel().getValueInRange(sel);
     }
-    if (fallbackTextarea) {
-      const { selectionStart: a, selectionEnd: b, value } = fallbackTextarea;
+    const fb = focusedFallbackTextarea();
+    if (fb) {
+      const { selectionStart: a, selectionEnd: b, value } = fb;
       if (typeof a === 'number' && typeof b === 'number' && b > a) {
         return value.slice(a, b);
       }
@@ -2376,25 +2910,41 @@
     let streamPane = null;
     let streamHeaderModel = null;
 
+    // Helpers: where is the running tab being displayed right now? At most
+    // one group at a time has it as activeTabId. The DOM bindings below
+    // resolve fresh each call so a tab moved between groups (step 4+) or
+    // a tab toggled out and back in updates the right pane.
+    function displayingGroupForRunningTab() {
+      return getDisplayingGroups(tab.id)[0] || null;
+    }
+    function liveResultsPane() {
+      const g = displayingGroupForRunningTab();
+      return g ? resultsPaneEl(groupElementById(g.id)) : null;
+    }
+    function liveElapsedSlot() {
+      const g = displayingGroupForRunningTab();
+      return g ? elapsedEl(groupElementById(g.id)) : null;
+    }
+
     // Reflect the new running state on whichever views are visible.
     syncToolbarToActiveTab();
     renderTabStrip();
-    if (state.workspace.activeTabId === tab.id) {
-      const results = document.getElementById('results-pane');
-      results.innerHTML = '<div class="meta">Running… (Esc to cancel)</div>';
+    {
+      const results = liveResultsPane();
+      if (results) results.innerHTML = '<div class="meta">Running… (Esc to cancel)</div>';
     }
 
-    // Live tick on the toolbar's `#elapsed` slot. Only paints while the
-    // tab is the active one — switching tabs leaves the visible #elapsed
-    // showing the new active tab's static stats, not a clobbered live
-    // value from a backgrounded run.
-    const elapsedSlot = document.getElementById('elapsed');
+    // Live tick on the toolbar's elapsed slot. Only paints while the tab
+    // is the active one in some group — switching tabs leaves the
+    // visible elapsed slot showing the new active tab's static stats,
+    // not a clobbered live value from a backgrounded run.
     function paintLiveStats() {
-      if (state.workspace.activeTabId !== tab.id) return;
+      const slot = liveElapsedSlot();
+      if (!slot) return;
       const seconds = (performance.now() - tab.runStartedAt) / 1000;
       const rows = tab.runningRes.rowCount;
       const rowText = `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}`;
-      elapsedSlot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
+      slot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
     }
     paintLiveStats();
     tab.liveTickHandle = setInterval(paintLiveStats, 250);
@@ -2422,10 +2972,11 @@
           tab.runningRes.error = `HTTP ${response.status}`;
         }
       } else {
-        // Clear the placeholder if we're still the active tab — events
-        // render in place from here.
-        if (state.workspace.activeTabId === tab.id) {
-          document.getElementById('results-pane').innerHTML = '';
+        // Clear the placeholder if the tab is being displayed somewhere
+        // — events render in place from here.
+        {
+          const results = liveResultsPane();
+          if (results) results.innerHTML = '';
         }
 
         const reader = response.body.getReader();
@@ -2464,10 +3015,11 @@
 
     function handleStreamEvent(event) {
       const res = tab.runningRes;
-      // Whether the user is currently looking at this tab; gates direct
-      // DOM appends. Background tabs accumulate into res only.
-      const isActive = state.workspace.activeTabId === tab.id;
-      const results = isActive ? document.getElementById('results-pane') : null;
+      // Whether the user is currently looking at this tab in some group;
+      // gates direct DOM appends. Tabs that aren't displayed anywhere
+      // accumulate into res only.
+      const results = liveResultsPane();
+      const isActive = !!results;
 
       switch (event.type) {
         case 'session':
@@ -2568,11 +3120,11 @@
     renderTabStrip();
     persistWorkspace();
 
-    // If the user is still on this tab, paint the final result. If they
-    // switched away, the renderer will pick it up next time they come
-    // back; meanwhile leave the toolbar / elapsed slot in their current
-    // state for the now-active tab.
-    if (state.workspace.activeTabId === tab.id) {
+    // If the user is still looking at this tab in any group, paint the
+    // final result. If they switched away, the renderer will pick it up
+    // next time they come back; meanwhile leave the toolbar / elapsed
+    // slots showing whatever's now active per pane.
+    if (getDisplayingGroups(tab.id).length > 0) {
       renderResultsForActiveTab();
     }
     // Run-button state changes regardless (e.g. another tab might still
@@ -2642,12 +3194,25 @@
     persistWorkspace();
     const name = workspaceName();
     registerWorkspace(name);
-    state.workspace = loadWorkspace(name);
-    // Clear any Monaco models from the previous workspace; new tabs get fresh
-    // models on first activation via getOrCreateModel.
+    // Workspace switch invalidates every group's editor — the new
+    // workspace may have a different group layout entirely. Tear them
+    // down before swapping state so reconcileGroupDom rebuilds cleanly.
+    for (const editor of monacoEditorsByGroup.values()) {
+      editor.setModel(null);
+      editor.dispose();
+    }
+    monacoEditorsByGroup.clear();
+    fallbackTextareasByGroup.clear();
     for (const m of monacoModels.values()) m.dispose();
     monacoModels.clear();
+    state.workspace = loadWorkspace(name);
     rebuildWsSelect();
+    reconcileGroupDom();
+    applyGroupContainerOrientation(
+      localStorage.getItem(GROUP_ORIENTATION_STORE) === 'stack'
+        ? 'stack' : 'side-by-side');
+    for (const g of state.workspace.groups) applyEditorOrientationForGroup(g);
+    updateSplitButtonIcon();
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
@@ -2685,6 +3250,7 @@
       const idx = state.workspace.tabs.findIndex(t => t.id === id);
       if (idx === -1) continue;               // we never saw it
       state.workspace.tabs.splice(idx, 1);
+      removeTabIdFromItsGroup(id);
       tabsChanged = true;
       if (monacoModels.has(id)) {
         monacoModels.get(id).dispose();
@@ -2696,7 +3262,9 @@
 
     // Add tabs we don't have. Skip anything we tombstoned locally — our
     // delete is fresher than disk's "still alive" view (next save will
-    // propagate the tombstone to disk).
+    // propagate the tombstone to disk). Newly-arrived tabs land in the
+    // focused group (where to assign them is otherwise ambiguous; users
+    // can move them across groups via tab drag once that ships).
     for (const t of onDisk.tabs) {
       if (!t || !t.id) continue;
       if (inMemoryById.has(t.id)) continue;
@@ -2718,6 +3286,7 @@
         runningRes: null,
         liveTickHandle: null,
       });
+      addTabIdToFocusedGroup(t.id);
       tabsChanged = true;
     }
 
@@ -2730,12 +3299,16 @@
     }
 
     // If our active tab got tombstoned remotely, fall back to the first
-    // surviving tab. Create a fresh one if everything's gone.
+    // surviving tab in the focused group. If that group is now empty we
+    // seed it with a fresh tab so the workspace is never tabless.
     if (activeMissing) {
-      if (state.workspace.tabs.length === 0) {
-        state.workspace.tabs.push(freshTab(1));
+      const g = focusedGroup();
+      if (g && g.tabIds.length === 0) {
+        const fresh = freshTab(1);
+        state.workspace.tabs.push(fresh);
+        g.tabIds.push(fresh.id);
       }
-      state.workspace.activeTabId = state.workspace.tabs[0].id;
+      if (g) g.activeTabId = g.tabIds[0];
       swapEditorToActiveTab();
       renderResultsForActiveTab();
       syncToolbarToActiveTab();
@@ -2890,6 +3463,14 @@
   // Orientation of the editor/results split: 'vertical' (default) or
   // 'horizontal' (side-by-side).
   const EDITOR_ORIENTATION_STORE = 'datum.devweb.editorOrientation';
+  // Arrangement of multiple editor groups inside #group-container:
+  // 'side-by-side' (default, flex-direction: row) or 'stack'
+  // (flex-direction: column, one pane above the other).
+  const GROUP_ORIENTATION_STORE = 'datum.devweb.groupOrientation';
+  // Fraction of the container occupied by the FIRST group. Both groups
+  // get `flex: ratio 1 0` / `flex: 1-ratio 1 0` so their sizes track
+  // the container's actual dimensions instead of being pinned to px.
+  const GROUP_SPLIT_RATIO_STORE = 'datum.devweb.groupSplitRatio';
 
   // Per-section cache so switching tabs doesn't re-fetch. Keys: 'tables',
   // 'udfs', 'procedures', 'functions', 'models'. Values: rendered HTML or
@@ -2958,9 +3539,9 @@
       toggleSidebar();
     });
 
-    // Drag-to-resize on the handle.
+    // Drag-to-resize on the sidebar handle. Editor-pane resize handles
+    // are wired per group by reconcileGroupDom().
     setupSidebarResize();
-    setupEditorResultsResize();
 
     // Activate persisted section. If the sidebar was collapsed at last save,
     // we still pick a section so the activity-bar highlight is correct and
@@ -3462,6 +4043,7 @@
     // appears once the user actually edits the seeded text.
     t.sqlOfLastRun = sql;
     state.workspace.tabs.push(t);
+    addTabIdToFocusedGroup(t.id);
     state.workspace.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
@@ -3512,8 +4094,8 @@
   // Horizontal-orientation analog: clamp width against the wrapper's own
   // width so the results pane keeps at least ~240px no matter how narrow
   // the window gets.
-  function clampEditorWidth(w) {
-    const wrapper = document.getElementById('editor-results-wrapper');
+  function clampEditorWidth(w, groupEl) {
+    const wrapper = editorResultsWrapperEl(groupEl || focusedGroupEl());
     const total = wrapper ? wrapper.getBoundingClientRect().width : window.innerWidth;
     const min = 240;
     const max = Math.max(min, total - 240);
@@ -3521,19 +4103,23 @@
     return Math.max(min, Math.min(max, w));
   }
 
-  function isHorizontalSplit() {
-    return document.getElementById('editor-results-wrapper')
-      .classList.contains('horizontal');
+  function isHorizontalSplit(groupEl) {
+    const wrapper = editorResultsWrapperEl(groupEl || focusedGroupEl());
+    return !!wrapper && wrapper.classList.contains('horizontal');
   }
 
   // Apply the persisted editor-pane size for the current orientation. The
   // CSS default (32vh / 50%) stays in effect when no px value is saved.
-  function applyPersistedEditorSize() {
-    const pane = document.getElementById('editor-pane');
-    if (isHorizontalSplit()) {
+  // For step 3b both groups read the same persisted size; per-group size
+  // persistence is polish (3c).
+  function applyPersistedEditorSize(groupEl) {
+    groupEl = groupEl || focusedGroupEl();
+    const pane = editorPaneEl(groupEl);
+    if (!pane) return;
+    if (isHorizontalSplit(groupEl)) {
       pane.style.height = '';
       const persisted = parseInt(localStorage.getItem(EDITOR_WIDTH_STORE) || '', 10);
-      pane.style.width = isFinite(persisted) ? clampEditorWidth(persisted) + 'px' : '';
+      pane.style.width = isFinite(persisted) ? clampEditorWidth(persisted, groupEl) + 'px' : '';
     } else {
       pane.style.width = '';
       const persisted = parseInt(localStorage.getItem(EDITOR_HEIGHT_STORE) || '', 10);
@@ -3541,17 +4127,27 @@
     }
   }
 
-  function setupEditorResultsResize() {
-    const handle = document.getElementById('editor-results-resize');
-    const pane = document.getElementById('editor-pane');
+  function setupEditorResultsResize(groupEl) {
+    groupEl = groupEl || focusedGroupEl();
+    if (!groupEl) return;
+    if (groupEl.dataset.resizeWired === '1') {
+      // Re-apply persisted size in case orientation changed under us, but
+      // don't pile up a second mousedown listener on the same handle.
+      applyPersistedEditorSize(groupEl);
+      return;
+    }
+    groupEl.dataset.resizeWired = '1';
+    const handle = editorResultsResizeEl(groupEl);
+    const pane = editorPaneEl(groupEl);
+    if (!handle || !pane) return;
 
-    applyPersistedEditorSize();
+    applyPersistedEditorSize(groupEl);
 
     let dragStart = 0, dragStartSize = 0, dragHorizontal = false;
     function onMove(e) {
       if (dragHorizontal) {
         const dx = e.clientX - dragStart;
-        const w = clampEditorWidth(dragStartSize + dx);
+        const w = clampEditorWidth(dragStartSize + dx, groupEl);
         pane.style.width = w + 'px';
       } else {
         const dy = e.clientY - dragStart;
@@ -3577,7 +4173,7 @@
       // Suppress text selection while dragging — the cursor would otherwise
       // grab whatever it passes over inside the editor or results table.
       document.body.style.userSelect = 'none';
-      dragHorizontal = isHorizontalSplit();
+      dragHorizontal = isHorizontalSplit(groupEl);
       const rect = pane.getBoundingClientRect();
       if (dragHorizontal) {
         dragStart = e.clientX;
@@ -3591,47 +4187,472 @@
     });
   }
 
-  // Top-toolbar button: flip the editor/results split between vertical
-  // (stacked) and horizontal (side-by-side). The persisted size for the
-  // newly-active orientation is reapplied so each layout keeps its own
-  // remembered editor extent.
-  function applyEditorOrientation(orientation) {
-    const wrapper = document.getElementById('editor-results-wrapper');
-    const horizontal = orientation === 'horizontal';
+  // Apply a group's current editorOrientation to its DOM. Each group
+  // owns its own orientation; the per-tab-strip toggle flips the value
+  // on `group.editorOrientation` and calls this. The persisted size
+  // (height vs width) is reapplied because the axis it's measured against
+  // has changed.
+  function applyEditorOrientationForGroup(group) {
+    if (!group) return;
+    const groupEl = groupElementById(group.id);
+    const wrapper = editorResultsWrapperEl(groupEl);
+    if (!wrapper) return;
+    const horizontal = group.editorOrientation === 'horizontal';
     wrapper.classList.toggle('horizontal', horizontal);
-    applyPersistedEditorSize();
-    // Update the toggle icon's divider to reflect the *current* split
-    // (horizontal line for stacked, vertical line for side-by-side).
-    const divider = document.getElementById('orient-toggle-divider');
-    if (divider) {
-      if (horizontal) {
-        divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
-        divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
-      } else {
-        divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
-        divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
-      }
+    applyPersistedEditorSize(groupEl);
+    refreshOrientToggleIconForGroup(group);
+  }
+
+  // Update the orient-toggle button (rendered into each tab strip) so
+  // its divider line previews the *target* orientation — i.e. the
+  // layout that clicking it will produce. Currently horizontal →
+  // divider is horizontal (click → vertical/stacked); currently
+  // vertical → divider is vertical (click → horizontal/side-by-side).
+  function refreshOrientToggleIconForGroup(group) {
+    if (!group) return;
+    const groupEl = groupElementById(group.id);
+    if (!groupEl) return;
+    const divider = groupEl.querySelector('.orient-toggle-divider');
+    if (!divider) return;
+    const horizontal = group.editorOrientation === 'horizontal';
+    if (horizontal) {
+      // Target = vertical (stacked) → horizontal divider.
+      divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
+      divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
+    } else {
+      // Target = horizontal (side-by-side) → vertical divider.
+      divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
+      divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
     }
   }
-  function toggleEditorOrientation() {
-    const next = isHorizontalSplit() ? 'vertical' : 'horizontal';
-    localStorage.setItem(EDITOR_ORIENTATION_STORE, next);
-    applyEditorOrientation(next);
+
+  // Flip the supplied group's orientation in state and reapply.
+  function toggleEditorOrientationForGroup(group) {
+    if (!group) return;
+    group.editorOrientation = group.editorOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+    applyEditorOrientationForGroup(group);
+    persistWorkspace();
+  }
+
+  // ===== Group splitter + container orientation =====
+
+  // Keep the split ratio in a sane range so a user can always grab the
+  // splitter and the smaller pane never shrinks below ~15% of the
+  // container.
+  function clampSplitRatio(r) {
+    if (!isFinite(r)) return 0.5;
+    return Math.max(0.15, Math.min(0.85, r));
+  }
+
+  function applyPersistedGroupSplitRatio() {
+    const container = document.getElementById('group-container');
+    if (!container) return;
+    const groups = container.querySelectorAll(':scope > .editor-group');
+    if (groups.length < 2) {
+      // Single pane: clear any inline flex from a prior split so the
+      // group fills the container.
+      groups.forEach(el => { el.style.flex = ''; });
+      return;
+    }
+    const persisted = parseFloat(localStorage.getItem(GROUP_SPLIT_RATIO_STORE));
+    const ratio = clampSplitRatio(isFinite(persisted) ? persisted : 0.5);
+    groups[0].style.flex = `${ratio} 1 0`;
+    groups[1].style.flex = `${1 - ratio} 1 0`;
+  }
+
+  // Build #group-resize with its floating control pill (merge + orient
+  // swap). The buttons stop propagation on mousedown so clicking them
+  // doesn't trigger the parent handle's drag-start; click events then
+  // run normally and route to the right action.
+  function buildGroupResizeElement() {
+    const el = document.createElement('div');
+    el.id = 'group-resize';
+
+    const controls = document.createElement('div');
+    controls.className = 'group-resize-controls';
+
+    const mergeBtn = document.createElement('button');
+    mergeBtn.title = 'Merge panes back into one';
+    mergeBtn.setAttribute('aria-label', 'Merge panes');
+    mergeBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">' +
+      '<path d="M6 6L18 18M6 18L18 6"></path>' +
+      '</svg>';
+    mergeBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    mergeBtn.addEventListener('click', mergeAllGroupsIntoFocused);
+    controls.appendChild(mergeBtn);
+
+    const swapBtn = document.createElement('button');
+    swapBtn.title = 'Swap pane arrangement (side-by-side ↔ stacked)';
+    swapBtn.setAttribute('aria-label', 'Swap pane arrangement');
+    // Initial divider position is set by refreshGroupOrientToggleIcon
+    // after the element is inserted; the placeholder coords here are
+    // fine because that helper rewrites them.
+    swapBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">' +
+      '<rect x="3" y="4" width="18" height="16" rx="1"></rect>' +
+      '<line class="group-orient-divider" x1="12" y1="4" x2="12" y2="20"></line>' +
+      '</svg>';
+    swapBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    swapBtn.addEventListener('click', toggleGroupContainerOrientation);
+    controls.appendChild(swapBtn);
+
+    el.appendChild(controls);
+    return el;
+  }
+
+  // Drag handle between the two groups. Resizing recomputes the ratio
+  // from the cursor's position relative to the container so both
+  // orientations (side-by-side and stacked) share one implementation.
+  function setupGroupResize(splitter) {
+    if (splitter.dataset.wired === '1') return;
+    splitter.dataset.wired = '1';
+
+    let dragVertical = false;
+    function onMove(e) {
+      const container = document.getElementById('group-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const total = dragVertical ? rect.height : rect.width;
+      const start = dragVertical ? rect.top : rect.left;
+      const cur = dragVertical ? e.clientY : e.clientX;
+      const ratio = clampSplitRatio((cur - start) / total);
+      const groups = container.querySelectorAll(':scope > .editor-group');
+      if (groups.length < 2) return;
+      groups[0].style.flex = `${ratio} 1 0`;
+      groups[1].style.flex = `${1 - ratio} 1 0`;
+    }
+    function onUp() {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const container = document.getElementById('group-container');
+      const groups = container ? container.querySelectorAll(':scope > .editor-group') : [];
+      if (groups.length >= 2) {
+        const f = parseFloat(groups[0].style.flex);
+        if (isFinite(f)) localStorage.setItem(GROUP_SPLIT_RATIO_STORE, f);
+      }
+    }
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      const container = document.getElementById('group-container');
+      dragVertical = !!container && container.classList.contains('vertical-stack');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // Update the orient-swap button (rendered into the floating controls
+  // on the resize line) so its divider line previews the *target*
+  // arrangement — i.e. the layout that clicking it will produce.
+  // Currently stacked → divider is vertical (click → side-by-side);
+  // currently side-by-side → divider is horizontal (click → stacked).
+  function refreshGroupOrientToggleIcon() {
+    const splitter = document.getElementById('group-resize');
+    if (!splitter) return;
+    const divider = splitter.querySelector('.group-orient-divider');
+    if (!divider) return;
+    const container = document.getElementById('group-container');
+    const stacked = !!container && container.classList.contains('vertical-stack');
+    if (stacked) {
+      // Target = side-by-side → vertical divider.
+      divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
+      divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
+    } else {
+      // Target = stacked → horizontal divider.
+      divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
+      divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
+    }
+  }
+
+  // Apply 'side-by-side' (default) or 'stack' to the container. Re-runs
+  // ratio application because the axis the ratio applies to changes.
+  function applyGroupContainerOrientation(orient) {
+    const container = document.getElementById('group-container');
+    if (!container) return;
+    container.classList.toggle('vertical-stack', orient === 'stack');
+    applyPersistedGroupSplitRatio();
+    refreshGroupOrientToggleIcon();
+  }
+  function toggleGroupContainerOrientation() {
+    const container = document.getElementById('group-container');
+    const next = container && container.classList.contains('vertical-stack')
+      ? 'side-by-side' : 'stack';
+    localStorage.setItem(GROUP_ORIENTATION_STORE, next);
+    applyGroupContainerOrientation(next);
+  }
+
+  // ===== Group DOM factory + lifecycle =====
+
+  // Build the .editor-group skeleton from scratch. Mirrors the hardcoded
+  // markup for the first group so reconcileGroupDom can stamp out
+  // additional groups when the user splits the layout.
+  function createEditorGroupElement(groupId) {
+    const root = document.createElement('div');
+    root.className = 'editor-group';
+    root.dataset.groupId = groupId;
+    root.innerHTML =
+      '<div class="tab-strip"></div>' +
+      '<div class="editor-results-wrapper">' +
+        '<div class="editor-pane">' +
+          '<div class="editor-host"></div>' +
+          '<div class="editor-toolbar">' +
+            '<button class="run-btn">Run</button>' +
+            '<span class="tip">Ctrl/⌘+Enter</span>' +
+            '<span class="tip">max rows ' +
+              '<input class="max-rows-input" type="number" value="200" min="1" max="100000">' +
+            '</span>' +
+            '<label class="tip" title="Capture engine execution trace for the next run">' +
+              '<input class="trace-toggle" type="checkbox"> trace' +
+            '</label>' +
+            '<span class="spacer"></span>' +
+            '<span class="elapsed tip"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="editor-results-resize" title="Drag to resize"></div>' +
+        '<div class="results-pane">' +
+          '<div class="meta">Type a query and press Run.</div>' +
+        '</div>' +
+      '</div>';
+    return root;
+  }
+
+  // Wire one group's toolbar buttons + inputs. Idempotent — guarded by a
+  // dataset flag so reconcileGroupDom can call it on every reconciliation
+  // pass without piling up duplicate handlers. The handlers re-resolve
+  // the live group by id from `state.workspace` rather than closing over
+  // the group object, so they keep working after a workspace switch
+  // reuses the same DOM node for a fresh workspace's group.
+  function wireGroupToolbar(groupEl, group) {
+    if (groupEl.dataset.toolbarWired === '1') return;
+    groupEl.dataset.toolbarWired = '1';
+    const groupId = group.id;
+    const liveGroup = () => state.workspace.groups.find(g => g.id === groupId);
+    const liveTab = () => {
+      const g = liveGroup();
+      return g ? state.workspace.tabs.find(t => t.id === g.activeTabId) : null;
+    };
+
+    // Each handler focuses its group as a side effect, so clicks on the
+    // non-focused pane "follow" — the user's interaction defines focus
+    // even when the keyboard hasn't moved yet.
+    runBtnEl(groupEl).addEventListener('click', () => {
+      const g = liveGroup();
+      if (!g) return;
+      state.workspace.focusedGroupId = g.id;
+      const tab = liveTab();
+      if (tab && tab.running) cancelActiveTabRun();
+      else run();
+    });
+    maxRowsInputEl(groupEl).addEventListener('input', (e) => {
+      const g = liveGroup();
+      if (!g) return;
+      state.workspace.focusedGroupId = g.id;
+      const tab = liveTab();
+      if (!tab) return;
+      const v = parseInt(e.target.value, 10);
+      tab.maxRows = (Number.isFinite(v) && v > 0) ? v : 200;
+      scheduleSave();
+    });
+    traceToggleEl(groupEl).addEventListener('change', (e) => {
+      const g = liveGroup();
+      if (!g) return;
+      state.workspace.focusedGroupId = g.id;
+      const tab = liveTab();
+      if (!tab) return;
+      tab.trace = e.target.checked === true;
+      scheduleSave();
+    });
+    // Pointerdown anywhere in the pane → focus this group AND move
+    // Monaco's keyboard focus to its editor. Without the second part,
+    // editor-scoped commands like Ctrl+Enter still target whichever
+    // editor previously had keyboard focus (e.g. the OTHER pane), so a
+    // click on this pane's tab strip followed by Ctrl+Enter could run
+    // the wrong tab. Form inputs are skipped — stealing focus from them
+    // would block typing into max-rows / trace controls.
+    groupEl.addEventListener('pointerdown', (e) => {
+      if (state.workspace.focusedGroupId !== groupId && liveGroup()) {
+        state.workspace.focusedGroupId = groupId;
+        // Status bar / header icons reflect the focused group's tab.
+        syncToolbarToActiveTab();
+      }
+      const target = e.target;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const editor = monacoEditorsByGroup.get(groupId);
+      if (editor) {
+        if (!editor.hasTextFocus()) editor.focus();
+        return;
+      }
+      const fb = fallbackTextareasByGroup.get(groupId);
+      if (fb && document.activeElement !== fb) fb.focus();
+    });
+  }
+
+  // Ensure #group-container's children mirror state.workspace.groups in
+  // order. Adds any missing .editor-group nodes, removes any orphaned
+  // ones, and (idempotently) wires every group's toolbar + resize handle.
+  // Also stands up an editor (Monaco if loaded, else the textarea
+  // fallback) for any group that doesn't have one yet — so split,
+  // workspace-switch, and boot all share one path.
+  function reconcileGroupDom() {
+    const container = document.getElementById('group-container');
+    if (!container) return;
+    const validIds = new Set(state.workspace.groups.map(g => g.id));
+    for (const el of Array.from(container.querySelectorAll(':scope > .editor-group'))) {
+      if (!validIds.has(el.dataset.groupId)) el.remove();
+    }
+    let prevEl = null;
+    for (const g of state.workspace.groups) {
+      let el = groupElementById(g.id);
+      if (!el) {
+        el = createEditorGroupElement(g.id);
+        if (prevEl) prevEl.after(el);
+        else container.prepend(el);
+      } else if (prevEl && prevEl.nextSibling !== el) {
+        // Order changed — re-anchor.
+        prevEl.after(el);
+      }
+      wireGroupToolbar(el, g);
+      setupEditorResultsResize(el);
+      // Editor-instance bring-up: Monaco if its loader has resolved,
+      // otherwise the textarea fallback. The fallback gets replaced by
+      // Monaco later when the loader's callback fires.
+      if (!monacoEditorsByGroup.has(g.id) && !fallbackTextareasByGroup.has(g.id)) {
+        if (window.monaco) bootMonacoForGroup(g.id);
+        else bootFallbackForGroup(g.id);
+      }
+      prevEl = el;
+    }
+
+    // Splitter between groups. Only meaningful with 2+ groups; otherwise
+    // remove it so the single pane fills the container without a gap.
+    // Group-level controls (merge / swap orientation) live inside the
+    // splitter so they're discoverable on hover and stay close to the
+    // visual "seam" between panes.
+    let splitter = document.getElementById('group-resize');
+    if (state.workspace.groups.length >= 2) {
+      if (!splitter) {
+        splitter = buildGroupResizeElement();
+      }
+      const groups = container.querySelectorAll(':scope > .editor-group');
+      if (groups.length >= 2 && groups[0].nextSibling !== splitter) {
+        groups[0].after(splitter);
+      }
+      setupGroupResize(splitter);
+      refreshGroupOrientToggleIcon();
+    } else if (splitter) {
+      splitter.remove();
+    }
+
+    // Re-apply ratio AFTER the splitter (and any newly-created group
+    // elements) are in place so the flex values stick.
+    applyPersistedGroupSplitRatio();
+  }
+
+  // ===== Split / merge =====
+
+  // Move the focused group's active tab into a new group on the right.
+  // Source pane is reseeded with a fresh tab if it would otherwise empty
+  // (we never want a group to exist with zero tabs). For step 3b only one
+  // additional group is allowed; clicking again merges back.
+  function splitFocusedGroup() {
+    if (state.workspace.groups.length >= 2) {
+      mergeAllGroupsIntoFocused();
+      return;
+    }
+    const source = focusedGroup();
+    if (!source) return;
+    const tabIdToMove = source.activeTabId;
+    const moveIdx = source.tabIds.indexOf(tabIdToMove);
+    if (moveIdx >= 0) source.tabIds.splice(moveIdx, 1);
+    if (source.tabIds.length === 0) {
+      const fresh = freshTab(state.workspace.tabs.length + 1);
+      state.workspace.tabs.push(fresh);
+      source.tabIds.push(fresh.id);
+    }
+    source.activeTabId = source.tabIds[0];
+
+    const newGroupId = 'g' + Date.now().toString(36);
+    state.workspace.groups.push({
+      id: newGroupId,
+      tabIds: [tabIdToMove],
+      activeTabId: tabIdToMove,
+      // Inherit the source pane's current editor orientation so the
+      // newly-spawned pane "feels like" the one it came from.
+      editorOrientation: source.editorOrientation || 'vertical',
+    });
+    state.workspace.focusedGroupId = newGroupId;
+
+    // reconcileGroupDom creates the new group's DOM and stands up its
+    // editor (Monaco if loaded, else fallback) in one shot.
+    reconcileGroupDom();
+
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    syncToolbarToActiveTab();
+    updateSplitButtonIcon();
+    persistWorkspace();
+  }
+
+  // Inverse of splitFocusedGroup: pull every other group's tabs into the
+  // focused group, then dispose those groups. Source-group ordering wins
+  // for the merged tab strip; the focused group's active tab stays
+  // active.
+  function mergeAllGroupsIntoFocused() {
+    if (state.workspace.groups.length < 2) return;
+    const focused = focusedGroup();
+    if (!focused) return;
+    for (const g of state.workspace.groups.slice()) {
+      if (g === focused) continue;
+      for (const tabId of g.tabIds) {
+        if (!focused.tabIds.includes(tabId)) focused.tabIds.push(tabId);
+      }
+      g.tabIds = [];
+      dissolveGroup(g.id);
+    }
+    renderTabStrip();
+    swapEditorToActiveTab();
+    renderResultsForActiveTab();
+    syncToolbarToActiveTab();
+    updateSplitButtonIcon();
+    persistWorkspace();
+  }
+
+  // Add/remove a `.focused` class on each .editor-group element so CSS
+  // can paint the accent on whichever pane Run / keys / orient-toggle
+  // currently target. Only meaningful when there's more than one group;
+  // single-pane mode looks the same as before.
+  function refreshFocusedGroupHighlight() {
+    const showHighlight = state.workspace.groups.length > 1;
+    for (const g of state.workspace.groups) {
+      const el = groupElementById(g.id);
+      if (!el) continue;
+      el.classList.toggle('focused', showHighlight && g.id === state.workspace.focusedGroupId);
+    }
+  }
+
+  // Toggle the Split button icon between "split" and "merge" appearance
+  // so the user can tell which action the next click will perform.
+  function updateSplitButtonIcon() {
+    const btn = document.getElementById('split-toggle');
+    if (!btn) return;
+    const isSplit = state.workspace.groups.length >= 2;
+    btn.title = isSplit
+      ? 'Merge panes back into one'
+      : 'Split editor into two side-by-side panes';
+    btn.setAttribute('aria-label', btn.title);
+    // The two-rect icon uses different fills to hint at split vs merge.
+    btn.classList.toggle('is-split', isSplit);
   }
 
   // ===== Boot =====
   function boot() {
     applyTheme(loadTheme());
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-
-    // Restore editor/results orientation before the layout is measured so
-    // Monaco's automaticLayout sees the correct container size on first
-    // paint. The toggle button is wired to flip between vertical/horizontal.
-    applyEditorOrientation(
-      localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
-        ? 'horizontal' : 'vertical');
-    document.getElementById('orient-toggle')
-      .addEventListener('click', toggleEditorOrientation);
 
     const name = workspaceName();
     registerWorkspace(name);
@@ -3647,39 +4668,27 @@
     window.addEventListener('hashchange', onHashChange);
     setupCrossWindowSync();
 
+    // Reconcile DOM with the workspace's groups before any rendering —
+    // this both wires the existing first-group toolbar handlers and
+    // stamps out additional .editor-group nodes for any groups loaded
+    // from a previously-saved split. Orientation is applied after the
+    // groups exist so the focused group's wrapper picks up the .horizontal
+    // class before Monaco measures.
+    reconcileGroupDom();
+    applyGroupContainerOrientation(
+      localStorage.getItem(GROUP_ORIENTATION_STORE) === 'stack'
+        ? 'stack' : 'side-by-side');
+    for (const g of state.workspace.groups) applyEditorOrientationForGroup(g);
+    updateSplitButtonIcon();
+
     renderTabStrip();
-    initFallbackEditor();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
 
     initCatalogSidebar();
 
-    // Run button doubles as a Cancel button while the active tab has a
-    // query in flight. Same handler — `run()` early-returns when
-    // `tab.running` is true, so we route to abort() instead.
-    document.getElementById('run').addEventListener('click', () => {
-      const tab = activeTab();
-      if (tab && tab.running) cancelActiveTabRun();
-      else run();
-    });
-
-    // Per-tab settings inputs. Writes to the active tab's fields so each
-    // tab carries its own preferences. Persistence runs through the
-    // existing debounced save.
-    document.getElementById('maxRows').addEventListener('input', (e) => {
-      const tab = activeTab();
-      if (!tab) return;
-      const v = parseInt(e.target.value, 10);
-      tab.maxRows = (Number.isFinite(v) && v > 0) ? v : 200;
-      scheduleSave();
-    });
-    document.getElementById('traceToggle').addEventListener('change', (e) => {
-      const tab = activeTab();
-      if (!tab) return;
-      tab.trace = e.target.checked === true;
-      scheduleSave();
-    });
+    document.getElementById('split-toggle').addEventListener('click', splitFocusedGroup);
 
     // Esc cancels the active tab's in-flight query. The browser aborts
     // the fetch, the server's RequestAborted token fires through
@@ -3691,6 +4700,31 @@
       const tab = activeTab();
       if (tab && tab.running) cancelActiveTabRun();
     });
+
+    // Ctrl/Cmd+Enter runs the focused pane's active tab. Routed at
+    // window level (in capture phase) so it bypasses Monaco's
+    // per-editor command system: that system fires for whichever
+    // editor has Monaco-keyboard-focus, which can drift from the user's
+    // intent if they clicked the pane's chrome (tab strip, results
+    // pane, toolbar) without the click landing inside the editor host.
+    // `focusedGroupId` is updated on every pointerdown anywhere in a
+    // pane, so it reliably tracks "the pane the user just touched."
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.shiftKey || e.altKey) return;
+      // Skip when typing into a non-editor input (workspace name,
+      // max-rows etc.). Monaco's hidden textarea inside `.editor-host`
+      // is allowed through so Ctrl+Enter still works while typing.
+      const t = e.target;
+      if (t && /^(INPUT|SELECT)$/.test(t.tagName) &&
+          !(t.closest && t.closest('.editor-host'))) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      run();
+    }, /*capture=*/true);
 
     // Persist on visibility change to catch cases where the debounced save
     // hasn't fired yet.
