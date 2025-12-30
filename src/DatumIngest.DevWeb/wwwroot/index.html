@@ -293,6 +293,18 @@
     overflow: hidden;
   }
 
+  /* Wrapper for the editor + drag-handle + results stack. Default flex
+     direction is column (vertical split); toggling `.horizontal` flips it
+     to a row so the editor sits beside the results. */
+  #editor-results-wrapper {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #editor-results-wrapper.horizontal {
+    flex-direction: row;
+  }
+
   /* Editor pane */
   #editor-pane {
     border-bottom: 1px solid var(--border);
@@ -301,6 +313,15 @@
     min-height: 120px;
     height: 32vh;
     overflow: hidden;
+  }
+  #editor-results-wrapper.horizontal #editor-pane {
+    /* Side-by-side: width replaces height; border moves to the right edge. */
+    height: auto;
+    min-height: 0;
+    width: 50%;
+    min-width: 240px;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
   }
 
   /* Drag handle between the editor and the results pane. Mirrors
@@ -312,6 +333,12 @@
     background: transparent;
     margin-top: -3px; margin-bottom: -3px;
     z-index: 5; position: relative;
+  }
+  #editor-results-wrapper.horizontal #editor-results-resize {
+    height: auto; width: 6px;
+    cursor: col-resize;
+    margin-top: 0; margin-bottom: 0;
+    margin-left: -3px; margin-right: -3px;
   }
   #editor-results-resize:hover, #editor-results-resize.dragging {
     background: var(--accent);
@@ -637,6 +664,12 @@
     </div>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
+    <button class="icon" id="orient-toggle" title="Toggle editor/results layout (vertical ↔ side-by-side)" aria-label="Toggle editor/results layout">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="3" y="4" width="18" height="16" rx="1"></rect>
+        <line id="orient-toggle-divider" x1="3" y1="12" x2="21" y2="12"></line>
+      </svg>
+    </button>
     <button class="icon" id="theme-toggle" title="Toggle theme">☾</button>
   </header>
 
@@ -696,27 +729,29 @@
     <div id="main-column">
       <div id="tab-strip"></div>
 
-      <div id="editor-pane">
-        <div id="editor-host"></div>
-        <div id="editor-toolbar">
-          <button id="run">Run</button>
-          <span class="tip">Ctrl/⌘+Enter</span>
-          <span class="tip">max rows
-            <input id="maxRows" type="number" value="200" min="1" max="100000">
-          </span>
-          <label class="tip" title="Capture engine execution trace for the next run">
-            <input id="traceToggle" type="checkbox">
-            trace
-          </label>
-          <span class="spacer"></span>
-          <span id="elapsed" class="tip"></span>
+      <div id="editor-results-wrapper">
+        <div id="editor-pane">
+          <div id="editor-host"></div>
+          <div id="editor-toolbar">
+            <button id="run">Run</button>
+            <span class="tip">Ctrl/⌘+Enter</span>
+            <span class="tip">max rows
+              <input id="maxRows" type="number" value="200" min="1" max="100000">
+            </span>
+            <label class="tip" title="Capture engine execution trace for the next run">
+              <input id="traceToggle" type="checkbox">
+              trace
+            </label>
+            <span class="spacer"></span>
+            <span id="elapsed" class="tip"></span>
+          </div>
         </div>
-      </div>
 
-      <div id="editor-results-resize" title="Drag to resize"></div>
+        <div id="editor-results-resize" title="Drag to resize"></div>
 
-      <div id="results-pane">
-        <div class="meta">Type a query and press Run.</div>
+        <div id="results-pane">
+          <div class="meta">Type a query and press Run.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -2848,6 +2883,13 @@
   // on drag end. Stored as an integer; missing/invalid falls back to the
   // CSS default (32vh).
   const EDITOR_HEIGHT_STORE = 'datum.devweb.editorHeight';
+  // Same idea for editor-pane width when the wrapper is in `.horizontal`
+  // (side-by-side) orientation. Independent key so the two layouts each
+  // remember their own size.
+  const EDITOR_WIDTH_STORE = 'datum.devweb.editorWidth';
+  // Orientation of the editor/results split: 'vertical' (default) or
+  // 'horizontal' (side-by-side).
+  const EDITOR_ORIENTATION_STORE = 'datum.devweb.editorOrientation';
 
   // Per-section cache so switching tabs doesn't re-fetch. Keys: 'tables',
   // 'udfs', 'procedures', 'functions', 'models'. Values: rendered HTML or
@@ -3467,29 +3509,66 @@
     return Math.max(min, Math.min(max, h));
   }
 
+  // Horizontal-orientation analog: clamp width against the wrapper's own
+  // width so the results pane keeps at least ~240px no matter how narrow
+  // the window gets.
+  function clampEditorWidth(w) {
+    const wrapper = document.getElementById('editor-results-wrapper');
+    const total = wrapper ? wrapper.getBoundingClientRect().width : window.innerWidth;
+    const min = 240;
+    const max = Math.max(min, total - 240);
+    if (!isFinite(w)) return min;
+    return Math.max(min, Math.min(max, w));
+  }
+
+  function isHorizontalSplit() {
+    return document.getElementById('editor-results-wrapper')
+      .classList.contains('horizontal');
+  }
+
+  // Apply the persisted editor-pane size for the current orientation. The
+  // CSS default (32vh / 50%) stays in effect when no px value is saved.
+  function applyPersistedEditorSize() {
+    const pane = document.getElementById('editor-pane');
+    if (isHorizontalSplit()) {
+      pane.style.height = '';
+      const persisted = parseInt(localStorage.getItem(EDITOR_WIDTH_STORE) || '', 10);
+      pane.style.width = isFinite(persisted) ? clampEditorWidth(persisted) + 'px' : '';
+    } else {
+      pane.style.width = '';
+      const persisted = parseInt(localStorage.getItem(EDITOR_HEIGHT_STORE) || '', 10);
+      pane.style.height = isFinite(persisted) ? clampEditorHeight(persisted) + 'px' : '';
+    }
+  }
+
   function setupEditorResultsResize() {
     const handle = document.getElementById('editor-results-resize');
     const pane = document.getElementById('editor-pane');
 
-    // Restore persisted height. CSS default (32vh) stays in effect when no
-    // value is saved yet — only override once the user has dragged.
-    const persisted = parseInt(localStorage.getItem(EDITOR_HEIGHT_STORE) || '', 10);
-    if (isFinite(persisted)) {
-      pane.style.height = clampEditorHeight(persisted) + 'px';
-    }
+    applyPersistedEditorSize();
 
-    let dragStartY = 0, dragStartH = 0;
+    let dragStart = 0, dragStartSize = 0, dragHorizontal = false;
     function onMove(e) {
-      const dy = e.clientY - dragStartY;
-      const h = clampEditorHeight(dragStartH + dy);
-      pane.style.height = h + 'px';
+      if (dragHorizontal) {
+        const dx = e.clientX - dragStart;
+        const w = clampEditorWidth(dragStartSize + dx);
+        pane.style.width = w + 'px';
+      } else {
+        const dy = e.clientY - dragStart;
+        const h = clampEditorHeight(dragStartSize + dy);
+        pane.style.height = h + 'px';
+      }
     }
     function onUp() {
       handle.classList.remove('dragging');
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      localStorage.setItem(EDITOR_HEIGHT_STORE, parseInt(pane.style.height, 10));
+      if (dragHorizontal) {
+        localStorage.setItem(EDITOR_WIDTH_STORE, parseInt(pane.style.width, 10));
+      } else {
+        localStorage.setItem(EDITOR_HEIGHT_STORE, parseInt(pane.style.height, 10));
+      }
     }
 
     handle.addEventListener('mousedown', (e) => {
@@ -3498,17 +3577,61 @@
       // Suppress text selection while dragging — the cursor would otherwise
       // grab whatever it passes over inside the editor or results table.
       document.body.style.userSelect = 'none';
-      dragStartY = e.clientY;
-      dragStartH = pane.getBoundingClientRect().height;
+      dragHorizontal = isHorizontalSplit();
+      const rect = pane.getBoundingClientRect();
+      if (dragHorizontal) {
+        dragStart = e.clientX;
+        dragStartSize = rect.width;
+      } else {
+        dragStart = e.clientY;
+        dragStartSize = rect.height;
+      }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+  }
+
+  // Top-toolbar button: flip the editor/results split between vertical
+  // (stacked) and horizontal (side-by-side). The persisted size for the
+  // newly-active orientation is reapplied so each layout keeps its own
+  // remembered editor extent.
+  function applyEditorOrientation(orientation) {
+    const wrapper = document.getElementById('editor-results-wrapper');
+    const horizontal = orientation === 'horizontal';
+    wrapper.classList.toggle('horizontal', horizontal);
+    applyPersistedEditorSize();
+    // Update the toggle icon's divider to reflect the *current* split
+    // (horizontal line for stacked, vertical line for side-by-side).
+    const divider = document.getElementById('orient-toggle-divider');
+    if (divider) {
+      if (horizontal) {
+        divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
+        divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
+      } else {
+        divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
+        divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
+      }
+    }
+  }
+  function toggleEditorOrientation() {
+    const next = isHorizontalSplit() ? 'vertical' : 'horizontal';
+    localStorage.setItem(EDITOR_ORIENTATION_STORE, next);
+    applyEditorOrientation(next);
   }
 
   // ===== Boot =====
   function boot() {
     applyTheme(loadTheme());
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+    // Restore editor/results orientation before the layout is measured so
+    // Monaco's automaticLayout sees the correct container size on first
+    // paint. The toggle button is wired to flip between vertical/horizontal.
+    applyEditorOrientation(
+      localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
+        ? 'horizontal' : 'vertical');
+    document.getElementById('orient-toggle')
+      .addEventListener('click', toggleEditorOrientation);
 
     const name = workspaceName();
     registerWorkspace(name);
