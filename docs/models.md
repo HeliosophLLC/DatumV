@@ -286,6 +286,118 @@ through one model class.
   LIMIT 5;
   ```
 
+### `midas_small`, `dpt_large` — monocular depth estimation
+
+Intel ISL's MiDaS / DPT depth-estimation family. Two registrations driven by
+the same `DepthEstimationModel` class — they share architecture-style
+(transformer-decoder over a vision backbone) and output kind, differing in
+input resolution, channel order, and normalisation stats.
+
+| Catalog name | File | Params | Input | Disk |
+|---|---|---|---|---|
+| `midas_small` | `midas_v21_small_256.onnx` | 21M | 256×256 | ~83 MB |
+| `dpt_large` | `dpt_large_384.onnx` | 344M | 384×384 | ~1.4 GB |
+
+- **What it does**: Returns an `Image` whose pixel intensity is **relative
+  depth** — bigger value = closer to the camera. Single-channel grayscale
+  encoded as RGBA-with-equal-channels (matching the `u2net` mask convention
+  so any colour-space consumer reads the same value). The depth map is
+  resized back to the input image's original dimensions; the network's
+  internal working size (256 / 384) doesn't leak through.
+- **License**: MIT (Intel ISL)
+- **Source**: [github.com/isl-org/MiDaS](https://github.com/isl-org/MiDaS)
+- **Setup**: pre-built ONNX exports attached to the GitHub releases page —
+  no Python conversion needed. Drop the file(s) directly into `$DATUM_MODELS`:
+  ```powershell
+  # MiDaS small (recommended starting point — 80 MB, fast)
+  Invoke-WebRequest "https://github.com/isl-org/MiDaS/releases/download/v2_1/midas_v21_small_256.onnx" `
+    -OutFile $env:DATUM_MODELS\midas_v21_small_256.onnx
+
+  # DPT-Large (sharper boundaries, 1.4 GB, ~16× more params)
+  Invoke-WebRequest "https://github.com/isl-org/MiDaS/releases/download/v3_1/dpt_large_384.onnx" `
+    -OutFile $env:DATUM_MODELS\dpt_large_384.onnx
+  ```
+- **Architecture**: MiDaS-small v2.1 is an EfficientNet-Lite3 encoder + lightweight
+  decoder; DPT-Large is a ViT-Large encoder + DPT (dense-prediction transformer)
+  decoder. Both are trained on a mixture of depth datasets via the MiDaS
+  loss (scale-and-shift invariant), so the output is **relative inverse depth
+  in arbitrary units** — not metric. Preprocessing differs between the two:
+  MiDaS-small uses BGR + ImageNet stats (`mean=[0.485,0.456,0.406]`,
+  `std=[0.229,0.224,0.225]`); DPT uses RGB + half/half stats
+  (`mean=[0.5,0.5,0.5]`, `std=[0.5,0.5,0.5]`). The model class encodes both
+  conventions; registration picks per architecture.
+- **Post-processing**: per-image min-max normalise to `[0, 1]` (matching the
+  upstream Python reference's depth_min/depth_max rescale), write a
+  grayscale-as-RGBA bitmap, resize back to the input's original dimensions
+  via SkiaSharp's bilinear sampler.
+- **Memory**: input bitmap + (256² or 384²) × 3 float NCHW input + same-size
+  float output — ~1 MB per side at 256×256, ~2 MB at 384×384. Per-row cost is
+  fixed regardless of input resolution since the network always operates at
+  its native size.
+- **Aspect-ratio note**: the upstream Python pipeline preserves aspect ratio
+  with `keep_aspect_ratio=True, multiple_of=32`; this implementation
+  square-stretches to the network's input size. Cheaper and avoids
+  letterboxing artefacts in the depth map; costs a small amount of accuracy
+  on extreme aspect ratios (panoramas, tall portraits). Re-evaluate if depth
+  quality matters more than throughput.
+- **`midas_small` vs `dpt_large`**: DPT-Large has noticeably sharper depth
+  discontinuities (cleaner foreground/background separation, better
+  small-object boundaries) at ~16× the params and ~5–10× the inference
+  latency. MiDaS-small loads in <1s and runs ~50ms per image on a consumer
+  GPU; DPT-Large takes ~3s to load and ~300–500ms per image. For demos and
+  interactive use, start with `midas_small` and reach for `dpt_large` only
+  when boundary precision matters.
+- **Not metric depth.** The output is *relative inverse depth*, normalised
+  per image — absolute scale is discarded by the per-image min-max step, and
+  even without it MiDaS produces values in arbitrary units. For metric depth
+  (depth in metres), you need a different model family (ZoeDepth, Metric3D,
+  Depth-Anything-Metric); they're not registered here yet.
+- **Visualizing depth — false-colour palettes (`apply_colormap`)**.
+  Grayscale depth is hard to *read*: the human visual system has poor
+  luminance contrast sensitivity in mid-tones, so a scene that's actually
+  three-dimensional often looks like a flat grey blob. The standard fix
+  in computer vision and scientific visualisation is to map single-channel
+  intensity through a perceptually-tuned colour palette (a *colourmap* or
+  *false-colour LUT*) so depth differences register as hue differences.
+
+  Use `apply_colormap(image, palette_name)` — a generic scalar function
+  that accepts any single-channel-as-RGBA image (depth maps, U²-Net
+  masks, attention maps, future heatmaps) and returns a fully-coloured
+  `Image`. It reads the input's red channel as the scalar value and
+  outputs RGB through the chosen palette. Currently shipped:
+
+  | Name | Style | Best for |
+  |---|---|---|
+  | `'turbo'` | Google's perceptually-improved jet (blue → cyan → green → yellow → orange → red) | Depth maps — sharp hue progression, no green-yellow ambiguity. Computed via Mikhailov's degree-5 polynomial; agrees with the canonical 256-entry LUT to within a couple of byte values except right at the very endpoints. |
+  | `'jet'` | Legacy MATLAB rainbow | Matching prior art; use `turbo` instead for new visualisations — `jet` has well-known perceptual flaws (banding at green/yellow, false edges at rainbow transitions). |
+  | `'gray'` | Identity (R = G = B = input intensity) | Pass-through; debug / round-trip checks. |
+
+  The matplotlib perceptually-uniform palettes (`viridis`, `inferno`,
+  `magma`, `plasma`) follow the same shape — adding one is a 256-entry
+  LUT plus a one-line entry in the palette dispatch table. They're not
+  wired up yet; if you want one, file an issue or add it directly.
+
+  Bigger input intensity → warmer output colour, which matches the
+  near-is-bright convention `DepthEstimationModel` produces — a
+  `turbo`-coloured MiDaS depth map shows nearby objects in red and far
+  objects in blue without any inversion.
+- **Demo**:
+  ```sql
+  -- Side-by-side comparison on the same scene.
+  SELECT
+    photo_id,
+    apply_colormap(models.midas_small(photo), 'turbo') AS depth_fast,
+    apply_colormap(models.dpt_large(photo),   'turbo') AS depth_sharp
+  FROM photos LIMIT 5;
+
+  -- Compare two palettes on the same depth map.
+  SELECT
+    photo_id,
+    apply_colormap(models.midas_small(photo), 'turbo') AS depth_turbo,
+    apply_colormap(models.midas_small(photo), 'jet')   AS depth_jet
+  FROM photos LIMIT 5;
+  ```
+
 ### `vit_gpt2_caption` — image captioner
 
 - **What it does**: Generates a single-sentence COCO-style caption for

@@ -383,6 +383,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
+        registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
 
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.
