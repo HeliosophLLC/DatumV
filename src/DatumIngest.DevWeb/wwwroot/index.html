@@ -1251,6 +1251,22 @@
   function loadWorkspace(name) {
     const ws = readJson(STORE.workspace(name), null);
     if (ws && Array.isArray(ws.tabs) && ws.tabs.length > 0) {
+      // Drop any tabs that overlap with the tombstone list. A bug in
+      // earlier persistWorkspace versions could write tabs[] and
+      // deletedTabIds[] with overlapping ids (a stale window saving its
+      // older state alongside a fresher window's tombstones); those
+      // snapshots manifest as "closed tabs reappear after reload."
+      // Filtering here heals already-corrupted snapshots.
+      const persistedTombs = new Set(
+        Array.isArray(ws.deletedTabIds) ? ws.deletedTabIds : []);
+      if (persistedTombs.size > 0) {
+        ws.tabs = ws.tabs.filter(t => !persistedTombs.has(t && t.id));
+      }
+      if (ws.tabs.length === 0) {
+        // Tombstones ate everything — fall through to the fresh-workspace
+        // branch below by making the outer guard fail on next iteration.
+        return loadFreshWorkspace();
+      }
       // Ensure each tab has the expected shape (forward-compat). Tabs hydrated
       // from localStorage have `lastResult` left undefined so the renderer
       // knows to fetch from IDB on first activation. Older saves that included
@@ -1289,6 +1305,12 @@
       migrateWorkspaceShape(ws);
       return ws;
     }
+    return loadFreshWorkspace();
+  }
+
+  // Fresh-workspace seed used both by first-time load and by recovery
+  // from a snapshot whose tabs were entirely tombstoned.
+  function loadFreshWorkspace() {
     const tab = freshTab(1);
     const orient =
       localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
@@ -1320,10 +1342,35 @@
   // resurrect them from another window's older snapshot.
   function persistWorkspace() {
     const name = workspaceName();
+    const onDisk = readJson(STORE.workspace(name), null);
+
+    // Build the FULL tombstone union *first* — local + disk — so a
+    // stale window's in-memory tab list can't resurrect tabs that
+    // another window has already tombstoned. (Earlier we only filtered
+    // disk tabs against tombstones; in-memory tabs were trusted, which
+    // meant a stale window happily wrote its old tabs back over a fresh
+    // disk state and the next load saw "deleted" tabs reappear.)
     const tombSet = new Set(state.workspace.deletedTabIds || []);
+    if (onDisk && Array.isArray(onDisk.deletedTabIds)) {
+      for (const id of onDisk.deletedTabIds) tombSet.add(id);
+    }
+
+    // In-memory tabs that are tombstoned in EITHER window get dropped.
+    // This both fixes the resurrection bug and keeps state.workspace.tabs
+    // consistent for the rest of this function (the inMemoryById index
+    // below is built after the filter). Group tabIds get the same scrub
+    // so the next render doesn't reference a now-deleted tab.
+    const before = state.workspace.tabs.length;
+    state.workspace.tabs = state.workspace.tabs.filter(t => !tombSet.has(t.id));
+    if (state.workspace.tabs.length !== before && Array.isArray(state.workspace.groups)) {
+      const validIds = new Set(state.workspace.tabs.map(t => t.id));
+      for (const g of state.workspace.groups) {
+        g.tabIds = (g.tabIds || []).filter(id => validIds.has(id));
+        if (!g.tabIds.includes(g.activeTabId)) g.activeTabId = g.tabIds[0];
+      }
+    }
     const inMemoryById = new Map(state.workspace.tabs.map(t => [t.id, t]));
 
-    const onDisk = readJson(STORE.workspace(name), null);
     const tabsToWrite = state.workspace.tabs.map(t => ({
       id: t.id,
       name: t.name,
@@ -1340,7 +1387,7 @@
       for (const t of onDisk.tabs) {
         if (!t || !t.id) continue;
         if (inMemoryById.has(t.id)) continue;   // we have a fresher view
-        if (tombSet.has(t.id)) continue;         // intentionally deleted here
+        if (tombSet.has(t.id)) continue;         // tombstoned anywhere
         tabsToWrite.push({
           id: t.id,
           name: t.name || 'Untitled',
@@ -1351,11 +1398,6 @@
           maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
           trace: t.trace === true,
         });
-      }
-      // Carry forward tombstones recorded by other windows so a deletion
-      // there isn't undone by the merge here.
-      if (Array.isArray(onDisk.deletedTabIds)) {
-        for (const id of onDisk.deletedTabIds) tombSet.add(id);
       }
     }
 
@@ -1412,11 +1454,20 @@
     workspace: null,            // { tabs, groups, focusedGroupId, deletedTabIds }
   };
 
-  // Debounce save so rapid keystrokes don't flog localStorage.
+  // Debounce save so rapid keystrokes don't flog localStorage. Kept
+  // short (75ms) so the unsaved-edit window is small — important
+  // because dev-server restarts can yank the page before a longer
+  // debounce gets a chance to fire. Page-visibility / pagehide handlers
+  // (see boot()) flush the pending save eagerly to close the gap when
+  // the user alt-tabs away or the tab unloads.
   let saveTimer = null;
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(persistWorkspace, 200);
+    saveTimer = setTimeout(flushPendingSave, 75);
+  }
+  function flushPendingSave() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    persistWorkspace();
   }
 
   function activeTab() {
@@ -4726,9 +4777,20 @@
       run();
     }, /*capture=*/true);
 
-    // Persist on visibility change to catch cases where the debounced save
-    // hasn't fired yet.
-    window.addEventListener('beforeunload', persistWorkspace);
+    // Three save triggers ensure pending edits reach localStorage even
+    // when the page is yanked unexpectedly (dev-server restart, browser
+    // crash, system sleep):
+    //   beforeunload — fires on most navigation/close events.
+    //   pagehide — fires more reliably than beforeunload on bfcache /
+    //     mobile / Firefox tab-close paths.
+    //   visibilitychange (hidden) — fires when the user alt-tabs to a
+    //     terminal (e.g. to restart WebDev) before any unload signal,
+    //     so edits made up to the moment of switching are persisted.
+    window.addEventListener('beforeunload', flushPendingSave);
+    window.addEventListener('pagehide', flushPendingSave);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPendingSave();
+    });
 
     // Now try to upgrade the textarea to Monaco. If the loader fails (offline,
     // CDN blocked) the textarea stays in place and everything still works.
