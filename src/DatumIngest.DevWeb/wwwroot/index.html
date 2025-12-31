@@ -2131,10 +2131,22 @@
     // keywords/types render with the right colors. Fetch is async; if it
     // fails we just keep the default tokenizer (everything still works,
     // backticks just render as identifiers).
+    // Models created before this resolves are tokenized with Monaco's
+    // built-in 'sql' grammar, which doesn't know about backtick template
+    // strings — they render as a sequence of identifiers/operators with
+    // no error. Swapping the provider does NOT retokenize existing
+    // models, so we re-set each model's language to 'sql' to force a
+    // fresh tokenization pass with the new grammar.
     fetch('/api/lang/grammar')
       .then(response => response.ok ? response.json() : null)
       .then(grammar => {
-        if (grammar) monaco.languages.setMonarchTokensProvider('sql', grammar);
+        if (!grammar) return;
+        monaco.languages.setMonarchTokensProvider('sql', grammar);
+        for (const model of monaco.editor.getModels()) {
+          if (model.getLanguageId() === 'sql') {
+            monaco.editor.setModelLanguage(model, 'sql');
+          }
+        }
       })
       .catch(() => { /* keep built-in tokenizer */ });
 
