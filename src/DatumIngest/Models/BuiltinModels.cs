@@ -81,6 +81,7 @@ public static class BuiltinModels
         RegisterU2Netp(modelCatalog);
         RegisterMidasSmall(modelCatalog);
         RegisterDptLarge(modelCatalog);
+        RegisterMobileSamPrompted(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
 
         // Captioner zoo — Florence-2 in three caption styles plus a
@@ -1599,6 +1600,92 @@ public static class BuiltinModels
             Category: "depth",
             Modalities: ["image"],
             Files: [modelFilename]));
+    }
+
+    // ─────────────────────── MobileSAM prompted (Apache-2.0) ─────────────────
+    //
+    // Meta's Segment Anything (TinyViT distillation) wrapped as a
+    // prompted-segmentation model: input (image, x, y) → output Image
+    // (binary mask). Two ONNX files from the vietanhdev/samexporter
+    // pipeline:
+    //   • mobile_sam_image_encoder.onnx   — TinyViT encoder, ~28 MB
+    //   • sam_mask_decoder_multi.onnx     — multi-mask prompt decoder, ~16 MB
+    //                                       (single-mask variant also accepted)
+    //
+    // The encoder graph bakes in resize-longest-to-1024, ImageNet
+    // normalisation, and zero-pad; the decoder graph bakes in the
+    // mask-resize-back to the original image dims via orig_im_size. We
+    // pack pixels and pick the highest-IoU mask — everything else lives
+    // in the ONNX files.
+
+    /// <summary>Default filename for the MobileSAM (TinyViT) image encoder.</summary>
+    public const string MobileSamEncoderFilename = "mobile_sam_image_encoder.onnx";
+
+    /// <summary>
+    /// Default filename for the multi-mask prompt decoder. Emits a small
+    /// number of candidate masks per prompt with a per-mask predicted-IoU
+    /// score; the model wrapper picks the highest-scoring one.
+    /// </summary>
+    public const string MobileSamMaskDecoderMultiFilename = "sam_mask_decoder_multi.onnx";
+
+    /// <summary>
+    /// Single-mask decoder variant. Produces one mask + one IoU score per
+    /// prompt. Either decoder file works with <see cref="MobileSamModel"/>;
+    /// the multi variant gives slightly better quality at no meaningful
+    /// extra runtime cost, so it's the default registration.
+    /// </summary>
+    public const string MobileSamMaskDecoderSingleFilename = "sam_mask_decoder_single.onnx";
+
+    /// <summary>
+    /// Registers MobileSAM prompted segmentation under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"mobilesam_prompted"</c>).
+    /// SQL surface: <c>models.mobilesam_prompted(image, x, y) → Image</c>
+    /// — a binary foreground mask sized to match the input image.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Coordinates <c>x</c> / <c>y</c> are in original-image pixel space:
+    /// <c>(0, 0)</c> is the top-left corner; <c>x</c> grows to the right,
+    /// <c>y</c> down. The decoder's <c>orig_im_size</c> input handles the
+    /// internal 1024-space rescaling.
+    /// </para>
+    /// <para>
+    /// Output mask: 0 = background, 255 = foreground, written as RGBA with
+    /// equal channels (matches every other image-emitting model so
+    /// downstream consumers don't branch on colour type).
+    /// </para>
+    /// <para>
+    /// Upstream encoder distillation: <a href="https://github.com/ChaoningZhang/MobileSAM">ChaoningZhang/MobileSAM</a>.
+    /// ONNX export pipeline: <a href="https://github.com/vietanhdev/samexporter">vietanhdev/samexporter</a>.
+    /// </para>
+    /// </remarks>
+    public static void RegisterMobileSamPrompted(
+        ModelCatalog catalog,
+        string modelName = "mobilesam_prompted",
+        string encoderFilename = MobileSamEncoderFilename,
+        string decoderFilename = MobileSamMaskDecoderMultiFilename)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: encoderFilename,
+            InputKinds: [DataKind.Image, DataKind.Float64, DataKind.Float64],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderFilename);
+                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderFilename);
+                return new MobileSamModel(modelName, encoderPath, decoderPath);
+            },
+            DisplayName: "MobileSAM (prompted segmentation)",
+            Parameters: "9.7M",
+            License: "Apache-2.0",
+            LicenseHolder: "Meta AI / Kyung Hee University",
+            SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
+            Category: "segmenter",
+            Modalities: ["image"],
+            Files: [encoderFilename, decoderFilename]));
     }
 
     // ────────────────────────── YOLOX (Apache-2.0) ──────────────────────────

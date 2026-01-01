@@ -286,6 +286,87 @@ through one model class.
   LIMIT 5;
   ```
 
+### `mobilesam_prompted` — point-prompted segmentation
+
+Meta's Segment Anything (TinyViT-distilled MobileSAM variant) wired as
+**prompted** segmentation: feed an image plus an `(x, y)` point in the
+image and the model returns a binary mask of whatever object that point
+sits on. Where U²-Net guesses the salient object for you, MobileSAM lets
+you say "segment *this thing here*" — useful for cutting a specific
+subject out of a photo with several candidates, or scripting a multi-step
+pipeline that picks coordinates from another model (face-detector → SAM
+on the face-box centre, etc.).
+
+- **What it does**: Takes `(image, x, y)`, returns an `Image` whose
+  white pixels are the segmented object and black pixels are everything
+  else. Mask is sized to match the input image. Equal-channel RGBA
+  matches the U²-Net mask convention so the same `image_cutout(image,
+  mask)` consumer applies.
+- **License**: Apache-2.0 (Meta AI / Kyung Hee University)
+- **Source**:
+  [github.com/ChaoningZhang/MobileSAM](https://github.com/ChaoningZhang/MobileSAM)
+  — TinyViT distillation of the original ViT-H SAM image encoder. Mask
+  decoder weights are unchanged from upstream SAM, just re-exported to
+  ONNX.
+- **Files** — two ONNX files at the root of `$DATUM_MODELS`:
+  - `mobile_sam_image_encoder.onnx` (~28 MB) — TinyViT image encoder.
+    Outputs a `[1, 256, 64, 64]` embedding the decoder consumes.
+  - `sam_mask_decoder_multi.onnx` (~16 MB) — multi-mask decoder. Emits
+    four candidate masks per prompt plus a per-mask predicted-IoU
+    score; the model class picks the highest-scoring candidate.
+  - `sam_mask_decoder_single.onnx` (~16 MB) — single-mask decoder
+    sibling. Either decoder file works at the registration site; the
+    multi version is the default because the IoU-based best-of-4
+    selection gives slightly better quality at no meaningful runtime
+    cost.
+- **Setup**: produced by the [vietanhdev/samexporter](https://github.com/vietanhdev/samexporter)
+  pipeline. Pre-built ONNX exports are mirrored on Hugging Face under
+  several community repos (search "mobilesam onnx"). Drop the encoder
+  and one of the decoder files directly into `$DATUM_MODELS`.
+- **Architecture**: TinyViT image encoder + a six-input prompt-conditioned
+  mask decoder. The decoder's six inputs are `image_embeddings`,
+  `point_coords`, `point_labels`, `mask_input`, `has_mask_input`, and
+  `orig_im_size`; we hand zeros for the prior-mask channel
+  (`has_mask_input=0` disables it) and feed the real prompt point plus a
+  `(0, 0)` padding sentinel with label `-1` to satisfy the decoder's
+  expected `≥ 2` point arity.
+- **Coordinate convention**: `x` and `y` are in original-image pixel
+  space, top-left origin. `(0, 0)` is the top-left corner; `x` grows
+  right, `y` grows down. Both the input bitmap and the prompt are
+  rescaled inside the model class by `scale = 1024 / max(W, H)` before
+  the encoder pass — the encoder graph zero-pads to 1024×1024 but does
+  not itself resize-longest-side, while the decoder's mask resize-back
+  expects the resize to have happened. Doing the rescale on the C# side
+  keeps the encoder's view and the decoder's view aligned.
+- **Memory**: encoder pass dominates (~150 MB of intermediate
+  activations on a 1024-square padded input); decoder is comparatively
+  cheap. One encoder forward per row — no batching across rows since
+  each row has its own image. Two ONNX sessions stay resident for the
+  catalog entry's lifetime (~45 MB of weights total).
+- **Demo**:
+  ```sql
+  -- Cut a face out of a photo using SCRFD's bounding-box centre as
+  -- the SAM prompt. The output is just the face region; everything
+  -- else is masked away.
+  SELECT
+    photo_id,
+    image_cutout(
+      photo,
+      models.mobilesam_prompted(
+        photo,
+        face.x + face.w / 2,
+        face.y + face.h / 2)) AS face_only
+  FROM photos
+  CROSS APPLY UNNEST(models.scrfd_10g(photo)) AS face
+  LIMIT 5;
+
+  -- Or with a hand-picked coordinate when you know what's in the frame.
+  SELECT
+    photo_id,
+    models.mobilesam_prompted(photo, 320, 240) AS mask
+  FROM photos LIMIT 5;
+  ```
+
 ### `midas_small`, `dpt_large` — monocular depth estimation
 
 Intel ISL's MiDaS / DPT depth-estimation family. Two registrations driven by

@@ -3213,7 +3213,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt128 => AsUInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
             DataKind.Int128 => AsInt128().ToString(System.Globalization.CultureInfo.InvariantCulture),
             DataKind.String => IsInline
-                ? $"String[\"{System.Text.Encoding.UTF8.GetString(InlineUtf8Span)}\"]"
+                ? System.Text.Encoding.UTF8.GetString(InlineUtf8Span)
                 : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),

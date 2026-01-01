@@ -228,6 +228,80 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Test backend that declares <c>[Float64, Float64]</c> inputs and records
+    /// the actual <see cref="DataKind"/> + value of each input it sees. Lets
+    /// tests assert the operator's coercion at the model-call boundary
+    /// produces values whose kind matches the declared signature, not the
+    /// kind the SQL literal happened to bind to.
+    /// </summary>
+    private sealed class Float64ProbeModel : DatumIngest.Models.IModel
+    {
+        public List<(DataKind kind, double value)> SeenArg0 { get; } = new();
+        public List<(DataKind kind, double value)> SeenArg1 { get; } = new();
+        public string Name => "float64_probe";
+        public bool IsDeterministic => true;
+        public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.Float64, DataKind.Float64];
+        public DataKind OutputKind => DataKind.Float64;
+
+        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+            CancellationToken cancellationToken)
+        {
+            _ = overrides;
+            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            for (int row = 0; row < inputs.Count; row++)
+            {
+                DatumIngest.Functions.ValueRef a = inputs[row][0];
+                DatumIngest.Functions.ValueRef b = inputs[row][1];
+                SeenArg0.Add((a.Kind, a.AsFloat64()));
+                SeenArg1.Add((b.Kind, b.AsFloat64()));
+                outputs[row] = DatumIngest.Functions.ValueRef.FromFloat64(a.AsFloat64() + b.AsFloat64());
+            }
+            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+        }
+    }
+
+    /// <summary>
+    /// Integer literals in SQL bind to the smallest integer kind that fits
+    /// (Int16 for <c>300</c>); when a model declares Float64 inputs, the
+    /// operator must auto-widen at the call boundary so the model's
+    /// <c>AsFloat64()</c> accessor doesn't throw "Cannot read Int16 as Float64".
+    /// Verifies both kind (Float64 reaches the model) and value (no
+    /// truncation through the conversion).
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_NumericLiteralsCoerceToDeclaredFloat64InputKind()
+    {
+        Float64ProbeModel probe = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "float64_probe",
+            Backend: "test",
+            RelativePath: null,
+            InputKinds: [DataKind.Float64, DataKind.Float64],
+            OutputKind: DataKind.Float64,
+            IsDeterministic: true,
+            Loader: _ => probe));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["id"],
+            new object?[] { 1 });
+        catalog.Models = modelCatalog;
+
+        List<Row> result = await ExecuteQueryAsync(
+            "SELECT models.float64_probe(300, 300) FROM t", catalog);
+
+        Assert.Single(result);
+        Assert.Single(probe.SeenArg0);
+        Assert.Equal(DataKind.Float64, probe.SeenArg0[0].kind);
+        Assert.Equal(DataKind.Float64, probe.SeenArg1[0].kind);
+        Assert.Equal(300.0, probe.SeenArg0[0].value);
+        Assert.Equal(300.0, probe.SeenArg1[0].value);
+    }
+
+    /// <summary>
     /// LIMIT N above a model invocation must invoke the model EXACTLY N times,
     /// not "process the whole upstream batch and let LIMIT discard the rest."
     /// For expensive operators (LLMs) the latter is a real cost regression.

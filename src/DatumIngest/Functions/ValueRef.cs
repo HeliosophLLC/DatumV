@@ -605,6 +605,28 @@ public readonly struct ValueRef
     public bool TryToDouble(out double result) => _inline.TryToDouble(out result);
 
     /// <summary>
+    /// Widens any numeric scalar to <see cref="float"/>. Returns
+    /// <see langword="false"/> for non-numeric kinds or null values.
+    /// Mirrors <see cref="DataValue.TryToFloat"/>.
+    /// </summary>
+    public bool TryToFloat(out float result) => _inline.TryToFloat(out result);
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="long"/>; floats truncate.
+    /// Returns <see langword="false"/> for non-numeric kinds or null values.
+    /// Mirrors <see cref="DataValue.TryToInt64"/>.
+    /// </summary>
+    public bool TryToInt64(out long result) => _inline.TryToInt64(out result);
+
+    /// <summary>
+    /// Coerces any numeric scalar to <see cref="int"/>; floats truncate and
+    /// out-of-range values overflow silently.
+    /// Returns <see langword="false"/> for non-numeric kinds or null values.
+    /// Mirrors <see cref="DataValue.TryToInt32"/>.
+    /// </summary>
+    public bool TryToInt32(out int result) => _inline.TryToInt32(out result);
+
+    /// <summary>
     /// Coerces any numeric scalar to <see cref="float"/>. Throws for null or
     /// non-numeric kinds. Mirrors <see cref="DataValue.ToFloat"/>.
     /// </summary>

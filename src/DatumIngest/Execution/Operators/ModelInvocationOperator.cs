@@ -289,7 +289,8 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
                     for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)
                     {
-                        rowInputs[argIdx] = await evaluator.EvaluateAsValueRefAsync(_inputExpressions[argIdx], frame, context.CancellationToken).ConfigureAwait(false);
+                        ValueRef raw = await evaluator.EvaluateAsValueRefAsync(_inputExpressions[argIdx], frame, context.CancellationToken).ConfigureAwait(false);
+                        rowInputs[argIdx] = CoerceToDeclaredKind(raw, model.InputKinds[argIdx], _modelName, argIdx);
                     }
                     inputs[chunkRowIdx] = rowInputs;
 
@@ -496,4 +497,38 @@ public sealed class ModelInvocationOperator : IQueryOperator
         return [rowOutput];
     }
 
+    /// <summary>
+    /// If the freshly-evaluated argument's kind doesn't match what the model
+    /// declared, widen numeric scalars to the declared kind. SQL literals
+    /// like <c>300</c> bind to the smallest integer kind that fits (Int16
+    /// here) — without this step, calling <c>models.X(image, 300, 300)</c>
+    /// against a model that declares <c>[Image, Float64, Float64]</c> would
+    /// throw "Cannot read Int16 as Float64" deep inside the model's accessor.
+    /// Treats every numeric→numeric widening as implicit (mirrors SQL's
+    /// usual numeric promotion rules); non-numeric kind mismatches still
+    /// throw — those are genuine signature errors, not type-tightening.
+    /// </summary>
+    private static ValueRef CoerceToDeclaredKind(
+        ValueRef value, DataKind declaredKind, string modelName, int argIdx)
+    {
+        if (value.IsNull) return value;
+        if (value.Kind == declaredKind) return value;
+
+        switch (declaredKind)
+        {
+            case DataKind.Float64 when value.TryToDouble(out double d):
+                return ValueRef.FromFloat64(d);
+            case DataKind.Float32 when value.TryToFloat(out float f):
+                return ValueRef.FromFloat32(f);
+            case DataKind.Int64 when value.TryToInt64(out long i64):
+                return ValueRef.FromInt64(i64);
+            case DataKind.Int32 when value.TryToInt32(out int i32):
+                return ValueRef.FromInt32(i32);
+        }
+
+        throw new InvalidOperationException(
+            $"Model '{modelName}' argument {argIdx} expects {declaredKind} but the call site supplies {value.Kind}; "
+            + "no implicit conversion is defined for this kind pair. "
+            + "Cast the value explicitly (e.g. CAST(x AS DOUBLE)) or fix the call to pass the right type.");
+    }
 }
