@@ -261,6 +261,26 @@
   #sidebar .tree-children .tree-node {
     padding-left: 28px;
   }
+  /* Floating signature popover for function-like tree nodes (UDFs,
+     Procedures, built-in Functions). Replaces the browser-native `title`
+     attribute hover so we get instant, styled, full-text display.
+     Positioned via JS (fixed) and removed on mouseleave. */
+  .tree-node-popover {
+    position: fixed;
+    z-index: 1000;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    white-space: pre-wrap;
+    max-width: 480px;
+    pointer-events: none;
+  }
   #sidebar .empty-state {
     color: var(--muted); font-size: 12px;
     padding: 12px;
@@ -3778,8 +3798,7 @@
     for (const r of rows) {
       container.appendChild(renderTreeNode({
         name: r.name,
-        meta: r.parameters ? truncate(r.parameters, 24) : '()',
-        title: `${r.name}(${r.parameters || ''})`,
+        popover: `${r.name}(${r.parameters || ''})`,
         onContextMenu: (e) => openUdfContextMenu(e, r),
       }));
     }
@@ -3796,8 +3815,7 @@
     for (const r of rows) {
       container.appendChild(renderTreeNode({
         name: r.name,
-        meta: r.parameters ? truncate(r.parameters, 24) : '()',
-        title: `${r.name}(${r.parameters || ''})`,
+        popover: `${r.name}(${r.parameters || ''})`,
         onContextMenu: (e) => openProcedureContextMenu(e, r),
       }));
     }
@@ -3820,7 +3838,7 @@
       container.appendChild(renderTreeNode({
         name: f.name,
         meta: f.category || '',
-        title: `${sig}${f.returnType ? ' → ' + f.returnType : ''}`,
+        popover: `${sig}${f.returnType ? ' → ' + f.returnType : ''}`,
         onContextMenu: (e) => openFunctionContextMenu(e, f),
       }));
     }
@@ -3850,15 +3868,20 @@
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
   }
 
-  function renderTreeNode({ name, meta, title, onContextMenu }) {
+  function renderTreeNode({ name, meta, title, popover, onContextMenu }) {
     const node = document.createElement('div');
     node.className = 'tree-node';
-    if (title) node.title = title;
+    // The browser-native `title` attribute is slow and visually
+    // inconsistent. For nodes that pass `popover`, we render a styled
+    // floating element instead. Plain `title` is still used for nodes
+    // that don't opt in.
+    if (title && !popover) node.title = title;
     node.innerHTML = `
       <span class="twisty"></span>
       <span class="name">${escapeHtml(name)}</span>
       ${meta ? `<span class="meta">${escapeHtml(meta)}</span>` : ''}
     `;
+    if (popover) attachTreeNodePopover(node, popover);
     if (onContextMenu) {
       node.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -3866,6 +3889,46 @@
       });
     }
     return node;
+  }
+
+  // Attach a hover popover to a tree node. The popover is created on
+  // mouseenter, positioned to the right of the node (or left/below if
+  // it would overflow), and removed on mouseleave.
+  function attachTreeNodePopover(node, text) {
+    let popoverEl = null;
+    const remove = () => {
+      if (popoverEl) {
+        popoverEl.remove();
+        popoverEl = null;
+      }
+    };
+    node.addEventListener('mouseenter', () => {
+      remove();
+      popoverEl = document.createElement('div');
+      popoverEl.className = 'tree-node-popover';
+      popoverEl.textContent = text;
+      document.body.appendChild(popoverEl);
+      const nodeRect = node.getBoundingClientRect();
+      const popRect = popoverEl.getBoundingClientRect();
+      const margin = 8;
+      // Prefer to the right of the sidebar node; flip below if the
+      // popover would overflow the viewport horizontally.
+      let left = nodeRect.right + margin;
+      let top = nodeRect.top;
+      if (left + popRect.width > window.innerWidth - margin) {
+        left = Math.max(margin, nodeRect.left);
+        top = nodeRect.bottom + 4;
+      }
+      if (top + popRect.height > window.innerHeight - margin) {
+        top = Math.max(margin, window.innerHeight - popRect.height - margin);
+      }
+      popoverEl.style.left = left + 'px';
+      popoverEl.style.top = top + 'px';
+    });
+    node.addEventListener('mouseleave', remove);
+    // Defensive: if the node is detached (e.g. sidebar refresh) while
+    // the popover is up, drop it on the next tick.
+    node.addEventListener('mousedown', remove);
   }
 
   // Runs an introspection query against /api/query and returns the rows as
