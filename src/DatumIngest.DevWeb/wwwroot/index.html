@@ -2412,20 +2412,36 @@
     const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
     const results = resultsPaneEl(groupEl);
     const elapsed = elapsedEl(groupEl);
-    // Revoke any media object URLs from the previous render in this
-    // pane — the upcoming innerHTML wipe detaches the elements, but the
-    // underlying blobs would remain pinned until the page unloads otherwise.
-    revokeMediaObjectUrls();
+    // Revoke only THIS group's previous URLs. With two panes rendering
+    // concurrently, a global revoke would kill the other group's
+    // just-created URLs.
+    revokeMediaObjectUrlsForGroup(group.id);
     results.innerHTML = '';
     elapsed.textContent = '';
     if (!tab) return;
+
+    // The mediaUrlCollector swap below keeps blob-URL ownership pinned to
+    // this group across the synchronous render call chain (renderResult →
+    // renderCell → dataB64ToBlobUrl). We wrap each render entry-point
+    // because awaiting IDB in this function would otherwise let a sibling
+    // group's render clobber the collector before our sync work runs.
+    let groupUrls = mediaObjectUrlsByGroup.get(group.id);
+    if (!groupUrls) {
+      groupUrls = [];
+      mediaObjectUrlsByGroup.set(group.id, groupUrls);
+    }
+    const renderWithCollector = (fn) => {
+      const prev = mediaUrlCollector;
+      mediaUrlCollector = groupUrls;
+      try { fn(); } finally { mediaUrlCollector = prev; }
+    };
 
     // If THIS tab has an in-flight query, render the streaming view from
     // the per-tab accumulator (rebuild chunks / partial rows so the user
     // can see progress on switch-back). The live ticker resumes painting
     // on its next 250ms tick once the tab is the active tab in this group.
     if (tab.running && tab.runningRes) {
-      renderRunningTab(tab, results);
+      renderWithCollector(() => renderRunningTab(tab, results));
       return;
     }
 
@@ -2471,7 +2487,7 @@
       results.appendChild(meta);
       return;
     }
-    renderResult(tab.lastResult, results);
+    renderWithCollector(() => renderResult(tab.lastResult, results));
     const r = tab.lastResult;
     if (!r.error) {
       const rowText = `${r.rowCount} ${r.rowCount === 1 ? 'row' : 'rows'}`;
@@ -2653,24 +2669,37 @@
   // we can revoke them on the next render — without revocation the browser
   // would hold the underlying blobs alive indefinitely (a few MB per image
   // adds up across runs).
-  let mediaObjectUrls = [];
-  function revokeMediaObjectUrls() {
-    for (const u of mediaObjectUrls) URL.revokeObjectURL(u);
-    mediaObjectUrls = [];
+  // Per-group URL tracking. With two panes rendering concurrently, a
+  // single global list led group B's render to revoke group A's
+  // freshly-created blob URLs out from under group A's <img> elements,
+  // leaving them blank while the byte-count caption survived. Each
+  // group now owns its own URL list.
+  const mediaObjectUrlsByGroup = new Map();
+  // The collector array dataB64ToBlobUrl pushes into. Callers that
+  // render media cells set this to the right group's list immediately
+  // before the synchronous rendering call and restore it after. Using
+  // a module-level flag works only because the cell-rendering call
+  // chain (renderResult → renderCell → dataB64ToBlobUrl) is fully
+  // synchronous; no await separates the assignment from the use.
+  let mediaUrlCollector = null;
+  function revokeMediaObjectUrlsForGroup(groupId) {
+    const list = mediaObjectUrlsByGroup.get(groupId);
+    if (!list) return;
+    for (const u of list) URL.revokeObjectURL(u);
+    mediaObjectUrlsByGroup.set(groupId, []);
   }
 
   // Decode base64 → Blob → object URL. Used in place of `data:` URLs for
   // image / audio / video cells: blob URLs aren't subject to Chromium's
   // ~2 MB URL-length limit, so right-click "Open image in new tab" works
-  // reliably regardless of the image's encoded size. Returned URLs are
-  // tracked in `mediaObjectUrls` and revoked on the next render.
+  // reliably regardless of the image's encoded size.
   function dataB64ToBlobUrl(b64, mime) {
     const bin = atob(b64);
     const len = bin.length;
     const arr = new Uint8Array(len);
     for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
     const url = URL.createObjectURL(new Blob([arr], { type: mime }));
-    mediaObjectUrls.push(url);
+    if (mediaUrlCollector) mediaUrlCollector.push(url);
     return url;
   }
 
