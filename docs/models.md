@@ -286,20 +286,37 @@ through one model class.
   LIMIT 5;
   ```
 
-### `mobilesam_prompted` — point-prompted segmentation
+### `mobilesam_prompted`, `mobilesam` — point-prompted and "everything" segmentation
 
-Meta's Segment Anything (TinyViT-distilled MobileSAM variant) wired as
-**prompted** segmentation: feed an image plus an `(x, y)` point in the
-image and the model returns a binary mask of whatever object that point
-sits on. Where U²-Net guesses the salient object for you, MobileSAM lets
-you say "segment *this thing here*" — useful for cutting a specific
-subject out of a photo with several candidates, or scripting a multi-step
-pipeline that picks coordinates from another model (face-detector → SAM
-on the face-box centre, etc.).
+Meta's Segment Anything (TinyViT-distilled MobileSAM variant). Two
+sibling registrations driven by the same `MobileSamModel` class:
 
-- **What it does**: Takes `(image, x, y)`, returns an `Image` whose
-  white pixels are the segmented object and black pixels are everything
-  else. Mask is sized to match the input image. Equal-channel RGBA
+| Catalog name | SQL surface | Output |
+|---|---|---|
+| `mobilesam_prompted` | `models.mobilesam_prompted(image, x, y)` | `Image` — one mask of the object that contains the click |
+| `mobilesam` | `models.mobilesam(image, [gridSize])` | `Array<Image>` — one mask per object the model finds |
+
+Where U²-Net guesses the salient object for you, MobileSAM-prompted
+lets you say "segment *this thing here*" — useful for cutting a
+specific subject out of a photo with several candidates, or scripting a
+multi-step pipeline that picks coordinates from another model
+(face-detector → SAM on the face-box centre, etc.). MobileSAM-everything
+sweeps the image with a grid of prompts and returns every distinct
+object it finds, suitable for building a per-photo segment library.
+
+- **What it does**:
+  - **`mobilesam_prompted(image, x, y)`** — returns a single `Image`
+    whose white pixels are the segmented object containing the click and
+    black pixels are everything else.
+  - **`mobilesam(image, [gridSize])`** — sweeps a `gridSize × gridSize`
+    grid of foreground prompts across the image, runs the decoder for
+    each, drops low-confidence and unstable candidates, NMS-deduplicates
+    the rest, and returns the survivors as `Array<Image>`. Default
+    `gridSize` is **32** (1024 prompts, the SAM canonical default);
+    pass a smaller value for faster batches at the cost of missing
+    small objects.
+
+  Each mask is sized to match the input image. Equal-channel RGBA
   matches the U²-Net mask convention so the same `image_cutout(image,
   mask)` consumer applies.
 - **License**: Apache-2.0 (Meta AI / Kyung Hee University)
@@ -340,14 +357,26 @@ on the face-box centre, etc.).
   keeps the encoder's view and the decoder's view aligned.
 - **Memory**: encoder pass dominates (~150 MB of intermediate
   activations on a 1024-square padded input); decoder is comparatively
-  cheap. One encoder forward per row — no batching across rows since
-  each row has its own image. Two ONNX sessions stay resident for the
-  catalog entry's lifetime (~45 MB of weights total).
-- **Demo**:
+  cheap. One encoder forward per row; everything-mode adds `gridSize²`
+  decoder dispatches per row on top. Two ONNX sessions stay resident for
+  the catalog entry's lifetime (~45 MB of weights total).
+- **Cost (everything mode)**: encoder once, decoder `gridSize²` times.
+  At the default `gridSize=32` that's ~1024 decoder dispatches per
+  image, ~3-5 seconds on CPU. `gridSize=16` cuts that to ~250ms but
+  misses small objects; `gridSize=8` is fast enough for interactive
+  use but only finds large salient regions. Everything-mode also sets
+  `PreferredBatchSize=1` so multi-row queries surface results
+  row-by-row instead of waiting for the full upstream batch.
+- **Quality filters (everything mode)**: SAM canonical defaults baked
+  in — predicted-IoU ≥ 0.88, stability score ≥ 0.95 (IoU between mask
+  thresholded at +δ vs −δ with δ=1.0), NMS overlap threshold 0.7. Not
+  exposed as overrides today; tweak the consts in `MobileSamModel` if
+  needed.
+- **Demos**:
   ```sql
-  -- Cut a face out of a photo using SCRFD's bounding-box centre as
-  -- the SAM prompt. The output is just the face region; everything
-  -- else is masked away.
+  -- Prompted: cut a face out of a photo using SCRFD's bounding-box
+  -- centre as the SAM prompt. The output is just the face region;
+  -- everything else is masked away.
   SELECT
     photo_id,
     image_cutout(
@@ -360,10 +389,21 @@ on the face-box centre, etc.).
   CROSS APPLY UNNEST(models.scrfd_10g(photo)) AS face
   LIMIT 5;
 
-  -- Or with a hand-picked coordinate when you know what's in the frame.
+  -- Everything mode: one row per detected segment, ~5-30 segments per
+  -- photo at the default grid size.
   SELECT
     photo_id,
-    models.mobilesam_prompted(photo, 320, 240) AS mask
+    ord                              AS segment_index,
+    image_cutout(photo, mask)        AS object_only
+  FROM photos
+  CROSS APPLY UNNEST(models.mobilesam(photo)) WITH ORDINALITY AS m(mask, ord)
+  LIMIT 50;
+
+  -- Faster sweep with a smaller grid: 8×8 = 64 prompts instead of
+  -- 1024. Misses small objects but finishes in a fraction of a second.
+  SELECT
+    photo_id,
+    models.mobilesam(photo, 8) AS masks
   FROM photos LIMIT 5;
   ```
 

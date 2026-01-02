@@ -651,6 +651,21 @@
   }
   table.results td audio { width: 360px; display: block; }
   table.results td .blob { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  /* Array<Image> cells render as a flex grid of thumbnails. Each thumbnail
+     is fixed-size, object-fit:cover for crop-to-square, and clickable for
+     the lightbox. Width caps at 480px so 6-image cells wrap to 3×2 (or
+     more rows if the elements are smaller). */
+  table.results td .media-array {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    max-width: 480px;
+  }
+  table.results td .media-array img {
+    width: 96px; height: 96px;
+    max-width: none; max-height: none;
+    object-fit: cover;
+    background: #000; border-radius: 4px;
+    cursor: zoom-in;
+  }
   table.results td pre.json {
     background: var(--panel-2);
     border-left: 2px solid var(--accent);
@@ -2892,6 +2907,29 @@
       td.classList.add('null');
       td.textContent = 'NULL';
       addCopyButton(td, () => 'NULL');
+      return td;
+    }
+    // Array<Image> cell: emit one <img> per element in a flex grid. Each
+    // thumbnail is independently clickable for the lightbox. Items are
+    // {mime, dataB64} pairs; we currently only construct image arrays
+    // server-side, but the loop tolerates other mimes by skipping them.
+    if (cell.kind === 'media_array' && Array.isArray(cell.items)) {
+      const grid = document.createElement('div');
+      grid.className = 'media-array';
+      for (const item of cell.items) {
+        if (!item || !item.mime || !item.mime.startsWith('image/')) continue;
+        const url = dataB64ToBlobUrl(item.dataB64, item.mime);
+        const img = document.createElement('img');
+        img.src = url; img.alt = '';
+        img.title = 'Click to expand';
+        img.addEventListener('click', () => openImageLightbox(url));
+        grid.appendChild(img);
+      }
+      td.appendChild(grid);
+      const note = document.createElement('div');
+      note.className = 'blob';
+      note.textContent = `${cell.items.length} ${cell.items.length === 1 ? 'image' : 'images'}`;
+      td.appendChild(note);
       return td;
     }
     if (cell.kind === 'media' && cell.mime) {

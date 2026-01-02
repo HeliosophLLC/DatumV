@@ -82,6 +82,7 @@ public static class BuiltinModels
         RegisterMidasSmall(modelCatalog);
         RegisterDptLarge(modelCatalog);
         RegisterMobileSamPrompted(modelCatalog);
+        RegisterMobileSam(modelCatalog);
         RegisterViTGpt2Caption(modelCatalog);
 
         // Captioner zoo — Florence-2 in three caption styles plus a
@@ -1676,9 +1677,66 @@ public static class BuiltinModels
             {
                 string encoderPath = Path.Combine(ctx.ModelDirectory, encoderFilename);
                 string decoderPath = Path.Combine(ctx.ModelDirectory, decoderFilename);
-                return new MobileSamModel(modelName, encoderPath, decoderPath);
+                return new MobileSamModel(modelName, encoderPath, decoderPath, MobileSamMode.Prompted);
             },
             DisplayName: "MobileSAM (prompted segmentation)",
+            Parameters: "9.7M",
+            License: "Apache-2.0",
+            LicenseHolder: "Meta AI / Kyung Hee University",
+            SourceUrl: "https://github.com/ChaoningZhang/MobileSAM",
+            Category: "segmenter",
+            Modalities: ["image"],
+            Files: [encoderFilename, decoderFilename]));
+    }
+
+    /// <summary>
+    /// Registers MobileSAM "everything" segmentation under the catalog
+    /// name <paramref name="modelName"/> (defaults to <c>"mobilesam"</c>).
+    /// SQL surface: <c>models.mobilesam(image, [gridSize]) →
+    /// Array&lt;Image&gt;</c> — one binary mask per object the model
+    /// finds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sweeps a <c>gridSize × gridSize</c> grid of foreground prompts
+    /// across the image (<c>32 × 32 = 1024</c> prompts at the default),
+    /// runs the decoder per prompt, drops candidates with low predicted
+    /// IoU or low stability, and NMS-deduplicates the survivors.
+    /// </para>
+    /// <para>
+    /// <strong>Cost.</strong> Encoder runs once per image; decoder runs
+    /// <c>gridSize²</c> times. ~3-5 seconds per image on CPU at the
+    /// default. Pass a smaller grid (<c>models.mobilesam(image, 16)</c>)
+    /// for ~4× faster batches at the cost of missing small objects.
+    /// </para>
+    /// </remarks>
+    public static void RegisterMobileSam(
+        ModelCatalog catalog,
+        string modelName = "mobilesam",
+        string encoderFilename = MobileSamEncoderFilename,
+        string decoderFilename = MobileSamMaskDecoderMultiFilename,
+        int defaultGridSize = 32)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: encoderFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string encoderPath = Path.Combine(ctx.ModelDirectory, encoderFilename);
+                string decoderPath = Path.Combine(ctx.ModelDirectory, decoderFilename);
+                return new MobileSamModel(
+                    modelName, encoderPath, decoderPath,
+                    MobileSamMode.Everything, defaultGridSize);
+            },
+            // Per-call hyperparameter overrides:
+            //   [0] gridSize (Int32) — grid side length for the prompt
+            //   sweep; the model does gridSize² decoder dispatches per row.
+            OptionalArgKinds: [DataKind.Int32],
+            DisplayName: "MobileSAM (everything segmentation)",
             Parameters: "9.7M",
             License: "Apache-2.0",
             LicenseHolder: "Meta AI / Kyung Hee University",

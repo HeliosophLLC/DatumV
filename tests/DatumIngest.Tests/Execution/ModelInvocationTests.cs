@@ -302,6 +302,129 @@ public sealed class ModelInvocationTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Synthetic model that returns <c>Array&lt;Image&gt;</c> — N tiny
+    /// solid-colour PNGs per row, with N taken from the input column. Used
+    /// to exercise the engine's array-of-image output path without
+    /// needing the real MobileSAM ONNX files. MobileSAM is the first
+    /// engine consumer of <c>Array&lt;Image&gt;</c>; this probe pins the
+    /// path so a regression in
+    /// <c>ValueRef.ToDataValue → BuildImageArray</c> or the operator's
+    /// scatter step shows up in fast unit tests rather than only in the
+    /// model-files-required MobileSAM smoke tests.
+    /// </summary>
+    private sealed class ImageArrayProbeModel : DatumIngest.Models.IModel
+    {
+        public string Name => "image_array_probe";
+        public bool IsDeterministic => true;
+        public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.Int32];
+        public DataKind OutputKind => DataKind.Image;
+
+        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+            CancellationToken cancellationToken)
+        {
+            _ = overrides;
+            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            for (int row = 0; row < inputs.Count; row++)
+            {
+                int count = inputs[row][0].AsInt32();
+                DatumIngest.Functions.ValueRef[] images = new DatumIngest.Functions.ValueRef[count];
+                for (int i = 0; i < count; i++)
+                {
+                    SkiaSharp.SKBitmap bmp = new(
+                        16, 16,
+                        SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Opaque);
+                    bmp.Erase(new SkiaSharp.SKColor(
+                        red: (byte)(row * 30 + i * 7),
+                        green: 128,
+                        blue: 64));
+                    images[i] = DatumIngest.Functions.ValueRef.FromImage(bmp);
+                }
+                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(DataKind.Image, images);
+            }
+            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+        }
+    }
+
+    /// <summary>
+    /// End-to-end SQL through the model-invocation operator with an
+    /// <c>Array&lt;Image&gt;</c>-returning model: verifies the operator's
+    /// scatter step calls <c>ValueRef.ToDataValue</c> with the right
+    /// arena, the resulting <c>DataValue</c> survives in the per-query
+    /// arena past plan execution, and <c>AsImageArray</c> reads back
+    /// the encoded PNG bytes for every element. Without this test the
+    /// arena materialisation step for image arrays is uncovered —
+    /// MobileSAM-everything's <c>Array&lt;Image&gt;</c> output would be
+    /// the first time the path runs in production.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_ImageArrayModel_PersistsThroughArena()
+    {
+        ImageArrayProbeModel probe = new();
+        ModelCatalog modelCatalog = new(modelDirectory: System.IO.Path.GetTempPath());
+        modelCatalog.Register(new ModelCatalogEntry(
+            Name: "image_array_probe",
+            Backend: "test",
+            RelativePath: null,
+            InputKinds: [DataKind.Int32],
+            OutputKind: DataKind.Image,
+            IsDeterministic: true,
+            Loader: _ => probe));
+
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["count"],
+            new object?[] { 1 },   // 1-element array
+            new object?[] { 3 },   // 3-element array
+            new object?[] { 5 });  // 5-element array — exercises the multi-slot block path
+        catalog.Models = modelCatalog;
+
+        // Pass an explicit retention store. CollectRowsAsync (the test
+        // helper that drives the plan) stabilises every row's payload
+        // into context.Store so values survive past the producing
+        // RowBatch's arena being returned to the pool. Reads of arena-
+        // backed payloads must use that same store as the resolution
+        // arena, otherwise they walk into a freshly-pooled arena and
+        // throw "Arena[#N] has not been allocated".
+        Pool pool = GetService<Pool>();
+        Arena retention = pool.Backing.RentArena();
+        try
+        {
+            List<Row> rows = await ExecuteQueryAsync(
+                "SELECT count, models.image_array_probe(count) FROM t", catalog, store: retention);
+
+            Assert.Equal(3, rows.Count);
+
+            int[] expectedCounts = [1, 3, 5];
+            for (int r = 0; r < rows.Count; r++)
+            {
+                DataValue arrayValue = rows[r][1];
+                Assert.True(arrayValue.IsArray,
+                    $"row[{r}] result should be an array, got Kind={arrayValue.Kind}, IsArray={arrayValue.IsArray}.");
+                Assert.Equal(DataKind.Image, arrayValue.Kind);
+
+                byte[][] elements = arrayValue.AsImageArray(retention);
+                Assert.Equal(expectedCounts[r], elements.Length);
+
+                for (int i = 0; i < elements.Length; i++)
+                {
+                    Assert.True(elements[i].Length > 0,
+                        $"row[{r}].element[{i}] arena bytes are empty.");
+                    using SkiaSharp.SKBitmap decoded = SkiaSharp.SKBitmap.Decode(elements[i]);
+                    Assert.NotNull(decoded);
+                    Assert.Equal(16, decoded.Width);
+                    Assert.Equal(16, decoded.Height);
+                }
+            }
+        }
+        finally
+        {
+            pool.Backing.TryReturn(retention);
+        }
+    }
+
+    /// <summary>
     /// LIMIT N above a model invocation must invoke the model EXACTLY N times,
     /// not "process the whole upstream batch and let LIMIT discard the rest."
     /// For expensive operators (LLMs) the latter is a real cost regression.

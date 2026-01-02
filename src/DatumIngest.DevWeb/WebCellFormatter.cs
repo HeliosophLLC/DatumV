@@ -15,6 +15,25 @@ internal static class WebCellFormatter
             return new JsonCell("null");
         }
 
+        // Array<Image> → render as a row of thumbnails on the front-end, each
+        // independently clickable for the lightbox. Has to be checked before
+        // the single-blob branch below because Image + IsArray would otherwise
+        // hit the AsByteSpan path (which is single-blob only) and read garbage.
+        // Audio / Video arrays not currently constructed by any code path; if
+        // they show up later, add the matching AsAudioArray / AsVideoArray
+        // accessors in DataValue and extend this branch.
+        if (value.IsArray && value.Kind == DataKind.Image)
+        {
+            byte[][] elements = value.AsImageArray(arena, registry);
+            JsonMediaItem[] items = new JsonMediaItem[elements.Length];
+            for (int i = 0; i < elements.Length; i++)
+            {
+                byte[] bytes = elements[i];
+                items[i] = new JsonMediaItem(DetectImageMime(bytes), Convert.ToBase64String(bytes));
+            }
+            return new JsonCell("media_array", Items: items);
+        }
+
         // Image / Audio / Video → base64 data so the browser can render them.
         // The legacy byte-array column path (UInt8 + IsArray) carries image
         // payloads from older datasets; treat it as image media too.
