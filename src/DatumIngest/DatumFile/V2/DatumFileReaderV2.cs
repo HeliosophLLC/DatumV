@@ -48,8 +48,14 @@ public sealed class DatumFileReaderV2 : IDisposable
     /// </summary>
     public static DatumFileReaderV2 Open(string filePath)
     {
+        // FileShare.ReadWrite lets a concurrent writer hold the file
+        // open in append mode without blocking this reader. The reader
+        // captures a snapshot of the footer at open and is unaffected
+        // by subsequent writes — appending always lands past EOF and
+        // commits via tail flip, so existing bytes the reader is
+        // pointing at don't move.
         FileStream stream = new(
-            filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
             bufferSize: 65_536, FileOptions.RandomAccess);
         try
         {

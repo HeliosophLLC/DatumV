@@ -63,7 +63,10 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
 
         FooterPrologueV4 p = reader.Footer.Prologue;
         Assert.Equal(1UL, p.Generation);            // first write
-        Assert.Equal(0UL, p.WriterId);              // anonymous single-writer in PR1
+        // PR3+: WriterId is stamped from WriterIdentity.Default by every
+        // commit (initial-write or append). The exact value varies per
+        // process; we only require it's non-zero (Anonymous is reserved).
+        Assert.NotEqual(WriterIdentity.Anonymous, p.WriterId);
         Assert.Equal(0UL, p.BaseGeneration);        // no prior commit
         Assert.Equal(DatumFormatV2.TombstoneGranularityChapter, p.TombstoneGranularity);
         Assert.Equal(reader.Footer.Columns.Count, p.ColumnCount);

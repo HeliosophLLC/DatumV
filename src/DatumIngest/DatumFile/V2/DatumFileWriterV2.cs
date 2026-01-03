@@ -63,6 +63,27 @@ public sealed class DatumFileWriterV2 : IDisposable
     private ulong _existingGeneration;
     private bool _existingSidecarReferences;
 
+    // Tail CAS state. _baseTailBytes is the 8 bytes that occupied the
+    // tail position when the writer was opened; _baseTailPosition is
+    // the file offset where those bytes lived (the old EOF − 8 at open
+    // time). At commit, we re-read those bytes and verify they're
+    // still intact — a sanity check that no other writer slipped in
+    // between open and finalize. Single-writer-with-FileShare.Read
+    // guarantees this passes; multi-writer adds a meaningful retry
+    // path. Empty for fresh writes (Initialize path).
+    private byte[]? _baseTailBytes;
+    private long _baseTailPosition = -1;
+
+    /// <summary>
+    /// Identifier stamped into <see cref="FooterPrologueV4.WriterId"/>
+    /// on every commit this writer makes. Defaults to
+    /// <see cref="WriterIdentity.Default"/> — a process-stable mixed
+    /// pid/random value — so different runs of the same code don't
+    /// collide on the same id. Multi-writer workloads can override per
+    /// instance to attribute commits.
+    /// </summary>
+    public ulong WriterId { get; set; } = WriterIdentity.Default;
+
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
     /// path. If <paramref name="sidecarPath"/> is non-null a
@@ -79,11 +100,17 @@ public sealed class DatumFileWriterV2 : IDisposable
             Directory.CreateDirectory(directory);
         }
 
+        // FileShare.Read lets concurrent readers open the file while
+        // a writer holds it — they get a snapshot of whatever footer
+        // was last committed. Concurrent writers (in this or other
+        // processes) are excluded by the absence of FileShare.Write,
+        // so the OS-level file-share rules implement the writer-lock
+        // convention without a separate lock primitive.
         _stream = new FileStream(
             datumPath,
             FileMode.Create,
             FileAccess.ReadWrite,
-            FileShare.None,
+            FileShare.Read,
             bufferSize: 65_536,
             FileOptions.SequentialScan);
         _ownsStream = true;
@@ -231,6 +258,13 @@ public sealed class DatumFileWriterV2 : IDisposable
         if (!_initialized) throw new InvalidOperationException("Writer was never initialized.");
         if (_finalized) return;
 
+        // Tail-CAS sanity check (append mode only). Verifies the bytes
+        // at the tail position captured at OpenForAppend are still what
+        // we read — i.e., no other writer slipped in. Throws on
+        // mismatch so the caller can rebase. No-op on initial-write
+        // path because there's no base tail to compare against.
+        VerifyBaseTailUnchanged();
+
         // Flush trailing partial pages.
         for (int colIndex = 0; colIndex < _columns!.Length; colIndex++)
         {
@@ -276,13 +310,14 @@ public sealed class DatumFileWriterV2 : IDisposable
         // Build the prologue: initial write starts at generation 1;
         // append bumps the existing generation and records the prior
         // value as baseGeneration so future MVCC layers can trace
-        // commit lineage.
+        // commit lineage. WriterId is stamped on every commit (default
+        // process-stable, configurable per instance).
         FooterPrologueV4 prologue;
         if (_isAppend)
         {
             prologue = new FooterPrologueV4(
                 Generation: _existingGeneration + 1,
-                WriterId: 0,                        // PR3 stamps a real id
+                WriterId: WriterId,
                 BaseGeneration: _existingGeneration,
                 TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
                 ColumnCount: _columns.Length,
@@ -291,7 +326,14 @@ public sealed class DatumFileWriterV2 : IDisposable
         }
         else
         {
-            prologue = FooterPrologueV4.InitialFor(_columns.Length);
+            prologue = new FooterPrologueV4(
+                Generation: 1,
+                WriterId: WriterId,
+                BaseGeneration: 0,
+                TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
+                ColumnCount: _columns.Length,
+                FileTableEntries: Array.Empty<FileTableEntryV4>(),
+                ChapterTombstoneOffsets: Array.Empty<long>());
         }
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
@@ -391,11 +433,18 @@ public sealed class DatumFileWriterV2 : IDisposable
     {
         ArgumentNullException.ThrowIfNull(datumPath);
 
+        // FileShare.Read mirrors the initial-write path: concurrent
+        // readers see the last-committed footer; concurrent writers
+        // (this or other processes) are excluded because we omit
+        // FileShare.Write. This is the writer-lock convention from the
+        // v4 design — OS file-share rules serialize writers, no
+        // separate lock primitive needed for single-process or
+        // multi-process exclusion.
         FileStream stream = new(
             datumPath,
             FileMode.Open,
             FileAccess.ReadWrite,
-            FileShare.None,
+            FileShare.Read,
             bufferSize: 65_536,
             FileOptions.RandomAccess);
 
@@ -423,6 +472,13 @@ public sealed class DatumFileWriterV2 : IDisposable
             // create on Windows. Sequencing read-then-write resolves
             // the conflict cleanly.
             DatumFileWriterV2 writer = new(stream, sink: null, ownsStream: true, ownsSidecar: false);
+
+            // Snapshot the base tail bytes so FinalizeWriter can verify
+            // nobody else committed during this session. The check is
+            // passive under single-writer (FileShare.Read excludes
+            // other writers) but in place so multi-writer can later add
+            // a CAS retry path without changing the protocol.
+            writer.CaptureBaseTail(stream);
 
             // Rehydrate per-column writer state from the existing
             // footer. This sets _columns / _encoders / _pageDirectory /
@@ -647,6 +703,61 @@ public sealed class DatumFileWriterV2 : IDisposable
         // Fingerprint mismatches would surface as decoder errors during
         // partial-page rehydration if the sidecar were truly mismatched.
         return DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
+    }
+
+    /// <summary>
+    /// Captures the 8 bytes occupying the file's current tail position
+    /// at open time. Stored on the writer so <see cref="FinalizeWriter"/>
+    /// can verify nothing rewrote them between open and commit — a
+    /// sanity check that becomes a meaningful CAS retry path under
+    /// future multi-writer concurrency. Single-writer-with-FileShare.Read
+    /// always passes this check.
+    /// </summary>
+    private void CaptureBaseTail(Stream stream)
+    {
+        long position = stream.Length - DatumFormatV2.TailSize;
+        byte[] bytes = new byte[DatumFormatV2.TailSize];
+        stream.Position = position;
+        stream.ReadExactly(bytes);
+
+        _baseTailPosition = position;
+        _baseTailBytes = bytes;
+    }
+
+    /// <summary>
+    /// Verifies the bytes at <see cref="_baseTailPosition"/> still
+    /// match what we read at <see cref="OpenForAppend"/>. Throws
+    /// <see cref="InvalidOperationException"/> on mismatch — meaning
+    /// some other writer committed during this writer's session, the
+    /// file is no longer the one we based our work on, and the caller
+    /// must abort or rebase. In single-writer-with-FileShare.Read this
+    /// check is a passive guard; under future multi-writer it becomes
+    /// the CAS retry trigger.
+    /// </summary>
+    private void VerifyBaseTailUnchanged()
+    {
+        if (_baseTailBytes is null || _baseTailPosition < 0) return; // initial-write path
+
+        Span<byte> actual = stackalloc byte[DatumFormatV2.TailSize];
+        long savedPosition = _stream.Position;
+        try
+        {
+            _stream.Position = _baseTailPosition;
+            _stream.ReadExactly(actual);
+        }
+        finally
+        {
+            _stream.Position = savedPosition;
+        }
+
+        if (!actual.SequenceEqual(_baseTailBytes))
+        {
+            throw new InvalidOperationException(
+                "Base tail mismatch on commit: the bytes at the tail position captured at " +
+                "OpenForAppend have been rewritten since this writer opened. Another writer " +
+                "committed during this session — the file is no longer the one this commit was " +
+                "based on. Re-open the file and re-apply pending writes.");
+        }
     }
 
     /// <summary>
