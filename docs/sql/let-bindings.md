@@ -48,9 +48,28 @@ SELECT
 FROM customers
 ```
 
+## Filtering on a LET binding from WHERE
+
+Scalar and `models.*` LET bindings are referenceable from `WHERE`. The planner lifts each referenced binding into a hidden upstream rung so its value is on the row by the time the predicate evaluates — and that single evaluation is shared with the rest of the SELECT (no double-evaluation).
+
+```sql
+SELECT LET label = models.classifier(image), id, label
+FROM uploads
+WHERE label = 'cat'
+```
+
+Mixed bodies (a scalar function wrapping a model call) work too:
+
+```sql
+SELECT LET tagged = concat('USER:', upper(models.echo(name))), name, tagged
+FROM users
+WHERE tagged LIKE 'USER:A%'
+```
+
+Aggregate- or window-derived LET bindings cannot be referenced from `WHERE` — `WHERE` runs before grouping. Use `HAVING` for aggregates and `QUALIFY` for window functions; the planner emits a diagnostic naming the offending binding.
+
 ## Gotchas
 
-- **LET bindings are NOT visible in WHERE** -- WHERE runs before SELECT, so you cannot filter on a LET binding. Repeat the expression in the WHERE clause or use a subquery.
 - **SELECT * does NOT include LET bindings** -- even aliased ones. You must name each output column explicitly.
 - **Later LET bindings can reference earlier ones, but not the reverse** -- bindings are evaluated left to right. Referencing a binding that appears later is a parse error.
 
@@ -143,7 +162,7 @@ FROM data
 
 | Clause | Can reference LET bindings? | Notes |
 |---|---|---|
-| WHERE | No | Evaluated before SELECT |
+| WHERE | Yes (scalar / `models.*` only) | Aggregate- or window-derived bindings rejected with a diagnostic; use HAVING / QUALIFY |
 | JOIN ON | No | Evaluated before SELECT |
 | GROUP BY | — | LET expressions follow the same rules as SELECT expressions: must be aggregates or grouping keys |
 | HAVING | No | Evaluated before SELECT |

@@ -36,6 +36,34 @@ public static class ModelInvocationHoister
     public const string ModelNamespacePrefix = "models.";
 
     /// <summary>
+    /// Hoists every <c>models.*</c> call out of <paramref name="expression"/>
+    /// into <see cref="ModelInvocationOperator"/> rungs stacked above
+    /// <paramref name="source"/>, returning the new source root and a
+    /// rewritten expression in which each hoisted call has been replaced by a
+    /// <see cref="ColumnReference"/> to its synthesised hidden column.
+    /// Used by callers that need to extract model calls from a single
+    /// expression (e.g. the LET-from-WHERE lifter) without rewriting an
+    /// entire operator tree. Pure-scalar expressions return unchanged.
+    /// </summary>
+    public static (IQueryOperator NewSource, Expression Rewritten) HoistModelCallsFromExpression(
+        IQueryOperator source,
+        Expression expression,
+        ModelCatalog catalog)
+    {
+        ModelHoistCollector collector = new();
+        collector.Visit(expression);
+
+        if (collector.HoistedOrder.Count == 0)
+        {
+            return (source, expression);
+        }
+
+        IQueryOperator augmented = BuildMioStack(source, collector, catalog);
+        Expression rewritten = RewriteExpression(expression, collector.HoistedColumns);
+        return (augmented, rewritten);
+    }
+
+    /// <summary>
     /// Walks the operator tree rooted at <paramref name="op"/> and rewrites it
     /// so every <c>models.*</c> call inside reachable <see cref="ProjectOperator"/>
     /// expressions is hoisted into a <see cref="ModelInvocationOperator"/>.

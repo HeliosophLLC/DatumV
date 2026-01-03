@@ -3175,9 +3175,10 @@ public sealed class QueryPlanner
     /// Pure-scalar LET bodies become <see cref="RowEnricherOperator"/> rungs.
     /// LET bodies that are exactly a <c>models.*</c> call become
     /// <see cref="ModelInvocationOperator"/> rungs. Mixed bodies (scalar
-    /// expressions wrapping a model call) are out of scope for Phase 1 — the
-    /// existing model hoister can lift them later when run against the
-    /// projection.
+    /// expressions wrapping one or more model calls) extract the inner model
+    /// calls into upstream MIO rungs via
+    /// <see cref="ModelInvocationHoister.HoistModelCallsFromExpression"/>;
+    /// the residual scalar then runs in a <see cref="RowEnricherOperator"/>.
     /// </para>
     /// <para>
     /// Aggregate- or window-derived LET bodies are rejected with a clear
@@ -3306,6 +3307,17 @@ public sealed class QueryPlanner
                 }
                 else
                 {
+                    // Mixed-body case: a scalar expression that contains one
+                    // or more models.* calls. Extract them into upstream MIO
+                    // rungs first; the residual is a pure-scalar expression
+                    // that the Enricher can evaluate. Pure-scalar bodies
+                    // (no model calls) pass through unchanged.
+                    if (_catalog.Models is not null)
+                    {
+                        (source, rewrittenBody) =
+                            ModelInvocationHoister.HoistModelCallsFromExpression(
+                                source, rewrittenBody, _catalog.Models);
+                    }
                     enrichments.Add(new RowEnrichment(nameToSynth[n], rewrittenBody));
                 }
             }

@@ -117,6 +117,66 @@ public sealed class LetInWhereClauseTests : ServiceTestBase
         Assert.Equal("cat", rows[0]["label"].AsString());
     }
 
+    // ──────────────── Mixed scalar-around-model bodies in WHERE ────────────────
+
+    /// <summary>
+    /// A LET body that wraps a <c>models.*</c> call in a scalar function
+    /// (here, <c>upper(models.echo(name))</c>) is referenceable from WHERE.
+    /// Phase 1 originally deferred this — the lift step only handled bodies
+    /// that were exactly a <c>models.*</c> call, so a wrapped model call fell
+    /// into the scalar RowEnricher branch and threw at runtime (model
+    /// "functions" are markers without an Execute body). Phase 1 follow-up:
+    /// extract the inner <c>models.*</c> call into its own MIO rung first,
+    /// then evaluate the residual scalar in a RowEnricher.
+    /// </summary>
+    [Fact]
+    public async Task ScalarAroundModelLet_InWhere_FiltersCorrectly()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["name"],
+            new object?[] { "cat" },
+            new object?[] { "dog" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        // EchoModel passes input through; upper() converts to uppercase.
+        // Filter on the upper-cased echo output.
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET shouty_label = upper(models.echo(name)), name, shouty_label " +
+            "FROM t " +
+            "WHERE shouty_label = 'CAT'",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("cat", rows[0]["name"].AsString());
+        Assert.Equal("CAT", rows[0]["shouty_label"].AsString());
+    }
+
+    /// <summary>
+    /// Mixed body that combines a column reference, a literal, and a model
+    /// call: <c>concat('USER:', upper(models.echo(name)))</c>. Inner
+    /// <c>models.echo</c> hoists to its own MIO; the outer scalar runs as
+    /// a RowEnricher referencing the MIO's hidden column.
+    /// </summary>
+    [Fact]
+    public async Task ScalarAroundModelLet_WithLiteralAndColumn_InWhere_FiltersCorrectly()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["name"],
+            new object?[] { "alice" },
+            new object?[] { "bob" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET tagged = concat('USER:', upper(models.echo(name))), name, tagged " +
+            "FROM t " +
+            "WHERE tagged LIKE 'USER:A%'",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("alice", rows[0]["name"].AsString());
+        Assert.Equal("USER:ALICE", rows[0]["tagged"].AsString());
+    }
+
     // ──────────────── Single-evaluation guarantee ────────────────
 
     /// <summary>
