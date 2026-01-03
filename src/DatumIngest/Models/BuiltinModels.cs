@@ -100,6 +100,7 @@ public static class BuiltinModels
         // SDXL-Turbo is the higher-quality sibling for hero outputs.
         // Juggernaut XL Lightning is the high-realism alternative.
         RegisterSdTurbo(modelCatalog);
+        RegisterRealisticVisionHyper(modelCatalog);
         RegisterSdxlTurbo(modelCatalog);
         RegisterJuggernautXlLightning(modelCatalog);
 
@@ -1033,6 +1034,87 @@ public static class BuiltinModels
                 $"{folder}/unet/model.onnx_data",  // external-data file (UNet weights > 2GB ONNX limit)
                 $"{folder}/vae_decoder/model.onnx",
                 $"{folder}/vae_encoder/model.onnx",  // for img2img (not used by txt2img path)
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the Realistic Vision V6 + Hyper-SD diffusers ONNX layout.</summary>
+    public const string RealisticVisionHyperFolder = "realistic-vision-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for Realistic Vision V6 + Hyper-SD: the UNet
+    /// weights, ~865M params (same architecture as SD-Turbo / SD 2.1, but the
+    /// underlying weights are SG161222's Realistic Vision V6 finetune of SD 1.5
+    /// with ByteDance's Hyper-SD 4-step distillation LoRA fused in).
+    /// </summary>
+    public const string RealisticVisionHyperAnchor = RealisticVisionHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers Realistic Vision V6 (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"realistic_vision_hyper"</c>). Drop-in replacement for <c>sd_turbo</c>
+    /// at the same wall-clock cost (~250–330ms per 512×512 image at 4 steps),
+    /// trained on a narrower people-and-portraits distribution and distilled
+    /// via Hyper-SD's TSCD+RLHF pipeline. Preferred over SD-Turbo when the
+    /// prompt describes people or characters.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the
+    /// Realistic Vision V6 base and the Hyper-SD LoRA. See the model cards
+    /// at <a href="https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1_noVAE">SG161222/Realistic_Vision_V6.0_B1_noVAE</a>
+    /// and <a href="https://huggingface.co/ByteDance/Hyper-SD">ByteDance/Hyper-SD</a>
+    /// for the full terms.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout (single text
+    /// encoder, no <c>text_encoder_2/</c>) — same shape as SD-Turbo, paired
+    /// with sd-vae-ft-mse for the VAE.
+    /// </para>
+    /// </remarks>
+    public static void RegisterRealisticVisionHyper(
+        ModelCatalog catalog,
+        string modelName = "realistic_vision_hyper",
+        string folder = RealisticVisionHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "Realistic Vision V6 + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "SG161222 / ByteDance",
+            SourceUrl: "https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1_noVAE",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
                 $"{folder}/tokenizer/vocab.json",
                 $"{folder}/tokenizer/merges.txt",
                 $"{folder}/tokenizer/special_tokens_map.json",
