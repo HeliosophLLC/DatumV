@@ -24,29 +24,12 @@ public sealed class TrOcrModelTests : ServiceTestBase
     private static bool Fp32Available => File.Exists(Fp32EncoderPath);
     private static bool Fp16Available => File.Exists(Fp16EncoderPath);
 
-    /// <summary>
-    /// Some optimum-cli merged fp16 exports of trocr-base-printed have a
-    /// graph-validity bug ORT rejects at load time: the if/else subgraph
-    /// returns a `logits` outer-scope value directly instead of through
-    /// an Identity node. Probe once per process so dependent tests can
-    /// self-skip rather than crashing with the same opaque error.
-    /// </summary>
-    private static readonly Lazy<bool> Fp16Loadable = new(() =>
-    {
-        if (!Fp16Available) return false;
-        try
-        {
-            using TrOcrModel _ = new(
-                name: "trocr_printed_fp16",
-                encoderModelFilePath: Fp16EncoderPath,
-                decoderFileName: "decoder_model_merged_fp16.onnx");
-            return true;
-        }
-        catch (Microsoft.ML.OnnxRuntime.OnnxRuntimeException)
-        {
-            return false;
-        }
-    });
+    // Fp16 file-present is treated the same as fp32: tests self-skip
+    // when the file isn't installed (CI machines), but if the file is
+    // installed and ORT can't load it, that's a real test failure —
+    // we WANT it visible. The earlier wrap-in-try/catch made bad-file
+    // failures invisible (silent xUnit "passed" with no assertions
+    // ever running), which masked an actual broken patcher for hours.
 
     /// <summary>
     /// Renders a single line of black text on a white background. TrOCR
@@ -110,7 +93,7 @@ public sealed class TrOcrModelTests : ServiceTestBase
     [Fact]
     public void Load_RealTrOcrFp16_ExposesExpectedSignature()
     {
-        if (!Fp16Loadable.Value) return;
+        if (!Fp16Available) return;
 
         using TrOcrModel model = new(
             name: "trocr_printed_fp16",
@@ -279,7 +262,7 @@ public sealed class TrOcrModelTests : ServiceTestBase
     [Fact]
     public async Task InferBatch_Fp16_ReturnsWellFormedTranscription()
     {
-        if (!Fp16Loadable.Value) return;
+        if (!Fp16Available) return;
 
         Pool pool = GetService<Pool>();
         Arena inputArena = pool.Backing.RentArena();
@@ -344,7 +327,7 @@ public sealed class TrOcrModelTests : ServiceTestBase
     [Fact]
     public void Catalog_RegisterAndResolveFp16_YieldsTrOcrModel()
     {
-        if (!Fp16Loadable.Value) return;
+        if (!Fp16Available) return;
 
         ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
         BuiltinModels.RegisterTrOcrPrintedFp16(catalog);

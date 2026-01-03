@@ -179,6 +179,89 @@ is identical across all sizes.
   FROM family_photos LIMIT 5;
   ```
 
+### `ppocr_det_v4` — text detector (pairs with TrOCR)
+
+PaddleOCR's PP-OCRv4 detection model — DBNet++-style segmentation
+network that finds bounding boxes around lines of printed text.
+Detection only; pair with a recognizer like `trocr_printed` for a
+two-stage OCR pipeline.
+
+- **What it does**: Returns
+  `Array<Struct{label: String, score: Float32, x, y, w, h: Float32}>`.
+  `label` is always the constant `"text"` so output shares the leading
+  `(label, score, x, y, w, h)` shape with general-purpose detectors
+  (YOLOX, SCRFD). Boxes are sorted top-to-bottom, left-to-right
+  (natural reading order for receipt-style documents).
+- **License**: Apache-2.0 (PaddlePaddle)
+- **Source**: [github.com/PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
+  — upstream ships Paddle weights only. The practical download is
+  [RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR/releases),
+  which mirrors PaddleOCR's official ONNX export and tracks new
+  releases.
+- **Files**:
+  - `ch_PP-OCRv4_det.onnx` (~4.7 MB) — single ONNX file
+- **Setup**: download from a RapidOCR release into `$DATUM_MODELS`:
+  ```powershell
+  # Browse https://github.com/RapidAI/RapidOCR/releases for the
+  # current release URL; the filename is ch_PP-OCRv4_det.onnx
+  Invoke-WebRequest "<release-url>/ch_PP-OCRv4_det.onnx" `
+    -OutFile $env:DATUM_MODELS\ch_PP-OCRv4_det.onnx
+  ```
+- **Per-call overrides**:
+  - `[0] pixel_threshold` (Float64) — per-pixel sigmoid threshold for
+    the binary mask. Default `0.3`. Lower → more permissive, catches
+    faint text but produces more false positives.
+  - `[1] box_score_threshold` (Float64) — per-region mean-probability
+    threshold. Default `0.6`. Filters out blurry or partial text even
+    when the pixel mask is large.
+  - `[2] unclip_ratio` (Float64) — DBNet polygon-offset ratio. Default
+    `1.5`. Larger → boxes are dilated more, useful when the recognizer
+    needs extra margin around glyphs.
+- **Architecture**: DBNet++ — a U-Net-style backbone produces a
+  single-channel sigmoid probability map at the input resolution.
+  Postprocessing thresholds the map, runs BFS connected-components
+  (4-connectivity), accepts each component with mean probability ≥
+  `box_score_threshold` and tight bbox ≥ 3 px on each side, and
+  unclips each axis-aligned bbox by
+  `distance = area × unclip_ratio / perimeter` (DBNet's polygon-offset
+  formula reduced to the rectangle case). Boxes are then mapped back
+  to original-image coordinates by inverting the per-axis resize
+  ratio.
+- **Preprocessing**: aspect-preserving resize so the longer side is
+  at most 960 px, both dims rounded to nearest multiple of 32 (the
+  network's stride). ImageNet per-channel normalisation
+  (`mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]`), NCHW RGB
+  float32. The ONNX accepts dynamic spatial dims, so each image runs
+  at its own per-image shape — no fixed letterbox.
+- **Detect-only model.** This finds *where* the text is, not *what*
+  it says. For receipt-style transcription, pair with `trocr_printed`
+  / `trocr_printed_fp16` via `image_crop`:
+- **Demos**:
+  ```sql
+  -- Two-stage OCR: detect text boxes, recognize each one.
+  SELECT
+    receipt_id,
+    det.score AS detect_confidence,
+    models.trocr_printed_fp16(
+      image_crop(photo, det.x, det.y, det.w, det.h)) AS line
+  FROM receipts
+  CROSS APPLY UNNEST(models.ppocr_det_v4(photo)) AS det
+  WHERE det.score > 0.7
+  ORDER BY receipt_id, det.y, det.x;
+
+  -- Just the detector — visualise box counts per image.
+  SELECT
+    photo_id,
+    array_length(models.ppocr_det_v4(photo)) AS line_count
+  FROM scanned_pages;
+
+  -- Tighter detection (catch faint text on low-contrast scans).
+  SELECT
+    photo_id,
+    models.ppocr_det_v4(photo, 0.2, 0.5) AS boxes
+  FROM faded_documents;
+  ```
+
 ### `realesrgan_general_x4` — image super-resolution
 
 - **What it does**: 4× super-resolution. Takes an `Image` of any size,
@@ -585,19 +668,26 @@ one folder and one tokenizer:
   Move-Item $env:DATUM_MODELS\trocr-base-printed-fp16\*_fp16.onnx `
     $env:DATUM_MODELS\trocr-base-printed\
   ```
-- **fp16 decoder patch (required)**: some optimum-cli versions emit a
-  `decoder_model_merged_fp16.onnx` with a graph-validity issue ORT
-  rejects at load time:
+- **fp16 decoder patch (required)**: optimum-cli's merged fp16 export
+  has two structural bugs ORT rejects:
   > *Subgraph output (logits) is an outer scope value being returned
-  > directly. Please update the model to add an Identity node between
-  > the outer scope value and the subgraph output.*
+  > directly.*
+  > *Type Error: Type (tensor(float)) of output arg
+  > (graph_output_cast_1) … does not match expected type
+  > (tensor(float16)).*
 
-  Patch in place by running
-  [scripts/convert_decoder_model_merged_fp16.py](../scripts/convert_decoder_model_merged_fp16.py)
-  — wraps each `If`-subgraph output in an Identity node. The script
-  writes `decoder_model_merged_fp16_converted.onnx` next to the
-  original; rename it over the original so the registration picks it
-  up:
+  The subgraph's internal nodes already produce the right values
+  (named `graph_output_cast_<i>`, matching the If's outer outputs),
+  but the export wired the subgraph output declarations to outer-scope
+  names like `logits`, AND the internal values are fp32 while the
+  outer If output expects fp16. Patch in place by running
+  [scripts/convert_decoder_model_merged_fp16.py](../scripts/convert_decoder_model_merged_fp16.py),
+  which (a) renames each subgraph output declaration to point at the
+  matching internal `graph_output_cast_<i>` and (b) inserts a
+  `Cast(to=fp16)` between the internal value and the subgraph output.
+  The script is idempotent — safe to re-run if you re-export. It
+  writes `decoder_model_merged_fp16_converted.onnx`; rename it over
+  the original so the registration picks it up:
   ```powershell
   python ./scripts/convert_decoder_model_merged_fp16.py
   Move-Item -Force `
@@ -606,7 +696,7 @@ one folder and one tokenizer:
   ```
   (Adjust the source/destination paths in the script if your
   `$DATUM_MODELS` is elsewhere.) The fp32 decoder doesn't need this —
-  only the fp16 export hits the issue.
+  only the fp16 export hits the issues.
 - **Architecture**: ViT-base 384×384 (1 + 24×24 patches × 768 hidden)
   feeds a 12-layer RoBERTa decoder with cross-attention. Merged
   decoder runs in two modes: **prefill** (full input_ids = `[</s>]`,

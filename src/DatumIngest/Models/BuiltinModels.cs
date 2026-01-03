@@ -76,6 +76,7 @@ public static class BuiltinModels
         RegisterMobileNetV2(modelCatalog);
         RegisterAllYoloX(modelCatalog);  // 7 entries: nano/tiny/s/m/l/x/darknet
         RegisterScrfd10g(modelCatalog);
+        RegisterPpOcrDetV4(modelCatalog);
         RegisterRealesrganGeneralX4(modelCatalog);
         RegisterU2Net(modelCatalog);
         RegisterU2Netp(modelCatalog);
@@ -1466,6 +1467,78 @@ public static class BuiltinModels
             License: "MIT",
             LicenseHolder: "InsightFace",
             SourceUrl: "https://github.com/deepinsight/insightface/tree/master/detection/scrfd",
+            Category: "detector",
+            Modalities: ["image"],
+            Files: [modelFilename]));
+    }
+
+    // ──────────────────── PP-OCRv4 text detector (Apache-2.0) ────────────────────
+    //
+    // PaddleOCR's PP-OCRv4 detection model — DBNet++-style segmentation
+    // emitting per-line text bounding boxes. ~5 MB ONNX. Pairs with a
+    // recognizer (e.g. trocr_printed) to build a two-stage OCR pipeline.
+
+    /// <summary>
+    /// Default filename for the PP-OCRv4 detector ONNX (the
+    /// <c>ch_PP-OCRv4_det.onnx</c> file shipped by the RapidOCR project).
+    /// </summary>
+    public const string PpOcrDetV4DefaultFilename = "ch_PP-OCRv4_det.onnx";
+
+    /// <summary>
+    /// Registers PP-OCRv4-det under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"ppocr_det_v4"</c>).
+    /// Returns one detection-array per image; each element is a
+    /// <c>Struct{label="text", score, x, y, w, h}</c>. Designed to be
+    /// fed into a recognizer via <c>image_crop</c>:
+    /// <code>
+    /// SELECT models.trocr_printed_fp16(
+    ///          image_crop(photo, det.x, det.y, det.w, det.h)) AS line
+    /// FROM receipts
+    /// CROSS APPLY UNNEST(models.ppocr_det_v4(photo)) AS det
+    /// </code>
+    /// </summary>
+    /// <remarks>
+    /// Upstream is PaddlePaddle's
+    /// <a href="https://github.com/PaddlePaddle/PaddleOCR">PaddleOCR</a>;
+    /// the practical download is the
+    /// <a href="https://github.com/RapidAI/RapidOCR/releases">RapidOCR releases page</a>
+    /// which mirrors the official ONNX export. Apache-2.0 — fully
+    /// unencumbered for commercial use.
+    /// </remarks>
+    public static void RegisterPpOcrDetV4(
+        ModelCatalog catalog,
+        string modelName = "ppocr_det_v4",
+        string modelFilename = PpOcrDetV4DefaultFilename,
+        float pixelThreshold = 0.3f,
+        float boxScoreThreshold = 0.6f,
+        float unclipRatio = 1.5f)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: modelFilename,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Struct,
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
+                return new PpOcrDetectionModel(
+                    modelName, modelPath,
+                    pixelThreshold: pixelThreshold,
+                    boxScoreThreshold: boxScoreThreshold,
+                    unclipRatio: unclipRatio);
+            },
+            // Per-call hyperparameter overrides:
+            //   [0] pixel_threshold     (Float64) — per-pixel sigmoid threshold
+            //   [1] box_score_threshold (Float64) — per-region mean-prob threshold
+            //   [2] unclip_ratio        (Float64) — DBNet polygon-offset ratio
+            OptionalArgKinds: [DataKind.Float64, DataKind.Float64, DataKind.Float64],
+            DisplayName: "PP-OCRv4 Text Detector",
+            Parameters: "4.7M",
+            License: "Apache-2.0",
+            LicenseHolder: "PaddlePaddle",
+            SourceUrl: "https://github.com/PaddlePaddle/PaddleOCR",
             Category: "detector",
             Modalities: ["image"],
             Files: [modelFilename]));
