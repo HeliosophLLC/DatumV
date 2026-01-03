@@ -4,6 +4,8 @@
 
 The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It's **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade vs a heavily-compressed alternative is ~2–4× larger files; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
 
+The current on-disk format version is **`4`**. v4 added a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag — most as forward-compat hooks whose behaviors land in subsequent PRs (crash-safe append, soft-drop column, soft-delete rows, cross-file rewrite). Today's writer emits zero-valued passive defaults for all of them; readers parse them but never observe non-zero values from this PR's writer.
+
 Two optional companion sidecars extend the base format:
 
 - A companion [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics for query acceleration. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) variant provides memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
@@ -54,9 +56,9 @@ Two optional companion sidecars extend the base format:
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
 | 0 | 4 | Magic | bytes | `DTMF` (ASCII) |
-| 4 | 2 | FormatVersion | uint16 | `3` |
+| 4 | 2 | FormatVersion | uint16 | `4` |
 | 6 | 2 | Flags | uint16 | `DatumFileFlagsV2` bitmask (see below) |
-| 8 | 4 | ColumnCount | int32 | Number of columns in the schema |
+| 8 | 4 | ColumnCount | int32 | Informational in v4 — the footer prologue's `ColumnCount` is authoritative |
 | 12 | 4 | PageSize | int32 | Rows per page (default 1024) |
 | 16 | 8 | TotalRowCount | int64 | Patched at finalize |
 | 24 | 8 | FooterOffset | int64 | Absolute byte offset of the footer body, patched at finalize |
@@ -68,8 +70,10 @@ Two optional companion sidecars extend the base format:
 | `None` | 0 | No special flags |
 | `HasSidecarReferences` | 0x01 | At least one row spilled to the companion `.datum-blob`; the sidecar must be present at read time |
 | `HasVolumeZoneMaps` | 0x02 | Volume-level zone maps were emitted (file row count exceeded the 1 M-row threshold) |
+| `HasExternalPages` | 0x04 | At least one page descriptor has a non-zero `FileId` — pages live in external `.datum-pack` files referenced from the footer prologue's file table. Always clear in PR1. |
+| `HasTombstones` | 0x08 | At least one chapter has a populated tombstone bitmap (some rows soft-deleted). Always clear in PR1. |
 
-`HasSidecarReferences` is only set when the sidecar's blob sink actually received an `Append` — files whose variable-slot columns happened to all stay inline leave the flag clear so the reader doesn't try to open a non-existent companion file.
+`HasSidecarReferences` is only set when the sidecar's blob sink actually received an `Append` — files whose variable-slot columns happened to all stay inline leave the flag clear so the reader doesn't try to open a non-existent companion file. Readers ignore unknown flag bits, so future bit allocations are forward-compatible.
 
 ## Page layouts
 
@@ -132,16 +136,38 @@ Readers reject any non-zero codec byte with a clear error so a future writer's b
 
 ## Footer
 
-The footer body begins at the offset stored in the header's `FooterOffset` field and runs until the 8-byte tail. It contains one block per column, written in schema order. The column count is taken from the header — there's no separate `columnCount` prefix in the footer body.
+The footer body begins at the offset stored in the header's `FooterOffset` field and runs until the 8-byte tail. It opens with a **prologue** carrying file-level metadata, followed by one block per column written in schema order. The prologue's `ColumnCount` is authoritative for the per-column block loop — the header's `ColumnCount` field is informational only in v4.
+
+### Footer prologue
+
+```
+uint64 : generation                  (commit counter; first write = 1, increments per commit)
+uint64 : writerId                    (0 in PR1; per-writer stamp when multi-writer ships)
+uint64 : baseGeneration              (the generation this commit was based on; 0 for initial write)
+byte   : tombstoneGranularity        (1 = chapter-level; reserved 0 = page-level)
+int32  : columnCount                 (authoritative; matches the per-column block count below)
+int32  : fileTableEntryCount         (0 in PR1; cross-file pages ship in PR7)
+For each file-table entry:
+  uint16  : fileId                   (>0; 0 is reserved for the primary file)
+  string  : relativePath             (length-prefixed UTF-8; resolved against the .datum file's directory)
+  byte[16] : fingerprint             (identity stamp of the external file; mismatch = stale manifest)
+
+int32  : chapterTombstoneCount       (0 in PR1; soft-delete ships in PR5)
+int64[chapterTombstoneCount] : tombstoneOffsets
+                                     (one per chapter index; -1 = no tombstones, otherwise the
+                                      absolute file offset of an 8 KiB chapter tombstone bitmap)
+```
+
+When `chapterTombstoneCount` is non-zero in a future PR, it must equal the file's actual chapter count (`⌈totalRowCount / (PagesPerChapter × pageSize)⌉`). The prologue's chapter tombstone offsets describe the file as a whole — tombstones apply to logical rows, not per-column-page, so a single bitmap per chapter index covers every column's view of that row range.
 
 ### Per-column block
 
 ```
-For each column (in schema order):
+For each column (in schema order, count = prologue.columnCount):
   string  : name                    (length-prefixed UTF-8)
   byte    : DataKind                (enum value)
   byte    : EncoderKind              (0=FixedWidth, 1=BitPackedBoolean, 2=VariableSlot)
-  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape)
+  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape | Tombstoned)
 
   If HasFixedShape:
     uint16  : shapeRank
@@ -149,7 +175,8 @@ For each column (in schema order):
 
   int32: pageCount
   For each page:
-    int64  : pageOffset             (absolute byte position)
+    uint16 : fileId                 (0 = primary file; >0 = file-table lookup. Always 0 in PR1.)
+    int64  : pageOffset             (absolute byte position within the file named by fileId)
     uint32 : pageByteLength
     uint16 : rowCount               (≤ pageSize; last page may be partial)
     bool   : hasZoneMap
@@ -162,6 +189,8 @@ For each column (in schema order):
     int32: volumeCount
     ZoneMap[volumeCount]             (one per 16-chapter volume; aggregated from chapter maps)
 ```
+
+The `Tombstoned` column flag (`0x08`) marks a soft-dropped column — its block stays in the footer for compaction-time reclamation, but readers skip it at schema enumeration. Inert in PR1.
 
 ### Zone-map serialization
 

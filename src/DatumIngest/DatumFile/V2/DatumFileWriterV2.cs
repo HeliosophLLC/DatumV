@@ -248,8 +248,14 @@ public sealed class DatumFileWriterV2 : IDisposable
         DatumFileFlagsV2 flags = DatumFileFlagsV2.None;
         if (emitVolumes) flags |= DatumFileFlagsV2.HasVolumeZoneMaps;
         if (HasAnySidecarReferences()) flags |= DatumFileFlagsV2.HasSidecarReferences;
+        // HasExternalPages and HasTombstones are clear in PR1 — those
+        // capabilities ship in PR5/PR7. The writer never emits a non-zero
+        // FileId or a populated chapter-tombstone offset table today.
 
-        FooterV2 footer = new(columnFooters, emitVolumes);
+        // Initial-write prologue: generation 1, writerId 0, no base
+        // generation, no file-table entries, no chapter tombstones.
+        FooterPrologueV4 prologue = FooterPrologueV4.InitialFor(_columns.Length);
+        FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
         // Write the footer body, capture offset and length.
         long footerOffset = _stream.Position;

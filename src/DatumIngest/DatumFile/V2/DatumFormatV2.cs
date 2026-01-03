@@ -1,15 +1,23 @@
 namespace DatumIngest.DatumFile.V2;
 
 /// <summary>
-/// Constants and enumerations for the <c>.datum</c> format v2 — the
-/// uncompressed columnar format spec'd in
-/// <c>project_datum_format_v2.md</c>. Designed for mmap zero-copy reads
-/// and a tiny encoder/decoder surface (three encoders only). v1 is
-/// dropped wholesale on cutover.
+/// Constants and enumerations for the <c>.datum</c> format. Designed for
+/// mmap zero-copy reads and a tiny encoder/decoder surface (three
+/// encoders only).
 /// </summary>
+/// <remarks>
+/// The "V2" in the type names refers to the second-generation engine
+/// rewrite, not the on-disk format version. The on-disk
+/// <see cref="FormatVersion"/> is currently <c>4</c>: v3 added the
+/// streaming three-encoder layout; v4 added forward-compat hooks for
+/// crash-safe append, soft mutation (drop column / delete rows),
+/// cross-file page references, and multi-writer concurrency. Most v4
+/// fields are passive (zero-valued) today and become load-bearing in
+/// follow-up PRs.
+/// </remarks>
 public static class DatumFormatV2
 {
-    /// <summary>Magic bytes identifying a v2 datum file: ASCII "DTMF" (unchanged from v1).</summary>
+    /// <summary>Magic bytes identifying a datum file: ASCII "DTMF" (unchanged from v1).</summary>
     public static ReadOnlySpan<byte> Magic => "DTMF"u8;
 
     /// <summary>
@@ -20,12 +28,48 @@ public static class DatumFormatV2
     public static ReadOnlySpan<byte> TailMagic => "FMTD"u8;
 
     /// <summary>
-    /// Format version. Bumped past the existing v2-in-code (which was
-    /// itself v1-in-docs and is being replaced wholesale) to clearly
-    /// signal incompatibility — readers of the old format will see this
-    /// version and refuse rather than mis-interpret bytes.
+    /// Format version. v4 adds the footer prologue (generation,
+    /// writerId, baseGeneration, tombstone granularity, file table,
+    /// chapter tombstone offset table), the <c>fileId</c> field on
+    /// <see cref="PageDescriptorV2"/>, and the
+    /// <see cref="ColumnFlagsV2.Tombstoned"/> bit. Reader rejects any
+    /// other version with <see cref="InvalidDataException"/>.
     /// </summary>
-    public const ushort FormatVersion = 3;
+    public const ushort FormatVersion = 4;
+
+    /// <summary>
+    /// Pinned tombstone granularity for v4. Value <c>1</c> means
+    /// chapter-level tombstone bitmaps (one 8 KiB block per
+    /// <see cref="PagesPerChapter"/>×<see cref="DefaultPageSize"/> rows).
+    /// Value <c>0</c> is reserved for a future page-level granularity if
+    /// it ever proves justified; the writer always emits <c>1</c> today
+    /// and the reader rejects other values.
+    /// </summary>
+    public const byte TombstoneGranularityChapter = 1;
+
+    /// <summary>
+    /// Size in bytes of the chapter tombstone bitmap. 64 K rows ÷ 8 bits
+    /// = 8 KiB per chapter. Each bit corresponds to one logical row in
+    /// the chapter; bit <c>0</c> = row <c>chapterIndex × 65536 + 0</c>.
+    /// </summary>
+    public const int ChapterTombstoneBlockBytes = 8 * 1024;
+
+    /// <summary>
+    /// Sentinel offset value in the per-chapter tombstone offset table
+    /// meaning "no tombstone bitmap allocated for this chapter — treat
+    /// every row as alive." Avoids writing 8 KiB of zeros for chapters
+    /// that haven't been touched by any delete.
+    /// </summary>
+    public const long NoTombstoneBlock = -1L;
+
+    /// <summary>
+    /// Sentinel <c>fileId</c> meaning "this page lives in the primary
+    /// <c>.datum</c> file." Any non-zero value indexes into the footer
+    /// prologue's file table for cross-file (post-compaction) pages.
+    /// Always <c>0</c> in v4 PR1 — the file table stays empty until
+    /// cross-file rewrite ships.
+    /// </summary>
+    public const ushort LocalFileId = 0;
 
     /// <summary>
     /// Fixed-size file header in bytes:
@@ -175,8 +219,9 @@ public enum SidecarBlobCodec : byte
 }
 
 /// <summary>
-/// File-level flags stored in the header. Reserved for forward-compatible
-/// v2.x evolution; v1 always writes <see cref="None"/>.
+/// File-level flags stored in the header. Reader ignores unknown bits
+/// rather than failing — additive flag-bit allocation is a
+/// forward-compatible operation.
 /// </summary>
 [Flags]
 public enum DatumFileFlagsV2 : ushort
@@ -198,4 +243,21 @@ public enum DatumFileFlagsV2 : ushort
     /// back to chapter+page pruning.
     /// </summary>
     HasVolumeZoneMaps = 0x02,
+
+    /// <summary>
+    /// At least one <see cref="PageDescriptorV2.FileId"/> is non-zero —
+    /// some pages live in external <c>.datum-pack</c> files referenced
+    /// from the footer prologue's file table. Lets the open path
+    /// fast-skip file-table parsing on the common single-file case.
+    /// Always clear in v4 PR1 (cross-file pages aren't produced yet).
+    /// </summary>
+    HasExternalPages = 0x04,
+
+    /// <summary>
+    /// At least one chapter has a non-empty tombstone bitmap (some rows
+    /// have been soft-deleted). Lets the read path skip tombstone-mask
+    /// resolution when clear. Always clear in v4 PR1 (delete API ships
+    /// in PR5).
+    /// </summary>
+    HasTombstones = 0x08,
 }

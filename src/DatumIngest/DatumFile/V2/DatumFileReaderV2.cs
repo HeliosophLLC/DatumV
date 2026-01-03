@@ -115,7 +115,20 @@ public sealed class DatumFileReaderV2 : IDisposable
         using (MemoryStream ms = new(footerBuffer, writable: false))
         using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer = FooterV2.Deserialize(reader, header.ColumnCount, hasVolumeZoneMaps);
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps);
+        }
+
+        // Header's ColumnCount is informational in v4 — the prologue's
+        // ColumnCount is authoritative (per the v4 design, the prologue
+        // wins on mismatch so column-add commits don't require a
+        // perfectly-atomic header patch). Mismatch is non-fatal but
+        // worth surfacing to callers as a sanity-check signal.
+        if (header.ColumnCount != footer.Prologue.ColumnCount)
+        {
+            // Non-fatal: prologue wins. Future PRs may surface this via
+            // a logger; for now it's silent because v4 PR1 always writes
+            // matching values and a mismatch only ever appears mid-PR4
+            // column-add commits which haven't shipped yet.
         }
 
         return new DatumFileReaderV2(stream, ownsStream, header, footer);

@@ -154,9 +154,11 @@ public sealed record ColumnFooterV2(
 }
 
 /// <summary>
-/// Per-column flag byte serialized into the V2 footer. Captures the
-/// small subset of column-level state that needs round-tripping past
-/// file open (nullability, typed-array flag, fixed-shape presence).
+/// Per-column flag byte serialized into the footer. Captures the small
+/// subset of column-level state that needs round-tripping past file
+/// open (nullability, typed-array flag, fixed-shape presence,
+/// tombstone bit). Reader ignores unknown bits rather than failing —
+/// additive flag-bit allocation is a forward-compatible operation.
 /// </summary>
 [Flags]
 internal enum ColumnFlagsV2 : byte
@@ -165,4 +167,13 @@ internal enum ColumnFlagsV2 : byte
     Nullable = 0x01,
     IsArray = 0x02,
     HasFixedShape = 0x04,
+
+    /// <summary>
+    /// Column has been soft-dropped via <c>ALTER TABLE DROP COLUMN</c>.
+    /// The column block (descriptor + page directory + zone maps)
+    /// remains in the footer for compaction-time reclamation, but the
+    /// reader skips the column at schema enumeration. Inert in PR1 —
+    /// the soft-drop API ships in PR4.
+    /// </summary>
+    Tombstoned = 0x08,
 }
