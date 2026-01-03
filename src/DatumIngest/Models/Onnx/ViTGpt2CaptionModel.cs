@@ -1,4 +1,3 @@
-using System.Text;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
@@ -339,87 +338,7 @@ public sealed class ViTGpt2CaptionModel : OnnxModel
         // appended (we break before adding it).
         IEnumerable<int> outputTokens = tokens.Skip(1);
         string raw = _tokenizer.Decode(outputTokens) ?? string.Empty;
-        return DecodeByteLevelBpe(raw).Trim();
-    }
-
-    /// <summary>
-    /// Applies the inverse of GPT-2's byte-level BPE encoding. The encoder
-    /// maps non-printable bytes (including space and newline) to high-Unicode
-    /// codepoints so they survive BPE merging without ambiguity; the decoder
-    /// must reverse that mapping. <c>BpeTokenizer.Decode</c> doesn't apply
-    /// this reverse step, so a literal <c>Ġ</c> (U+0120, the encoded form of
-    /// space) leaks into the output. We unmap it here.
-    /// </summary>
-    /// <remarks>
-    /// The GPT-2 byte-to-unicode table assigns codepoints 256+ to bytes
-    /// outside the printable-ASCII range. For English captions only two
-    /// bytes typically need translation: space (<c>0x20 → Ġ</c> at U+0120)
-    /// and newline (<c>0x0A → Ċ</c> at U+010A). We translate the full
-    /// 188-byte mapping for correctness across non-English outputs.
-    /// </remarks>
-    private static string DecodeByteLevelBpe(string raw)
-    {
-        if (string.IsNullOrEmpty(raw)) return raw;
-
-        byte[] bytes = new byte[raw.Length * 4];  // worst-case UTF-8 expansion
-        Span<byte> singleCharBuf = stackalloc byte[4];
-        Span<char> singleChar = stackalloc char[1];
-        int byteIdx = 0;
-        foreach (char c in raw)
-        {
-            if (UnicodeToByte.TryGetValue(c, out byte mapped))
-            {
-                bytes[byteIdx++] = mapped;
-            }
-            else
-            {
-                // Unmapped char (printable ASCII or genuinely emitted Unicode):
-                // pass through as UTF-8.
-                singleChar[0] = c;
-                int written = Encoding.UTF8.GetBytes(singleChar, singleCharBuf);
-                singleCharBuf[..written].CopyTo(bytes.AsSpan(byteIdx));
-                byteIdx += written;
-            }
-        }
-        return Encoding.UTF8.GetString(bytes, 0, byteIdx);
-    }
-
-    /// <summary>
-    /// Inverse of GPT-2's byte_to_unicode table — maps the high-Unicode
-    /// codepoints the encoder emitted back to their original bytes.
-    /// Built lazily once per process; small (188 entries).
-    /// </summary>
-    private static readonly Dictionary<char, byte> UnicodeToByte = BuildUnicodeToByte();
-
-    private static Dictionary<char, byte> BuildUnicodeToByte()
-    {
-        // Replicate GPT-2's bytes_to_unicode: printable bytes (! through ~,
-        // ¡ through ¬, ® through ÿ) map to themselves; the remaining 68
-        // unmapped bytes get codepoints starting at 0x100 (256).
-        Dictionary<char, byte> reverse = new(256);
-        List<int> printable =
-        [
-            .. Enumerable.Range('!', '~' - '!' + 1),
-            .. Enumerable.Range('¡', '¬' - '¡' + 1),
-            .. Enumerable.Range('®', 'ÿ' - '®' + 1),
-        ];
-        HashSet<int> printableSet = new(printable);
-
-        // Self-mapped: byte b → char b for printable bytes.
-        foreach (int b in printable)
-        {
-            reverse[(char)b] = (byte)b;
-        }
-
-        // Encoded: byte b → char (256 + n) for non-printable b, n incrementing.
-        int n = 0;
-        for (int b = 0; b < 256; b++)
-        {
-            if (printableSet.Contains(b)) continue;
-            reverse[(char)(256 + n)] = (byte)b;
-            n++;
-        }
-        return reverse;
+        return ByteLevelBpeDecoder.Decode(raw).Trim();
     }
 
     private static int ArgMax(ReadOnlySpan<float> values)

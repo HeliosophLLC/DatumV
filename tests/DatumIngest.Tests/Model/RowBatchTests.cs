@@ -1,4 +1,5 @@
 using DatumIngest.Model;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Tests.Model;
 
@@ -7,6 +8,7 @@ namespace DatumIngest.Tests.Model;
 /// </summary>
 public class RowBatchTests : ServiceTestBase
 {
+    private static Pool pool = new(new PoolBacking());
     private static Row MakeRow(string name, float value)
     {
         return new Row([name], [DataValue.FromFloat32(value)]);
@@ -25,7 +27,8 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void AddIncrementsCountAndStoresRow()
     {
-        RowBatch batch = RowBatch.Rent(4);
+        ColumnLookup columnLookup = new(["value"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 4);
         Row row = MakeRow("value", 42.0f);
 
         batch.Add(row);

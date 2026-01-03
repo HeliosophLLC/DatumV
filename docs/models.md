@@ -543,6 +543,104 @@ input resolution, channel order, and normalisation stats.
   `optimum[onnxruntime] transformers`, and runs `optimum-cli export
   onnx`. ~5 minutes including download.
 
+### `trocr_printed`, `trocr_printed_fp16` — printed-text OCR
+
+Microsoft TrOCR — ViT-base 384×384 encoder feeding a 12-layer RoBERTa
+autoregressive decoder. Single line of printed text in, transcription
+out. Two registrations driven by the same `TrOcrModel` class, sharing
+one folder and one tokenizer:
+
+| Catalog name | Encoder | Decoder | Disk |
+|---|---|---|---|
+| `trocr_printed` | `encoder_model.onnx` (~330 MB) | `decoder_model_merged.onnx` (~990 MB) | ~1.3 GB |
+| `trocr_printed_fp16` | `encoder_model_fp16.onnx` (~170 MB) | `decoder_model_merged_fp16.onnx` (~500 MB) | ~640 MB |
+
+- **What it does**: Returns `String` — a single transcription per image.
+  Works on receipts, signage, document lines, label scans. Region-aware
+  output (`Array<Struct{text, bbox, score}>`) is not supported here;
+  pair with a separate text-detector model if you need multi-line.
+- **License**: MIT (Microsoft)
+- **Source**: [huggingface.co/microsoft/trocr-base-printed](https://huggingface.co/microsoft/trocr-base-printed)
+- **Folder**: `trocr-base-printed/` — both fp32 and fp16 ONNX files live
+  in the same folder alongside the shared tokenizer + configs.
+- **Files** (relative to the folder):
+  - `encoder_model.onnx` + `encoder_model_fp16.onnx`
+  - `decoder_model_merged.onnx` + `decoder_model_merged_fp16.onnx` —
+    merged decoders (single ONNX file with a `use_cache_branch` switch
+    that drives prefill vs incremental KV-cache steps)
+  - `tokenizer.json`, `vocab.json`, `merges.txt` — RoBERTa byte-level BPE
+  - `config.json`, `generation_config.json`, `preprocessor_config.json`,
+    `tokenizer_config.json`, `special_tokens_map.json`
+- **Setup**: produced by `optimum-cli export onnx --model
+  microsoft/trocr-base-printed`. Pull both precisions in one pass:
+  ```powershell
+  ./.venv/Scripts/Activate.ps1
+  optimum-cli export onnx `
+    --model microsoft/trocr-base-printed `
+    --task vision2seq-lm `
+    $env:DATUM_MODELS\trocr-base-printed
+  optimum-cli onnxruntime quantize `
+    --onnx_model $env:DATUM_MODELS\trocr-base-printed `
+    --fp16 -o $env:DATUM_MODELS\trocr-base-printed-fp16
+  Move-Item $env:DATUM_MODELS\trocr-base-printed-fp16\*_fp16.onnx `
+    $env:DATUM_MODELS\trocr-base-printed\
+  ```
+- **fp16 decoder patch (required)**: some optimum-cli versions emit a
+  `decoder_model_merged_fp16.onnx` with a graph-validity issue ORT
+  rejects at load time:
+  > *Subgraph output (logits) is an outer scope value being returned
+  > directly. Please update the model to add an Identity node between
+  > the outer scope value and the subgraph output.*
+
+  Patch in place by running
+  [scripts/convert_decoder_model_merged_fp16.py](../scripts/convert_decoder_model_merged_fp16.py)
+  — wraps each `If`-subgraph output in an Identity node. The script
+  writes `decoder_model_merged_fp16_converted.onnx` next to the
+  original; rename it over the original so the registration picks it
+  up:
+  ```powershell
+  python ./scripts/convert_decoder_model_merged_fp16.py
+  Move-Item -Force `
+    E:\Models\trocr-base-printed\decoder_model_merged_fp16_converted.onnx `
+    E:\Models\trocr-base-printed\decoder_model_merged_fp16.onnx
+  ```
+  (Adjust the source/destination paths in the script if your
+  `$DATUM_MODELS` is elsewhere.) The fp32 decoder doesn't need this —
+  only the fp16 export hits the issue.
+- **Architecture**: ViT-base 384×384 (1 + 24×24 patches × 768 hidden)
+  feeds a 12-layer RoBERTa decoder with cross-attention. Merged
+  decoder runs in two modes: **prefill** (full input_ids = `[</s>]`,
+  empty caches, `use_cache_branch=false`) populates encoder + decoder
+  K/V; **incremental** (single new token, prior `present.*` fed back
+  as `past_key_values.*`, `use_cache_branch=true`) grows the decoder
+  cache by one position per step and reuses the encoder cache
+  unchanged. Greedy argmax decoding; stops on `</s>` (token 2) or
+  `max_tokens=20` (matches `generation_config.json`). Preprocessing is
+  `mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5]` on RGB; tokens decoded with
+  `BpeTokenizer.Decode` then `ByteLevelBpeDecoder` (shared with
+  `vit_gpt2_caption`) to reverse the `Ġ → space` byte-level BPE
+  mojibake.
+- **fp32 vs fp16**: fp16 is ~2× smaller on disk and ~5× faster per
+  image at negligible accuracy cost for printed text — start there.
+  Reach for fp32 only if you observe transcription regressions on a
+  particular document style.
+- **Demo**:
+  ```sql
+  -- Transcribe a folder of receipt-line images.
+  SELECT
+    photo_id,
+    models.trocr_printed_fp16(line_crop) AS text
+  FROM receipt_lines
+  LIMIT 20;
+
+  -- A/B fp32 vs fp16 quality on the same crops.
+  SELECT
+    photo_id,
+    models.trocr_printed(line_crop)      AS fp32,
+    models.trocr_printed_fp16(line_crop) AS fp16
+  FROM receipt_lines LIMIT 5;
+  ```
+
 ### `sd_turbo` — text-to-image generator
 
 - **What it does**: Generates 512×512 images from a text prompt in a
