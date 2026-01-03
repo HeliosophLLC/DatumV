@@ -84,6 +84,21 @@ internal sealed class PageZoneMapBuilderV2
             return null;
         }
 
+        // Sidecar-backed values can't resolve through an IValueStore
+        // alone — they'd need the SidecarRegistry to read bytes. Encoder
+        // paths that produce sidecar pointers (initial spill of long
+        // payloads, IsInSidecar fast path during ingest, partial-page
+        // rehydrate during OpenForAppend) hand us values whose
+        // comparable form isn't materialized here. Skip min/max for
+        // these — null counts still record correctly, and zone-map
+        // pruning loses some precision for variable-length comparable
+        // kinds (mainly long Strings) that spill. Future PR can route
+        // a SidecarRegistry through if precision matters.
+        if (v.IsInSidecar)
+        {
+            return null;
+        }
+
         return v.Kind switch
         {
             DataKind.Int8 => (object)v.AsInt8(),

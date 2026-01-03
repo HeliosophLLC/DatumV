@@ -34,9 +34,13 @@ public sealed class DatumFileWriterV2 : IDisposable
 {
     private readonly Stream _stream;
     private readonly bool _ownsStream;
-    private readonly IBlobSink? _sidecar;
-    private readonly CountingBlobSink? _countingSidecar;
-    private readonly bool _ownsSidecar;
+    // Sidecar fields are not readonly because OpenForAppend attaches
+    // them after construction (sequenced after rehydrate to avoid a
+    // file-share conflict between the read-side mmap used during
+    // partial-page rehydrate and the write-side RW handle).
+    private IBlobSink? _sidecar;
+    private CountingBlobSink? _countingSidecar;
+    private bool _ownsSidecar;
 
     private ColumnDescriptorV2[]? _columns;
     private IPageEncoderV2[]? _encoders;
@@ -47,6 +51,17 @@ public sealed class DatumFileWriterV2 : IDisposable
     private bool _initialized;
     private bool _finalized;
     private bool _disposed;
+
+    // Append-mode state. _isAppend is true when the writer was opened
+    // via OpenForAppend; _existingGeneration carries the generation we
+    // read from the existing footer so finalize can stamp gen+1 with
+    // baseGeneration = oldGeneration. _existingSidecarReferences tracks
+    // whether any prior commit already set HasSidecarReferences — once
+    // set, the flag stays sticky even if no new sidecar appends happen
+    // in this session.
+    private bool _isAppend;
+    private ulong _existingGeneration;
+    private bool _existingSidecarReferences;
 
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
@@ -247,14 +262,37 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         DatumFileFlagsV2 flags = DatumFileFlagsV2.None;
         if (emitVolumes) flags |= DatumFileFlagsV2.HasVolumeZoneMaps;
-        if (HasAnySidecarReferences()) flags |= DatumFileFlagsV2.HasSidecarReferences;
-        // HasExternalPages and HasTombstones are clear in PR1 — those
-        // capabilities ship in PR5/PR7. The writer never emits a non-zero
-        // FileId or a populated chapter-tombstone offset table today.
+        // HasSidecarReferences is sticky across appends — once a prior
+        // commit set it, it stays set, even if this session's encoders
+        // happened not to spill (rehydrated old sidecar refs are still
+        // referenced). New sidecar appends in this session also set it.
+        if (_existingSidecarReferences || HasAnySidecarReferences())
+        {
+            flags |= DatumFileFlagsV2.HasSidecarReferences;
+        }
+        // HasExternalPages and HasTombstones are clear in PR2 — those
+        // capabilities ship in PR5/PR7.
 
-        // Initial-write prologue: generation 1, writerId 0, no base
-        // generation, no file-table entries, no chapter tombstones.
-        FooterPrologueV4 prologue = FooterPrologueV4.InitialFor(_columns.Length);
+        // Build the prologue: initial write starts at generation 1;
+        // append bumps the existing generation and records the prior
+        // value as baseGeneration so future MVCC layers can trace
+        // commit lineage.
+        FooterPrologueV4 prologue;
+        if (_isAppend)
+        {
+            prologue = new FooterPrologueV4(
+                Generation: _existingGeneration + 1,
+                WriterId: 0,                        // PR3 stamps a real id
+                BaseGeneration: _existingGeneration,
+                TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
+                ColumnCount: _columns.Length,
+                FileTableEntries: Array.Empty<FileTableEntryV4>(),
+                ChapterTombstoneOffsets: Array.Empty<long>());
+        }
+        else
+        {
+            prologue = FooterPrologueV4.InitialFor(_columns.Length);
+        }
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
         // Write the footer body, capture offset and length.
@@ -309,6 +347,461 @@ public sealed class DatumFileWriterV2 : IDisposable
         {
             disposableSidecar.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Opens an existing finalized <c>.datum</c> file for append. Reads
+    /// the header / tail / footer, rebuilds per-column encoder + page
+    /// directory + zone-map hierarchy state, extends any trailing
+    /// partial page back into its encoder, and positions the stream
+    /// past the old data so new pages can stream out without disturbing
+    /// the on-disk old state.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Crash safety.</strong> Until <see cref="FinalizeWriter"/>
+    /// completes its tail flip, the file's old tail at EOF still
+    /// references the old footer, so a crash mid-append leaves the
+    /// file readable in its pre-append state (the new bytes are
+    /// orphaned past the old tail). On the next
+    /// <see cref="OpenForAppend"/> call, the post-tail garbage is
+    /// detected and truncated back to the last clean tail.
+    /// </para>
+    /// <para>
+    /// <strong>Trailing partial pages.</strong> If any column's last
+    /// page has fewer than <see cref="DatumFormatV2.DefaultPageSize"/>
+    /// rows, that page is decoded back into a fresh encoder so the
+    /// partial values are re-flushed at the next page boundary. The
+    /// old partial-page bytes remain on disk as orphans (reachable from
+    /// the old footer only). The format's seek math
+    /// (<c>pageIndex = startRow / pageSize</c>) requires every page
+    /// except the last to be exactly <c>pageSize</c> rows, so partial
+    /// extension is mandatory — we can't simply seal-and-fresh.
+    /// </para>
+    /// <para>
+    /// <strong>Sidecar.</strong> Pass <paramref name="sidecarPath"/>
+    /// matching the source file's companion <c>.datum-blob</c>. The
+    /// blob sink opens append-only, preserving existing offsets; new
+    /// non-inline payloads land at the sidecar's existing EOF. Pass
+    /// <see langword="null"/> to forbid new sidecar writes (the
+    /// resulting writer rejects rows that would spill).
+    /// </para>
+    /// </remarks>
+    public static DatumFileWriterV2 OpenForAppend(string datumPath, string? sidecarPath)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+
+        FileStream stream = new(
+            datumPath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 65_536,
+            FileOptions.RandomAccess);
+
+        try
+        {
+            // Recover from any prior torn append: scan backward for the
+            // last clean tail and truncate. After this returns, the file
+            // ends with a valid tail/footer combination.
+            RecoverIfTorn(stream);
+
+            // Read header + tail + footer using the same logic as the
+            // reader. We don't reuse DatumFileReaderV2 directly because
+            // it dispose-owns the stream and we need persistent
+            // ReadWrite access for append.
+            HeaderV2 header;
+            FooterV2 footer;
+            (header, footer) = LoadHeaderAndFooter(stream);
+
+            // Allocate writer instance (without sidecar yet) so we can
+            // populate rehydrated state. The write-side sidecar opens
+            // AFTER rehydrate completes to avoid a Windows file-share
+            // conflict — RehydrateFromFooter may open a read-side mmap
+            // on the .datum-blob, and SidecarWriteStore.OpenForAppend
+            // holds it RW with FileShare.Read which blocks the mmap
+            // create on Windows. Sequencing read-then-write resolves
+            // the conflict cleanly.
+            DatumFileWriterV2 writer = new(stream, sink: null, ownsStream: true, ownsSidecar: false);
+
+            // Rehydrate per-column writer state from the existing
+            // footer. This sets _columns / _encoders / _pageDirectory /
+            // _hierarchies and extends any trailing partial pages,
+            // opening a temporary SidecarReadStore for the partial-page
+            // decode if needed.
+            writer.RehydrateFromFooter(header, footer);
+
+            // Now open the write-side sidecar in append mode. Existing
+            // offsets stay valid; new payloads land at current sidecar
+            // EOF.
+            if (sidecarPath is not null)
+            {
+                SidecarWriteStore sidecarStore = SidecarWriteStore.OpenForAppend(sidecarPath);
+                writer.AttachSidecar(sidecarStore);
+            }
+
+            // Position stream past the old tail so new pages stream out
+            // append-only. Old pages, footer, and tail bytes remain
+            // intact; the FinalizeWriter tail-flip is what supersedes
+            // them.
+            stream.Position = stream.Length;
+
+            return writer;
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Attaches a sidecar to a writer that was constructed without one
+    /// — used by <see cref="OpenForAppend"/> to defer sidecar open
+    /// until after rehydrate completes.
+    /// </summary>
+    private void AttachSidecar(IBlobSink sink)
+    {
+        _countingSidecar = sink as CountingBlobSink ?? new CountingBlobSink(sink);
+        _sidecar = _countingSidecar;
+        _ownsSidecar = true;
+    }
+
+    /// <summary>
+    /// Internal constructor used by <see cref="OpenForAppend"/> — does
+    /// not write a header (the existing one stays in place) and does
+    /// not run <see cref="Initialize"/> (rehydration drives the schema
+    /// instead).
+    /// </summary>
+    private DatumFileWriterV2(Stream stream, IBlobSink? sink, bool ownsStream, bool ownsSidecar)
+    {
+        _stream = stream;
+        _ownsStream = ownsStream;
+        if (sink is not null)
+        {
+            _countingSidecar = sink as CountingBlobSink ?? new CountingBlobSink(sink);
+            _sidecar = _countingSidecar;
+        }
+        _ownsSidecar = ownsSidecar;
+    }
+
+    /// <summary>
+    /// Rebuilds per-column writer state from a parsed footer. Replays
+    /// every full page's zone map through a fresh hierarchy builder
+    /// (so chapter / volume aggregation matches the original
+    /// finalize), seeds the page directory with full pages, and
+    /// extends trailing partial pages by decoding their values back
+    /// into fresh encoders.
+    /// </summary>
+    private void RehydrateFromFooter(HeaderV2 header, FooterV2 footer)
+    {
+        _pageSize = header.PageSize;
+        _existingGeneration = footer.Prologue.Generation;
+        _existingSidecarReferences = (header.Flags & DatumFileFlagsV2.HasSidecarReferences) != 0;
+        _totalRowsWritten = header.TotalRowCount;
+
+        int columnCount = footer.Columns.Count;
+        _columns = new ColumnDescriptorV2[columnCount];
+        _encoders = new IPageEncoderV2[columnCount];
+        _pageDirectory = new List<PageDescriptorV2>[columnCount];
+        _hierarchies = new ZoneMapHierarchyBuilderV2[columnCount];
+
+        // We need to read partial-page bytes back to extend them. Use a
+        // SidecarReadStore opened against the same file for any
+        // sidecar-pointer values produced by the page decoder — the
+        // values pass through to the new encoder unchanged because
+        // VariableSlotPageEncoderV2's Append fast-paths IsInSidecar.
+        // Constructed lazily; only opened if a partial-page extension
+        // actually needs it.
+        DatumFile.Sidecar.SidecarReadStore? sidecarReadStore = null;
+        try
+        {
+            for (int colIndex = 0; colIndex < columnCount; colIndex++)
+            {
+                ColumnFooterV2 columnFooter = footer.Columns[colIndex];
+                _columns[colIndex] = columnFooter.Descriptor;
+                _encoders[colIndex] = PageEncoderFactoryV2.Create(columnFooter.Descriptor, _pageSize);
+                _pageDirectory[colIndex] = new List<PageDescriptorV2>();
+                _hierarchies[colIndex] = new ZoneMapHierarchyBuilderV2();
+
+                int pageCount = columnFooter.Pages.Count;
+                if (pageCount == 0)
+                {
+                    continue;
+                }
+
+                PageDescriptorV2 lastPage = columnFooter.Pages[pageCount - 1];
+                bool lastIsPartial = lastPage.RowCount < _pageSize;
+                int fullPageCount = lastIsPartial ? pageCount - 1 : pageCount;
+
+                // Replay full pages: their bytes don't move, so their
+                // descriptors carry forward verbatim and their zone maps
+                // feed the fresh hierarchy builder to recreate the
+                // chapter/volume aggregation state.
+                for (int p = 0; p < fullPageCount; p++)
+                {
+                    PageDescriptorV2 page = columnFooter.Pages[p];
+                    _pageDirectory[colIndex].Add(page);
+                    _hierarchies[colIndex].AddPage(page.ZoneMap ?? new DatumZoneMap(0));
+                }
+
+                if (lastIsPartial)
+                {
+                    // Decode the partial page back into the fresh
+                    // encoder so its rows are re-flushed at the next
+                    // page boundary. The old partial-page bytes stay on
+                    // disk as orphan (reachable only via the old footer
+                    // we're about to supersede).
+                    sidecarReadStore ??= TryOpenSidecarForRehydrate(_stream, header);
+                    ExtendPartialPage(
+                        colIndex, columnFooter.Descriptor, lastPage,
+                        sidecarReadStore);
+                }
+            }
+
+            _initialized = true;
+            _isAppend = true;
+        }
+        finally
+        {
+            sidecarReadStore?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Decodes the rows of <paramref name="partialPage"/> back into
+    /// <see cref="_encoders"/>[<paramref name="columnIndex"/>] so the
+    /// encoder's accumulated row count matches the partial page's row
+    /// count. New <see cref="WriteRowBatch"/> calls fill the rest of
+    /// the page; on flush the encoder produces fresh page bytes (with a
+    /// fresh zone map) at a new file offset.
+    /// </summary>
+    private void ExtendPartialPage(
+        int columnIndex,
+        ColumnDescriptorV2 column,
+        PageDescriptorV2 partialPage,
+        DatumFile.Sidecar.SidecarReadStore? sidecarReadStore)
+    {
+        // Read page bytes directly from the stream.
+        byte[] pageBytes = new byte[partialPage.PageByteLength];
+        long savedPosition = _stream.Position;
+        try
+        {
+            _stream.Position = partialPage.PageOffset;
+            _stream.ReadExactly(pageBytes);
+        }
+        finally
+        {
+            _stream.Position = savedPosition;
+        }
+
+        // Build a temporary read arena to absorb eagerly-materialized
+        // children (Struct field arrays). Values that come back as
+        // sidecar-pointer DataValues (IsInSidecar = true) flow through
+        // the encoder's IsInSidecar fast path and never need
+        // reconstitution.
+        Model.Arena rehydrateArena = new();
+        Decoding.IPageDecoderV2 decoder = Decoding.PageDecoderFactoryV2.Create(
+            column,
+            new ReadOnlyMemory<byte>(pageBytes),
+            partialPage.RowCount,
+            sidecarStoreId: 0,
+            sidecarSource: sidecarReadStore,
+            eagerStore: rehydrateArena);
+
+        IPageEncoderV2 encoder = _encoders![columnIndex];
+        for (int row = 0; row < partialPage.RowCount; row++)
+        {
+            Model.DataValue value = decoder.ReadValue(row);
+            encoder.Append(value, rehydrateArena, _sidecar);
+        }
+    }
+
+    /// <summary>
+    /// Opens a read-only sidecar handle for rehydrating partial pages
+    /// whose VariableSlot rows reference the sidecar. Returns
+    /// <see langword="null"/> when the file declares no sidecar
+    /// references (so partial-page rows are guaranteed inline) or when
+    /// the sidecar file is missing for any reason — the decoder will
+    /// surface a clear error if it actually needs sidecar bytes.
+    /// </summary>
+    private static DatumFile.Sidecar.SidecarReadStore? TryOpenSidecarForRehydrate(
+        Stream datumStream, HeaderV2 header)
+    {
+        if ((header.Flags & DatumFileFlagsV2.HasSidecarReferences) == 0)
+        {
+            return null;
+        }
+        if (datumStream is not FileStream fs)
+        {
+            return null;
+        }
+
+        string sidecarPath = fs.Name + DatumFile.Sidecar.SidecarConstants.FileExtension;
+        if (!File.Exists(sidecarPath))
+        {
+            return null;
+        }
+        // Open without fingerprint validation — we trust the local file
+        // since we just opened the .datum from the same directory.
+        // Fingerprint mismatches would surface as decoder errors during
+        // partial-page rehydration if the sidecar were truly mismatched.
+        return DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
+    }
+
+    /// <summary>
+    /// Reads the header + tail + footer from <paramref name="stream"/>
+    /// without taking ownership. Mirrors
+    /// <see cref="DatumFileReaderV2.Open(string)"/>'s parsing logic.
+    /// </summary>
+    private static (HeaderV2 Header, FooterV2 Footer) LoadHeaderAndFooter(Stream stream)
+    {
+        if (stream.Length < DatumFormatV2.HeaderSize + DatumFormatV2.TailSize)
+        {
+            throw new InvalidDataException(
+                $"File is too small ({stream.Length} bytes) to be a valid .datum file.");
+        }
+
+        Span<byte> headerBytes = stackalloc byte[DatumFormatV2.HeaderSize];
+        stream.Position = 0;
+        stream.ReadExactly(headerBytes);
+        HeaderV2 header = HeaderV2.ReadFrom(headerBytes);
+
+        Span<byte> tail = stackalloc byte[DatumFormatV2.TailSize];
+        stream.Position = stream.Length - DatumFormatV2.TailSize;
+        stream.ReadExactly(tail);
+        if (!tail[4..].SequenceEqual(DatumFormatV2.TailMagic))
+        {
+            throw new InvalidDataException(
+                "File tail sentinel does not match 'FMTD' magic; the file may be truncated or corrupt.");
+        }
+        uint footerByteLength = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(tail[..4]);
+
+        long footerStart = stream.Length - DatumFormatV2.TailSize - footerByteLength;
+        if (footerStart != header.FooterOffset)
+        {
+            throw new InvalidDataException(
+                $"Footer offset mismatch: header says {header.FooterOffset}, tail says {footerStart}.");
+        }
+
+        byte[] footerBuffer = new byte[footerByteLength];
+        stream.Position = footerStart;
+        stream.ReadExactly(footerBuffer);
+
+        bool hasVolumeZoneMaps = (header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0;
+        FooterV2 footer;
+        using (MemoryStream ms = new(footerBuffer, writable: false))
+        using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps);
+        }
+        return (header, footer);
+    }
+
+    /// <summary>
+    /// Detects torn-append state — the trailing 8 bytes of the file
+    /// don't match the <see cref="DatumFormatV2.TailMagic"/> sentinel —
+    /// and truncates the file back to its last clean tail. A
+    /// well-finalized file is left untouched.
+    /// </summary>
+    /// <remarks>
+    /// Recovery scans backward in 4 KiB chunks from EOF looking for the
+    /// last <c>FMTD</c> 4-byte sentinel preceded by a plausible
+    /// <c>uint32</c> footer length. The bounds check (footer length
+    /// must point inside the file past the header) catches false
+    /// positives in user data. Throws
+    /// <see cref="InvalidDataException"/> if no clean tail can be
+    /// recovered — the file is unsalvageable.
+    /// </remarks>
+    private static void RecoverIfTorn(FileStream stream)
+    {
+        if (stream.Length < DatumFormatV2.HeaderSize + DatumFormatV2.TailSize)
+        {
+            return; // too small to bother — let the regular open path produce the error
+        }
+
+        Span<byte> tail = stackalloc byte[DatumFormatV2.TailSize];
+        stream.Position = stream.Length - DatumFormatV2.TailSize;
+        stream.ReadExactly(tail);
+        if (tail[4..].SequenceEqual(DatumFormatV2.TailMagic))
+        {
+            return; // file ends cleanly
+        }
+
+        // Tail magic missing → torn append. Scan backward for last
+        // FMTD whose preceding uint32 (footerByteLength) yields a
+        // plausible footer offset (greater than HeaderSize, less than
+        // the FMTD position).
+        const int chunkSize = 4096;
+        const int overlap = 3;  // FMTD is 4 bytes; 3 bytes of overlap captures cross-chunk straddlers
+        long fileLength = stream.Length;
+        long minScanStart = DatumFormatV2.HeaderSize;
+        long lastCleanTailEof = -1;
+
+        byte[] buffer = new byte[chunkSize + overlap];
+
+        // Walk backward in chunks. scanCursor is the exclusive upper
+        // bound for the current chunk's natural region; the chunk
+        // itself reads up to `overlap` bytes past scanCursor to catch
+        // FMTDs that straddle the boundary with the previous (later)
+        // chunk.
+        long scanCursor = fileLength;
+        while (scanCursor > minScanStart && lastCleanTailEof < 0)
+        {
+            long chunkStart = Math.Max(minScanStart, scanCursor - chunkSize);
+            long chunkEndExclusive = Math.Min(fileLength, scanCursor + overlap);
+            int bytesToRead = (int)(chunkEndExclusive - chunkStart);
+            if (bytesToRead < 4) break;
+
+            stream.Position = chunkStart;
+            stream.ReadExactly(buffer, 0, bytesToRead);
+
+            for (int i = bytesToRead - 4; i >= 0; i--)
+            {
+                if (buffer[i] != (byte)'F' || buffer[i + 1] != (byte)'M'
+                    || buffer[i + 2] != (byte)'T' || buffer[i + 3] != (byte)'D')
+                {
+                    continue;
+                }
+
+                long fmtdPosition = chunkStart + i;
+                long tailEof = fmtdPosition + 4;
+
+                // The 4 bytes immediately before FMTD are the footer
+                // byte length. Validate the implied footer offset is
+                // plausible.
+                if (fmtdPosition < DatumFormatV2.HeaderSize + 4)
+                {
+                    continue;
+                }
+                stream.Position = fmtdPosition - 4;
+                Span<byte> lengthBytes = stackalloc byte[4];
+                stream.ReadExactly(lengthBytes);
+                uint footerLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(lengthBytes);
+                long footerStart = fmtdPosition - 4 - footerLen;
+                if (footerStart < DatumFormatV2.HeaderSize || footerLen == 0)
+                {
+                    continue;
+                }
+
+                lastCleanTailEof = tailEof;
+                break;
+            }
+
+            if (chunkStart == minScanStart) break;
+            scanCursor = chunkStart;
+        }
+
+        if (lastCleanTailEof < 0)
+        {
+            throw new InvalidDataException(
+                "File ends without a valid tail and no recoverable prior tail was found. " +
+                "The file may be corrupt or never finalized.");
+        }
+
+        // Truncate file to the last clean tail's EOF.
+        stream.SetLength(lastCleanTailEof);
+        stream.Position = lastCleanTailEof;
     }
 
     /// <summary>

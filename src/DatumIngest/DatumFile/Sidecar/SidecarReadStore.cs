@@ -75,6 +75,38 @@ public sealed class SidecarReadStore : IBlobSource
         }
     }
 
+    /// <summary>
+    /// Opens a sidecar at <paramref name="path"/> using the fingerprint
+    /// recorded in the file's own header — i.e., skipping the
+    /// cross-reference check against the companion <c>.datum</c> file.
+    /// Used by <see cref="V2.DatumFileWriterV2.OpenForAppend"/> when
+    /// rehydrating partial-page values during append; the calling
+    /// writer trusts the local sidecar because it's about to write to
+    /// it. Payload-hash validation still runs (a non-zero stored hash
+    /// is verified on open).
+    /// </summary>
+    public static SidecarReadStore OpenWithoutFingerprintCheck(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"Sidecar file not found: {path}", path);
+        }
+
+        ulong fingerprint;
+        using (FileStream readHeader = new(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            if (readHeader.Length < SidecarConstants.HeaderSize)
+            {
+                throw new InvalidDataException(
+                    $"Sidecar '{path}' is shorter than the header size.");
+            }
+            Span<byte> header = stackalloc byte[SidecarConstants.HeaderSize];
+            readHeader.ReadExactly(header);
+            fingerprint = BinaryPrimitives.ReadUInt64LittleEndian(header[16..24]);
+        }
+        return new SidecarReadStore(path, fingerprint);
+    }
+
     /// <inheritdoc />
     public unsafe ReadOnlySpan<byte> Read(long offset, long length)
     {

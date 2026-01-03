@@ -50,6 +50,17 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     private bool _disposed;
 
     /// <summary>
+    /// True when this store was created via <see cref="OpenForAppend"/>
+    /// against an existing sidecar file. Append mode preserves the
+    /// existing fingerprint, opens the stream eagerly at EOF, and
+    /// invalidates the payload hash on Dispose (writes zero, which the
+    /// reader treats as "unhashed" — same back-compat path as
+    /// pre-Phase-9b sidecars). Streaming hash recompute over the full
+    /// extended payload is a future enhancement.
+    /// </summary>
+    private readonly bool _appendMode;
+
+    /// <summary>
     /// Bounded channel of just-written buffers (rented from <see cref="ArrayPool{T}.Shared"/>).
     /// The deserializer thread enqueues; a single background task drains and feeds
     /// <see cref="_hasher"/>. Buffers are returned to the pool by the worker after
@@ -80,6 +91,90 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
     {
         _path = path;
         Fingerprint = GenerateFingerprint();
+    }
+
+    /// <summary>
+    /// Private constructor for <see cref="OpenForAppend"/>. Eagerly
+    /// opens the existing file at EOF, preserves the fingerprint read
+    /// from its header, and switches into append mode (no streaming
+    /// hash; payload hash zeroed on Dispose).
+    /// </summary>
+    private SidecarWriteStore(string path, ulong existingFingerprint, FileStream openedStream)
+    {
+        _path = path;
+        Fingerprint = existingFingerprint;
+        _stream = openedStream;
+        _writeOffset = openedStream.Length;
+        _appendMode = true;
+    }
+
+    /// <summary>
+    /// Opens an existing sidecar file in append mode. The existing
+    /// header (magic, version, fingerprint) is preserved; new payloads
+    /// land at current EOF. If <paramref name="path"/> does not exist
+    /// (the source <c>.datum</c> previously had no non-inline values),
+    /// returns a fresh writer that lazy-materialises on first
+    /// <see cref="Append"/> — matches initial-write semantics.
+    /// </summary>
+    /// <remarks>
+    /// In append mode the streaming xxHash3 worker is not started — the
+    /// existing payload hash on disk is left in place during writes and
+    /// zeroed on <see cref="Dispose"/>, marking the file as "unhashed."
+    /// <see cref="SidecarReadStore"/> already skips verification when
+    /// the stored hash is zero (back-compat with pre-Phase-9b sidecars),
+    /// so opening such a file for read still works. Recomputing the hash
+    /// over the full extended payload after append is a future
+    /// enhancement.
+    /// </remarks>
+    public static SidecarWriteStore OpenForAppend(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        if (!File.Exists(path))
+        {
+            // Source file had no non-inline payloads; behave like a
+            // fresh writer (lazy on first Append).
+            return new SidecarWriteStore(path);
+        }
+
+        // Read existing fingerprint from the header.
+        ulong fingerprint;
+        using (FileStream readHeader = new(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            if (readHeader.Length < SidecarConstants.HeaderSize)
+            {
+                throw new InvalidDataException(
+                    $"Sidecar '{path}' is shorter than the header size; cannot open for append.");
+            }
+            Span<byte> header = stackalloc byte[SidecarConstants.HeaderSize];
+            readHeader.ReadExactly(header);
+            ulong magic = BinaryPrimitives.ReadUInt64LittleEndian(header[0..8]);
+            if (magic != SidecarConstants.Magic)
+            {
+                throw new InvalidDataException(
+                    $"Sidecar '{path}' does not start with the expected DATUMBLB magic.");
+            }
+            fingerprint = BinaryPrimitives.ReadUInt64LittleEndian(header[16..24]);
+        }
+
+        // Re-open RW at EOF for append.
+        FileStream rwStream = new(
+            path,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.Read,
+            bufferSize: 1 << 20,
+            options: FileOptions.SequentialScan);
+        try
+        {
+            rwStream.Position = rwStream.Length;
+            return new SidecarWriteStore(path, fingerprint, rwStream);
+        }
+        catch
+        {
+            rwStream.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -143,16 +238,28 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
             _stream.Write(bytes);
             _writeOffset += bytes.Length;
 
-            // Enqueue under the lock so write order matches enqueue order matches
-            // hash order. xxHash3 is order-dependent — Append("ab") ≠ Append("ba")
-            // — and the IBlobSink contract permits concurrent Appends, so we can't
-            // rely on the call site to serialise. TryWrite is non-blocking; the
-            // bounded channel only blocks when the hasher has fallen ~32 buffers
-            // behind, which is rare given xxHash3 throughput beats disk write.
-            if (!_hashChannel!.Writer.TryWrite(new HashJob(copy, bytes.Length)))
+            if (_appendMode)
             {
-                _hashChannel.Writer.WriteAsync(new HashJob(copy, bytes.Length))
-                    .AsTask().GetAwaiter().GetResult();
+                // Append mode skips streaming hash — the buffer copy is
+                // unused and goes back to the pool immediately. Dispose
+                // zeros the on-disk hash to mark the file unhashed; a
+                // future PR can recompute over the full extended
+                // payload if integrity validation becomes load-bearing.
+                ArrayPool<byte>.Shared.Return(copy);
+            }
+            else
+            {
+                // Enqueue under the lock so write order matches enqueue order matches
+                // hash order. xxHash3 is order-dependent — Append("ab") ≠ Append("ba")
+                // — and the IBlobSink contract permits concurrent Appends, so we can't
+                // rely on the call site to serialise. TryWrite is non-blocking; the
+                // bounded channel only blocks when the hasher has fallen ~32 buffers
+                // behind, which is rare given xxHash3 throughput beats disk write.
+                if (!_hashChannel!.Writer.TryWrite(new HashJob(copy, bytes.Length)))
+                {
+                    _hashChannel.Writer.WriteAsync(new HashJob(copy, bytes.Length))
+                        .AsTask().GetAwaiter().GetResult();
+                }
             }
         }
 
@@ -167,13 +274,24 @@ public sealed class SidecarWriteStore : IBlobSink, IDisposable
 
         if (_stream is not null)
         {
-            // Signal the hash worker to drain remaining jobs and exit. Then await
-            // it so the hasher state reflects every byte ever appended. Only then
-            // is it safe to read the final hash and patch it into the header.
-            _hashChannel!.Writer.TryComplete();
-            _hashTask!.GetAwaiter().GetResult();
+            ulong hash;
+            if (_appendMode)
+            {
+                // Append mode invalidates the previous hash — write 0
+                // (the "unhashed" sentinel). SidecarReadStore skips
+                // verification when the stored hash is zero.
+                hash = 0;
+            }
+            else
+            {
+                // Signal the hash worker to drain remaining jobs and exit. Then await
+                // it so the hasher state reflects every byte ever appended. Only then
+                // is it safe to read the final hash and patch it into the header.
+                _hashChannel!.Writer.TryComplete();
+                _hashTask!.GetAwaiter().GetResult();
+                hash = _hasher!.GetCurrentHashAsUInt64();
+            }
 
-            ulong hash = _hasher!.GetCurrentHashAsUInt64();
             _stream.Seek(SidecarConstants.PayloadHashOffset, SeekOrigin.Begin);
             Span<byte> hashBytes = stackalloc byte[8];
             BinaryPrimitives.WriteUInt64LittleEndian(hashBytes, hash);
