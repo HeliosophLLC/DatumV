@@ -17,7 +17,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE staging (id INT, name STRING, score FLOAT64)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal("staging", create.TableName);
         Assert.False(create.IfNotExists);
         Assert.Equal(3, create.Columns.Count);
@@ -39,7 +39,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE t (id INT NOT NULL, label STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal(2, create.Columns.Count);
         Assert.False(create.Columns[0].Nullable);
         Assert.True(create.Columns[1].Nullable);
@@ -51,7 +51,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMPORARY TABLE t (x INT)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal("t", create.TableName);
         Assert.Single(create.Columns);
     }
@@ -62,7 +62,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE IF NOT EXISTS cache (key STRING, value STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.True(create.IfNotExists);
         Assert.Equal("cache", create.TableName);
         Assert.Equal(2, create.Columns.Count);
@@ -77,7 +77,7 @@ public class DdlParsingTests : ServiceTestBase
     {
         Statement statement = SqlParser.ParseStatement("CREATE TABLE t (id INT)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal("t", create.TableName);
         Assert.Single(create.Columns);
     }
@@ -91,7 +91,7 @@ public class DdlParsingTests : ServiceTestBase
     {
         Statement statement = SqlParser.ParseStatement("CREATE TABLE #test (id INT32)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal("#test", create.TableName);
         Assert.Single(create.Columns);
     }
@@ -102,7 +102,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE filtered AS SELECT * FROM orders WHERE amount > 100");
 
-        CreateTempTableAsSelectStatement create = Assert.IsType<CreateTempTableAsSelectStatement>(statement);
+        CreateTableAsSelectStatement create = Assert.IsType<CreateTableAsSelectStatement>(statement);
         Assert.Equal("filtered", create.TableName);
         Assert.False(create.IfNotExists);
         Assert.IsType<SelectQueryExpression>(create.Query);
@@ -114,7 +114,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE IF NOT EXISTS summary AS SELECT category, COUNT(*) AS cnt FROM products GROUP BY category");
 
-        CreateTempTableAsSelectStatement create = Assert.IsType<CreateTempTableAsSelectStatement>(statement);
+        CreateTableAsSelectStatement create = Assert.IsType<CreateTableAsSelectStatement>(statement);
         Assert.True(create.IfNotExists);
         Assert.Equal("summary", create.TableName);
     }
@@ -405,7 +405,7 @@ public class DdlParsingTests : ServiceTestBase
             "CREATE TEMP TABLE t (x INT); SELECT * FROM t");
 
         Assert.Equal(2, statements.Count);
-        Assert.IsType<CreateTempTableStatement>(statements[0]);
+        Assert.IsType<CreateTableStatement>(statements[0]);
         Assert.IsType<QueryStatement>(statements[1]);
     }
 
@@ -434,7 +434,7 @@ public class DdlParsingTests : ServiceTestBase
             """);
 
         Assert.Equal(7, statements.Count);
-        Assert.IsType<CreateTempTableStatement>(statements[0]);
+        Assert.IsType<CreateTableStatement>(statements[0]);
         Assert.IsType<InsertStatement>(statements[1]);
         Assert.IsType<UpdateStatement>(statements[2]);
         Assert.IsType<DeleteStatement>(statements[3]);
@@ -450,7 +450,7 @@ public class DdlParsingTests : ServiceTestBase
             "CREATE TEMP TABLE filtered AS SELECT * FROM orders WHERE amount > 100; SELECT COUNT(*) FROM filtered");
 
         Assert.Equal(2, statements.Count);
-        Assert.IsType<CreateTempTableAsSelectStatement>(statements[0]);
+        Assert.IsType<CreateTableAsSelectStatement>(statements[0]);
         Assert.IsType<QueryStatement>(statements[1]);
     }
 
@@ -474,7 +474,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE orders (id INT PRIMARY KEY, name STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal(2, create.Columns.Count);
         Assert.True(create.Columns[0].PrimaryKey);
         Assert.False(create.Columns[1].PrimaryKey);
@@ -492,7 +492,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE orders (id INT PRIMARY KEY, label STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.False(create.Columns[0].Nullable, "PRIMARY KEY column should be implicitly NOT NULL.");
         Assert.True(create.Columns[1].Nullable, "Non-PK column should remain nullable by default.");
     }
@@ -506,7 +506,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE orders (id INT NOT NULL PRIMARY KEY)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.True(create.Columns[0].PrimaryKey);
         Assert.False(create.Columns[0].Nullable);
     }
@@ -520,7 +520,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE t (primary STRING, key STRING, value STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal(3, create.Columns.Count);
         Assert.Equal("primary", create.Columns[0].Name);
         Assert.Equal("key", create.Columns[1].Name);
@@ -538,7 +538,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE orders (user_id INT, product_id INT, quantity INT, PRIMARY KEY (user_id, product_id))");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal(3, create.Columns.Count);
         Assert.NotNull(create.PrimaryKeyColumns);
         Assert.Equal(2, create.PrimaryKeyColumns.Count);
@@ -555,7 +555,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE orders (id INT, name STRING, PRIMARY KEY (id))");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.NotNull(create.PrimaryKeyColumns);
         Assert.Single(create.PrimaryKeyColumns);
         Assert.Equal("id", create.PrimaryKeyColumns[0]);
@@ -570,7 +570,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE data (x INT, y STRING)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Null(create.PrimaryKeyColumns);
     }
 
@@ -597,7 +597,7 @@ public class DdlParsingTests : ServiceTestBase
         Statement statement = SqlParser.ParseStatement(
             "CREATE TEMP TABLE t (analyze STRING, value INT)");
 
-        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
         Assert.Equal("analyze", create.Columns[0].Name);
     }
 

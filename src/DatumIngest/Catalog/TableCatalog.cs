@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.DatumFile.Sidecar;
+using DatumIngest.DatumFile.V2;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
@@ -57,8 +58,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <see cref="CatalogStore.DefaultFileName"/>. The directory is created on
     /// first save if missing.
     /// </param>
-    public TableCatalog(Pool pool, string? catalogPath)
+    /// <param name="allowExplicitTablePaths">
+    /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c> is honored;
+    /// the persistent <c>.datum</c> file lands at the supplied location. Defaults
+    /// to <see langword="false"/> so production hosts get the safe behaviour
+    /// (table file always derived from the catalog directory + table name).
+    /// Tests opt in.
+    /// </param>
+    public TableCatalog(Pool pool, string? catalogPath, bool allowExplicitTablePaths = false)
     {
+        this.AllowExplicitTablePaths = allowExplicitTablePaths;
         this.Pool = pool;
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
@@ -92,6 +101,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // entries are immediately visible to introspection.
         if (_catalogStore is not null)
         {
+            // Wire the tables provider before any save fires so the
+            // file-write path always sees the catalog's current table
+            // set (PR10a). The closure captures `this` so the latest
+            // _persistentTableEntries snapshot is used at save time.
+            _catalogStore.SetTablesProvider(SnapshotPersistentTablesForSave);
+
             CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
             CatalogLoadReport = report;
 
@@ -101,12 +116,37 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // a freshly opened catalog can immediately invoke any persisted
             // procedural UDF.
             _routines.SyncProceduralAdaptersFromRegistry();
+
+            // Replay persisted tables. Resolves relative paths against
+            // the catalog directory so the catalog moves with the data.
+            foreach (CatalogFileTableEntry entry in _catalogStore.LoadTables())
+            {
+                if (string.IsNullOrEmpty(entry.Name) || string.IsNullOrEmpty(entry.FilePath)) continue;
+                string resolved = ResolveTablePath(entry.FilePath);
+                if (!File.Exists(resolved))
+                {
+                    // Stale catalog entry — file has been moved or
+                    // deleted. Skip silently for now; a future REPAIR
+                    // command can prune dead entries.
+                    continue;
+                }
+                AddFile(resolved, entry.Name);
+                _persistentTableEntries[entry.Name] = entry.FilePath;
+            }
         }
     }
 
 
     private TableCatalog? Parent { get; }
     internal Pool Pool { get; }
+
+    /// <summary>
+    /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c>
+    /// statements are honored. Default is <see langword="false"/> —
+    /// production hosts reject the clause so table files always land in
+    /// the catalog's working directory.
+    /// </summary>
+    public bool AllowExplicitTablePaths { get; }
     private readonly PoolBacking _backing;
     private readonly FunctionRegistry _functions;
     private readonly UdfRegistry _udfs;
@@ -115,6 +155,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly RoutineRegistrar _routines;
     private ConcurrentDictionary<string, ITableProvider> Tables { get; }
     private readonly SidecarRegistry _sidecarRegistry = new();
+
+    /// <summary>
+    /// Tracks tables created via <c>CREATE TABLE</c> (i.e. ones that
+    /// should round-trip through the catalog json). Maps the catalog
+    /// table name to the path string we want to persist (relative when
+    /// the table lives inside the catalog's directory tree, absolute
+    /// otherwise). Tables added via host-side <see cref="AddFile"/>
+    /// don't appear here — they're not the catalog file's responsibility.
+    /// TEMP tables aren't tracked either; they die with the session.
+    /// </summary>
+    private readonly Dictionary<string, string> _persistentTableEntries = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>
@@ -280,11 +331,250 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             case ExecStatement exec:
                 return PlanExec(exec);
 
+            case CreateTableStatement createTable:
+                ApplyCreateTable(createTable);
+                return EmptyQueryPlan.Instance;
+
+            case DropTableStatement dropTable:
+                ApplyDropTable(dropTable);
+                return EmptyQueryPlan.Instance;
+
             default:
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
                     $"Use the dedicated APIs (e.g. AddFile for file registration) or extend Plan to dispatch this statement.");
         }
+    }
+
+    /// <summary>
+    /// Applies a <c>CREATE TABLE</c> statement: validates the
+    /// <c>AT 'path'</c> clause against <see cref="AllowExplicitTablePaths"/>,
+    /// resolves the storage location, materialises the table (in-memory
+    /// for TEMP, an empty <c>.datum</c> file for persistent), registers
+    /// it with the catalog, and persists the entry in the catalog json
+    /// (persistent only).
+    /// </summary>
+    /// <remarks>
+    /// PR10a covers shape only — column kinds, NULL/NOT NULL,
+    /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PRIMARY KEY and
+    /// IDENTITY are recorded in the AST but not yet enforced
+    /// (PR10e/PR10f). DEFAULT values are not yet supported (PR10b).
+    /// </remarks>
+    private void ApplyCreateTable(CreateTableStatement create)
+    {
+        // AT clause gating.
+        if (create.StoragePath is not null && !AllowExplicitTablePaths)
+        {
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{create.TableName}' uses AT 'path' but the catalog has " +
+                "AllowExplicitTablePaths = false. Pass allowExplicitTablePaths: true to the " +
+                "TableCatalog constructor to opt in (test scenarios), or remove the AT clause " +
+                "and let the catalog place the file at {catalog_dir}/{name}.datum.");
+        }
+
+        // Persistent CREATE TABLE only allowed with a catalog file.
+        if (!create.IsTemp && _catalogStore is null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{create.TableName}' requires the catalog to be backed by a " +
+                ".datum-catalog.json file. Either use CREATE TEMP TABLE for in-memory " +
+                "scratch, or open the catalog with a catalogPath so persistent tables can be " +
+                "recorded.");
+        }
+
+        // Existence check.
+        if (HasTable(create.TableName))
+        {
+            if (create.IfNotExists) return;
+            throw new InvalidOperationException(
+                $"Table '{create.TableName}' already exists.");
+        }
+
+        // Build ColumnInfo[] from the AST's ColumnDefinition list.
+        Schema schema = BuildSchemaFromColumnDefinitions(create.Columns);
+
+        if (create.IsTemp)
+        {
+            Add(new InMemoryTableProvider(Pool, create.TableName, schema));
+            return;
+        }
+
+        // Persistent. Resolve the storage path, materialise an empty
+        // .datum file, register, and record in the catalog json.
+        string targetPath = ResolveCreateTablePath(create.TableName, create.StoragePath);
+        if (File.Exists(targetPath))
+        {
+            // We already checked HasTable; a stale .datum on disk
+            // without a catalog entry is treated as an error to avoid
+            // accidentally overwriting unindexed user data.
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{create.TableName}' would create a file at '{targetPath}' " +
+                "but a file already exists there. Drop the existing file or pick a different " +
+                "name / AT clause.");
+        }
+
+        ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            ColumnInfo c = schema.Columns[i];
+            descriptors[i] = new ColumnDescriptorV2(
+                Name: c.Name,
+                Kind: c.Kind,
+                Encoder: ColumnDescriptorV2.EncoderFor(c.Kind, c.IsArray),
+                IsNullable: c.Nullable,
+                IsArray: c.IsArray);
+        }
+
+        DatumFileWriterV2.CreateEmpty(targetPath, descriptors);
+
+        Add(new TableDescriptor(create.TableName, targetPath));
+
+        // Record in catalog json. Store the path relative to the
+        // catalog directory when possible so the catalog moves with
+        // the data.
+        string persistedPath = ToPersistedPath(targetPath);
+        _persistentTableEntries[create.TableName] = persistedPath;
+        _catalogStore!.Save(_udfs, _procedures);
+    }
+
+    /// <summary>
+    /// Applies a <c>DROP TABLE</c> statement: removes the table from
+    /// the catalog, disposes its provider, deletes the underlying
+    /// <c>.datum</c> file (and companion sidecars), and updates the
+    /// catalog json. <c>IF EXISTS</c> suppresses the not-found error.
+    /// </summary>
+    private void ApplyDropTable(DropTableStatement drop)
+    {
+        if (!Tables.TryGetValue(drop.TableName, out ITableProvider? provider))
+        {
+            if (drop.IfExists) return;
+            throw new InvalidOperationException(
+                $"Table '{drop.TableName}' is not registered in the catalog.");
+        }
+
+        // Capture path BEFORE disposing the provider so we can delete
+        // the file. Persistent tables track their path in
+        // _persistentTableEntries.
+        string? persistedPath = _persistentTableEntries.TryGetValue(drop.TableName, out string? p) ? p : null;
+
+        Tables.TryRemove(drop.TableName, out _);
+        try { provider.Dispose(); } catch { /* best-effort */ }
+
+        if (persistedPath is not null)
+        {
+            string resolved = ResolveTablePath(persistedPath);
+            // Delete the .datum file plus its companion sidecars.
+            // Best-effort: leave the directory clean even if a
+            // particular sidecar is locked or missing.
+            TryDeleteFile(resolved);
+            TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-blob"));
+            TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-index"));
+            TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-manifest"));
+
+            _persistentTableEntries.Remove(drop.TableName);
+            _catalogStore?.Save(_udfs, _procedures);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (IOException) { /* best-effort cleanup */ }
+        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+    }
+
+    private Schema BuildSchemaFromColumnDefinitions(IReadOnlyList<ColumnDefinition> definitions)
+    {
+        ColumnInfo[] columns = new ColumnInfo[definitions.Count];
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ColumnDefinition d = definitions[i];
+            if (!Model.TypeAnnotationResolver.TryParse(d.TypeName, out DataKind kind, out bool isArray))
+            {
+                throw new InvalidOperationException(
+                    $"Unknown column type '{d.TypeName}' on column '{d.Name}'. " +
+                    "Use a DataKind name (Int32, String, Float64, Uuid, ...) optionally " +
+                    "suffixed with [] for typed-array columns.");
+            }
+            columns[i] = new ColumnInfo(d.Name, kind, d.Nullable) { IsArray = isArray };
+        }
+        return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Resolves the storage path for a new persistent table. Returns
+    /// the absolute path the <c>.datum</c> file should land at.
+    /// </summary>
+    private string ResolveCreateTablePath(string tableName, string? explicitPath)
+    {
+        if (explicitPath is not null)
+        {
+            // Explicit AT clause — use as-is, but if relative, anchor
+            // to the catalog directory so it ends up reachable.
+            return System.IO.Path.IsPathRooted(explicitPath)
+                ? explicitPath
+                : ResolveTablePath(explicitPath);
+        }
+
+        // Default: {catalog_dir}/{tablename}.datum. _catalogStore is
+        // non-null here because the persistent path requires a
+        // catalog file (validated upstream).
+        string catalogDir = System.IO.Path.GetDirectoryName(_catalogStore!.Path) ?? Environment.CurrentDirectory;
+        return System.IO.Path.Combine(catalogDir, tableName + ".datum");
+    }
+
+    /// <summary>
+    /// Resolves a stored path to an absolute path. Relative paths are
+    /// anchored to the catalog directory; absolute paths are returned
+    /// unchanged.
+    /// </summary>
+    private string ResolveTablePath(string storedPath)
+    {
+        if (System.IO.Path.IsPathRooted(storedPath)) return storedPath;
+        string catalogDir = _catalogStore is null
+            ? Environment.CurrentDirectory
+            : System.IO.Path.GetDirectoryName(_catalogStore.Path) ?? Environment.CurrentDirectory;
+        return System.IO.Path.GetFullPath(System.IO.Path.Combine(catalogDir, storedPath));
+    }
+
+    /// <summary>
+    /// Converts an absolute path to a form suitable for the catalog
+    /// json: relative to the catalog directory when the path lives
+    /// underneath it, absolute otherwise. Keeps catalog-internal
+    /// tables portable while letting <c>AT '/abs/path'</c> tables
+    /// stay reachable.
+    /// </summary>
+    private string ToPersistedPath(string absolutePath)
+    {
+        if (_catalogStore is null) return absolutePath;
+        string catalogDir = System.IO.Path.GetDirectoryName(_catalogStore.Path) ?? Environment.CurrentDirectory;
+        string relative = System.IO.Path.GetRelativePath(catalogDir, absolutePath);
+        // GetRelativePath returns the absolute path back when there's
+        // no shared root (e.g. different drive on Windows). Use the
+        // absolute form in that case.
+        if (System.IO.Path.IsPathRooted(relative)) return absolutePath;
+        // Keep "../"-prefixed paths as absolute too — they're valid
+        // but more fragile across catalog moves.
+        if (relative.StartsWith("..")) return absolutePath;
+        return relative;
+    }
+
+    /// <summary>
+    /// Snapshots the current persistent-table set into the wire format
+    /// for the catalog json. Called by <see cref="CatalogStore.Save"/>
+    /// at every save.
+    /// </summary>
+    private IReadOnlyList<CatalogFileTableEntry> SnapshotPersistentTablesForSave()
+    {
+        List<CatalogFileTableEntry> result = new(_persistentTableEntries.Count);
+        foreach ((string name, string path) in _persistentTableEntries)
+        {
+            result.Add(new CatalogFileTableEntry { Name = name, FilePath = path });
+        }
+        return result;
     }
 
     private IQueryPlan PlanExec(ExecStatement exec)

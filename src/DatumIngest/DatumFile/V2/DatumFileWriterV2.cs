@@ -710,6 +710,34 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// One-shot helper that creates a fresh, empty <c>.datum</c> file
+    /// at <paramref name="datumPath"/> with the given column schema and
+    /// zero rows. Used by <c>CREATE TABLE</c> to materialise a table
+    /// before any rows are inserted.
+    /// </summary>
+    /// <remarks>
+    /// Overwrites any existing file at the path. The file is fully
+    /// finalised on return — readers see a valid header + footer + tail
+    /// describing an empty 0-row table whose columns match the input
+    /// descriptors.
+    /// </remarks>
+    public static void CreateEmpty(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columns);
+        if (columns.Count == 0)
+        {
+            throw new ArgumentException(
+                "CreateEmpty requires at least one column.", nameof(columns));
+        }
+
+        // No sidecar — empty file has no values to spill.
+        using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
+        writer.Initialize(columns);
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// One-shot helper that opens <paramref name="datumPath"/>, adds
     /// <paramref name="column"/> with all-null backfill, and commits
     /// via tail flip. See <see cref="AddColumn(ColumnDescriptorV2)"/> for the

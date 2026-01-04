@@ -968,23 +968,39 @@ public abstract record Statement;
 public sealed record QueryStatement(QueryExpression Query) : Statement;
 
 /// <summary>
-/// <c>CREATE TEMP TABLE name (col type, ...)</c> — creates a temporary table
-/// <c>CREATE TEMP TABLE name (col type, ..., [PRIMARY KEY (col, ...)])</c> — creates a temporary table
-/// with an explicit column definition list.
+/// <c>CREATE [TEMP] TABLE name (col type, ..., [PRIMARY KEY (col, ...)]) [AT 'path']</c>
+/// — creates a table with an explicit column definition list. The
+/// <see cref="IsTemp"/> flag selects between an in-memory table (TEMP)
+/// and a persistent <c>.datum</c>-file-backed one.
 /// </summary>
-/// <param name="TableName">The name of the temporary table to create.</param>
+/// <param name="TableName">The name of the table to create.</param>
 /// <param name="Columns">The column definitions (name and type pairs).</param>
+/// <param name="IsTemp">
+/// When <see langword="true"/>, the table is created as an in-memory
+/// temp table that lives only for the catalog's lifetime. When
+/// <see langword="false"/>, the table is materialised as a new
+/// <c>.datum</c> file on disk and persisted in the catalog file.
+/// </param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
 /// <param name="PrimaryKeyColumns">
 /// Column names that form the primary key. Populated from either inline <c>PRIMARY KEY</c>
 /// annotations on individual columns or a table-level <c>PRIMARY KEY (col, ...)</c> clause.
 /// Empty when no primary key is declared.
 /// </param>
-public sealed record CreateTempTableStatement(
+/// <param name="StoragePath">
+/// Optional explicit path supplied via the <c>AT 'path'</c> clause. When
+/// <see langword="null"/>, persistent tables land at
+/// <c>{catalog_dir}/{TableName}.datum</c>. The catalog gates this clause
+/// behind an <c>AllowExplicitTablePaths</c> flag so production hosts can
+/// disable it; tests opt in. Always <see langword="null"/> for TEMP tables.
+/// </param>
+public sealed record CreateTableStatement(
     string TableName,
     IReadOnlyList<ColumnDefinition> Columns,
+    bool IsTemp = false,
     bool IfNotExists = false,
-    IReadOnlyList<string>? PrimaryKeyColumns = null) : Statement;
+    IReadOnlyList<string>? PrimaryKeyColumns = null,
+    string? StoragePath = null) : Statement;
 
 /// <summary>
 /// A single column definition within a <c>CREATE TABLE</c> statement.
@@ -996,16 +1012,22 @@ public sealed record CreateTempTableStatement(
 public sealed record ColumnDefinition(string Name, string TypeName, bool Nullable = true, bool PrimaryKey = false);
 
 /// <summary>
-/// <c>CREATE TEMP TABLE name AS SELECT ...</c> — creates a temporary table
-/// populated from a query.
+/// <c>CREATE [TEMP] TABLE name AS SELECT ...</c> — creates a table
+/// populated from a query (CTAS). The <see cref="IsTemp"/> flag selects
+/// between in-memory and persistent forms, mirroring
+/// <see cref="CreateTableStatement"/>.
 /// </summary>
-/// <param name="TableName">The name of the temporary table to create.</param>
+/// <param name="TableName">The name of the table to create.</param>
 /// <param name="Query">The query whose results populate the table.</param>
+/// <param name="IsTemp">When <see langword="true"/>, creates an in-memory temp table.</param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
-public sealed record CreateTempTableAsSelectStatement(
+/// <param name="StoragePath">Optional explicit path (see <see cref="CreateTableStatement.StoragePath"/>).</param>
+public sealed record CreateTableAsSelectStatement(
     string TableName,
     QueryExpression Query,
-    bool IfNotExists = false) : Statement;
+    bool IsTemp = false,
+    bool IfNotExists = false,
+    string? StoragePath = null) : Statement;
 
 /// <summary>
 /// <c>DROP TABLE [IF EXISTS] name</c> — removes a temporary table.

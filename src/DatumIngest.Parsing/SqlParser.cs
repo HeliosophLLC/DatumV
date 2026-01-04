@@ -2433,29 +2433,51 @@ public static class SqlParser
     /// Same pattern as <see cref="CreateFunctionPrefix"/> /
     /// <see cref="CreateProcedurePrefix"/> — wrapped in <c>.Try()</c>
     /// for backtracking against sibling CREATE-* parsers, with the rest
-    /// of <see cref="CreateTempTableParser"/> running without an outer
+    /// of <see cref="CreateTableParser"/> running without an outer
     /// <c>.Try()</c> so column-list / AS-SELECT body failures propagate
     /// with deep Remainder.Position.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, Token<SqlToken>> CreateTempTablePrefix =
+    /// <summary>
+    /// Disambiguating prefix for <c>CREATE [TEMP|TEMPORARY] TABLE</c>.
+    /// Returns whether the TEMP keyword was present so downstream parsing
+    /// can build the right <see cref="CreateTableStatement"/> shape.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> CreateTablePrefix =
         (from createKw in Token.EqualTo(SqlToken.Create)
-         from optionalTempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary)).OptionalOrDefault()
+         from tempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary))
+            .Select(_ => true).OptionalOrDefault()
          from tableKw in Token.EqualTo(SqlToken.Table)
-         select tableKw)
+         select tempKw)
         .Try();
 
-    private static readonly TokenListParser<SqlToken, Statement> CreateTempTableParser =
-        from tableKw in CreateTempTablePrefix
+    /// <summary>
+    /// Optional <c>AT 'path'</c> trailing clause on a CREATE TABLE
+    /// statement. The catalog gates whether to honor it via the
+    /// <c>AllowExplicitTablePaths</c> option; production hosts disable
+    /// the clause entirely. <see langword="null"/> when the clause is
+    /// absent.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string?> AtPathParser =
+        (from atKw in Token.EqualTo(SqlToken.At)
+         from path in Token.EqualTo(SqlToken.StringLiteral)
+         select (string?)path.ToStringValue().Trim('\''))
+        .OptionalOrDefault();
+
+    private static readonly TokenListParser<SqlToken, Statement> CreateTableParser =
+        from isTemp in CreateTablePrefix
         from ifNotExists in IfNotExistsParser
         from tableName in IdentifierOrKeywordAsName
         from asOrParen in Token.EqualTo(SqlToken.As).Try()
             .Or(Token.EqualTo(SqlToken.LeftParen))
         from statement in asOrParen.Kind == SqlToken.As
-            ? SP.Ref(() => QueryExpressionParser!)
-                .Select(query => (Statement)new CreateTempTableAsSelectStatement(tableName, query, ifNotExists))
+            ? (from query in SP.Ref(() => QueryExpressionParser!)
+               from path in AtPathParser
+               select (Statement)new CreateTableAsSelectStatement(
+                   tableName, query, IsTemp: isTemp, IfNotExists: ifNotExists, StoragePath: path))
             : ColumnListWithOptionalPrimaryKeyParser
                 .Then(result => Token.EqualTo(SqlToken.RightParen)
-                    .Select(_ =>
+                    .IgnoreThen(AtPathParser)
+                    .Select(path =>
                     {
                         IReadOnlyList<string>? primaryKeyColumns = result.PrimaryKeyColumns;
                         if (primaryKeyColumns is null)
@@ -2471,8 +2493,11 @@ public static class SqlParser
                             }
                             primaryKeyColumns = inlineKeys;
                         }
-                        return (Statement)new CreateTempTableStatement(tableName, result.Columns, ifNotExists,
-                            PrimaryKeyColumns: primaryKeyColumns);
+                        return (Statement)new CreateTableStatement(
+                            tableName, result.Columns,
+                            IsTemp: isTemp, IfNotExists: ifNotExists,
+                            PrimaryKeyColumns: primaryKeyColumns,
+                            StoragePath: path);
                     }))
         select statement;
 
@@ -3250,7 +3275,7 @@ public static class SqlParser
     /// </summary>
     /// <remarks>
     /// The CREATE-* parsers (<see cref="CreateFunctionParser"/>,
-    /// <see cref="CreateProcedureParser"/>, <see cref="CreateTempTableParser"/>)
+    /// <see cref="CreateProcedureParser"/>, <see cref="CreateTableParser"/>)
     /// each have their own <c>.Try()</c>-protected prefix that disambiguates
     /// against the sibling CREATE-* alternatives — once a prefix matches, the
     /// rest of the parser runs without a surrounding <c>.Try()</c> so
@@ -3282,7 +3307,7 @@ public static class SqlParser
             .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
             .Or(SetStatementParser.Try())
-            .Or(CreateTempTableParser)
+            .Or(CreateTableParser)
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())

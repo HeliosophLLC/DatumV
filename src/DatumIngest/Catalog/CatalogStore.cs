@@ -76,11 +76,32 @@ public sealed class CatalogStore
     /// </summary>
     public const string DefaultFileName = ".datum-catalog.json";
 
-    /// <summary>The schema version this binary writes.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// The schema version this binary writes.
+    /// <list type="bullet">
+    ///   <item><description><c>1</c>: <c>udfs</c> + <c>procedures</c> only.</description></item>
+    ///   <item><description><c>2</c>: adds <c>tables</c> section for persistent tables created via <c>CREATE TABLE</c> (PR10a).</description></item>
+    /// </list>
+    /// Forward-compat: a binary that writes v2 reads v1 files cleanly
+    /// (the missing <c>tables</c> section just means no tables are
+    /// rehydrated). Older binaries that don't know v2 will see the
+    /// version mismatch and start with an empty registry, per the
+    /// existing forward-compat policy.
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     private readonly string _path;
     private readonly object _writeLock = new();
+
+    /// <summary>
+    /// Optional callback that returns the catalog's current persistent
+    /// table set at <see cref="Save"/> time. Wired up by
+    /// <see cref="TableCatalog"/> at construction so existing UDF /
+    /// procedure save call-sites don't need to know about tables;
+    /// tables transparently round-trip through the same file.
+    /// <see langword="null"/> means no tables are persisted (older callers).
+    /// </summary>
+    private Func<IReadOnlyList<CatalogFileTableEntry>>? _tablesProvider;
 
     /// <summary>Creates a store rooted at <paramref name="path"/>.</summary>
     /// <param name="path">Absolute path to the catalog JSON file.</param>
@@ -91,6 +112,70 @@ public sealed class CatalogStore
 
     /// <summary>The absolute path to the persisted catalog file.</summary>
     public string Path => _path;
+
+    /// <summary>
+    /// Wires <paramref name="provider"/> as the callback that supplies
+    /// the catalog's persistent tables at every <see cref="Save"/>.
+    /// <see cref="TableCatalog"/> calls this once at construction so
+    /// existing UDF / procedure save call-sites don't need to know
+    /// about tables — the saved file always reflects the catalog's
+    /// current state of tables, UDFs, and procedures.
+    /// </summary>
+    public void SetTablesProvider(Func<IReadOnlyList<CatalogFileTableEntry>> provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        _tablesProvider = provider;
+    }
+
+    /// <summary>
+    /// Reads the persisted <c>tables</c> section. Returns an empty
+    /// list when the file is missing, the version is too new, or the
+    /// section was absent (v1 file). Per-entry parse failures are
+    /// reported via the returned <see cref="CatalogStoreLoadReport"/>
+    /// alongside UDF / procedure warnings.
+    /// </summary>
+    /// <remarks>
+    /// Called by <see cref="TableCatalog"/> right after
+    /// <see cref="Load(UdfRegistry, ProcedureRegistry)"/> so the
+    /// catalog can re-register every persisted table via its
+    /// <c>AddFile</c> path.
+    /// </remarks>
+    public IReadOnlyList<CatalogFileTableEntry> LoadTables()
+    {
+        if (!File.Exists(_path))
+        {
+            return [];
+        }
+
+        string json;
+        try
+        {
+            json = File.ReadAllText(_path);
+        }
+        catch (Exception)
+        {
+            // Caller will surface the same error via Load(); return
+            // empty here to avoid double-reporting.
+            return [];
+        }
+
+        CatalogFile? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize(json, CatalogJsonContext.Default.CatalogFile);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        if (parsed is null || parsed.Version > CurrentVersion)
+        {
+            return [];
+        }
+
+        return parsed.Tables ?? (IReadOnlyList<CatalogFileTableEntry>)[];
+    }
 
     /// <summary>
     /// Loads the persisted state into <paramref name="udfs"/> and
@@ -499,6 +584,9 @@ public sealed class CatalogStore
                         SourceText = e.SourceText,
                     })
                     .ToList(),
+                Tables = _tablesProvider?.Invoke()
+                    .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
             };
         }
 
@@ -533,6 +621,26 @@ internal sealed class CatalogFile
     public int Version { get; set; }
     public List<CatalogFileUdfEntry>? Udfs { get; set; }
     public List<CatalogFileProcedureEntry>? Procedures { get; set; }
+    public List<CatalogFileTableEntry>? Tables { get; set; }
+}
+
+/// <summary>
+/// One table entry in the persisted catalog (v2). Only persistent
+/// tables (created via <c>CREATE TABLE</c>) are recorded; TEMP tables
+/// die with the catalog session and never make it into the file.
+/// </summary>
+public sealed class CatalogFileTableEntry
+{
+    /// <summary>The table's logical name as it appears in queries.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Path to the backing <c>.datum</c> file. Stored relative to the
+    /// catalog directory when possible (so the catalog moves with the
+    /// data); absolute when the table was created with an explicit
+    /// <c>AT 'path'</c> outside the catalog tree.
+    /// </summary>
+    public string? FilePath { get; set; }
 }
 
 /// <summary>One UDF entry in the persisted catalog.</summary>
@@ -609,9 +717,11 @@ internal sealed class CatalogFileProcedureEntry
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
 [JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
+[JsonSerializable(typeof(CatalogFileTableEntry))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
+[JsonSerializable(typeof(List<CatalogFileTableEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,

@@ -86,6 +86,31 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <summary>
+    /// Creates an empty provider whose schema is declared up front — for
+    /// <c>CREATE TEMP TABLE</c> bodies that need a table with declared
+    /// types but zero rows. Subsequent <c>INSERT</c>s populate the rows.
+    /// </summary>
+    /// <param name="pool">The buffer pool used to rent row batches.</param>
+    /// <param name="name">The logical table name.</param>
+    /// <param name="schema">
+    /// The column descriptors for the empty table. Cell types in
+    /// subsequent inserts must be consistent with each column's
+    /// declared <see cref="ColumnInfo.Kind"/>.
+    /// </param>
+    public InMemoryTableProvider(Pool pool, string name, Schema schema)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        _pool = pool;
+        Name = name;
+        _columns = schema.Columns.Select(c => c.Name).ToArray();
+        _rows = [];
+        _schema = schema;
+        _fullLookup = new ColumnLookup(_columns);
+        _indexEnabled = false; // empty table — no point auto-building.
+        _lazySourceIndex = null;
+    }
+
+    /// <summary>
     /// Creates a provider from a sequence of <see cref="Row"/>s. Column names are
     /// derived from the first row's <see cref="Row.ColumnNames"/>; schema kinds are
     /// inferred from the first non-null <see cref="DataValue"/> per column. Each row
