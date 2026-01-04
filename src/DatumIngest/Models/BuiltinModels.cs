@@ -104,8 +104,11 @@ public static class BuiltinModels
         // Juggernaut XL Lightning is the high-realism alternative.
         RegisterSdTurbo(modelCatalog);
         RegisterRealisticVisionHyper(modelCatalog);
+        RegisterDreamshaperHyper(modelCatalog);
+        RegisterEpicrealismHyper(modelCatalog);
         RegisterSdxlTurbo(modelCatalog);
         RegisterJuggernautXlLightning(modelCatalog);
+        RegisterSdxlLightning2Step(modelCatalog);
 
         // Audio generation.
         RegisterMusicGenSmall(modelCatalog);
@@ -1127,6 +1130,167 @@ public static class BuiltinModels
             ]));
     }
 
+    /// <summary>Default folder for the DreamShaper 8 + Hyper-SD diffusers ONNX layout.</summary>
+    public const string DreamshaperHyperFolder = "dreamshaper-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for DreamShaper 8 + Hyper-SD: the UNet weights,
+    /// ~865M params (same architecture as SD-Turbo / SD 1.5, but the
+    /// underlying weights are Lykon's DreamShaper 8 finetune of SD 1.5
+    /// with ByteDance's Hyper-SD 4-step distillation LoRA fused in).
+    /// </summary>
+    public const string DreamshaperHyperAnchor = DreamshaperHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers DreamShaper 8 (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"dreamshaper_hyper"</c>). Stylized / painterly leaning fantasy
+    /// and concept-art — strong fit for D&amp;D fantasy aesthetics, monsters,
+    /// and atmospheric environments. Same wall-clock cost as
+    /// <c>realistic_vision_hyper</c> (~250–330ms per 512×512 image at 4 steps);
+    /// notably less NSFW-leaning than Realistic Vision V6.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the
+    /// DreamShaper 8 base and the Hyper-SD LoRA. See the model cards
+    /// at <a href="https://huggingface.co/Lykon/dreamshaper-8">Lykon/dreamshaper-8</a>
+    /// and <a href="https://huggingface.co/ByteDance/Hyper-SD">ByteDance/Hyper-SD</a>
+    /// for the full terms.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout — DreamShaper
+    /// ships with its own bundled VAE, no separate sd-vae-ft-mse pairing.
+    /// </para>
+    /// </remarks>
+    public static void RegisterDreamshaperHyper(
+        ModelCatalog catalog,
+        string modelName = "dreamshaper_hyper",
+        string folder = DreamshaperHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "DreamShaper 8 + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "Lykon / ByteDance",
+            SourceUrl: "https://huggingface.co/Lykon/dreamshaper-8",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the epiCRealism + Hyper-SD diffusers ONNX layout.</summary>
+    public const string EpicrealismHyperFolder = "epicrealism-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for epiCRealism + Hyper-SD: the UNet weights,
+    /// ~865M params (same architecture as SD-Turbo / SD 1.5, but the
+    /// underlying weights are emilianJR's epiCRealism finetune of SD 1.5
+    /// with ByteDance's Hyper-SD 4-step distillation LoRA fused in).
+    /// </summary>
+    public const string EpicrealismHyperAnchor = EpicrealismHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers epiCRealism (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"epicrealism_hyper"</c>). Photoreal-leaning with broader subject
+    /// coverage than Realistic Vision V6 — strong fit for D&amp;D environments,
+    /// taverns, landscapes, and group scenes where RV's narrow portrait
+    /// distribution starts to limit composition. Same wall-clock cost as
+    /// the other SD 1.5 + Hyper exports (~250–330ms per 512×512 image at
+    /// 4 steps); notably less NSFW-leaning than Realistic Vision V6.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the
+    /// epiCRealism base and the Hyper-SD LoRA. See the model cards
+    /// at <a href="https://huggingface.co/emilianJR/epiCRealism">emilianJR/epiCRealism</a>
+    /// and <a href="https://huggingface.co/ByteDance/Hyper-SD">ByteDance/Hyper-SD</a>
+    /// for the full terms.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout — epiCRealism
+    /// ships with its own bundled VAE, no separate sd-vae-ft-mse pairing.
+    /// </para>
+    /// </remarks>
+    public static void RegisterEpicrealismHyper(
+        ModelCatalog catalog,
+        string modelName = "epicrealism_hyper",
+        string folder = EpicrealismHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "epiCRealism + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "emilianJR / ByteDance",
+            SourceUrl: "https://huggingface.co/emilianJR/epiCRealism",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
     /// <summary>Default folder for SDXL-Turbo's diffusers ONNX layout.</summary>
     public const string SdxlTurboFolder = "sdxl-turbo-onnx";
 
@@ -1242,6 +1406,98 @@ public static class BuiltinModels
             License: "Stability AI Community",
             LicenseHolder: "RunDiffusion / Stability AI",
             SourceUrl: "https://huggingface.co/RunDiffusion/Juggernaut-XL-Lightning",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx",
+                $"{folder}/text_encoder_2/model.onnx_data",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/tokenizer_2/vocab.json",
+                $"{folder}/tokenizer_2/merges.txt",
+                $"{folder}/tokenizer_2/special_tokens_map.json",
+                $"{folder}/tokenizer_2/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for SDXL-Lightning 2-step's diffusers ONNX layout.</summary>
+    public const string SdxlLightning2StepFolder = "sdxl-lightning-2step-onnx";
+
+    /// <summary>
+    /// File-existence anchor for SDXL-Lightning 2-step: the UNet weights,
+    /// ~2.6B params (full SDXL UNet replaced by ByteDance's Lightning 2-step
+    /// distillation, not a LoRA).
+    /// </summary>
+    public const string SdxlLightning2StepAnchor = SdxlLightning2StepFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers ByteDance's SDXL-Lightning 2-step under the catalog name
+    /// <paramref name="modelName"/> (defaults to <c>"sdxl_lightning_2step"</c>).
+    /// SDXL-class prompt adherence at roughly half the wall-clock cost of
+    /// SDXL-Turbo's recommended 4-step operating point. Notably more stable
+    /// across seeds than SDXL-Turbo because Lightning's progressive
+    /// distillation produces calmer outputs than ADD.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Two non-default scheduler choices are baked in.</strong>
+    /// First, this is a 2-step model — passing more or fewer steps would
+    /// drift outside the distillation distribution. Second, the 2-step
+    /// Lightning UNet was distilled to predict the clean sample directly
+    /// (not noise), so the loader uses
+    /// <see cref="PredictionType.Sample"/>. The 4-step and 8-step Lightning
+    /// variants are epsilon-prediction; if you ever export those, register
+    /// them with the default <see cref="PredictionType.Epsilon"/>.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> OpenRAIL++ (the SDXL-Lightning weights
+    /// inherit SDXL base 1.0's license terms via ByteDance's redistribution
+    /// permissions). See <a href="https://huggingface.co/ByteDance/SDXL-Lightning">
+    /// the model card</a> for current terms.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard SDXL diffusers folder layout (dual
+    /// text encoder, dual tokenizer) — same shape as SDXL-Turbo / Juggernaut.
+    /// </para>
+    /// </remarks>
+    public static void RegisterSdxlLightning2Step(
+        ModelCatalog catalog,
+        string modelName = "sdxl_lightning_2step",
+        string folder = SdxlLightning2StepFolder,
+        int? seed = null)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new SdxlTurboModel(
+                    modelName,
+                    modelDirectory,
+                    seed,
+                    steps: 2,
+                    predictionType: PredictionType.Sample);
+            },
+            DisplayName: "SDXL Lightning 2-step",
+            Parameters: "2.6B (UNet) + 1.4B (text encoders)",
+            License: "OpenRAIL++",
+            LicenseHolder: "ByteDance / Stability AI",
+            SourceUrl: "https://huggingface.co/ByteDance/SDXL-Lightning",
             Category: "generator",
             Modalities: ["text", "image"],
             Files:

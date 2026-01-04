@@ -10,6 +10,22 @@ using SkiaSharp;
 namespace DatumIngest.Models.Onnx;
 
 /// <summary>
+/// Which quantity the UNet predicts at each denoising step. SDXL-Turbo,
+/// Juggernaut XL Lightning, and SDXL-Lightning 4-step/8-step predict noise
+/// (epsilon). SDXL-Lightning 2-step predicts the clean sample (x0) directly.
+/// The Euler update rule differs between the two, so the model loader must
+/// know which one applies to the loaded weights.
+/// </summary>
+public enum PredictionType
+{
+    /// <summary>UNet predicts noise: <c>x_next = x + (σ_next − σ) · noise_pred</c>.</summary>
+    Epsilon,
+
+    /// <summary>UNet predicts clean sample: <c>x_next = x · (σ_next/σ) + pred_x0 · (1 − σ_next/σ)</c>.</summary>
+    Sample,
+}
+
+/// <summary>
 /// Stability AI SDXL-Turbo — text-to-image diffusion model. Generates
 /// 1024×1024 images with notably better composition and prompt adherence
 /// than SD-Turbo, at modestly higher latency. Implements the SDXL
@@ -80,6 +96,7 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     private readonly InferenceSession _vaeDecoderSession;
     private readonly BpeTokenizer _tokenizer;
     private readonly Random _rng;
+    private readonly PredictionType _predictionType;
 
     // The pooled-output tensor from text encoder 2.
     private readonly string _encoder2PooledOutputName;
@@ -126,10 +143,23 @@ public sealed class SdxlTurboModel : IModel, IDisposable
     /// speed at the cost of face/detail quality; 4 is the recommended
     /// minimum for recognisable faces; 8 for hero outputs.
     /// </param>
-    public SdxlTurboModel(string name, string modelDirectory, int? seed = null, int steps = 4)
+    /// <param name="predictionType">
+    /// Which quantity the UNet predicts. Default is <see cref="PredictionType.Epsilon"/>,
+    /// correct for SDXL-Turbo, Juggernaut XL Lightning, and SDXL-Lightning 4-step/8-step.
+    /// SDXL-Lightning 2-step is the lone exception — its UNet was distilled to predict
+    /// the clean sample directly, so callers loading those weights must pass
+    /// <see cref="PredictionType.Sample"/>. Mismatched prediction type produces garbage.
+    /// </param>
+    public SdxlTurboModel(
+        string name,
+        string modelDirectory,
+        int? seed = null,
+        int steps = 4,
+        PredictionType predictionType = PredictionType.Epsilon)
     {
         Name = name;
         _steps = steps;
+        _predictionType = predictionType;
 
         string textEncoder1Path = Path.Combine(modelDirectory, "text_encoder", "model.onnx");
         string textEncoder2Path = Path.Combine(modelDirectory, "text_encoder_2", "model.onnx");
@@ -253,10 +283,16 @@ public sealed class SdxlTurboModel : IModel, IDisposable
         // 6. Multi-step Euler denoising with Karras sigma schedule.
         //
         //    Each step:
-        //      a. Scale model input by c_in = 1/sqrt(sigma^2+1)
+        //      a. Scale model input by c_in = 1/sqrt(sigma^2+1) — same for both prediction types
         //      b. Run UNet at the training timestep nearest to this sigma
-        //      c. Euler update: x_next = x + (sigma_next - sigma) * noise_pred
-        //         sigma_next < sigma, so delta < 0 (removes noise each step)
+        //      c. Euler update — branched on prediction type:
+        //         Epsilon (model_output = noise):
+        //             x_next = x + (sigma_next - sigma) * noise_pred
+        //         Sample (model_output = pred_x0):
+        //             x_next = x * (sigma_next/sigma) + pred_x0 * (1 - sigma_next/sigma)
+        //         At the final step sigma_next = 0 so both formulas collapse to
+        //         "output the predicted clean image" — sigma_next/sigma = 0 in the
+        //         Sample case sets x_next = pred_x0 directly.
         for (int step = 0; step < _steps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -271,15 +307,25 @@ public sealed class SdxlTurboModel : IModel, IDisposable
             DenseTensor<float> scaledLatents = new(
                 scaledBuffer, [1, LatentChannels, LatentHeight, LatentWidth]);
 
-            DenseTensor<float> noisePred = RunUnet(
+            DenseTensor<float> modelOutput = RunUnet(
                 scaledLatents, combinedTextEmbeds, pooledTextEmbeds, timeIds,
                 timestep: _timesteps[step]);
-            ThrowIfNotFinite(noisePred, $"UNet noise_pred (step {step + 1}/{_steps})");
+            ThrowIfNotFinite(modelOutput, $"UNet output (step {step + 1}/{_steps})");
 
-            float delta = sigmaNext - sigma;
-            ReadOnlySpan<float> pred = noisePred.Buffer.Span;
-            for (int i = 0; i < latentBuffer.Length; i++)
-                latentBuffer[i] += delta * pred[i];
+            ReadOnlySpan<float> output = modelOutput.Buffer.Span;
+            if (_predictionType == PredictionType.Epsilon)
+            {
+                float delta = sigmaNext - sigma;
+                for (int i = 0; i < latentBuffer.Length; i++)
+                    latentBuffer[i] += delta * output[i];
+            }
+            else // PredictionType.Sample
+            {
+                float ratio = sigmaNext / sigma;
+                float oneMinusRatio = 1f - ratio;
+                for (int i = 0; i < latentBuffer.Length; i++)
+                    latentBuffer[i] = latentBuffer[i] * ratio + output[i] * oneMinusRatio;
+            }
         }
 
         // 7. Scale latents for VAE decoding.
