@@ -578,6 +578,175 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Adds a new column to the schema with all-null backfill for
+    /// every existing row. After this call, the writer's effective
+    /// column count is <c>previous + 1</c>; subsequent
+    /// <see cref="WriteRowBatch"/> calls must supply values for the
+    /// new column too.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only valid in append mode (writer opened via
+    /// <see cref="OpenForAppend"/>) and only callable while the
+    /// writer's encoders have no pending unflushed rows for the
+    /// existing columns — i.e., <see cref="AddColumn(ColumnDescriptorV2)"/> must come
+    /// before any <see cref="WriteRowBatch"/> call in the session, OR
+    /// after a <see cref="WriteRowBatch"/> whose row count made every
+    /// column's encoder flush at the same boundary. The simplest rule:
+    /// call <c>AddColumn</c> immediately after
+    /// <see cref="OpenForAppend"/> and before any
+    /// <c>WriteRowBatch</c>.
+    /// </para>
+    /// <para>
+    /// PR6 requires the new column to be nullable
+    /// (<see cref="ColumnDescriptorV2.IsNullable"/> = <c>true</c>) —
+    /// the backfill is all-null and a non-nullable column with no
+    /// values is undefined. Computed-default backfill is a future
+    /// enhancement.
+    /// </para>
+    /// <para>
+    /// The new column's pages stream out past EOF as the encoder
+    /// fills, exactly mirroring the existing append-pages flow.
+    /// They're column-major (contiguous) for the new column, while
+    /// older columns' pages remain interleaved by their original
+    /// flush order — invisible to readers because page directories
+    /// record absolute offsets.
+    /// </para>
+    /// </remarks>
+    public void AddColumn(ColumnDescriptorV2 column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_initialized) throw new InvalidOperationException(
+            "AddColumn requires an initialized writer; open the file with OpenForAppend.");
+        if (_finalized) throw new InvalidOperationException("Writer is finalized.");
+        if (!_isAppend) throw new InvalidOperationException(
+            "AddColumn is only supported in append mode (OpenForAppend). " +
+            "For initial writes, include the column in Initialize's schema list.");
+
+        if (!column.IsNullable)
+        {
+            throw new ArgumentException(
+                $"AddColumn requires a nullable column; '{column.Name}' is non-nullable. " +
+                "All-null backfill needs IsNullable = true.",
+                nameof(column));
+        }
+        if (column.IsTombstoned)
+        {
+            throw new ArgumentException(
+                "AddColumn cannot accept a column with IsTombstoned = true; " +
+                "tombstone state is set via MarkColumnTombstoned, not AddColumn.",
+                nameof(column));
+        }
+
+        // Reject collisions against any column block — even tombstoned
+        // ones — so a future undrop can recover the dropped column
+        // unambiguously.
+        foreach (ColumnDescriptorV2 existing in _columns!)
+        {
+            if (existing.Name == column.Name)
+            {
+                throw new ArgumentException(
+                    $"Column '{column.Name}' already exists in the file's schema " +
+                    $"(IsTombstoned = {existing.IsTombstoned}). Drop or compact first if you " +
+                    "need to re-add a column with the same name.",
+                    nameof(column));
+            }
+        }
+
+        // Sanity: every existing column's encoder must hold the same
+        // pending row count. This is the lockstep invariant the writer
+        // maintains across rehydration and WriteRowBatch (all columns
+        // advance row-by-row in step). A divergence here would mean
+        // some prior op corrupted writer state — fail loudly. The
+        // backfill below pumps _totalRowsWritten nulls into the new
+        // column, which aligns it to whatever lockstep state the
+        // existing columns share regardless of value.
+        if (_encoders!.Length > 0)
+        {
+            int referenceRowCount = _encoders[0].RowCount;
+            for (int i = 1; i < _encoders.Length; i++)
+            {
+                if (_encoders[i].RowCount != referenceRowCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Writer state inconsistent at AddColumn: column '{_columns[0].Name}' " +
+                        $"has {referenceRowCount} pending rows, column '{_columns[i].Name}' has " +
+                        $"{_encoders[i].RowCount}. Existing columns must be in lockstep before " +
+                        "adding a new column.");
+                }
+            }
+        }
+
+        // Grow per-column writer state arrays to accommodate the new
+        // column at index N (where N was the previous count).
+        int newIndex = _columns.Length;
+        Array.Resize(ref _columns, newIndex + 1);
+        Array.Resize(ref _encoders, newIndex + 1);
+        Array.Resize(ref _pageDirectory, newIndex + 1);
+        Array.Resize(ref _hierarchies, newIndex + 1);
+
+        _columns[newIndex] = column;
+        _encoders[newIndex] = PageEncoderFactoryV2.Create(column, _pageSize);
+        _pageDirectory[newIndex] = new List<PageDescriptorV2>();
+        _hierarchies[newIndex] = new ZoneMapHierarchyBuilderV2();
+
+        // Pump _totalRowsWritten null values into the new column's
+        // encoder. Pages flush automatically as the encoder fills,
+        // streaming all-null bytes past EOF and recording offsets in
+        // the new page directory. After this loop the encoder's
+        // RowCount matches every other column's logical position
+        // (zero, since we asserted that above), so subsequent
+        // WriteRowBatch calls extend all columns in lockstep.
+        DataValue nullValue = DataValue.Null(column.Kind);
+        for (long row = 0; row < _totalRowsWritten; row++)
+        {
+            _encoders[newIndex].Append(nullValue, store: null, sidecar: null);
+            if (_encoders[newIndex].IsFull)
+            {
+                FlushPage(newIndex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One-shot helper that opens <paramref name="datumPath"/>, adds
+    /// <paramref name="column"/> with all-null backfill, and commits
+    /// via tail flip. See <see cref="AddColumn(ColumnDescriptorV2)"/> for the
+    /// session-scoped equivalent and constraints.
+    /// </summary>
+    public static void AddColumn(string datumPath, ColumnDescriptorV2 column)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(column);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+        writer.AddColumn(column);
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// One-shot helper for batched column additions in a single
+    /// commit. Generation bumps by one regardless of how many columns
+    /// are added.
+    /// </summary>
+    public static void AddColumns(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columns);
+        if (columns.Count == 0) return;
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+        foreach (ColumnDescriptorV2 column in columns)
+        {
+            writer.AddColumn(column);
+        }
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// Marks the row at logical index <paramref name="rowIndex"/> as
     /// soft-deleted. The data bytes stay on disk (page directory, zone
     /// maps, sidecar refs all unchanged) but readers skip the row at
