@@ -44,6 +44,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private readonly Pool _pool;
     private readonly SidecarReadStore? _sidecar;
     private readonly Schema _schema;
+    /// <summary>
+    /// Maps a filtered-schema index (after tombstoned columns were
+    /// removed) to its index in <see cref="_reader"/>'s
+    /// <see cref="FooterV2.Columns"/>. Length equals
+    /// <c>_schema.Columns.Count</c>. Without tombstones this is just
+    /// the identity mapping; with tombstones it skips the dropped
+    /// column slots so the footer's page directories / zone maps stay
+    /// addressable from the live schema.
+    /// </summary>
+    private readonly int[] _schemaToFooterIndex;
     private readonly QueryResultsManifest? _manifest;
     private readonly MappedSourceIndexSet? _mappedIndexSet;
     private readonly SourceIndex? _sourceIndex;
@@ -63,7 +73,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _pool = pool;
         _reader = DatumFileReaderV2.Open(descriptor.FilePath);
         _sidecar = TryOpenSidecar(descriptor.FilePath, _reader);
-        _schema = BuildSchema(_reader.Footer);
+        (_schema, _schemaToFooterIndex) = BuildSchema(_reader.Footer);
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
     }
@@ -115,11 +125,19 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
         // All columns share the same page count and per-page row count
         // because the writer flushes every encoder at the same row cadence.
-        int pageCount = _reader.Footer.Columns[0].Pages.Count;
+        // Use _schemaToFooterIndex[0] (the first live column) as the probe —
+        // tombstoned columns at index 0 are skipped from the live schema.
+        int pageCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages.Count;
+
+        // schemaIndices[i] = footer column index for the i-th projected
+        // column. The columnLookup gives us the index into the live
+        // (filtered) schema; we translate via _schemaToFooterIndex so all
+        // downstream Footer.Columns[..] accesses land on the right block.
         int[] schemaIndices = new int[projectedCount];
         for (int i = 0; i < projectedCount; i++)
         {
-            schemaIndices[i] = columnLookup.GetSchemaColumnIndex(i);
+            int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
+            schemaIndices[i] = _schemaToFooterIndex[filteredIndex];
         }
 
         // Build a filter-column → schema-index lookup once. Skip the
@@ -200,14 +218,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
         int pagesPerChapter = DatumFormatV2.PagesPerChapter;
         int chaptersPerVolume = DatumFormatV2.ChaptersPerVolume;
-        int chapterCount = _reader.Footer.Columns[0].ChapterZoneMaps.Count;
+        // Probe the first live column (skipping tombstoned slots) for
+        // page-count / chapter-count / volume-count metadata. All live
+        // columns share these counts.
+        int probeFooterIdx = _schemaToFooterIndex[0];
+        int chapterCount = _reader.Footer.Columns[probeFooterIdx].ChapterZoneMaps.Count;
 
         bool hasVolumes = (_reader.Header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0
-            && _reader.Footer.Columns[0].VolumeZoneMaps is { Count: > 0 };
+            && _reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps is { Count: > 0 };
 
         // When the file emits volume zone maps walk volumes; otherwise
         // the volume tier is collapsed and we walk chapters directly.
-        int volumeIterCount = hasVolumes ? _reader.Footer.Columns[0].VolumeZoneMaps!.Count : 1;
+        int volumeIterCount = hasVolumes ? _reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps!.Count : 1;
 
         for (int v = 0; v < volumeIterCount; v++)
         {
@@ -253,7 +275,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            DatumZoneMap zoneMap = _reader.Footer.Columns[schemaIdx].VolumeZoneMaps![volumeIndex];
+            int footerIdx = _schemaToFooterIndex[schemaIdx];
+            DatumZoneMap zoneMap = _reader.Footer.Columns[footerIdx].VolumeZoneMaps![volumeIndex];
             stats[name] = MakeRange(zoneMap, rowCount, arena);
         }
         using ColumnStatisticsRangeLookup lookup = new(stats);
@@ -266,7 +289,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            DatumZoneMap zoneMap = _reader.Footer.Columns[schemaIdx].ChapterZoneMaps[chapterIndex];
+            int footerIdx = _schemaToFooterIndex[schemaIdx];
+            DatumZoneMap zoneMap = _reader.Footer.Columns[footerIdx].ChapterZoneMaps[chapterIndex];
             stats[name] = MakeRange(zoneMap, rowCount, arena);
         }
         using ColumnStatisticsRangeLookup lookup = new(stats);
@@ -275,11 +299,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     private bool CanSkipPage(int pageIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
     {
-        int rowCount = _reader.Footer.Columns[0].Pages[pageIndex].RowCount;
+        int rowCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages[pageIndex].RowCount;
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            DatumZoneMap? zoneMap = _reader.Footer.Columns[schemaIdx].Pages[pageIndex].ZoneMap;
+            int footerIdx = _schemaToFooterIndex[schemaIdx];
+            DatumZoneMap? zoneMap = _reader.Footer.Columns[footerIdx].Pages[pageIndex].ZoneMap;
             // Page-level zone maps are null for non-comparable kinds —
             // skip those columns rather than synthesizing fake stats.
             if (zoneMap is null) continue;
@@ -304,9 +329,14 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     private long ComputeChapterRowCount(int chapterIndex)
     {
+        // Use the first live (non-tombstoned) column as the probe — its
+        // page count and per-page row counts mirror every other live
+        // column's by construction (the writer flushes all encoders at
+        // the same row cadence). Tombstoned columns are skipped from
+        // _schemaToFooterIndex so we never address one here.
         int pagesPerChapter = DatumFormatV2.PagesPerChapter;
         int pageStart = chapterIndex * pagesPerChapter;
-        var pages = _reader.Footer.Columns[0].Pages;
+        var pages = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages;
         int pageEnd = Math.Min(pageStart + pagesPerChapter, pages.Count);
         long total = 0;
         for (int p = pageStart; p < pageEnd; p++) total += pages[p].RowCount;
@@ -317,7 +347,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     {
         int chaptersPerVolume = DatumFormatV2.ChaptersPerVolume;
         int chapterStart = volumeIndex * chaptersPerVolume;
-        int chapterCount = _reader.Footer.Columns[0].ChapterZoneMaps.Count;
+        int chapterCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].ChapterZoneMaps.Count;
         int chapterEnd = Math.Min(chapterStart + chaptersPerVolume, chapterCount);
         long total = 0;
         for (int c = chapterStart; c < chapterEnd; c++) total += ComputeChapterRowCount(c);
@@ -362,10 +392,14 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     {
         ColumnLookup columnLookup = ResolveProjection(_schema, requiredColumns);
         int projectedCount = columnLookup.Count;
+        // schemaIndices[i] holds the FOOTER column index, translated
+        // from the live (filtered) schema position via
+        // _schemaToFooterIndex so tombstoned columns are skipped.
         int[] schemaIndices = new int[projectedCount];
         for (int i = 0; i < projectedCount; i++)
         {
-            schemaIndices[i] = columnLookup.GetSchemaColumnIndex(i);
+            int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
+            schemaIndices[i] = _schemaToFooterIndex[filteredIndex];
         }
 
         DatumFileReaderV2 sessionReader = DatumFileReaderV2.Open(_descriptor.FilePath);
@@ -396,20 +430,30 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     /// <summary>
     /// Builds an engine-facing <see cref="Schema"/> from the v2 footer's
-    /// column descriptors. The descriptor's <c>IsArray</c> flag rides through
-    /// to <see cref="ColumnInfo.IsArray"/>; per-element kind is the descriptor's
-    /// <c>Kind</c> directly (typed-array convention — no separate
-    /// <c>ArrayElementKind</c> wrapper).
+    /// column descriptors, filtering out soft-dropped (tombstoned)
+    /// columns. The descriptor's <c>IsArray</c> flag rides through to
+    /// <see cref="ColumnInfo.IsArray"/>; per-element kind is the
+    /// descriptor's <c>Kind</c> directly (typed-array convention — no
+    /// separate <c>ArrayElementKind</c> wrapper).
     /// </summary>
-    private static Schema BuildSchema(FooterV2 footer)
+    /// <returns>
+    /// The filtered schema and a parallel array mapping each filtered
+    /// schema index to its position in <see cref="FooterV2.Columns"/>.
+    /// Callers use the mapping when consuming page directories / zone
+    /// maps directly from the footer.
+    /// </returns>
+    private static (Schema Schema, int[] SchemaToFooterIndex) BuildSchema(FooterV2 footer)
     {
-        ColumnInfo[] columns = new ColumnInfo[footer.Columns.Count];
+        List<ColumnInfo> columns = new(footer.Columns.Count);
+        List<int> indices = new(footer.Columns.Count);
         for (int i = 0; i < footer.Columns.Count; i++)
         {
             ColumnDescriptorV2 d = footer.Columns[i].Descriptor;
-            columns[i] = new ColumnInfo(d.Name, d.Kind, d.IsNullable) { IsArray = d.IsArray };
+            if (d.IsTombstoned) continue;
+            columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable) { IsArray = d.IsArray });
+            indices.Add(i);
         }
-        return new Schema(columns);
+        return (new Schema(columns.ToArray()), indices.ToArray());
     }
 
     private static ColumnLookup ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)

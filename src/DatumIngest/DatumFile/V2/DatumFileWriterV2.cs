@@ -524,6 +524,127 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Marks a column as soft-dropped. The column's data stays on
+    /// disk (page directory, zone maps, sidecar references all
+    /// preserved) but readers skip it at schema enumeration. Idempotent
+    /// — calling twice on the same name is a no-op.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only valid in append mode (the writer was opened via
+    /// <see cref="OpenForAppend"/>). Initial-write callers that don't
+    /// want the column should simply not include it in the schema
+    /// passed to <see cref="Initialize"/>.
+    /// </para>
+    /// <para>
+    /// Must be called before <see cref="FinalizeWriter"/>. Calls
+    /// after finalize throw <see cref="InvalidOperationException"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="columnName">
+    /// Name of the column to drop. Match is case-sensitive and exact;
+    /// throws <see cref="ArgumentException"/> if the name doesn't
+    /// resolve to a column in the file's footer.
+    /// </param>
+    public void MarkColumnTombstoned(string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(columnName);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_initialized) throw new InvalidOperationException(
+            "MarkColumnTombstoned requires an initialized writer; open the file with OpenForAppend.");
+        if (_finalized) throw new InvalidOperationException("Writer is finalized.");
+
+        for (int i = 0; i < _columns!.Length; i++)
+        {
+            if (_columns[i].Name == columnName)
+            {
+                if (_columns[i].IsTombstoned) return; // idempotent
+                _columns[i] = _columns[i] with { IsTombstoned = true };
+                return;
+            }
+        }
+
+        throw new ArgumentException(
+            $"Column '{columnName}' not found in the file's schema. Existing columns: " +
+            string.Join(", ", _columns.Select(c => c.Name)),
+            nameof(columnName));
+    }
+
+    /// <summary>
+    /// One-shot helper that opens <paramref name="datumPath"/>, marks
+    /// <paramref name="columnName"/> as tombstoned, and commits via
+    /// tail flip. Resolves the sidecar path from the source filename
+    /// when the file declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>;
+    /// callers wanting non-default sidecar placement should use
+    /// <see cref="OpenForAppend"/> + <see cref="MarkColumnTombstoned"/> +
+    /// <see cref="FinalizeWriter"/> directly.
+    /// </summary>
+    public static void DropColumn(string datumPath, string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columnName);
+
+        // Auto-resolve sidecar from convention if the file uses one.
+        // We can determine that without opening for write by peeking
+        // at the header flags through a read-only handle.
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+        writer.MarkColumnTombstoned(columnName);
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// One-shot helper for batched drops in a single commit.
+    /// Equivalent to opening once, marking all named columns, and
+    /// finalizing — generation increments by one regardless of how
+    /// many columns are dropped in the call.
+    /// </summary>
+    public static void DropColumns(string datumPath, IReadOnlyList<string> columnNames)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columnNames);
+        if (columnNames.Count == 0) return;
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+        foreach (string name in columnNames)
+        {
+            writer.MarkColumnTombstoned(name);
+        }
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// Returns the conventional <c>.datum-blob</c> path for
+    /// <paramref name="datumPath"/> when the file's header declares
+    /// <see cref="DatumFileFlagsV2.HasSidecarReferences"/>; otherwise
+    /// <see langword="null"/> (no sidecar in the picture). Implemented
+    /// without opening the writer-side handle so it doesn't conflict
+    /// with the caller's subsequent <see cref="OpenForAppend"/>.
+    /// </summary>
+    private static string? ResolveSidecarPathIfNeeded(string datumPath)
+    {
+        if (!File.Exists(datumPath)) return null;
+
+        // Read just the header flags to decide.
+        using FileStream fs = new(
+            datumPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+            bufferSize: 64, FileOptions.None);
+        if (fs.Length < DatumFormatV2.HeaderSize) return null;
+
+        Span<byte> headerBytes = stackalloc byte[DatumFormatV2.HeaderSize];
+        fs.ReadExactly(headerBytes);
+        DatumFileFlagsV2 flags =
+            (DatumFileFlagsV2)System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(headerBytes[6..8]);
+
+        if ((flags & DatumFileFlagsV2.HasSidecarReferences) == 0) return null;
+
+        return datumPath + DatumFile.Sidecar.SidecarConstants.FileExtension;
+    }
+
+    /// <summary>
     /// Internal constructor used by <see cref="OpenForAppend"/> — does
     /// not write a header (the existing one stays in place) and does
     /// not run <see cref="Initialize"/> (rehydration drives the schema

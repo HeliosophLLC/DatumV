@@ -37,9 +37,19 @@ public sealed class DatumFileReaderV2 : IDisposable
     /// <summary>Total rows captured in the file (taken from the header).</summary>
     public long TotalRowCount => Header.TotalRowCount;
 
-    /// <summary>Schema-order column descriptors.</summary>
+    /// <summary>
+    /// Schema-order column descriptors, with tombstoned (soft-dropped)
+    /// columns filtered out. Higher-level consumers (table provider,
+    /// query planner) should treat this as the live schema. Use
+    /// <see cref="Footer"/>.<see cref="FooterV2.Columns"/> directly to
+    /// see every column block including tombstoned ones (e.g. for
+    /// compaction).
+    /// </summary>
     public IReadOnlyList<ColumnDescriptorV2> Columns =>
-        Footer.Columns.Select(c => c.Descriptor).ToArray();
+        Footer.Columns
+            .Where(c => !c.Descriptor.IsTombstoned)
+            .Select(c => c.Descriptor)
+            .ToArray();
 
     /// <summary>
     /// Opens a v2 file at the given path. Throws

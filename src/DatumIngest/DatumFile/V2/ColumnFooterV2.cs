@@ -60,6 +60,7 @@ public sealed record ColumnFooterV2(
         if (Descriptor.IsNullable) flags |= ColumnFlagsV2.Nullable;
         if (Descriptor.IsArray) flags |= ColumnFlagsV2.IsArray;
         if (Descriptor.FixedShape is not null) flags |= ColumnFlagsV2.HasFixedShape;
+        if (Descriptor.IsTombstoned) flags |= ColumnFlagsV2.Tombstoned;
         writer.Write((byte)flags);
 
         if (Descriptor.FixedShape is not null)
@@ -122,7 +123,8 @@ public sealed record ColumnFooterV2(
             encoder,
             (flags & ColumnFlagsV2.Nullable) != 0,
             (flags & ColumnFlagsV2.IsArray) != 0,
-            fixedShape);
+            fixedShape,
+            (flags & ColumnFlagsV2.Tombstoned) != 0);
 
         int pageCount = reader.ReadInt32();
         PageDescriptorV2[] pages = new PageDescriptorV2[pageCount];

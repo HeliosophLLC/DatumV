@@ -27,13 +27,21 @@ namespace DatumIngest.DatumFile.V2;
 /// or Tensor (<c>[d0, d1, ..., dN-1]</c>). <see langword="null"/> for all
 /// other kinds. Frozen at first-row-flush time.
 /// </param>
+/// <param name="IsTombstoned">
+/// When <see langword="true"/>, the column has been soft-dropped via
+/// <c>ALTER TABLE DROP COLUMN</c>. The column block (descriptor + page
+/// directory + zone maps) remains in the footer for compaction-time
+/// reclamation, but readers skip it at schema enumeration. Backed by
+/// <c>ColumnFlagsV2.Tombstoned</c> in the on-disk footer.
+/// </param>
 public sealed record ColumnDescriptorV2(
     string Name,
     DataKind Kind,
     EncoderKind Encoder,
     bool IsNullable,
     bool IsArray = false,
-    int[]? FixedShape = null)
+    int[]? FixedShape = null,
+    bool IsTombstoned = false)
 {
     /// <summary>
     /// Picks the appropriate <see cref="EncoderKind"/> for a given
