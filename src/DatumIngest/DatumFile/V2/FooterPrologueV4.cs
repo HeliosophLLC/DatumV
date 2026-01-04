@@ -63,6 +63,16 @@ namespace DatumIngest.DatumFile.V2;
 /// tombstones in that chapter) or the absolute file offset of the 8 KiB
 /// chapter tombstone bitmap. Empty list in PR1.
 /// </param>
+/// <param name="ColumnDefaults">
+/// Per-column <c>DEFAULT</c> literal expressions captured from the
+/// table's <c>CREATE TABLE</c> definition. Stored as a SQL fragment per
+/// entry (round-tripped through <c>QueryExplainer.FormatExpression</c>
+/// at write time and the parser at read time) so the prologue does not
+/// need a binary <c>DataValue</c> serializer. Empty when no column has
+/// a declared default. Not every column index needs an entry — entries
+/// without a matching <see cref="ColumnDefaultV4.ColumnIndex"/> have no
+/// default.
+/// </param>
 public sealed record FooterPrologueV4(
     ulong Generation,
     ulong WriterId,
@@ -70,7 +80,8 @@ public sealed record FooterPrologueV4(
     byte TombstoneGranularity,
     int ColumnCount,
     IReadOnlyList<FileTableEntryV4> FileTableEntries,
-    IReadOnlyList<long> ChapterTombstoneOffsets)
+    IReadOnlyList<long> ChapterTombstoneOffsets,
+    IReadOnlyList<ColumnDefaultV4> ColumnDefaults)
 {
     /// <summary>
     /// Default prologue for a fresh single-writer commit with no
@@ -84,7 +95,8 @@ public sealed record FooterPrologueV4(
         TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
         ColumnCount: columnCount,
         FileTableEntries: Array.Empty<FileTableEntryV4>(),
-        ChapterTombstoneOffsets: Array.Empty<long>());
+        ChapterTombstoneOffsets: Array.Empty<long>(),
+        ColumnDefaults: Array.Empty<ColumnDefaultV4>());
 
     /// <summary>
     /// Serializes the prologue. Layout:
@@ -94,6 +106,7 @@ public sealed record FooterPrologueV4(
     ///   <item>columnCount (4)</item>
     ///   <item>fileTableEntryCount (4) + entries[]</item>
     ///   <item>chapterTombstoneCount (4) + int64 offsets[]</item>
+    ///   <item>columnDefaultCount (4) + entries[]</item>
     /// </list>
     /// </summary>
     internal void Serialize(BinaryWriter writer)
@@ -114,6 +127,12 @@ public sealed record FooterPrologueV4(
         foreach (long offset in ChapterTombstoneOffsets)
         {
             writer.Write(offset);
+        }
+
+        writer.Write(ColumnDefaults.Count);
+        foreach (ColumnDefaultV4 entry in ColumnDefaults)
+        {
+            entry.Serialize(writer);
         }
     }
 
@@ -162,10 +181,58 @@ public sealed record FooterPrologueV4(
             chapterTombstoneOffsets[i] = reader.ReadInt64();
         }
 
+        int columnDefaultCount = reader.ReadInt32();
+        if (columnDefaultCount < 0)
+        {
+            throw new InvalidDataException(
+                $"Footer prologue declares negative column-default count ({columnDefaultCount}).");
+        }
+        ColumnDefaultV4[] columnDefaults = new ColumnDefaultV4[columnDefaultCount];
+        for (int i = 0; i < columnDefaultCount; i++)
+        {
+            columnDefaults[i] = ColumnDefaultV4.Deserialize(reader);
+        }
+
         return new FooterPrologueV4(
             generation, writerId, baseGeneration,
             tombstoneGranularity, columnCount,
-            fileTable, chapterTombstoneOffsets);
+            fileTable, chapterTombstoneOffsets,
+            columnDefaults);
+    }
+}
+
+/// <summary>
+/// A persisted <c>DEFAULT</c> literal for one column. Captured at
+/// <c>CREATE TABLE</c> time and round-tripped on read so a freshly-opened
+/// catalog (and standalone <c>.datum</c> tools) see the same defaults
+/// without consulting <c>.datum-catalog.json</c>.
+/// </summary>
+/// <param name="ColumnIndex">
+/// Index of the column whose default this entry carries (matches the
+/// schema's column order and the column footer index).
+/// </param>
+/// <param name="SqlFragment">
+/// The default expression rendered as a SQL fragment via
+/// <c>QueryExplainer.FormatExpression</c>. Re-parsed on read with
+/// <c>SqlParser.Parse("SELECT &lt;fragment&gt;")</c> — the same trick
+/// used by UDF default-parameter persistence — so we never need a
+/// dedicated binary <c>DataValue</c> serializer for the prologue.
+/// </param>
+public sealed record ColumnDefaultV4(
+    ushort ColumnIndex,
+    string SqlFragment)
+{
+    internal void Serialize(BinaryWriter writer)
+    {
+        writer.Write(ColumnIndex);
+        writer.Write(SqlFragment);
+    }
+
+    internal static ColumnDefaultV4 Deserialize(BinaryReader reader)
+    {
+        ushort columnIndex = reader.ReadUInt16();
+        string fragment = reader.ReadString();
+        return new ColumnDefaultV4(columnIndex, fragment);
     }
 }
 

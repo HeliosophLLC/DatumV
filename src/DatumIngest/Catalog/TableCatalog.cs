@@ -339,6 +339,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyDropTable(dropTable);
                 return EmptyQueryPlan.Instance;
 
+            case AlterTableAddColumnStatement alterAdd:
+                ApplyAlterTableAddColumn(alterAdd);
+                return EmptyQueryPlan.Instance;
+
+            case AlterTableDropColumnStatement alterDrop:
+                ApplyAlterTableDropColumn(alterDrop);
+                return EmptyQueryPlan.Instance;
+
             default:
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
@@ -358,7 +366,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// PR10a covers shape only — column kinds, NULL/NOT NULL,
     /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PRIMARY KEY and
     /// IDENTITY are recorded in the AST but not yet enforced
-    /// (PR10e/PR10f). DEFAULT values are not yet supported (PR10b).
+    /// (PR10e/PR10f). PR10b adds <c>DEFAULT &lt;literal&gt;</c> on each
+    /// column — validated literal-only at this layer and persisted in
+    /// the footer prologue (<see cref="FooterPrologueV4.ColumnDefaults"/>)
+    /// for persistent tables; the INSERT layer (PR10c) materialises the
+    /// default when a row omits the column.
     /// </remarks>
     private void ApplyCreateTable(CreateTableStatement create)
     {
@@ -414,6 +426,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
+        List<ColumnDefaultV4>? columnDefaults = null;
         for (int i = 0; i < schema.Columns.Count; i++)
         {
             ColumnInfo c = schema.Columns[i];
@@ -423,9 +436,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 Encoder: ColumnDescriptorV2.EncoderFor(c.Kind, c.IsArray),
                 IsNullable: c.Nullable,
                 IsArray: c.IsArray);
+
+            if (c.DefaultExpression is not null)
+            {
+                columnDefaults ??= new List<ColumnDefaultV4>();
+                columnDefaults.Add(new ColumnDefaultV4(
+                    ColumnIndex: checked((ushort)i),
+                    SqlFragment: QueryExplainer.FormatExpression(c.DefaultExpression)));
+            }
         }
 
-        DatumFileWriterV2.CreateEmpty(targetPath, descriptors);
+        DatumFileWriterV2.CreateEmpty(targetPath, descriptors, columnDefaults);
 
         Add(new TableDescriptor(create.TableName, targetPath));
 
@@ -499,9 +520,126 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     "Use a DataKind name (Int32, String, Float64, Uuid, ...) optionally " +
                     "suffixed with [] for typed-array columns.");
             }
-            columns[i] = new ColumnInfo(d.Name, kind, d.Nullable) { IsArray = isArray };
+
+            Expression? defaultExpression = null;
+            if (d.DefaultValue is not null)
+            {
+                ValidateDefaultLiteral(d.DefaultValue, d.Name);
+                defaultExpression = d.DefaultValue;
+            }
+
+            columns[i] = new ColumnInfo(d.Name, kind, d.Nullable)
+            {
+                IsArray = isArray,
+                DefaultExpression = defaultExpression,
+            };
         }
         return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Validates that a column's <c>DEFAULT</c> expression is a literal
+    /// the catalog can persist as a SQL fragment and the INSERT layer
+    /// can evaluate without a per-row pipeline. Accepts any
+    /// <see cref="LiteralExpression"/>, plus <c>-&lt;numeric literal&gt;</c>
+    /// (an arithmetic <see cref="UnaryExpression"/> over a numeric
+    /// literal) since the parser models negative number literals that
+    /// way.
+    /// </summary>
+    private static void ValidateDefaultLiteral(Expression expression, string columnName)
+    {
+        if (IsAcceptedDefaultLiteral(expression)) return;
+
+        throw new InvalidOperationException(
+            $"DEFAULT for column '{columnName}' must be a literal expression " +
+            "(string, number, boolean, NULL, or a negated numeric literal). " +
+            "Function calls and other computed expressions are not yet supported as DEFAULTs.");
+    }
+
+    private static bool IsAcceptedDefaultLiteral(Expression expression) =>
+        expression switch
+        {
+            LiteralExpression => true,
+            UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression literal }
+                => literal.Value is sbyte or short or int or long
+                    or byte or ushort or uint or ulong
+                    or float or double or decimal or Half,
+            _ => false,
+        };
+
+    /// <summary>
+    /// Applies an <c>ALTER TABLE ADD COLUMN</c> statement. PR10b ships
+    /// the additive shape only — the new column must be nullable, the
+    /// <c>DEFAULT</c> clause is rejected (existing-row backfill is a
+    /// later-PR concern), and computed columns (<c>AS expr</c>) are
+    /// reserved for a future PR.
+    /// </summary>
+    private void ApplyAlterTableAddColumn(AlterTableAddColumnStatement alter)
+    {
+        if (alter.ComputedExpression is not null)
+        {
+            throw new InvalidOperationException(
+                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' AS <expr> " +
+                "(computed columns) is not yet supported.");
+        }
+        if (alter.DefaultValue is not null)
+        {
+            throw new InvalidOperationException(
+                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' DEFAULT … " +
+                "is not yet supported. Existing rows would need backfill, which lands in a " +
+                "later PR. Add the column without a DEFAULT for now (existing rows read as NULL).");
+        }
+        if (!alter.Nullable)
+        {
+            throw new InvalidOperationException(
+                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' NOT NULL " +
+                "is not yet supported. Existing rows would need a non-null backfill value, " +
+                "which requires DEFAULT support that hasn't shipped yet.");
+        }
+
+        if (!Model.TypeAnnotationResolver.TryParse(alter.TypeName, out DataKind kind, out bool isArray))
+        {
+            throw new InvalidOperationException(
+                $"Unknown column type '{alter.TypeName}' on column '{alter.ColumnName}'.");
+        }
+
+        ColumnInfo column = new(alter.ColumnName, kind, nullable: true) { IsArray = isArray };
+        AddColumn(alter.TableName, column);
+    }
+
+    /// <summary>
+    /// Applies an <c>ALTER TABLE DROP COLUMN</c> statement. The column
+    /// is soft-dropped (tombstoned) on the underlying provider; the
+    /// data block stays on disk for compaction-time reclamation.
+    /// </summary>
+    private void ApplyAlterTableDropColumn(AlterTableDropColumnStatement alter)
+    {
+        if (!TryGetTable(alter.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{alter.TableName}' is not registered in the catalog.");
+        }
+
+        // Honor IF EXISTS — schema lookup is the cheapest way to ask
+        // "does this column exist?" without poking at provider internals.
+        bool columnPresent = false;
+        Schema schema = provider.GetSchema();
+        foreach (ColumnInfo c in schema.Columns)
+        {
+            if (string.Equals(c.Name, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                columnPresent = true;
+                break;
+            }
+        }
+        if (!columnPresent)
+        {
+            if (alter.IfExists) return;
+            throw new InvalidOperationException(
+                $"Column '{alter.ColumnName}' does not exist on table '{alter.TableName}'.");
+        }
+
+        DropColumn(alter.TableName, alter.ColumnName);
     }
 
     /// <summary>

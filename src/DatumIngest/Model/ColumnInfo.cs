@@ -1,3 +1,5 @@
+using DatumIngest.Parsing.Ast;
+
 namespace DatumIngest.Model;
 
 /// <summary>
@@ -72,4 +74,14 @@ public sealed record ColumnInfo
     /// <see cref="IsArray"/> is set. Mirrors <see cref="DataValue.IsByteArrayKind"/>.
     /// </summary>
     public bool IsByteArrayColumn => Kind == DataKind.UInt8 && IsArray;
+
+    /// <summary>
+    /// Optional <c>DEFAULT</c> literal expression captured from the column's
+    /// <c>CREATE TABLE</c> definition. Restricted to <see cref="LiteralExpression"/>
+    /// at registration time — the catalog rejects non-literal defaults so the
+    /// expression here is always a constant the INSERT layer can evaluate
+    /// once and reuse for every absent row value. <see langword="null"/>
+    /// when the column has no default.
+    /// </summary>
+    public Expression? DefaultExpression { get; init; }
 }

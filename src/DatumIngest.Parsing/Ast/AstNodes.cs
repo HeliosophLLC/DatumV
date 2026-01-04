@@ -1009,7 +1009,17 @@ public sealed record CreateTableStatement(
 /// <param name="TypeName">The SQL type name (resolved to a <c>DataKind</c> at execution time).</param>
 /// <param name="Nullable">Whether the column accepts NULL values. Defaults to <see langword="true"/>.</param>
 /// <param name="PrimaryKey">Whether this column is part of the primary key. Defaults to <see langword="false"/>.</param>
-public sealed record ColumnDefinition(string Name, string TypeName, bool Nullable = true, bool PrimaryKey = false);
+/// <param name="DefaultValue">
+/// Optional <c>DEFAULT</c> literal expression for the column. The catalog
+/// rejects non-literal defaults at <c>CREATE TABLE</c> time; only
+/// <see cref="LiteralExpression"/> is honored in PR10b.
+/// </param>
+public sealed record ColumnDefinition(
+    string Name,
+    string TypeName,
+    bool Nullable = true,
+    bool PrimaryKey = false,
+    Expression? DefaultValue = null);
 
 /// <summary>
 /// <c>CREATE [TEMP] TABLE name AS SELECT ...</c> — creates a table
@@ -1125,6 +1135,20 @@ public sealed record AlterTableAddColumnStatement(
     Expression? DefaultValue = null,
     bool Nullable = true,
     Expression? ComputedExpression = null) : Statement;
+
+/// <summary>
+/// <c>ALTER TABLE name DROP [COLUMN] col [IF EXISTS]</c> — soft-drops a
+/// column from a table. The column is hidden from subsequent
+/// <c>GetSchema</c> / scan output; the underlying storage is reclaimed
+/// at compaction time.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ColumnName">The name of the column to drop.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the column does not exist.</param>
+public sealed record AlterTableDropColumnStatement(
+    string TableName,
+    string ColumnName,
+    bool IfExists = false) : Statement;
 
 /// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.

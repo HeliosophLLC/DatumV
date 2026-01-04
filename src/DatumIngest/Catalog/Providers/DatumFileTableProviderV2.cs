@@ -8,6 +8,7 @@ using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -680,16 +681,60 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// </returns>
     private static (Schema Schema, int[] SchemaToFooterIndex) BuildSchema(FooterV2 footer)
     {
+        // Index DEFAULT entries by footer column index for O(1) lookup
+        // during schema construction. Most columns have no default, so a
+        // dictionary stays cheap.
+        Dictionary<ushort, string>? defaultsByIndex = null;
+        if (footer.Prologue.ColumnDefaults.Count > 0)
+        {
+            defaultsByIndex = new Dictionary<ushort, string>(footer.Prologue.ColumnDefaults.Count);
+            foreach (ColumnDefaultV4 entry in footer.Prologue.ColumnDefaults)
+            {
+                defaultsByIndex[entry.ColumnIndex] = entry.SqlFragment;
+            }
+        }
+
         List<ColumnInfo> columns = new(footer.Columns.Count);
         List<int> indices = new(footer.Columns.Count);
         for (int i = 0; i < footer.Columns.Count; i++)
         {
             ColumnDescriptorV2 d = footer.Columns[i].Descriptor;
             if (d.IsTombstoned) continue;
-            columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable) { IsArray = d.IsArray });
+
+            Expression? defaultExpression = null;
+            if (defaultsByIndex is not null && defaultsByIndex.TryGetValue((ushort)i, out string? fragment))
+            {
+                defaultExpression = ParseDefaultFragment(fragment, d.Name);
+            }
+
+            columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable)
+            {
+                IsArray = d.IsArray,
+                DefaultExpression = defaultExpression,
+            });
             indices.Add(i);
         }
         return (new Schema(columns.ToArray()), indices.ToArray());
+    }
+
+    /// <summary>
+    /// Re-parses a persisted DEFAULT SQL fragment back into an
+    /// <see cref="Expression"/>. Wraps the fragment in a synthetic
+    /// <c>SELECT</c> and pulls the first column expression — same trick
+    /// the catalog uses for UDF default-parameter persistence.
+    /// </summary>
+    private static Expression ParseDefaultFragment(string fragment, string columnName)
+    {
+        try
+        {
+            QueryExpression q = SqlParser.Parse($"SELECT {fragment}");
+            return ((SelectQueryExpression)q).Statement.Columns[0].Expression;
+        }
+        catch (Exception ex) when (ex is ParseException || ex is Superpower.ParseException)
+        {
+            throw new InvalidDataException(
+                $"Failed to re-parse DEFAULT for column '{columnName}': '{fragment}' — {ex.Message}");
+        }
     }
 
     private static ColumnLookup ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)

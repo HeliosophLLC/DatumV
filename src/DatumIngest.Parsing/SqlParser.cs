@@ -2355,7 +2355,11 @@ public static class SqlParser
         select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
 
     /// <summary>
-    /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY]</c>.
+    /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY] [DEFAULT literal]</c>.
+    /// The <c>DEFAULT</c> clause accepts any expression here; the catalog
+    /// rejects non-literal defaults at <c>CREATE TABLE</c> time, so the
+    /// validation surface stays in one place rather than spread across
+    /// the parser.
     /// </summary>
     private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
         from name in IdentifierOrKeywordAsName
@@ -2370,7 +2374,16 @@ public static class SqlParser
             from keyKw in Token.EqualTo(SqlToken.Key)
             select true
         ).OptionalOrDefault()
-        select new ColumnDefinition(name, typeName, Nullable: !notNull && !primaryKey, PrimaryKey: primaryKey);
+        from defaultValue in (
+            from defaultKw in Token.EqualTo(SqlToken.Default)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AsNullable().OptionalOrDefault()
+        select new ColumnDefinition(
+            name, typeName,
+            Nullable: !notNull && !primaryKey,
+            PrimaryKey: primaryKey,
+            DefaultValue: defaultValue);
 
     /// <summary>
     /// Parses <c>IF NOT EXISTS</c> as an optional guard clause for CREATE statements.
@@ -3230,13 +3243,27 @@ public static class SqlParser
         select (Statement)new DeleteStatement(tableName, whereClause);
 
     /// <summary>
-    /// Parses <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr | AS expr]</c>.
+    /// Disambiguating prefix for <c>ALTER TABLE name</c>. <c>ALTER</c> is
+    /// a unique starting keyword among DDL/DML statements, so the
+    /// <c>.Try()</c> exists only to backtrack against the
+    /// <c>QueryExpression</c> branch in <see cref="SingleStatementParser"/>;
+    /// the body parsers run unprotected so deep failures (e.g., bad
+    /// <c>DEFAULT</c> expression) propagate with their real
+    /// <c>Remainder.Position</c>.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
-        from alterKw in Token.EqualTo(SqlToken.Alter)
-        from tableKw in Token.EqualTo(SqlToken.Table)
-        from tableName in IdentifierOrKeywordAsName
-        from addKw in Token.EqualTo(SqlToken.Add)
+    private static readonly TokenListParser<SqlToken, string> AlterTablePrefix =
+        (from alterKw in Token.EqualTo(SqlToken.Alter)
+         from tableKw in Token.EqualTo(SqlToken.Table)
+         from tableName in IdentifierOrKeywordAsName
+         select tableName)
+        .Try();
+
+    /// <summary>
+    /// Parses the <c>[COLUMN] col type [NOT NULL] [DEFAULT expr | AS expr]</c>
+    /// body of an <c>ALTER TABLE name ADD</c> statement once the
+    /// <c>ADD</c> keyword has been consumed.
+    /// </summary>
+    private static TokenListParser<SqlToken, Statement> AlterTableAddColumnBody(string tableName) =>
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from colName in IdentifierOrKeywordAsName
         from typeName in TypeNameParser
@@ -3258,6 +3285,34 @@ public static class SqlParser
         select (Statement)new AlterTableAddColumnStatement(
             tableName, colName, typeName, defaultValue, Nullable: !notNull,
             ComputedExpression: computedExpression);
+
+    /// <summary>
+    /// Parses the <c>[COLUMN] [IF EXISTS] col</c> body of an
+    /// <c>ALTER TABLE name DROP</c> statement once the <c>DROP</c>
+    /// keyword has been consumed.
+    /// </summary>
+    private static TokenListParser<SqlToken, Statement> AlterTableDropColumnBody(string tableName) =>
+        from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
+        from ifExists in IfExistsParser
+        from colName in IdentifierOrKeywordAsName
+        select (Statement)new AlterTableDropColumnStatement(tableName, colName, ifExists);
+
+    /// <summary>
+    /// Parses <c>ALTER TABLE name (ADD ... | DROP ...)</c>. The prefix
+    /// matches <c>ALTER TABLE name</c> as a Try-protected unit; the
+    /// next token (<c>ADD</c> or <c>DROP</c>) selects the body parser
+    /// directly so neither body needs <c>.Try()</c> protection — deep
+    /// errors (e.g., bad <c>DEFAULT</c> expression) propagate with
+    /// their real <c>Remainder.Position</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
+        from tableName in AlterTablePrefix
+        from addOrDrop in Token.EqualTo(SqlToken.Add).Try()
+            .Or(Token.EqualTo(SqlToken.Drop))
+        from body in addOrDrop.Kind == SqlToken.Add
+            ? AlterTableAddColumnBody(tableName)
+            : AlterTableDropColumnBody(tableName)
+        select body;
 
     /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.
@@ -3312,7 +3367,7 @@ public static class SqlParser
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())
             .Or(DeleteParser.Try())
-            .Or(AlterTableParser.Try())
+            .Or(AlterTableParser)
             .Or(AnalyzeTableParser.Try())
             .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
 

@@ -94,6 +94,15 @@ public sealed class DatumFileWriterV2 : IDisposable
     private long[]? _existingTombstoneOffsets;
     private long _existingChapterCount;
 
+    // Column defaults carry forward verbatim across appends. They live
+    // in the footer prologue (PR10b) so a freshly-opened catalog and
+    // standalone .datum tools see the same DEFAULT literals without
+    // consulting .datum-catalog.json. Initialize seeds them; AddColumn
+    // and MarkColumnTombstoned leave them alone (dropped columns keep
+    // their index, so the stored ColumnIndex stays valid even after a
+    // tombstone). FinalizeWriter emits this list verbatim.
+    private List<ColumnDefaultV4>? _columnDefaults;
+
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
     /// path. If <paramref name="sidecarPath"/> is non-null a
@@ -159,7 +168,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
-    /// Override the page size before <see cref="Initialize"/>. Test-only;
+    /// Override the page size before <see cref="Initialize(IReadOnlyList{ColumnDescriptorV2})"/>. Test-only;
     /// production writers should leave this at
     /// <see cref="DatumFormatV2.DefaultPageSize"/> so pages align with
     /// <c>ExecutionContext.BatchSize</c>.
@@ -182,7 +191,19 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// space at offset 0 (zeros, patched at finalize) and prepares one
     /// encoder + zone-map builder per column.
     /// </summary>
-    public void Initialize(IReadOnlyList<ColumnDescriptorV2> columns)
+    public void Initialize(IReadOnlyList<ColumnDescriptorV2> columns) =>
+        Initialize(columns, columnDefaults: null);
+
+    /// <summary>
+    /// Initializes the writer with the column schema and an optional
+    /// per-column <c>DEFAULT</c> literal table that the finalize step
+    /// stamps into the footer prologue. The defaults are SQL fragments
+    /// (round-tripped through <c>QueryExplainer.FormatExpression</c> at
+    /// the catalog layer); the writer treats them as opaque payload.
+    /// </summary>
+    public void Initialize(
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults)
     {
         if (_initialized) throw new InvalidOperationException("Writer already initialized.");
         if (columns.Count == 0) throw new ArgumentException("At least one column required.", nameof(columns));
@@ -197,6 +218,11 @@ public sealed class DatumFileWriterV2 : IDisposable
             _encoders[i] = PageEncoderFactoryV2.Create(_columns[i], _pageSize);
             _pageDirectory[i] = new List<PageDescriptorV2>();
             _hierarchies[i] = new ZoneMapHierarchyBuilderV2();
+        }
+
+        if (columnDefaults is { Count: > 0 })
+        {
+            _columnDefaults = new List<ColumnDefaultV4>(columnDefaults);
         }
 
         // Reserve header bytes (placeholder zeros). Patched at finalize.
@@ -340,7 +366,10 @@ public sealed class DatumFileWriterV2 : IDisposable
             TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
             ColumnCount: _columns.Length,
             FileTableEntries: Array.Empty<FileTableEntryV4>(),
-            ChapterTombstoneOffsets: chapterTombstoneOffsets);
+            ChapterTombstoneOffsets: chapterTombstoneOffsets,
+            ColumnDefaults: _columnDefaults is { Count: > 0 }
+                ? _columnDefaults.ToArray()
+                : Array.Empty<ColumnDefaultV4>());
 
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
@@ -541,7 +570,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// Only valid in append mode (the writer was opened via
     /// <see cref="OpenForAppend"/>). Initial-write callers that don't
     /// want the column should simply not include it in the schema
-    /// passed to <see cref="Initialize"/>.
+    /// passed to <see cref="Initialize(IReadOnlyList{ColumnDescriptorV2})"/>.
     /// </para>
     /// <para>
     /// Must be called before <see cref="FinalizeWriter"/>. Calls
@@ -721,7 +750,20 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// describing an empty 0-row table whose columns match the input
     /// descriptors.
     /// </remarks>
-    public static void CreateEmpty(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns)
+    public static void CreateEmpty(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns) =>
+        CreateEmpty(datumPath, columns, columnDefaults: null);
+
+    /// <summary>
+    /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2})"/>,
+    /// but stamps a per-column <c>DEFAULT</c> literal table into the
+    /// footer prologue. Used by <c>CREATE TABLE</c> to persist defaults
+    /// alongside the table itself so opening the file is enough to see
+    /// them — no separate catalog round-trip needed.
+    /// </summary>
+    public static void CreateEmpty(
+        string datumPath,
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(columns);
@@ -733,7 +775,7 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         // No sidecar — empty file has no values to spill.
         using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
-        writer.Initialize(columns);
+        writer.Initialize(columns, columnDefaults);
         writer.FinalizeWriter();
     }
 
@@ -994,7 +1036,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// <summary>
     /// Internal constructor used by <see cref="OpenForAppend"/> — does
     /// not write a header (the existing one stays in place) and does
-    /// not run <see cref="Initialize"/> (rehydration drives the schema
+    /// not run <see cref="Initialize(IReadOnlyList{ColumnDescriptorV2})"/> (rehydration drives the schema
     /// instead).
     /// </summary>
     private DatumFileWriterV2(Stream stream, IBlobSink? sink, bool ownsStream, bool ownsSidecar)
@@ -1042,6 +1084,14 @@ public sealed class DatumFileWriterV2 : IDisposable
             _existingChapterCount = footer.Columns.Count > 0
                 ? footer.Columns[0].ChapterZoneMaps.Count
                 : 0;
+        }
+
+        // Carry forward column defaults verbatim. AddColumn/MarkColumnTombstoned
+        // don't shift indices, so the stored ColumnIndex on each entry stays
+        // valid across the append.
+        if (footer.Prologue.ColumnDefaults.Count > 0)
+        {
+            _columnDefaults = new List<ColumnDefaultV4>(footer.Prologue.ColumnDefaults);
         }
 
         int columnCount = footer.Columns.Count;
