@@ -543,7 +543,19 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Appends every batch in <paramref name="batches"/> to <paramref name="tableName"/>.
+    /// Opens a streaming append session over <paramref name="tableName"/>.
+    /// Caller is responsible for <see cref="IAppendSession.CommitAsync"/>;
+    /// disposing without commit aborts.
+    /// </summary>
+    public IAppendSession BeginAppend(string tableName)
+    {
+        ITableProvider provider = ResolveForMutation(tableName, requireFlag: p => p.CanAppendRows, op: "BeginAppend");
+        return provider.BeginAppend();
+    }
+
+    /// <summary>
+    /// Appends every batch in <paramref name="batches"/> to <paramref name="tableName"/>
+    /// in a single committed unit (open session, drain, commit).
     /// </summary>
     public Task AppendRowsAsync(string tableName, IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken = default)
     {

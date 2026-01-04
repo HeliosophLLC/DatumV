@@ -91,7 +91,17 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     private Snapshot _snapshot;
     private readonly object _snapshotLock = new();
-    private readonly object _mutationLock = new();
+
+    /// <summary>
+    /// Serializes mutations and append sessions across async awaits.
+    /// A session holds this semaphore for its entire lifetime
+    /// (Begin → Commit / Dispose) so no two writers can overlap on
+    /// the same provider in-process. The single-permit count mirrors
+    /// the format's single-writer constraint
+    /// (<see cref="DatumFileWriterV2.OpenForAppend"/> uses
+    /// <c>FileShare.Read</c> to exclude other writers at the OS level).
+    /// </summary>
+    private readonly SemaphoreSlim _mutationLock = new(1, 1);
 
     /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
@@ -869,10 +879,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             IsNullable: column.Nullable,
             IsArray: column.IsArray);
 
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+        finally
+        {
+            _mutationLock.Release();
         }
     }
 
@@ -880,54 +895,35 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public void DropColumn(string columnName)
     {
         ArgumentNullException.ThrowIfNull(columnName);
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             DatumFileWriterV2.DropColumn(_descriptor.FilePath, columnName);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
         }
+        finally
+        {
+            _mutationLock.Release();
+        }
     }
 
     /// <inheritdoc/>
-    public async Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken)
+    public IAppendSession BeginAppend()
     {
-        ArgumentNullException.ThrowIfNull(batches);
-
-        await using IAsyncEnumerator<RowBatch> enumerator = batches.GetAsyncEnumerator(cancellationToken);
-
-        bool any = false;
-        DatumFileWriterV2? writer = null;
+        // Block until any prior session/mutation has released the
+        // semaphore. The session takes ownership of the permit and
+        // releases it on Dispose / Commit. Sync .Wait() here mirrors
+        // the other mutation methods; future async-friendly callers
+        // can call BeginAppendAsync if added.
+        _mutationLock.Wait();
         try
         {
-            while (await enumerator.MoveNextAsync().ConfigureAwait(false))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                RowBatch batch = enumerator.Current;
-                if (batch.Count == 0) continue;
-
-                writer ??= OpenAppendWriter();
-                writer.WriteRowBatch(batch);
-                any = true;
-            }
-
-            if (writer is not null)
-            {
-                writer.FinalizeWriter();
-            }
+            return new DatumAppendSession(this);
         }
-        finally
+        catch
         {
-            writer?.Dispose();
-        }
-
-        if (any)
-        {
-            // Reopen the sidecar after the append: writer-side spills
-            // grew the .datum-blob past the read mmap's view, and the
-            // registry needs to see the larger source.
-            lock (_mutationLock)
-            {
-                RebuildSnapshotAfterMutation(sidecarMayHaveGrown: true);
-            }
+            _mutationLock.Release();
+            throw;
         }
     }
 
@@ -937,10 +933,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         ArgumentNullException.ThrowIfNull(rowIndices);
         if (rowIndices.Count == 0) return;
 
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             DatumFileWriterV2.SoftDeleteRows(_descriptor.FilePath, rowIndices);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+        finally
+        {
+            _mutationLock.Release();
         }
     }
 
@@ -968,5 +969,138 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             SidecarRegistry.UpdateAt(SidecarStoreId, next.Sidecar);
         }
         SwapSnapshot(next);
+    }
+
+    /// <summary>
+    /// Append session backed by a held-open <see cref="DatumFileWriterV2"/>.
+    /// Constructed under the parent provider's <c>_mutationLock</c>;
+    /// owns the permit until disposed. Writes stream straight to the
+    /// data file (visible past the existing tail but unreferenced
+    /// until commit); commit calls <c>FinalizeWriter</c> to write the
+    /// new tail and rebuild the parent's snapshot. Disposing without
+    /// committing closes the writer without finalizing — partial bytes
+    /// are reclaimed by the next writer's torn-tail recovery.
+    /// </summary>
+    private sealed class DatumAppendSession : IAppendSession
+    {
+        private readonly DatumFileTableProviderV2 _provider;
+        private DatumFileWriterV2? _writer;
+        private bool _committed;
+        private bool _disposed;
+        private bool _anyWrites;
+
+        public DatumAppendSession(DatumFileTableProviderV2 provider)
+        {
+            _provider = provider;
+            // Writer opened lazily on first WriteAsync — empty sessions
+            // (Begin → Commit with no writes) are no-ops with no file
+            // mutation, matching the in-memory provider's semantics.
+        }
+
+        public Task WriteAsync(RowBatch batch, CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("Cannot write after CommitAsync.");
+            ArgumentNullException.ThrowIfNull(batch);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (batch.Count == 0) return Task.CompletedTask;
+
+            ValidateBatchSchema(batch);
+
+            _writer ??= _provider.OpenAppendWriter();
+            _writer.WriteRowBatch(batch);
+            _anyWrites = true;
+            return Task.CompletedTask;
+        }
+
+        public Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("CommitAsync was already called.");
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (_writer is not null)
+                {
+                    _writer.FinalizeWriter();
+                    _writer.Dispose();
+                    _writer = null;
+
+                    // Rebuild the parent's snapshot under the lock we
+                    // already hold (the session has the semaphore
+                    // permit). Sidecar may have grown if any of the
+                    // appended rows spilled non-inline payloads.
+                    _provider.RebuildSnapshotAfterMutation(sidecarMayHaveGrown: _anyWrites);
+                }
+                _committed = true;
+            }
+            catch
+            {
+                // Commit failed — drop the writer without finalizing.
+                // Subsequent torn-tail recovery cleans up.
+                _writer?.Dispose();
+                _writer = null;
+                throw;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (_disposed) return ValueTask.CompletedTask;
+            _disposed = true;
+
+            try
+            {
+                if (!_committed && _writer is not null)
+                {
+                    // Abort: close the writer without FinalizeWriter so
+                    // no new tail is emitted. Trailing partial bytes
+                    // become unreachable garbage cleaned up by the next
+                    // writer's RecoverIfTorn pass.
+                    _writer.Dispose();
+                    _writer = null;
+                }
+            }
+            finally
+            {
+                _provider._mutationLock.Release();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        private void ValidateBatchSchema(RowBatch batch)
+        {
+            // Capture current schema under snapshot lock — light touch,
+            // doesn't bump the refcount because we don't need to retain
+            // anything across the call.
+            Schema schema;
+            lock (_provider._snapshotLock)
+            {
+                schema = _provider._snapshot.Schema;
+            }
+
+            if (batch.ColumnLookup.Count != schema.Columns.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Append batch has {batch.ColumnLookup.Count} columns but table " +
+                    $"'{_provider.Name}' has {schema.Columns.Count}.");
+            }
+            for (int i = 0; i < schema.Columns.Count; i++)
+            {
+                string expected = schema.Columns[i].Name;
+                string actual = batch.ColumnLookup.GetColumnName(i);
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Append batch column {i} is named '{actual}' but table " +
+                        $"'{_provider.Name}' expects '{expected}'.");
+                }
+            }
+        }
     }
 }

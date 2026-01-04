@@ -377,6 +377,51 @@ Per-blob codec means each value in a column can choose its own compression indep
    └─ Seek to header offset 0, patch TotalRowCount, FooterOffset, and Flags
 ```
 
+## Crash recovery
+
+The format is designed so that a process dying mid-write — crash, kill, power loss — never corrupts a previously-committed state. The mechanism is **tail-flip-as-commit**: a write becomes durable only when the new 8-byte tail (`FMTD` magic + footer length) is the file's last 8 bytes. Until that moment the existing tail at the previous EOF is the authoritative boundary, and every byte written past it is invisible to readers.
+
+### What's on disk during a write
+
+Mid-session, after several `WriteRowBatch` calls but before `FinalizeWriter`:
+
+```
+[ header ][ committed pages ][ committed footer ][ committed tail │ pre-session EOF ]
+                                                                   [ uncommitted pages │ current EOF ]
+```
+
+Page bytes are flushed eagerly (`Stream.Flush()` after every batch) so growing files are visible to `ls -l`. But there is no new footer and no new tail. The committed tail at `pre-session EOF` is the durable boundary.
+
+### Crash modes
+
+- **Process kill / power loss before commit.** Trailing bytes past the committed tail are partial pages with no footer pointing at them. They are unreachable garbage.
+- **Graceful abort (session disposed without `CommitAsync`).** Same on-disk shape as a crash — the writer just exits without finalizing. The recovery path is identical; abort is essentially free.
+- **Crash during `FinalizeWriter` itself.** Footer bytes are streamed before the tail. A partial footer with no tail behind it presents identically to "crash before commit" — recovery scans backward to the previous committed tail and the in-progress footer is treated as garbage.
+
+### Recovery on reopen
+
+Two paths:
+
+**Writer reopens via `DatumFileWriterV2.OpenForAppend`.** `RecoverIfTorn` scans backward from EOF for the last valid `FMTD` tail magic, validates the footer it points to, and **truncates the file to that point** with `SetLength`. After truncation the file ends at the previous good commit; the new writer proceeds normally and uncommitted bytes from the dead session are gone.
+
+**Reader opens via `DatumFileReaderV2.Open`.** The reader runs the same backward `FMTD` scan as a non-destructive recovery: it locates the last valid tail and treats that as its logical EOF, ignoring any trailing partial bytes. The on-disk file isn't modified — readers don't truncate — but the reader's view of the file is the last committed state. This means a crashed write doesn't block reads; the next writer reopen will perform the actual truncation.
+
+### What's preserved vs. dropped
+
+- **Preserved.** Every batch from a previously-committed session. The committed footer/tail combination is the durable boundary.
+- **Dropped.** Every batch from the dead session. Page bytes were on disk, but without a footer pointing at them they are unreachable.
+- **Sidecar.** `AppendRowsAsync` extends `.datum-blob` for non-inline payloads. The blob writer doesn't update the blob's `payloadHash` until close, so a crash leaves trailing blob bytes that nothing references. They are harmless — the (committed) primary footer's pointers don't reach them — but they are wasted space. The next blob writer either appends past them (a small gap of dead bytes) or a future compaction PR can reclaim them.
+
+### Why this works without a journal
+
+A traditional WAL-based system writes intent records to a separate journal and rolls them back on crash. The `.datum` format avoids that complexity by making the commit **a single 8-byte write at EOF** that is observed only when complete:
+
+- Bytes written past the old tail but before the new tail aren't referenced by any footer, so they are invisible to readers regardless of how much was flushed.
+- A single `FMTD` write either lands or doesn't — there is no partial-magic state that confuses the scan-backward logic. (The scan validates the magic AND that the footer-length it points to lands inside the file AND that the footer at that offset deserializes; corrupt magic fails all three checks and the scan continues backward.)
+- The previous tail remains physically present in the file and authoritative until the new tail is written. Reopens converge on it deterministically.
+
+The trade is that aborted sessions leave physical bytes on disk that need to be truncated by the next writer (or accepted as a gap). For append-mostly workloads this overhead is negligible; compaction reclaims it eventually.
+
 ## Catalog-level mutation API
 
 `TableCatalog` exposes provider-agnostic ALTER TABLE / INSERT / DELETE entry points so SQL DDL/DML lowers the same way regardless of whether the underlying table is a `.datum` file, an in-memory fixture, or a system table:
@@ -400,9 +445,20 @@ The catalog's `IsReadOnly` semantics are derived: a table is read-only for an op
 
 `AppendRowsAsync` is the only mutation that grows the companion `.datum-blob`. After the writer commits, the provider reopens the sidecar mmap (the existing view was sized to the pre-mutation length and can't see the appended bytes) and calls `SidecarRegistry.UpdateAt` on the same `storeId`. The new `IBlobSource`'s mmap is a strict superset of the old one's, so existing storeId-stamped DataValues continue to resolve correctly through the registry.
 
-### Sessions deferred
+### Append sessions
 
-The `AppendRowsAsync` signature takes an `IAsyncEnumerable<RowBatch>` (one-shot append, single tail-flip per call). Explicit append sessions — required for fully-streaming `INSERT … SELECT` lowering — ship later when the SQL DML lowering pipeline lands. Today's API drains the enumerable inside one writer scope and commits once.
+For streaming writes — `INSERT … SELECT`, programmatic ingest of unbounded sources — `BeginAppend` returns an `IAppendSession` with explicit `WriteAsync` / `CommitAsync` semantics:
+
+```csharp
+await using IAppendSession session = catalog.BeginAppend(tableName);
+await foreach (RowBatch batch in selectPipeline.WithCancellation(ct))
+{
+    await session.WriteAsync(batch, ct);
+}
+await session.CommitAsync(ct);
+```
+
+`AppendRowsAsync` is a convenience wrapper over `BeginAppend` (open, drain, commit) — the session is the primitive. One session is allowed per provider at a time; concurrent `BeginAppend` calls block on a `SemaphoreSlim` so the call ordering across awaits is well-defined. Disposing the session without calling `CommitAsync` aborts cleanly: the writer exits without writing the new tail and the partial bytes get cleaned up by the next writer's torn-tail recovery (see [Crash recovery](#crash-recovery)).
 
 ## Source files
 
@@ -428,8 +484,10 @@ The `AppendRowsAsync` signature takes an `IAsyncEnumerable<RowBatch>` (one-shot 
 | `DatumFile/V2/Decoding/PageDecoderFactoryV2.cs` | Picks the right decoder for a column descriptor |
 | `Catalog/Providers/DatumFileTableProviderV2.cs` | Engine-facing provider with three-tier zone-map pruning + seek session + manifest/index discovery + catalog-level mutation methods (AddColumn / DropColumn / AppendRowsAsync / DeleteRows) routed through a refcounted reader snapshot |
 | `Catalog/Providers/DatumFileSeekSessionV2.cs` | Caller-owned seek session with page-index math (`pageIndex = startRow / pageSize`) |
-| `Catalog/TableCatalog.cs` | Registry of named tables; provider-agnostic `AddColumn` / `DropColumn` / `AppendRowsAsync` / `DeleteRows` passthroughs that gate on per-provider capability flags |
-| `Catalog/ITableProvider.cs` | Provider interface with `CanAlterColumns` / `CanAppendRows` / `CanDeleteRows` flags + default-throw mutation methods |
+| `Catalog/TableCatalog.cs` | Registry of named tables; provider-agnostic `AddColumn` / `DropColumn` / `BeginAppend` / `AppendRowsAsync` / `DeleteRows` passthroughs that gate on per-provider capability flags |
+| `Catalog/ITableProvider.cs` | Provider interface with `CanAlterColumns` / `CanAppendRows` / `CanDeleteRows` flags + default-throw mutation methods; `AppendRowsAsync` is a default-impl wrapper over `BeginAppend` |
+| `Catalog/IAppendSession.cs` | Caller-owned streaming append session: `WriteAsync` / `CommitAsync` / abort-on-dispose |
+| `DatumFile/V2/TornTailScanner.cs` | Backward `FMTD` scan shared by writer (destructive truncate) and reader (non-destructive logical-EOF recovery) |
 | `DatumFile/Sidecar/SidecarRegistry.cs` | Per-catalog `storeId` → `IBlobSource` map; `UpdateAt` swaps the source after AppendRows grows the `.datum-blob` past the previous mmap view |
 | `DatumFile/Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout |
 | `DatumFile/Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |

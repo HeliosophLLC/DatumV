@@ -126,21 +126,47 @@ public sealed class DatumFileReaderV2 : IDisposable
         stream.ReadExactly(headerBytes);
         HeaderV2 header = HeaderV2.ReadFrom(headerBytes);
 
-        // Read tail.
+        // Read tail. If the trailing bytes aren't a valid FMTD tail —
+        // typically a crashed writer that streamed pages past the
+        // previous committed tail without ever writing the new one —
+        // scan backward for the last good tail and treat that as the
+        // logical EOF. The on-disk file isn't modified (readers never
+        // truncate); the next writer reopen runs RecoverIfTorn to do
+        // the actual cleanup.
+        long logicalEof = stream.Length;
         Span<byte> tail = stackalloc byte[DatumFormatV2.TailSize];
-        stream.Position = stream.Length - DatumFormatV2.TailSize;
+        stream.Position = logicalEof - DatumFormatV2.TailSize;
         stream.ReadExactly(tail);
-        if (!tail[4..].SequenceEqual(DatumFormatV2.TailMagic))
-        {
-            throw new InvalidDataException(
-                "File tail sentinel does not match v2 'FMTD' magic; the file may be truncated or corrupt.");
-        }
-        uint footerByteLength = BinaryPrimitives.ReadUInt32LittleEndian(tail[..4]);
 
-        long expectedFooterEnd = stream.Length - DatumFormatV2.TailSize;
-        long footerStart = expectedFooterEnd - footerByteLength;
+        uint footerByteLength;
+        long footerStart;
+        if (tail[4..].SequenceEqual(DatumFormatV2.TailMagic))
+        {
+            footerByteLength = BinaryPrimitives.ReadUInt32LittleEndian(tail[..4]);
+            footerStart = logicalEof - DatumFormatV2.TailSize - footerByteLength;
+        }
+        else
+        {
+            long recoveredTailEof = TornTailScanner.FindLastCleanTailEof(stream);
+            if (recoveredTailEof < 0)
+            {
+                throw new InvalidDataException(
+                    "File tail sentinel does not match v2 'FMTD' magic and no recoverable " +
+                    "prior tail was found; the file may be corrupt or never finalized.");
+            }
+            logicalEof = recoveredTailEof;
+            stream.Position = logicalEof - DatumFormatV2.TailSize;
+            stream.ReadExactly(tail);
+            footerByteLength = BinaryPrimitives.ReadUInt32LittleEndian(tail[..4]);
+            footerStart = logicalEof - DatumFormatV2.TailSize - footerByteLength;
+        }
+
         if (footerStart != header.FooterOffset)
         {
+            // After recovery the header still points at the *old*
+            // footer offset, which matches the recovered tail's footer
+            // start — so this check passes for the common torn-tail
+            // case. Mismatch here means actual corruption.
             throw new InvalidDataException(
                 $"Footer offset mismatch: header says {header.FooterOffset}, tail says {footerStart}.");
         }

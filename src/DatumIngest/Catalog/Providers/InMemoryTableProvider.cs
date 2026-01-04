@@ -39,15 +39,18 @@ public sealed class InMemoryTableProvider : ITableProvider
     private SourceIndex? _overrideIndex;
 
     /// <summary>
-    /// Serializes mutations (AddColumn / DropColumn / AppendRowsAsync /
-    /// DeleteRows) and the field-replacement they perform. Read paths
-    /// capture the current <c>_rows</c> / <c>_columns</c> / <c>_schema</c>
-    /// references into locals at entry — a concurrent mutation that
-    /// replaces the references afterward is invisible to the in-flight
-    /// scan, mirroring the snapshot semantics used by
+    /// Serializes mutations and append sessions across async awaits.
+    /// A session holds the permit for its entire lifetime so two
+    /// writers can't overlap on the same provider; mutations
+    /// (AddColumn / DropColumn / DeleteRows) take the permit for the
+    /// duration of the swap. Read paths capture the current
+    /// <c>_rows</c> / <c>_columns</c> / <c>_schema</c> references into
+    /// locals at entry — a concurrent mutation that replaces the
+    /// references afterward is invisible to the in-flight scan,
+    /// mirroring the snapshot semantics used by
     /// <see cref="DatumFileTableProviderV2"/>.
     /// </summary>
-    private readonly object _mutationLock = new();
+    private readonly SemaphoreSlim _mutationLock = new(1, 1);
 
     /// <summary>
     /// Creates a provider from explicit column names and raw <c>object[]</c> rows.
@@ -267,7 +270,8 @@ public sealed class InMemoryTableProvider : ITableProvider
                 nameof(column));
         }
 
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             for (int i = 0; i < _columns.Length; i++)
             {
@@ -303,6 +307,10 @@ public sealed class InMemoryTableProvider : ITableProvider
             _fullLookup = new ColumnLookup(_columns);
             _overrideIndex = null;
         }
+        finally
+        {
+            _mutationLock.Release();
+        }
     }
 
     /// <inheritdoc/>
@@ -311,7 +319,8 @@ public sealed class InMemoryTableProvider : ITableProvider
         ArgumentNullException.ThrowIfNull(columnName);
         ObjectDisposedException.ThrowIf(Disposed, this);
 
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             int dropIndex = -1;
             for (int i = 0; i < _columns.Length; i++)
@@ -361,55 +370,25 @@ public sealed class InMemoryTableProvider : ITableProvider
             _fullLookup = new ColumnLookup(_columns);
             _overrideIndex = null;
         }
+        finally
+        {
+            _mutationLock.Release();
+        }
     }
 
     /// <inheritdoc/>
-    public async Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken)
+    public IAppendSession BeginAppend()
     {
-        ArgumentNullException.ThrowIfNull(batches);
         ObjectDisposedException.ThrowIf(Disposed, this);
-
-        // Drain the enumerable into a staged list outside the lock so
-        // we don't hold the mutation lock across awaits.
-        List<object?[]> staged = new();
-        await foreach (RowBatch batch in batches.WithCancellation(cancellationToken).ConfigureAwait(false))
+        _mutationLock.Wait();
+        try
         {
-            int columnCount;
-            lock (_mutationLock)
-            {
-                columnCount = _columns.Length;
-                if (batch.ColumnLookup.Count != columnCount)
-                {
-                    throw new InvalidOperationException(
-                        $"AppendRowsAsync: batch has {batch.ColumnLookup.Count} columns but " +
-                        $"table '{Name}' has {columnCount}.");
-                }
-            }
-
-            for (int r = 0; r < batch.Count; r++)
-            {
-                Row row = batch[r];
-                object?[] cells = new object?[columnCount];
-                for (int c = 0; c < columnCount; c++)
-                {
-                    cells[c] = ConvertDataValueToCell(row[c], batch.Arena);
-                }
-                staged.Add(cells);
-            }
+            return new InMemoryAppendSession(this);
         }
-
-        if (staged.Count == 0) return;
-
-        lock (_mutationLock)
+        catch
         {
-            object?[][] newRows = new object?[_rows.Length + staged.Count][];
-            Array.Copy(_rows, newRows, _rows.Length);
-            for (int i = 0; i < staged.Count; i++)
-            {
-                newRows[_rows.Length + i] = staged[i];
-            }
-            _rows = newRows;
-            _overrideIndex = null;
+            _mutationLock.Release();
+            throw;
         }
     }
 
@@ -420,7 +399,8 @@ public sealed class InMemoryTableProvider : ITableProvider
         ObjectDisposedException.ThrowIf(Disposed, this);
         if (rowIndices.Count == 0) return;
 
-        lock (_mutationLock)
+        _mutationLock.Wait();
+        try
         {
             HashSet<long> drop = new(rowIndices.Count);
             foreach (long idx in rowIndices)
@@ -443,6 +423,10 @@ public sealed class InMemoryTableProvider : ITableProvider
             }
             _rows = newRows;
             _overrideIndex = null;
+        }
+        finally
+        {
+            _mutationLock.Release();
         }
     }
 
@@ -771,4 +755,94 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// source cell is null so we emit a typed null rather than defaulting to Unknown).
     /// </summary>
     private sealed record Projection(ColumnLookup Lookup, int[] SourceIndexes, DataKind[] Kinds);
+
+    /// <summary>
+    /// Append session that stages incoming cells in a managed list and
+    /// snaps them into the provider's <c>_rows</c> array on
+    /// <see cref="CommitAsync"/>. Disposing without committing drops
+    /// the staged list — abort is just an unreferenced
+    /// <see cref="List{T}"/> the GC reclaims.
+    /// </summary>
+    private sealed class InMemoryAppendSession : IAppendSession
+    {
+        private readonly InMemoryTableProvider _provider;
+        private readonly List<object?[]> _staged = new();
+        private bool _committed;
+        private bool _disposed;
+
+        public InMemoryAppendSession(InMemoryTableProvider provider)
+        {
+            _provider = provider;
+        }
+
+        public Task WriteAsync(RowBatch batch, CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("Cannot write after CommitAsync.");
+            ArgumentNullException.ThrowIfNull(batch);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int columnCount = _provider._columns.Length;
+            if (batch.ColumnLookup.Count != columnCount)
+            {
+                throw new InvalidOperationException(
+                    $"Append batch has {batch.ColumnLookup.Count} columns but table " +
+                    $"'{_provider.Name}' has {columnCount}.");
+            }
+            for (int i = 0; i < columnCount; i++)
+            {
+                string expected = _provider._columns[i];
+                string actual = batch.ColumnLookup.GetColumnName(i);
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Append batch column {i} is named '{actual}' but table " +
+                        $"'{_provider.Name}' expects '{expected}'.");
+                }
+            }
+
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Row row = batch[r];
+                object?[] cells = new object?[columnCount];
+                for (int c = 0; c < columnCount; c++)
+                {
+                    cells[c] = ConvertDataValueToCell(row[c], batch.Arena);
+                }
+                _staged.Add(cells);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("CommitAsync was already called.");
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_staged.Count > 0)
+            {
+                object?[][] newRows = new object?[_provider._rows.Length + _staged.Count][];
+                Array.Copy(_provider._rows, newRows, _provider._rows.Length);
+                for (int i = 0; i < _staged.Count; i++)
+                {
+                    newRows[_provider._rows.Length + i] = _staged[i];
+                }
+                _provider._rows = newRows;
+                _provider._overrideIndex = null;
+            }
+            _committed = true;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (_disposed) return ValueTask.CompletedTask;
+            _disposed = true;
+            // Staged list goes to the GC if we never committed.
+            _provider._mutationLock.Release();
+            return ValueTask.CompletedTask;
+        }
+    }
 }

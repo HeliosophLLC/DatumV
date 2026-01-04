@@ -1299,70 +1299,7 @@ public sealed class DatumFileWriterV2 : IDisposable
             return; // file ends cleanly
         }
 
-        // Tail magic missing → torn append. Scan backward for last
-        // FMTD whose preceding uint32 (footerByteLength) yields a
-        // plausible footer offset (greater than HeaderSize, less than
-        // the FMTD position).
-        const int chunkSize = 4096;
-        const int overlap = 3;  // FMTD is 4 bytes; 3 bytes of overlap captures cross-chunk straddlers
-        long fileLength = stream.Length;
-        long minScanStart = DatumFormatV2.HeaderSize;
-        long lastCleanTailEof = -1;
-
-        byte[] buffer = new byte[chunkSize + overlap];
-
-        // Walk backward in chunks. scanCursor is the exclusive upper
-        // bound for the current chunk's natural region; the chunk
-        // itself reads up to `overlap` bytes past scanCursor to catch
-        // FMTDs that straddle the boundary with the previous (later)
-        // chunk.
-        long scanCursor = fileLength;
-        while (scanCursor > minScanStart && lastCleanTailEof < 0)
-        {
-            long chunkStart = Math.Max(minScanStart, scanCursor - chunkSize);
-            long chunkEndExclusive = Math.Min(fileLength, scanCursor + overlap);
-            int bytesToRead = (int)(chunkEndExclusive - chunkStart);
-            if (bytesToRead < 4) break;
-
-            stream.Position = chunkStart;
-            stream.ReadExactly(buffer, 0, bytesToRead);
-
-            for (int i = bytesToRead - 4; i >= 0; i--)
-            {
-                if (buffer[i] != (byte)'F' || buffer[i + 1] != (byte)'M'
-                    || buffer[i + 2] != (byte)'T' || buffer[i + 3] != (byte)'D')
-                {
-                    continue;
-                }
-
-                long fmtdPosition = chunkStart + i;
-                long tailEof = fmtdPosition + 4;
-
-                // The 4 bytes immediately before FMTD are the footer
-                // byte length. Validate the implied footer offset is
-                // plausible.
-                if (fmtdPosition < DatumFormatV2.HeaderSize + 4)
-                {
-                    continue;
-                }
-                stream.Position = fmtdPosition - 4;
-                Span<byte> lengthBytes = stackalloc byte[4];
-                stream.ReadExactly(lengthBytes);
-                uint footerLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(lengthBytes);
-                long footerStart = fmtdPosition - 4 - footerLen;
-                if (footerStart < DatumFormatV2.HeaderSize || footerLen == 0)
-                {
-                    continue;
-                }
-
-                lastCleanTailEof = tailEof;
-                break;
-            }
-
-            if (chunkStart == minScanStart) break;
-            scanCursor = chunkStart;
-        }
-
+        long lastCleanTailEof = TornTailScanner.FindLastCleanTailEof(stream);
         if (lastCleanTailEof < 0)
         {
             throw new InvalidDataException(

@@ -145,18 +145,40 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support DropColumn (CanAlterColumns is false).");
 
     /// <summary>
-    /// Appends every <see cref="RowBatch"/> in <paramref name="batches"/>
-    /// to the table. Batches must match the table's schema.
+    /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
+    /// inserts. The session holds a writer for its lifetime; rows
+    /// become visible only after <see cref="IAppendSession.CommitAsync"/>.
+    /// One session per provider at a time — concurrent callers wait
+    /// for the active session to dispose.
     /// </summary>
     /// <remarks>
     /// Default implementation throws <see cref="NotSupportedException"/>.
-    /// On the .datum provider, the call commits a single new footer at
-    /// the end of the stream and tail-flips it atomically — partial
-    /// progress is invisible to concurrent readers.
+    /// Mutable providers override.
     /// </remarks>
-    Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken) =>
+    IAppendSession BeginAppend() =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support AppendRowsAsync (CanAppendRows is false).");
+            $"Table '{Name}' does not support BeginAppend (CanAppendRows is false).");
+
+    /// <summary>
+    /// Appends every <see cref="RowBatch"/> in <paramref name="batches"/>
+    /// to the table in a single committed unit. Convenience wrapper over
+    /// <see cref="BeginAppend"/> — opens a session, drains the
+    /// enumerable, and commits.
+    /// </summary>
+    /// <remarks>
+    /// Provider implementations should rely on this default implementation
+    /// rather than re-implementing the drain-and-commit loop themselves.
+    /// </remarks>
+    async Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batches);
+        await using IAppendSession session = BeginAppend();
+        await foreach (RowBatch batch in batches.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            await session.WriteAsync(batch, cancellationToken).ConfigureAwait(false);
+        }
+        await session.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Soft-deletes the rows at the given linear (zero-based) row
