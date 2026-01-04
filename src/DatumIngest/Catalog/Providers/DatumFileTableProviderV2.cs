@@ -42,8 +42,17 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private readonly TableDescriptor _descriptor;
     private readonly Pool _pool;
     private readonly QueryResultsManifest? _manifest;
-    private readonly MappedSourceIndexSet? _mappedIndexSet;
-    private readonly SourceIndex? _sourceIndex;
+    /// <summary>
+    /// Lazily-loaded <c>.datum-index</c> sidecar mapping, captured at
+    /// provider construction. Becomes stale after any mutation
+    /// (mutation invalidates the source file's fingerprint); the
+    /// mutation path nulls these fields out so subsequent
+    /// <see cref="GetSourceIndex"/> calls return <see langword="null"/>
+    /// and queries fall back to scan instead of using a stale index.
+    /// A future REINDEX command (PR12) will repopulate.
+    /// </summary>
+    private MappedSourceIndexSet? _mappedIndexSet;
+    private SourceIndex? _sourceIndex;
 
     /// <summary>
     /// Per-snapshot bundle of read-side state. Mutations (AddColumn /
@@ -795,9 +804,22 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// Memory-maps a <c>.datum-index</c> sidecar alongside the source
     /// file. Returns the owning <see cref="MappedSourceIndexSet"/> and
     /// the resolved <see cref="SourceIndex"/> for this table, or
-    /// <c>(null, null)</c> when absent. Multiple scan operators share the
-    /// single mapped view via the kept <see cref="MappedSourceIndexSet"/>.
+    /// <c>(null, null)</c> when absent <strong>or stale</strong>.
+    /// Multiple scan operators share the single mapped view via the
+    /// kept <see cref="MappedSourceIndexSet"/>.
     /// </summary>
+    /// <remarks>
+    /// Compares the index sidecar's stored
+    /// <see cref="SourceFingerprint"/> against a freshly-computed
+    /// fingerprint of the current <c>.datum</c> file. Any prior
+    /// mutation (AppendRows / AddColumn / DropColumn / DeleteRows) bumps
+    /// the file's size and stripe-hash, so the stored fingerprint no
+    /// longer matches and the index is treated as missing — readers
+    /// fall back to scan rather than silently using a stale index that
+    /// could miss newly-appended rows or address dropped columns. The
+    /// stale sidecar file isn't deleted; a future REINDEX command
+    /// rebuilds it on demand.
+    /// </remarks>
     private static (MappedSourceIndexSet? Mapped, SourceIndex? Index) TryLoadSourceIndex(TableDescriptor descriptor)
     {
         string path = PathDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-index";
@@ -809,6 +831,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         MappedSourceIndexSet mapped = UnifiedIndexReader.Open(path);
         try
         {
+            if (!IsFingerprintCurrent(descriptor.FilePath, mapped.IndexSet.Fingerprint))
+            {
+                // Stale index — source file has changed since the index
+                // was built. Treat as no index; the next reader either
+                // works without it or callers can run REINDEX.
+                mapped.Dispose();
+                return (null, null);
+            }
+
             SourceIndex? index = ResolveSidecarEntry(mapped.IndexSet.Tables, descriptor.Name, descriptor.FilePath);
             if (index is null)
             {
@@ -822,6 +853,25 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             mapped.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Compares <paramref name="storedFingerprint"/> against a freshly-
+    /// computed fingerprint of the file at <paramref name="datumPath"/>.
+    /// Returns <see langword="false"/> when the file has changed since
+    /// the fingerprint was captured (different size, or differing
+    /// stripe content).
+    /// </summary>
+    /// <remarks>
+    /// Synchronous wrapper over the async <see cref="SourceFingerprint.MatchesAsync"/>
+    /// because the provider constructor is synchronous. The compute
+    /// is striped-sample-based (not full-file), so the cost is bounded
+    /// regardless of file size.
+    /// </remarks>
+    private static bool IsFingerprintCurrent(string datumPath, SourceFingerprint storedFingerprint)
+    {
+        using FileStream fs = File.OpenRead(datumPath);
+        return storedFingerprint.MatchesAsync(fs, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -969,6 +1019,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             SidecarRegistry.UpdateAt(SidecarStoreId, next.Sidecar);
         }
         SwapSnapshot(next);
+
+        // Invalidate the cached source index — the mutation just
+        // changed the source file's fingerprint, so any cached
+        // .datum-index sidecar is now stale. Drop our handle so
+        // GetSourceIndex returns null and queries fall back to scan.
+        // The .datum-index file on disk is left in place; a future
+        // REINDEX rebuilds it, and TryLoadSourceIndex's fingerprint
+        // check rejects it on the next provider open.
+        MappedSourceIndexSet? staleMapped = _mappedIndexSet;
+        _mappedIndexSet = null;
+        _sourceIndex = null;
+        staleMapped?.Dispose();
     }
 
     /// <summary>
