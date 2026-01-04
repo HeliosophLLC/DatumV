@@ -26,4 +26,14 @@ public interface IDatumFileTableProvider
     /// downstream accessors can resolve through the registry.
     /// </summary>
     byte SidecarStoreId { get; set; }
+
+    /// <summary>
+    /// The catalog's <see cref="SidecarRegistry"/>, set at provider-add
+    /// time so the provider can swap its registered <see cref="IBlobSource"/>
+    /// after a mutation grows the underlying <c>.datum-blob</c>. Append
+    /// extends the sidecar past the existing mmap's view; the provider
+    /// reopens the mmap and calls <see cref="SidecarRegistry.UpdateAt"/>
+    /// on the same <see cref="SidecarStoreId"/>.
+    /// </summary>
+    SidecarRegistry? SidecarRegistry { get; set; }
 }

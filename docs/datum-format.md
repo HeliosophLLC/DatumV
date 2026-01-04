@@ -4,7 +4,7 @@
 
 The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It's **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade vs a heavily-compressed alternative is ~2–4× larger files; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
 
-The current on-disk format version is **`4`**. v4 added a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag — most as forward-compat hooks whose behaviors land in subsequent PRs (crash-safe append, soft-drop column, soft-delete rows, cross-file rewrite). Today's writer emits zero-valued passive defaults for all of them; readers parse them but never observe non-zero values from this PR's writer.
+The current on-disk format version is **`4`**. v4 introduces a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag. These hooks back: crash-safe append (tail-flip-as-commit + torn-tail recovery), soft-drop column, soft-delete rows (chapter-level tombstone bitmaps with copy-on-write per commit), add column (all-null backfill), and external pages in companion `.datum-pack` files. Catalog-level `ALTER TABLE` / `INSERT` / `DELETE` route to these primitives through `TableCatalog`.
 
 Two optional companion sidecars extend the base format:
 
@@ -70,8 +70,8 @@ Two optional companion sidecars extend the base format:
 | `None` | 0 | No special flags |
 | `HasSidecarReferences` | 0x01 | At least one row spilled to the companion `.datum-blob`; the sidecar must be present at read time |
 | `HasVolumeZoneMaps` | 0x02 | Volume-level zone maps were emitted (file row count exceeded the 1 M-row threshold) |
-| `HasExternalPages` | 0x04 | At least one page descriptor has a non-zero `FileId` — pages live in external `.datum-pack` files referenced from the footer prologue's file table. Always clear in PR1. |
-| `HasTombstones` | 0x08 | At least one chapter has a populated tombstone bitmap (some rows soft-deleted). Always clear in PR1. |
+| `HasExternalPages` | 0x04 | At least one page descriptor has a non-zero `FileId` — pages live in external `.datum-pack` files referenced from the footer prologue's file table. Set by compaction-style code paths that move pages out of the primary file. |
+| `HasTombstones` | 0x08 | At least one chapter has a populated tombstone bitmap (some rows soft-deleted). Set when `DELETE` has soft-deleted at least one row. |
 
 `HasSidecarReferences` is only set when the sidecar's blob sink actually received an `Append` — files whose variable-slot columns happened to all stay inline leave the flag clear so the reader doesn't try to open a non-existent companion file. Readers ignore unknown flag bits, so future bit allocations are forward-compatible.
 
@@ -142,23 +142,23 @@ The footer body begins at the offset stored in the header's `FooterOffset` field
 
 ```
 uint64 : generation                  (commit counter; first write = 1, increments per commit)
-uint64 : writerId                    (0 in PR1; per-writer stamp when multi-writer ships)
+uint64 : writerId                    (per-writer process-stable identity stamp; passive single-writer guard today)
 uint64 : baseGeneration              (the generation this commit was based on; 0 for initial write)
 byte   : tombstoneGranularity        (1 = chapter-level; reserved 0 = page-level)
 int32  : columnCount                 (authoritative; matches the per-column block count below)
-int32  : fileTableEntryCount         (0 in PR1; cross-file pages ship in PR7)
+int32  : fileTableEntryCount         (zero when no external pages; non-zero when compaction has moved pages to .datum-pack files)
 For each file-table entry:
   uint16  : fileId                   (>0; 0 is reserved for the primary file)
   string  : relativePath             (length-prefixed UTF-8; resolved against the .datum file's directory)
   byte[16] : fingerprint             (identity stamp of the external file; mismatch = stale manifest)
 
-int32  : chapterTombstoneCount       (0 in PR1; soft-delete ships in PR5)
+int32  : chapterTombstoneCount       (zero until first soft-delete; otherwise equals the file's chapter count)
 int64[chapterTombstoneCount] : tombstoneOffsets
                                      (one per chapter index; -1 = no tombstones, otherwise the
                                       absolute file offset of an 8 KiB chapter tombstone bitmap)
 ```
 
-When `chapterTombstoneCount` is non-zero in a future PR, it must equal the file's actual chapter count (`⌈totalRowCount / (PagesPerChapter × pageSize)⌉`). The prologue's chapter tombstone offsets describe the file as a whole — tombstones apply to logical rows, not per-column-page, so a single bitmap per chapter index covers every column's view of that row range.
+When `chapterTombstoneCount` is non-zero, it equals the file's actual chapter count (`⌈totalRowCount / (PagesPerChapter × pageSize)⌉`). The prologue's chapter tombstone offsets describe the file as a whole — tombstones apply to logical rows, not per-column-page, so a single bitmap per chapter index covers every column's view of that row range.
 
 ### Per-column block
 
@@ -175,7 +175,7 @@ For each column (in schema order, count = prologue.columnCount):
 
   int32: pageCount
   For each page:
-    uint16 : fileId                 (0 = primary file; >0 = file-table lookup. Always 0 in PR1.)
+    uint16 : fileId                 (0 = primary file; >0 = file-table lookup for pages compacted into a .datum-pack)
     int64  : pageOffset             (absolute byte position within the file named by fileId)
     uint32 : pageByteLength
     uint16 : rowCount               (≤ pageSize; last page may be partial)
@@ -190,7 +190,7 @@ For each column (in schema order, count = prologue.columnCount):
     ZoneMap[volumeCount]             (one per 16-chapter volume; aggregated from chapter maps)
 ```
 
-The `Tombstoned` column flag (`0x08`) marks a soft-dropped column — its block stays in the footer for compaction-time reclamation, but readers skip it at schema enumeration. Inert in PR1.
+The `Tombstoned` column flag (`0x08`) marks a soft-dropped column — its block stays in the footer for compaction-time reclamation, but readers skip it at schema enumeration.
 
 ### Zone-map serialization
 
@@ -377,6 +377,33 @@ Per-blob codec means each value in a column can choose its own compression indep
    └─ Seek to header offset 0, patch TotalRowCount, FooterOffset, and Flags
 ```
 
+## Catalog-level mutation API
+
+`TableCatalog` exposes provider-agnostic ALTER TABLE / INSERT / DELETE entry points so SQL DDL/DML lowers the same way regardless of whether the underlying table is a `.datum` file, an in-memory fixture, or a system table:
+
+```csharp
+catalog.AddColumn(tableName, columnInfo);                  // ALTER TABLE … ADD COLUMN …
+catalog.DropColumn(tableName, columnName);                 // ALTER TABLE … DROP COLUMN …
+await catalog.AppendRowsAsync(tableName, batches, ct);     // INSERT INTO …
+catalog.DeleteRows(tableName, rowIndices);                 // DELETE FROM … (linear row indices)
+```
+
+### Capability flags + default-throw
+
+`ITableProvider` carries three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — defaulting to `false`. Each mutation method has a default interface implementation that throws `NotSupportedException`. Mutable providers (the .datum file provider, the in-memory provider) override the flags and the methods. System tables (information_schema, datum_catalog.*, models, udfs, …) leave the defaults alone, so the catalog rejects mutations against them with a clear `"Table 'X' is read-only"` error.
+
+The catalog's `IsReadOnly` semantics are derived: a table is read-only for an operation when its provider's corresponding `Can…` flag is `false`. There is no separate sub-interface — the four mutation methods + three flags all live on `ITableProvider`.
+
+### Datum file provider — snapshot semantics
+
+`DatumFileTableProviderV2` wraps its read-side state (open `DatumFileReaderV2`, sidecar mmap, derived schema, schema→footer index translation, chapter tombstone bitmaps) in a refcounted `Snapshot`. Mutations route through the format's static helpers (`DatumFileWriterV2.AddColumn` / `DropColumn` / `OpenForAppend` / `SoftDeleteRows`), then swap the snapshot atomically. In-flight scans hold a refcount on the snapshot they captured at scan-open; the retired snapshot disposes when its refcount drops to zero — closest analogue is SQL Server's RCSI, but the version chain is the .datum file's footer-LSN sequence rather than a tempdb side-table.
+
+`AppendRowsAsync` is the only mutation that grows the companion `.datum-blob`. After the writer commits, the provider reopens the sidecar mmap (the existing view was sized to the pre-mutation length and can't see the appended bytes) and calls `SidecarRegistry.UpdateAt` on the same `storeId`. The new `IBlobSource`'s mmap is a strict superset of the old one's, so existing storeId-stamped DataValues continue to resolve correctly through the registry.
+
+### Sessions deferred
+
+The `AppendRowsAsync` signature takes an `IAsyncEnumerable<RowBatch>` (one-shot append, single tail-flip per call). Explicit append sessions — required for fully-streaming `INSERT … SELECT` lowering — ship later when the SQL DML lowering pipeline lands. Today's API drains the enumerable inside one writer scope and commits once.
+
 ## Source files
 
 | File | Purpose |
@@ -399,8 +426,11 @@ Per-blob codec means each value in a column can choose its own compression indep
 | `DatumFile/V2/Decoding/BitPackedBooleanPageDecoderV2.cs` | Random-access reader for boolean pages |
 | `DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs` | Random-access reader for variable-slot pages (inline + sidecar pointer) |
 | `DatumFile/V2/Decoding/PageDecoderFactoryV2.cs` | Picks the right decoder for a column descriptor |
-| `Catalog/Providers/DatumFileTableProviderV2.cs` | Engine-facing provider with three-tier zone-map pruning + seek session + manifest/index discovery |
+| `Catalog/Providers/DatumFileTableProviderV2.cs` | Engine-facing provider with three-tier zone-map pruning + seek session + manifest/index discovery + catalog-level mutation methods (AddColumn / DropColumn / AppendRowsAsync / DeleteRows) routed through a refcounted reader snapshot |
 | `Catalog/Providers/DatumFileSeekSessionV2.cs` | Caller-owned seek session with page-index math (`pageIndex = startRow / pageSize`) |
+| `Catalog/TableCatalog.cs` | Registry of named tables; provider-agnostic `AddColumn` / `DropColumn` / `AppendRowsAsync` / `DeleteRows` passthroughs that gate on per-provider capability flags |
+| `Catalog/ITableProvider.cs` | Provider interface with `CanAlterColumns` / `CanAppendRows` / `CanDeleteRows` flags + default-throw mutation methods |
+| `DatumFile/Sidecar/SidecarRegistry.cs` | Per-catalog `storeId` → `IBlobSource` map; `UpdateAt` swaps the source after AppendRows grows the `.datum-blob` past the previous mmap view |
 | `DatumFile/Sidecar/SidecarConstants.cs` | `.datum-blob` magic (`DATUMBLB`), version, header layout |
 | `DatumFile/Sidecar/SidecarWriteStore.cs` | Lazy-materialised, locked, append-only writer for the `.datum-blob` sidecar |
 | `DatumFile/Sidecar/SidecarReadStore.cs` | mmap-backed reader with header + fingerprint validation |

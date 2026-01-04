@@ -508,9 +508,74 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private void RegisterProviderSidecar(ITableProvider provider)
     {
         if (provider is not IDatumFileTableProvider datumProvider) return;
+        // Wire the registry first so mutations can swap sidecar sources
+        // even on tabular-only providers (no current sidecar) that may
+        // produce one later via AppendRows.
+        datumProvider.SidecarRegistry = SidecarRegistry;
         if (datumProvider.Sidecar is not { } source) return;
 
         datumProvider.SidecarStoreId = SidecarRegistry.Register(source);
+    }
+
+    // ──────────────────── Mutation passthroughs ────────────────────
+
+    /// <summary>
+    /// Adds a new (nullable) column to <paramref name="tableName"/>. Throws
+    /// <see cref="InvalidOperationException"/> if the resolved provider's
+    /// <see cref="ITableProvider.CanAlterColumns"/> is <see langword="false"/>
+    /// (e.g. system tables).
+    /// </summary>
+    public void AddColumn(string tableName, Model.ColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        ITableProvider provider = ResolveForMutation(tableName, requireFlag: p => p.CanAlterColumns, op: "AddColumn");
+        provider.AddColumn(column);
+    }
+
+    /// <summary>
+    /// Soft-drops the named column from <paramref name="tableName"/>.
+    /// </summary>
+    public void DropColumn(string tableName, string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(columnName);
+        ITableProvider provider = ResolveForMutation(tableName, requireFlag: p => p.CanAlterColumns, op: "DropColumn");
+        provider.DropColumn(columnName);
+    }
+
+    /// <summary>
+    /// Appends every batch in <paramref name="batches"/> to <paramref name="tableName"/>.
+    /// </summary>
+    public Task AppendRowsAsync(string tableName, IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(batches);
+        ITableProvider provider = ResolveForMutation(tableName, requireFlag: p => p.CanAppendRows, op: "AppendRowsAsync");
+        return provider.AppendRowsAsync(batches, cancellationToken);
+    }
+
+    /// <summary>
+    /// Soft-deletes rows at the given linear indices in <paramref name="tableName"/>.
+    /// </summary>
+    public void DeleteRows(string tableName, IReadOnlyList<long> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        ITableProvider provider = ResolveForMutation(tableName, requireFlag: p => p.CanDeleteRows, op: "DeleteRows");
+        provider.DeleteRows(rowIndices);
+    }
+
+    private ITableProvider ResolveForMutation(string tableName, Func<ITableProvider, bool> requireFlag, string op)
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        if (!TryGetTable(tableName, out ITableProvider? provider))
+        {
+            throw new KeyNotFoundException($"Table '{tableName}' is not registered in the catalog.");
+        }
+        if (!requireFlag(provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{tableName}' is read-only for {op} (provider type {provider.GetType().Name}). " +
+                "System tables and read-only providers do not support mutation.");
+        }
+        return provider;
     }
 
     /// <summary>
@@ -557,29 +622,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <inheritdoc />
     public void Dispose()
     {
-        // foreach (MappedSourceIndexSet mapped in _mappedIndexSets)
-        // {
-        //     mapped.Dispose();
-        // }
-
-        // _mappedIndexSets.Clear();
-
-        // foreach (string tempFile in _tempFiles)
-        // {
-        //     try
-        //     {
-        //         if (File.Exists(tempFile))
-        //         {
-        //             File.Delete(tempFile);
-        //         }
-        //     }
-        //     catch (IOException)
-        //     {
-        //         // Best-effort cleanup.
-        //     }
-        // }
-
-        // _tempFiles.Clear();
+        // Dispose locally-registered providers; parent-catalog providers
+        // remain owned by the parent. Best-effort: a misbehaving provider's
+        // Dispose shouldn't leak handles for its siblings.
+        foreach (ITableProvider provider in Tables.Values)
+        {
+            try { provider.Dispose(); }
+            catch { /* best-effort cleanup */ }
+        }
+        Tables.Clear();
     }
 
 

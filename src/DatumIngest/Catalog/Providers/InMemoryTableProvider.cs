@@ -30,13 +30,24 @@ public sealed class InMemoryTableProvider : ITableProvider
     private const int DefaultBatchSize = 64;
 
     private Pool? _pool;
-    private readonly string[] _columns;
-    private readonly object?[][] _rows;
-    private readonly Schema _schema;
-    private readonly ColumnLookup _fullLookup;
+    private string[] _columns;
+    private object?[][] _rows;
+    private Schema _schema;
+    private ColumnLookup _fullLookup;
     private readonly bool _indexEnabled;
     private readonly Lazy<SourceIndex?>? _lazySourceIndex;
     private SourceIndex? _overrideIndex;
+
+    /// <summary>
+    /// Serializes mutations (AddColumn / DropColumn / AppendRowsAsync /
+    /// DeleteRows) and the field-replacement they perform. Read paths
+    /// capture the current <c>_rows</c> / <c>_columns</c> / <c>_schema</c>
+    /// references into locals at entry — a concurrent mutation that
+    /// replaces the references afterward is invisible to the in-flight
+    /// scan, mirroring the snapshot semantics used by
+    /// <see cref="DatumFileTableProviderV2"/>.
+    /// </summary>
+    private readonly object _mutationLock = new();
 
     /// <summary>
     /// Creates a provider from explicit column names and raw <c>object[]</c> rows.
@@ -230,6 +241,247 @@ public sealed class InMemoryTableProvider : ITableProvider
         ObjectDisposedException.ThrowIf(Disposed, this);
 
         return new InMemorySeekSession(_pool, ResolveProjection(requiredColumns), _rows, targetArena);
+    }
+
+    // ──────────────────── Mutation (catalog-level ALTER TABLE) ────────────────────
+
+    /// <inheritdoc/>
+    public bool CanAlterColumns => true;
+
+    /// <inheritdoc/>
+    public bool CanAppendRows => true;
+
+    /// <inheritdoc/>
+    public bool CanDeleteRows => true;
+
+    /// <inheritdoc/>
+    public void AddColumn(ColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        if (!column.Nullable)
+        {
+            throw new ArgumentException(
+                $"AddColumn requires column '{column.Name}' to be nullable: existing rows are " +
+                "back-filled with nulls.",
+                nameof(column));
+        }
+
+        lock (_mutationLock)
+        {
+            for (int i = 0; i < _columns.Length; i++)
+            {
+                if (string.Equals(_columns[i], column.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{column.Name}' is already present in table '{Name}'.");
+                }
+            }
+
+            // Append the column slot, back-fill existing rows with null.
+            string[] newColumns = new string[_columns.Length + 1];
+            Array.Copy(_columns, newColumns, _columns.Length);
+            newColumns[^1] = column.Name;
+
+            object?[][] newRows = new object?[_rows.Length][];
+            for (int r = 0; r < _rows.Length; r++)
+            {
+                object?[] oldRow = _rows[r];
+                object?[] newRow = new object?[oldRow.Length + 1];
+                Array.Copy(oldRow, newRow, oldRow.Length);
+                newRow[^1] = null;
+                newRows[r] = newRow;
+            }
+
+            ColumnInfo[] newSchemaColumns = new ColumnInfo[_schema.Columns.Count + 1];
+            for (int i = 0; i < _schema.Columns.Count; i++) newSchemaColumns[i] = _schema.Columns[i];
+            newSchemaColumns[^1] = column;
+
+            _columns = newColumns;
+            _rows = newRows;
+            _schema = new Schema(newSchemaColumns);
+            _fullLookup = new ColumnLookup(_columns);
+            _overrideIndex = null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public void DropColumn(string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(columnName);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        lock (_mutationLock)
+        {
+            int dropIndex = -1;
+            for (int i = 0; i < _columns.Length; i++)
+            {
+                if (string.Equals(_columns[i], columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    dropIndex = i;
+                    break;
+                }
+            }
+            if (dropIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Column '{columnName}' is not present in table '{Name}'.");
+            }
+
+            string[] newColumns = new string[_columns.Length - 1];
+            for (int i = 0, j = 0; i < _columns.Length; i++)
+            {
+                if (i == dropIndex) continue;
+                newColumns[j++] = _columns[i];
+            }
+
+            object?[][] newRows = new object?[_rows.Length][];
+            for (int r = 0; r < _rows.Length; r++)
+            {
+                object?[] oldRow = _rows[r];
+                object?[] newRow = new object?[oldRow.Length - 1];
+                for (int i = 0, j = 0; i < oldRow.Length; i++)
+                {
+                    if (i == dropIndex) continue;
+                    newRow[j++] = oldRow[i];
+                }
+                newRows[r] = newRow;
+            }
+
+            ColumnInfo[] newSchemaColumns = new ColumnInfo[_schema.Columns.Count - 1];
+            for (int i = 0, j = 0; i < _schema.Columns.Count; i++)
+            {
+                if (i == dropIndex) continue;
+                newSchemaColumns[j++] = _schema.Columns[i];
+            }
+
+            _columns = newColumns;
+            _rows = newRows;
+            _schema = new Schema(newSchemaColumns);
+            _fullLookup = new ColumnLookup(_columns);
+            _overrideIndex = null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batches);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+
+        // Drain the enumerable into a staged list outside the lock so
+        // we don't hold the mutation lock across awaits.
+        List<object?[]> staged = new();
+        await foreach (RowBatch batch in batches.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            int columnCount;
+            lock (_mutationLock)
+            {
+                columnCount = _columns.Length;
+                if (batch.ColumnLookup.Count != columnCount)
+                {
+                    throw new InvalidOperationException(
+                        $"AppendRowsAsync: batch has {batch.ColumnLookup.Count} columns but " +
+                        $"table '{Name}' has {columnCount}.");
+                }
+            }
+
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Row row = batch[r];
+                object?[] cells = new object?[columnCount];
+                for (int c = 0; c < columnCount; c++)
+                {
+                    cells[c] = ConvertDataValueToCell(row[c], batch.Arena);
+                }
+                staged.Add(cells);
+            }
+        }
+
+        if (staged.Count == 0) return;
+
+        lock (_mutationLock)
+        {
+            object?[][] newRows = new object?[_rows.Length + staged.Count][];
+            Array.Copy(_rows, newRows, _rows.Length);
+            for (int i = 0; i < staged.Count; i++)
+            {
+                newRows[_rows.Length + i] = staged[i];
+            }
+            _rows = newRows;
+            _overrideIndex = null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public void DeleteRows(IReadOnlyList<long> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        if (rowIndices.Count == 0) return;
+
+        lock (_mutationLock)
+        {
+            HashSet<long> drop = new(rowIndices.Count);
+            foreach (long idx in rowIndices)
+            {
+                if (idx < 0 || idx >= _rows.Length)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(rowIndices), idx,
+                        $"Row index {idx} is out of range for table '{Name}' (row count {_rows.Length}).");
+                }
+                drop.Add(idx);
+            }
+
+            object?[][] newRows = new object?[_rows.Length - drop.Count][];
+            int j = 0;
+            for (int i = 0; i < _rows.Length; i++)
+            {
+                if (drop.Contains(i)) continue;
+                newRows[j++] = _rows[i];
+            }
+            _rows = newRows;
+            _overrideIndex = null;
+        }
+    }
+
+    /// <summary>
+    /// Converts a <see cref="DataValue"/> read from an incoming
+    /// <see cref="RowBatch"/> into a managed CLR cell suitable for
+    /// long-term storage in the in-memory backing array. Decouples the
+    /// stored cell from the source batch's arena so subsequent scans can
+    /// rematerialize against fresh arenas.
+    /// </summary>
+    private static object? ConvertDataValueToCell(DataValue value, Arena arena)
+    {
+        if (value.IsNull) return null;
+
+        return value.Kind switch
+        {
+            DataKind.Boolean => value.AsBoolean(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt8 when value.IsArray => value.AsUInt8Array(arena),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
+            DataKind.Decimal => value.AsDecimal(),
+            DataKind.Date => value.AsDate(),
+            DataKind.Time => value.AsTime(),
+            DataKind.DateTime => value.AsDateTime(),
+            DataKind.Duration => value.AsDuration(),
+            DataKind.Uuid => value.AsUuid(),
+            DataKind.String => value.AsString(arena),
+            _ => throw new NotSupportedException(
+                $"InMemoryTableProvider.AppendRowsAsync does not yet support DataKind.{value.Kind}" +
+                (value.IsArray ? " (array)" : "") + ". Extend ConvertDataValueToCell with a stable extraction path."),
+        };
     }
 
     /// <summary>

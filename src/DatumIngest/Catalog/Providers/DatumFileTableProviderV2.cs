@@ -40,34 +40,58 @@ namespace DatumIngest.Catalog.Providers;
 public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTableProvider, IDisposable
 {
     private readonly TableDescriptor _descriptor;
-    private readonly DatumFileReaderV2 _reader;
     private readonly Pool _pool;
-    private readonly SidecarReadStore? _sidecar;
-    private readonly Schema _schema;
-    /// <summary>
-    /// Maps a filtered-schema index (after tombstoned columns were
-    /// removed) to its index in <see cref="_reader"/>'s
-    /// <see cref="FooterV2.Columns"/>. Length equals
-    /// <c>_schema.Columns.Count</c>. Without tombstones this is just
-    /// the identity mapping; with tombstones it skips the dropped
-    /// column slots so the footer's page directories / zone maps stay
-    /// addressable from the live schema.
-    /// </summary>
-    private readonly int[] _schemaToFooterIndex;
-    /// <summary>
-    /// Per-chapter row tombstone bitmaps, indexed by chapter index.
-    /// <c>null</c> when the file has no row-level soft-deletes
-    /// (<see cref="DatumFileFlagsV2.HasTombstones"/> clear). Element
-    /// is <c>null</c> for chapters whose offset is
-    /// <see cref="DatumFormatV2.NoTombstoneBlock"/> (no deletes in
-    /// that chapter); otherwise an 8 KiB bitmap. Loaded eagerly at
-    /// provider construction so per-page reads don't touch disk for
-    /// the bitmap.
-    /// </summary>
-    private readonly byte[]?[]? _chapterTombstoneBitmaps;
     private readonly QueryResultsManifest? _manifest;
     private readonly MappedSourceIndexSet? _mappedIndexSet;
     private readonly SourceIndex? _sourceIndex;
+
+    /// <summary>
+    /// Per-snapshot bundle of read-side state. Mutations (AddColumn /
+    /// DropColumn / AppendRows / DeleteRows) build a fresh
+    /// <see cref="Snapshot"/> against the post-mutation file and swap
+    /// it in atomically. In-flight scans hold a refcount on the
+    /// snapshot they captured so the underlying reader / sidecar stays
+    /// alive until they finish; the retired snapshot disposes when its
+    /// refcount drops to zero.
+    /// </summary>
+    /// <remarks>
+    /// Read paths (<see cref="ScanAsync"/>, <see cref="GetSchema"/>,
+    /// <see cref="GetRowCount"/>, …) acquire the current snapshot under
+    /// <see cref="_snapshotLock"/>, then release at the end. Mutations
+    /// take <see cref="_mutationLock"/> first to serialize against
+    /// other mutations, run the static file-level helper, build the
+    /// new snapshot, then take <see cref="_snapshotLock"/> for the
+    /// install.
+    /// </remarks>
+    private sealed class Snapshot
+    {
+        public required DatumFileReaderV2 Reader { get; init; }
+        public required SidecarReadStore? Sidecar { get; init; }
+        public required Schema Schema { get; init; }
+        public required int[] SchemaToFooterIndex { get; init; }
+        public required byte[]?[]? ChapterTombstoneBitmaps { get; init; }
+
+        /// <summary>
+        /// Active acquisitions outstanding against this snapshot. Set
+        /// to 1 at construction (the snapshot is "live" until retired);
+        /// readers increment / decrement around their use; mutations
+        /// decrement once on retirement. Disposed when count hits 0.
+        /// </summary>
+        public int RefCount;
+
+        /// <summary>True after a mutation has installed a successor; the snapshot is no longer the current one.</summary>
+        public bool Retired;
+
+        public void Dispose()
+        {
+            Sidecar?.Dispose();
+            Reader.Dispose();
+        }
+    }
+
+    private Snapshot _snapshot;
+    private readonly object _snapshotLock = new();
+    private readonly object _mutationLock = new();
 
     /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
@@ -82,19 +106,116 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     {
         _descriptor = descriptor;
         _pool = pool;
-        _reader = DatumFileReaderV2.Open(descriptor.FilePath);
-        _sidecar = TryOpenSidecar(descriptor.FilePath, _reader);
-        (_schema, _schemaToFooterIndex) = BuildSchema(_reader.Footer);
-        _chapterTombstoneBitmaps = _reader.LoadChapterTombstoneBitmaps();
+        _snapshot = OpenSnapshot(descriptor.FilePath);
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
     }
 
+    /// <summary>
+    /// Opens a fresh <see cref="DatumFileReaderV2"/> + sidecar for
+    /// <paramref name="path"/> and bundles the derived schema /
+    /// tombstone state into a <see cref="Snapshot"/> with refcount 1.
+    /// </summary>
+    private static Snapshot OpenSnapshot(string path)
+    {
+        DatumFileReaderV2 reader = DatumFileReaderV2.Open(path);
+        SidecarReadStore? sidecar = null;
+        try
+        {
+            sidecar = TryOpenSidecar(path, reader);
+            (Schema schema, int[] schemaToFooterIndex) = BuildSchema(reader.Footer);
+            byte[]?[]? bitmaps = reader.LoadChapterTombstoneBitmaps();
+            return new Snapshot
+            {
+                Reader = reader,
+                Sidecar = sidecar,
+                Schema = schema,
+                SchemaToFooterIndex = schemaToFooterIndex,
+                ChapterTombstoneBitmaps = bitmaps,
+                RefCount = 1,
+            };
+        }
+        catch
+        {
+            sidecar?.Dispose();
+            reader.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Captures the current snapshot and increments its refcount.
+    /// Callers must pass the returned reference back to
+    /// <see cref="ReleaseSnapshot"/> when done.
+    /// </summary>
+    private Snapshot AcquireSnapshot()
+    {
+        lock (_snapshotLock)
+        {
+            _snapshot.RefCount++;
+            return _snapshot;
+        }
+    }
+
+    /// <summary>
+    /// Decrements <paramref name="snapshot"/>'s refcount and disposes it
+    /// if it has been retired and is now unreferenced.
+    /// </summary>
+    private void ReleaseSnapshot(Snapshot snapshot)
+    {
+        lock (_snapshotLock)
+        {
+            if (--snapshot.RefCount == 0 && snapshot.Retired)
+            {
+                snapshot.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Installs <paramref name="next"/> as the current snapshot,
+    /// retiring the previous one. The previous snapshot disposes
+    /// immediately if no scans hold a refcount; otherwise the last
+    /// scan releases will dispose it. Caller must hold
+    /// <see cref="_mutationLock"/>.
+    /// </summary>
+    private void SwapSnapshot(Snapshot next)
+    {
+        lock (_snapshotLock)
+        {
+            Snapshot old = _snapshot;
+            old.Retired = true;
+            _snapshot = next;
+
+            // The retired snapshot's initial RefCount=1 represents
+            // "this is the current snapshot". Drop that ref now;
+            // remaining refs (if any) belong to in-flight scans.
+            if (--old.RefCount == 0)
+            {
+                old.Dispose();
+            }
+        }
+    }
+
     /// <inheritdoc/>
-    public IBlobSource? Sidecar => _sidecar;
+    public IBlobSource? Sidecar
+    {
+        get
+        {
+            // Reads the current snapshot's sidecar without bumping the
+            // refcount. Catalog wiring calls this once at provider-add
+            // time to register with SidecarRegistry; the registered
+            // source is later swapped via SidecarRegistry.UpdateAt
+            // when AppendRows grows the .datum-blob.
+            lock (_snapshotLock) { return _snapshot.Sidecar; }
+        }
+    }
 
     /// <inheritdoc/>
     public byte SidecarStoreId { get; set; }
+
+    /// <inheritdoc/>
+    public SidecarRegistry? SidecarRegistry { get; set; }
 
     /// <inheritdoc/>
     public string Name => _descriptor.Name;
@@ -103,10 +224,20 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public bool Seekable => true;
 
     /// <inheritdoc/>
-    public long GetRowCount() => _reader.TotalRowCount;
+    public long GetRowCount()
+    {
+        Snapshot s = AcquireSnapshot();
+        try { return s.Reader.TotalRowCount; }
+        finally { ReleaseSnapshot(s); }
+    }
 
     /// <inheritdoc/>
-    public Schema GetSchema() => _schema;
+    public Schema GetSchema()
+    {
+        Snapshot s = AcquireSnapshot();
+        try { return s.Schema; }
+        finally { ReleaseSnapshot(s); }
+    }
 
     /// <inheritdoc/>
     public QueryResultsManifest? GetManifest() => _manifest;
@@ -121,105 +252,113 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         Arena? targetArena,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (_reader.Footer.Columns.Count == 0)
+        Snapshot s = AcquireSnapshot();
+        try
         {
-            yield break;
-        }
-
-        // Resolve the column projection. Maps lookup-index → schema-index
-        // so the scan only opens decoders for projected columns.
-        ColumnLookup columnLookup = ResolveProjection(_schema, requiredColumns);
-        int projectedCount = columnLookup.Count;
-        if (projectedCount == 0)
-        {
-            yield break;
-        }
-
-        // All columns share the same page count and per-page row count
-        // because the writer flushes every encoder at the same row cadence.
-        // Use _schemaToFooterIndex[0] (the first live column) as the probe —
-        // tombstoned columns at index 0 are skipped from the live schema.
-        int pageCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages.Count;
-
-        // schemaIndices[i] = footer column index for the i-th projected
-        // column. The columnLookup gives us the index into the live
-        // (filtered) schema; we translate via _schemaToFooterIndex so all
-        // downstream Footer.Columns[..] accesses land on the right block.
-        int[] schemaIndices = new int[projectedCount];
-        for (int i = 0; i < projectedCount; i++)
-        {
-            int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
-            schemaIndices[i] = _schemaToFooterIndex[filteredIndex];
-        }
-
-        // Build a filter-column → schema-index lookup once. Skip the
-        // pruning path entirely when the filter references no columns we
-        // have stats for.
-        Dictionary<string, int>? filterSchemaIndex = filterHint is null
-            ? null
-            : BuildFilterColumnIndex(filterHint);
-
-        // Stats arena for boxed min/max values during partition checks.
-        // Reused across all skip evaluations; values are tiny (numerics,
-        // short strings) so growth is bounded.
-        Arena statsArena = new();
-
-        IPageDecoderV2[] decoders = new IPageDecoderV2[projectedCount];
-
-        foreach (int pageIndex in EnumerateScanablePages(pageCount, filterHint, filterSchemaIndex, statsArena))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            int rowCount = _reader.Footer.Columns[schemaIndices[0]].Pages[pageIndex].RowCount;
-            if (rowCount == 0)
+            if (s.Reader.Footer.Columns.Count == 0)
             {
-                continue;
+                yield break;
             }
 
-            // One batch per page. batch.Arena is the eager store the
-            // decoders use to materialize Struct field arrays — values
-            // stored against the batch's own arena resolve cleanly through
-            // standard accessors downstream.
-            RowBatch batch = _pool.RentRowBatch(columnLookup, rowCount, targetArena);
+            // Resolve the column projection. Maps lookup-index → schema-index
+            // so the scan only opens decoders for projected columns.
+            ColumnLookup columnLookup = ResolveProjection(s.Schema, requiredColumns);
+            int projectedCount = columnLookup.Count;
+            if (projectedCount == 0)
+            {
+                yield break;
+            }
 
+            // All columns share the same page count and per-page row count
+            // because the writer flushes every encoder at the same row cadence.
+            // Use SchemaToFooterIndex[0] (the first live column) as the probe —
+            // tombstoned columns at index 0 are skipped from the live schema.
+            int pageCount = s.Reader.Footer.Columns[s.SchemaToFooterIndex[0]].Pages.Count;
+
+            // schemaIndices[i] = footer column index for the i-th projected
+            // column. The columnLookup gives us the index into the live
+            // (filtered) schema; we translate via SchemaToFooterIndex so all
+            // downstream Footer.Columns[..] accesses land on the right block.
+            int[] schemaIndices = new int[projectedCount];
             for (int i = 0; i < projectedCount; i++)
             {
-                decoders[i] = _reader.OpenPageDecoder(
-                    columnIndex: schemaIndices[i],
-                    pageIndex: pageIndex,
-                    sidecarStoreId: SidecarStoreId,
-                    sidecarSource: _sidecar,
-                    eagerStore: batch.Arena);
+                int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
+                schemaIndices[i] = s.SchemaToFooterIndex[filteredIndex];
             }
 
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            // Build a filter-column → schema-index lookup once. Skip the
+            // pruning path entirely when the filter references no columns we
+            // have stats for.
+            Dictionary<string, int>? filterSchemaIndex = filterHint is null
+                ? null
+                : BuildFilterColumnIndex(s.Schema, filterHint);
+
+            // Stats arena for boxed min/max values during partition checks.
+            // Reused across all skip evaluations; values are tiny (numerics,
+            // short strings) so growth is bounded.
+            Arena statsArena = new();
+
+            IPageDecoderV2[] decoders = new IPageDecoderV2[projectedCount];
+
+            foreach (int pageIndex in EnumerateScanablePages(s, pageCount, filterHint, filterSchemaIndex, statsArena))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Skip soft-deleted rows. Fast-paths when the file has
-                // no tombstones (IsRowDeleted returns false without
-                // touching the bitmap array).
-                if (IsRowDeleted(pageIndex, rowIndex)) continue;
+                int rowCount = s.Reader.Footer.Columns[schemaIndices[0]].Pages[pageIndex].RowCount;
+                if (rowCount == 0)
+                {
+                    continue;
+                }
 
-                DataValue[] values = _pool.RentDataValues(projectedCount);
+                // One batch per page. batch.Arena is the eager store the
+                // decoders use to materialize Struct field arrays — values
+                // stored against the batch's own arena resolve cleanly through
+                // standard accessors downstream.
+                RowBatch batch = _pool.RentRowBatch(columnLookup, rowCount, targetArena);
+
                 for (int i = 0; i < projectedCount; i++)
                 {
-                    values[i] = decoders[i].ReadValue(rowIndex);
+                    decoders[i] = s.Reader.OpenPageDecoder(
+                        columnIndex: schemaIndices[i],
+                        pageIndex: pageIndex,
+                        sidecarStoreId: SidecarStoreId,
+                        sidecarSource: s.Sidecar,
+                        eagerStore: batch.Arena);
                 }
-                batch.Add(values);
-            }
 
-            // Skip empty batches — a page where every row was tombstoned
-            // produces a zero-length batch that consumers might interpret
-            // as end-of-stream. Yield only batches with at least one row.
-            if (batch.Count > 0)
-            {
-                yield return batch;
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Skip soft-deleted rows. Fast-paths when the file has
+                    // no tombstones (IsRowDeleted returns false without
+                    // touching the bitmap array).
+                    if (IsRowDeleted(s, pageIndex, rowIndex)) continue;
+
+                    DataValue[] values = _pool.RentDataValues(projectedCount);
+                    for (int i = 0; i < projectedCount; i++)
+                    {
+                        values[i] = decoders[i].ReadValue(rowIndex);
+                    }
+                    batch.Add(values);
+                }
+
+                // Skip empty batches — a page where every row was tombstoned
+                // produces a zero-length batch that consumers might interpret
+                // as end-of-stream. Yield only batches with at least one row.
+                if (batch.Count > 0)
+                {
+                    yield return batch;
+                }
+                else
+                {
+                    _pool.ReturnRowBatch(batch);
+                }
             }
-            else
-            {
-                _pool.ReturnRowBatch(batch);
-            }
+        }
+        finally
+        {
+            ReleaseSnapshot(s);
         }
     }
 
@@ -231,7 +370,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// match short-circuits all its chapters; same for chapters and
     /// their pages.
     /// </summary>
-    private IEnumerable<int> EnumerateScanablePages(
+    private static IEnumerable<int> EnumerateScanablePages(
+        Snapshot s,
         int pageCount,
         Expression? filterHint,
         Dictionary<string, int>? filterSchemaIndex,
@@ -248,19 +388,19 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // Probe the first live column (skipping tombstoned slots) for
         // page-count / chapter-count / volume-count metadata. All live
         // columns share these counts.
-        int probeFooterIdx = _schemaToFooterIndex[0];
-        int chapterCount = _reader.Footer.Columns[probeFooterIdx].ChapterZoneMaps.Count;
+        int probeFooterIdx = s.SchemaToFooterIndex[0];
+        int chapterCount = s.Reader.Footer.Columns[probeFooterIdx].ChapterZoneMaps.Count;
 
-        bool hasVolumes = (_reader.Header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0
-            && _reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps is { Count: > 0 };
+        bool hasVolumes = (s.Reader.Header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0
+            && s.Reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps is { Count: > 0 };
 
         // When the file emits volume zone maps walk volumes; otherwise
         // the volume tier is collapsed and we walk chapters directly.
-        int volumeIterCount = hasVolumes ? _reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps!.Count : 1;
+        int volumeIterCount = hasVolumes ? s.Reader.Footer.Columns[probeFooterIdx].VolumeZoneMaps!.Count : 1;
 
         for (int v = 0; v < volumeIterCount; v++)
         {
-            if (hasVolumes && CanSkipVolume(v, filterHint, filterSchemaIndex, statsArena))
+            if (hasVolumes && CanSkipVolume(s, v, filterHint, filterSchemaIndex, statsArena))
             {
                 continue;
             }
@@ -272,7 +412,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             for (int c = chapterStart; c < chapterEnd; c++)
             {
-                if (CanSkipChapter(c, filterHint, filterSchemaIndex, statsArena))
+                if (CanSkipChapter(s, c, filterHint, filterSchemaIndex, statsArena))
                 {
                     continue;
                 }
@@ -282,7 +422,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
                 for (int p = pageStart; p < pageEnd; p++)
                 {
-                    if (CanSkipPage(p, filterHint, filterSchemaIndex, statsArena))
+                    if (CanSkipPage(s, p, filterHint, filterSchemaIndex, statsArena))
                     {
                         continue;
                     }
@@ -292,46 +432,46 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         }
     }
 
-    private bool CanSkipVolume(int volumeIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    private static bool CanSkipVolume(Snapshot s, int volumeIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
     {
         // Volume row count = sum of chapter row counts in this volume.
         // Chapter row count = sum of page row counts in that chapter.
         // We only need a bound; passing pageCount * pageSize is fine as a
         // ceiling for the predicate evaluator's null-vs-row arithmetic.
-        long rowCount = ComputeVolumeRowCount(volumeIndex);
+        long rowCount = ComputeVolumeRowCount(s, volumeIndex);
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            int footerIdx = _schemaToFooterIndex[schemaIdx];
-            DatumZoneMap zoneMap = _reader.Footer.Columns[footerIdx].VolumeZoneMaps![volumeIndex];
+            int footerIdx = s.SchemaToFooterIndex[schemaIdx];
+            DatumZoneMap zoneMap = s.Reader.Footer.Columns[footerIdx].VolumeZoneMaps![volumeIndex];
             stats[name] = MakeRange(zoneMap, rowCount, arena);
         }
         using ColumnStatisticsRangeLookup lookup = new(stats);
         return StatisticsPredicateEvaluator.CanSkipPartition(filter, lookup, arena);
     }
 
-    private bool CanSkipChapter(int chapterIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    private static bool CanSkipChapter(Snapshot s, int chapterIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
     {
-        long rowCount = ComputeChapterRowCount(chapterIndex);
+        long rowCount = ComputeChapterRowCount(s, chapterIndex);
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            int footerIdx = _schemaToFooterIndex[schemaIdx];
-            DatumZoneMap zoneMap = _reader.Footer.Columns[footerIdx].ChapterZoneMaps[chapterIndex];
+            int footerIdx = s.SchemaToFooterIndex[schemaIdx];
+            DatumZoneMap zoneMap = s.Reader.Footer.Columns[footerIdx].ChapterZoneMaps[chapterIndex];
             stats[name] = MakeRange(zoneMap, rowCount, arena);
         }
         using ColumnStatisticsRangeLookup lookup = new(stats);
         return StatisticsPredicateEvaluator.CanSkipPartition(filter, lookup, arena);
     }
 
-    private bool CanSkipPage(int pageIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
+    private static bool CanSkipPage(Snapshot s, int pageIndex, Expression filter, Dictionary<string, int> filterSchemaIndex, Arena arena)
     {
-        int rowCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages[pageIndex].RowCount;
+        int rowCount = s.Reader.Footer.Columns[s.SchemaToFooterIndex[0]].Pages[pageIndex].RowCount;
         Dictionary<string, ColumnStatisticsRange> stats = new(filterSchemaIndex.Count, StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int schemaIdx) in filterSchemaIndex)
         {
-            int footerIdx = _schemaToFooterIndex[schemaIdx];
-            DatumZoneMap? zoneMap = _reader.Footer.Columns[footerIdx].Pages[pageIndex].ZoneMap;
+            int footerIdx = s.SchemaToFooterIndex[schemaIdx];
+            DatumZoneMap? zoneMap = s.Reader.Footer.Columns[footerIdx].Pages[pageIndex].ZoneMap;
             // Page-level zone maps are null for non-comparable kinds —
             // skip those columns rather than synthesizing fake stats.
             if (zoneMap is null) continue;
@@ -354,30 +494,30 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             zoneMap.NullCount,
             rowCount);
 
-    private long ComputeChapterRowCount(int chapterIndex)
+    private static long ComputeChapterRowCount(Snapshot s, int chapterIndex)
     {
         // Use the first live (non-tombstoned) column as the probe — its
         // page count and per-page row counts mirror every other live
         // column's by construction (the writer flushes all encoders at
         // the same row cadence). Tombstoned columns are skipped from
-        // _schemaToFooterIndex so we never address one here.
+        // SchemaToFooterIndex so we never address one here.
         int pagesPerChapter = DatumFormatV2.PagesPerChapter;
         int pageStart = chapterIndex * pagesPerChapter;
-        var pages = _reader.Footer.Columns[_schemaToFooterIndex[0]].Pages;
+        var pages = s.Reader.Footer.Columns[s.SchemaToFooterIndex[0]].Pages;
         int pageEnd = Math.Min(pageStart + pagesPerChapter, pages.Count);
         long total = 0;
         for (int p = pageStart; p < pageEnd; p++) total += pages[p].RowCount;
         return total;
     }
 
-    private long ComputeVolumeRowCount(int volumeIndex)
+    private static long ComputeVolumeRowCount(Snapshot s, int volumeIndex)
     {
         int chaptersPerVolume = DatumFormatV2.ChaptersPerVolume;
         int chapterStart = volumeIndex * chaptersPerVolume;
-        int chapterCount = _reader.Footer.Columns[_schemaToFooterIndex[0]].ChapterZoneMaps.Count;
+        int chapterCount = s.Reader.Footer.Columns[s.SchemaToFooterIndex[0]].ChapterZoneMaps.Count;
         int chapterEnd = Math.Min(chapterStart + chaptersPerVolume, chapterCount);
         long total = 0;
-        for (int c = chapterStart; c < chapterEnd; c++) total += ComputeChapterRowCount(c);
+        for (int c = chapterStart; c < chapterEnd; c++) total += ComputeChapterRowCount(s, c);
         return total;
     }
 
@@ -387,15 +527,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// index. Columns not present in the schema are silently dropped
     /// (the predicate evaluator falls back to "do not skip" for those).
     /// </summary>
-    private Dictionary<string, int>? BuildFilterColumnIndex(Expression filter)
+    private static Dictionary<string, int>? BuildFilterColumnIndex(Schema schema, Expression filter)
     {
         Dictionary<string, int> result = new(StringComparer.OrdinalIgnoreCase);
         foreach ((string? _, string columnName) in ColumnReferenceCollector.Collect(filter))
         {
             if (result.ContainsKey(columnName)) continue;
-            for (int i = 0; i < _schema.Columns.Count; i++)
+            for (int i = 0; i < schema.Columns.Count; i++)
             {
-                if (string.Equals(_schema.Columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(schema.Columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
                 {
                     result[columnName] = i;
                     break;
@@ -417,23 +557,28 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// </remarks>
     public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
     {
-        ColumnLookup columnLookup = ResolveProjection(_schema, requiredColumns);
-        int projectedCount = columnLookup.Count;
-        // schemaIndices[i] holds the FOOTER column index, translated
-        // from the live (filtered) schema position via
-        // _schemaToFooterIndex so tombstoned columns are skipped.
-        int[] schemaIndices = new int[projectedCount];
-        for (int i = 0; i < projectedCount; i++)
-        {
-            int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
-            schemaIndices[i] = _schemaToFooterIndex[filteredIndex];
-        }
-
+        // Open the session reader first, then derive schema /
+        // schemaToFooterIndex from THAT reader's footer (rather than from
+        // the provider's snapshot). This sidesteps any race window
+        // between a concurrent mutation finishing the file write and the
+        // provider swapping its snapshot — the session always sees a
+        // self-consistent view of whatever the file currently is.
         DatumFileReaderV2 sessionReader = DatumFileReaderV2.Open(_descriptor.FilePath);
         SidecarReadStore? sessionSidecar = null;
         try
         {
             sessionSidecar = TryOpenSidecar(_descriptor.FilePath, sessionReader);
+            (Schema sessionSchema, int[] sessionSchemaToFooterIndex) = BuildSchema(sessionReader.Footer);
+
+            ColumnLookup columnLookup = ResolveProjection(sessionSchema, requiredColumns);
+            int projectedCount = columnLookup.Count;
+            int[] schemaIndices = new int[projectedCount];
+            for (int i = 0; i < projectedCount; i++)
+            {
+                int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
+                schemaIndices[i] = sessionSchemaToFooterIndex[filteredIndex];
+            }
+
             return new DatumFileSeekSessionV2(
                 _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId, targetArena);
         }
@@ -449,8 +594,24 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public void Dispose()
     {
         _mappedIndexSet?.Dispose();
-        _sidecar?.Dispose();
-        _reader.Dispose();
+
+        // Dispose whichever snapshot is current; in-flight scans hold
+        // their own refs so they remain safe until they finish.
+        // (Disposing the provider while scans are mid-iteration is a
+        // caller-side bug; this is best-effort cleanup.)
+        Snapshot toDispose;
+        lock (_snapshotLock)
+        {
+            toDispose = _snapshot;
+            _snapshot.Retired = true;
+            if (--_snapshot.RefCount > 0)
+            {
+                // Live readers still hold the snapshot; let the last
+                // release dispose it.
+                return;
+            }
+        }
+        toDispose.Dispose();
     }
 
     // ──────────────────── Helpers ────────────────────
@@ -459,20 +620,20 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// Returns <see langword="true"/> when the row at
     /// <c>(pageIndex, rowInPage)</c> has been soft-deleted — its bit
     /// is set in the chapter tombstone bitmap. Fast-paths when the
-    /// file has no tombstones at all (<c>_chapterTombstoneBitmaps</c>
+    /// file has no tombstones at all (<c>s.ChapterTombstoneBitmaps</c>
     /// is <see langword="null"/>) or no tombstones in the row's
-    /// chapter (<c>_chapterTombstoneBitmaps[c]</c> is
+    /// chapter (<c>s.ChapterTombstoneBitmaps[c]</c> is
     /// <see langword="null"/>).
     /// </summary>
-    private bool IsRowDeleted(int pageIndex, int rowInPage)
+    private static bool IsRowDeleted(Snapshot s, int pageIndex, int rowInPage)
     {
-        if (_chapterTombstoneBitmaps is null) return false;
+        if (s.ChapterTombstoneBitmaps is null) return false;
 
-        int pageSize = _reader.Header.PageSize;
+        int pageSize = s.Reader.Header.PageSize;
         int chapterIndex = pageIndex / DatumFormatV2.PagesPerChapter;
-        if (chapterIndex >= _chapterTombstoneBitmaps.Length) return false;
+        if (chapterIndex >= s.ChapterTombstoneBitmaps.Length) return false;
 
-        byte[]? bitmap = _chapterTombstoneBitmaps[chapterIndex];
+        byte[]? bitmap = s.ChapterTombstoneBitmaps[chapterIndex];
         if (bitmap is null) return false;
 
         int pageOffsetInChapter = pageIndex % DatumFormatV2.PagesPerChapter;
@@ -676,5 +837,136 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         }
 
         return null;
+    }
+
+    // ──────────────────── Mutation (catalog-level ALTER TABLE) ────────────────────
+
+    /// <inheritdoc/>
+    public bool CanAlterColumns => true;
+
+    /// <inheritdoc/>
+    public bool CanAppendRows => true;
+
+    /// <inheritdoc/>
+    public bool CanDeleteRows => true;
+
+    /// <inheritdoc/>
+    public void AddColumn(ColumnInfo column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        if (!column.Nullable)
+        {
+            throw new ArgumentException(
+                $"AddColumn requires column '{column.Name}' to be nullable: existing rows are " +
+                "back-filled with nulls and a non-nullable column would violate the schema.",
+                nameof(column));
+        }
+
+        ColumnDescriptorV2 descriptor = new(
+            Name: column.Name,
+            Kind: column.Kind,
+            Encoder: ColumnDescriptorV2.EncoderFor(column.Kind, column.IsArray),
+            IsNullable: column.Nullable,
+            IsArray: column.IsArray);
+
+        lock (_mutationLock)
+        {
+            DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+    }
+
+    /// <inheritdoc/>
+    public void DropColumn(string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(columnName);
+        lock (_mutationLock)
+        {
+            DatumFileWriterV2.DropColumn(_descriptor.FilePath, columnName);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batches);
+
+        await using IAsyncEnumerator<RowBatch> enumerator = batches.GetAsyncEnumerator(cancellationToken);
+
+        bool any = false;
+        DatumFileWriterV2? writer = null;
+        try
+        {
+            while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RowBatch batch = enumerator.Current;
+                if (batch.Count == 0) continue;
+
+                writer ??= OpenAppendWriter();
+                writer.WriteRowBatch(batch);
+                any = true;
+            }
+
+            if (writer is not null)
+            {
+                writer.FinalizeWriter();
+            }
+        }
+        finally
+        {
+            writer?.Dispose();
+        }
+
+        if (any)
+        {
+            // Reopen the sidecar after the append: writer-side spills
+            // grew the .datum-blob past the read mmap's view, and the
+            // registry needs to see the larger source.
+            lock (_mutationLock)
+            {
+                RebuildSnapshotAfterMutation(sidecarMayHaveGrown: true);
+            }
+        }
+    }
+
+    /// <inheritdoc/>
+    public void DeleteRows(IReadOnlyList<long> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        if (rowIndices.Count == 0) return;
+
+        lock (_mutationLock)
+        {
+            DatumFileWriterV2.SoftDeleteRows(_descriptor.FilePath, rowIndices);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+    }
+
+    private DatumFileWriterV2 OpenAppendWriter()
+    {
+        string sidecarPath = Path.ChangeExtension(_descriptor.FilePath, SidecarConstants.FileExtension);
+        return DatumFileWriterV2.OpenForAppend(_descriptor.FilePath, sidecarPath);
+    }
+
+    /// <summary>
+    /// Builds a new <see cref="Snapshot"/> from the on-disk file post-
+    /// mutation and atomically swaps it in. Caller must hold
+    /// <see cref="_mutationLock"/>. When
+    /// <paramref name="sidecarMayHaveGrown"/> is <see langword="true"/>
+    /// (i.e. an append just ran), the catalog's
+    /// <see cref="SidecarRegistry"/> is updated with the new
+    /// <see cref="IBlobSource"/> so existing storeId-stamped DataValues
+    /// in flight resolve through bytes the new mmap can see.
+    /// </summary>
+    private void RebuildSnapshotAfterMutation(bool sidecarMayHaveGrown)
+    {
+        Snapshot next = OpenSnapshot(_descriptor.FilePath);
+        if (sidecarMayHaveGrown && next.Sidecar is not null && SidecarRegistry is not null)
+        {
+            SidecarRegistry.UpdateAt(SidecarStoreId, next.Sidecar);
+        }
+        SwapSnapshot(next);
     }
 }

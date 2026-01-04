@@ -93,4 +93,83 @@ public interface ITableProvider : IDisposable
     /// </param>
     /// <returns>A seek session bound to the required columns and target arena.</returns>
     ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null);
+
+    // ──────────────────── Mutation (catalog-level ALTER TABLE) ────────────────────
+
+    /// <summary>
+    /// True when this provider supports schema mutations via
+    /// <see cref="AddColumn"/> and <see cref="DropColumn"/>. Default
+    /// <see langword="false"/>; mutable providers (e.g. .datum file,
+    /// in-memory) override to <see langword="true"/>.
+    /// </summary>
+    bool CanAlterColumns => false;
+
+    /// <summary>
+    /// True when this provider supports row appends via
+    /// <see cref="AppendRowsAsync"/>. Default <see langword="false"/>.
+    /// </summary>
+    bool CanAppendRows => false;
+
+    /// <summary>
+    /// True when this provider supports row deletes via
+    /// <see cref="DeleteRows"/>. Default <see langword="false"/>.
+    /// </summary>
+    bool CanDeleteRows => false;
+
+    /// <summary>
+    /// Adds a new column to the table. The new column is populated with
+    /// nulls for every existing row and so must be nullable.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/> —
+    /// override on providers that opt in via <see cref="CanAlterColumns"/>.
+    /// Schema changes are not visible to scans / seek-sessions that were
+    /// already opened against this provider; close and reopen to observe
+    /// the new column.
+    /// </remarks>
+    void AddColumn(Model.ColumnInfo column) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support AddColumn (CanAlterColumns is false).");
+
+    /// <summary>
+    /// Soft-drops a column from the table by name. The column block is
+    /// retained in the underlying store for compaction-time reclamation,
+    /// but is hidden from <see cref="GetSchema"/> and from subsequent
+    /// scans.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// </remarks>
+    void DropColumn(string columnName) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support DropColumn (CanAlterColumns is false).");
+
+    /// <summary>
+    /// Appends every <see cref="RowBatch"/> in <paramref name="batches"/>
+    /// to the table. Batches must match the table's schema.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// On the .datum provider, the call commits a single new footer at
+    /// the end of the stream and tail-flips it atomically — partial
+    /// progress is invisible to concurrent readers.
+    /// </remarks>
+    Task AppendRowsAsync(IAsyncEnumerable<RowBatch> batches, CancellationToken cancellationToken) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support AppendRowsAsync (CanAppendRows is false).");
+
+    /// <summary>
+    /// Soft-deletes the rows at the given linear (zero-based) row
+    /// indices. Subsequent scans skip these rows; storage reclamation
+    /// happens at compaction.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Indices are linear over the live row sequence (post-tombstone
+    /// from previous deletes) — the same numbering a fresh
+    /// <c>SELECT * FROM table</c> would yield.
+    /// </remarks>
+    void DeleteRows(IReadOnlyList<long> rowIndices) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support DeleteRows (CanDeleteRows is false).");
 }

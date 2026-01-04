@@ -69,4 +69,34 @@ public sealed class SidecarRegistry
     /// or <see langword="null"/> if no source is registered at that slot.
     /// </summary>
     public IBlobSource? Resolve(byte storeId) => _stores[storeId];
+
+    /// <summary>
+    /// Replaces the source registered at <paramref name="storeId"/> with
+    /// <paramref name="source"/>. Used after an append-style mutation
+    /// extends the underlying <c>.datum-blob</c>: the provider opens a
+    /// fresh <see cref="IBlobSource"/> over the now-larger file and
+    /// swaps it in here, so existing storeId-stamped DataValues continue
+    /// to resolve through this registry against bytes the new source can
+    /// see.
+    /// </summary>
+    /// <remarks>
+    /// Safe for concurrent <see cref="Resolve"/>: the new source's mmap
+    /// is a strict superset of the old one's, so any offset that was
+    /// valid against the old source remains valid against the new. The
+    /// caller owns disposing the previously-registered source.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when no source was previously registered at <paramref name="storeId"/>
+    /// (the slot was never assigned via <see cref="Register"/>).
+    /// </exception>
+    public void UpdateAt(byte storeId, IBlobSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (_stores[storeId] is null)
+        {
+            throw new InvalidOperationException(
+                $"No sidecar source is registered at storeId {storeId}; UpdateAt requires a prior Register call.");
+        }
+        _stores[storeId] = source;
+    }
 }
