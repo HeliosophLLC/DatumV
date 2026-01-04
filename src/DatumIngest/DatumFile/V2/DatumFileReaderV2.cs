@@ -18,14 +18,26 @@ public sealed class DatumFileReaderV2 : IDisposable
 {
     private readonly Stream _stream;
     private readonly bool _ownsStream;
+    /// <summary>
+    /// Pack readers for external <c>.datum-pack</c> files referenced by
+    /// the footer prologue's file table, indexed by
+    /// <see cref="FileTableEntryV4.FileId"/>. <see langword="null"/>
+    /// when the primary <c>.datum</c> doesn't reference any external
+    /// packs (<see cref="DatumFileFlagsV2.HasExternalPages"/> clear) —
+    /// the common case in PR7 where compaction hasn't shipped yet.
+    /// </summary>
+    private readonly Dictionary<ushort, DatumPackReader>? _packReaders;
     private bool _disposed;
 
-    private DatumFileReaderV2(Stream stream, bool ownsStream, HeaderV2 header, FooterV2 footer)
+    private DatumFileReaderV2(
+        Stream stream, bool ownsStream, HeaderV2 header, FooterV2 footer,
+        Dictionary<ushort, DatumPackReader>? packReaders)
     {
         _stream = stream;
         _ownsStream = ownsStream;
         Header = header;
         Footer = footer;
+        _packReaders = packReaders;
     }
 
     /// <summary>The parsed file header (flags, column count, page size, totals).</summary>
@@ -69,7 +81,12 @@ public sealed class DatumFileReaderV2 : IDisposable
             bufferSize: 65_536, FileOptions.RandomAccess);
         try
         {
-            return Open(stream, ownsStream: true);
+            // The base directory for resolving file-table relative
+            // paths is the primary .datum file's directory. We pass
+            // it through so external .datum-pack files can be opened
+            // alongside the primary.
+            string? baseDirectory = Path.GetDirectoryName(filePath);
+            return OpenInternal(stream, ownsStream: true, baseDirectory);
         }
         catch
         {
@@ -81,9 +98,16 @@ public sealed class DatumFileReaderV2 : IDisposable
     /// <summary>
     /// Opens a v2 file over an existing seekable stream. Pass
     /// <paramref name="ownsStream"/> = <see langword="true"/> to have the
-    /// reader dispose the stream on <see cref="Dispose"/>.
+    /// reader dispose the stream on <see cref="Dispose"/>. Throws when
+    /// the file declares <see cref="DatumFileFlagsV2.HasExternalPages"/>
+    /// — the stream-based Open has no base directory to resolve
+    /// external <c>.datum-pack</c> paths; use the path-based
+    /// <see cref="Open(string)"/> for cross-file scenarios.
     /// </summary>
     public static DatumFileReaderV2 Open(Stream stream, bool ownsStream)
+        => OpenInternal(stream, ownsStream, baseDirectory: null);
+
+    private static DatumFileReaderV2 OpenInternal(Stream stream, bool ownsStream, string? baseDirectory)
     {
         if (!stream.CanSeek)
         {
@@ -147,7 +171,69 @@ public sealed class DatumFileReaderV2 : IDisposable
             // column-add commits which haven't shipped yet.
         }
 
-        return new DatumFileReaderV2(stream, ownsStream, header, footer);
+        // Open external packs referenced by the file table. Reject
+        // HasExternalPages without a base directory (stream-based Open
+        // can't resolve relative paths).
+        Dictionary<ushort, DatumPackReader>? packReaders = null;
+        bool hasExternalPages = (header.Flags & DatumFileFlagsV2.HasExternalPages) != 0;
+        if (hasExternalPages)
+        {
+            if (baseDirectory is null)
+            {
+                throw new InvalidDataException(
+                    "File declares HasExternalPages but the reader was opened from a stream " +
+                    "with no base directory. Use DatumFileReaderV2.Open(string) for files " +
+                    "with cross-file page references.");
+            }
+            packReaders = OpenPackReaders(footer.Prologue.FileTableEntries, baseDirectory);
+        }
+
+        return new DatumFileReaderV2(stream, ownsStream, header, footer, packReaders);
+    }
+
+    /// <summary>
+    /// Opens one <see cref="DatumPackReader"/> per file-table entry
+    /// and returns a dictionary keyed by file id for fast routing in
+    /// <see cref="ReadPageBytes"/>. Each pack's fingerprint is
+    /// validated against the file-table entry's recorded value;
+    /// mismatch raises <see cref="InvalidDataException"/>.
+    /// </summary>
+    /// <remarks>
+    /// Relative paths are resolved against
+    /// <paramref name="baseDirectory"/>; absolute paths are used
+    /// as-is. The reader takes ownership of the opened pack readers
+    /// and disposes them in <see cref="Dispose"/>.
+    /// </remarks>
+    private static Dictionary<ushort, DatumPackReader> OpenPackReaders(
+        IReadOnlyList<FileTableEntryV4> fileTable, string baseDirectory)
+    {
+        Dictionary<ushort, DatumPackReader> result = new(fileTable.Count);
+        try
+        {
+            foreach (FileTableEntryV4 entry in fileTable)
+            {
+                if (entry.FileId == DatumFormatV2.LocalFileId)
+                {
+                    throw new InvalidDataException(
+                        $"File-table entry has reserved FileId 0; that id is reserved for the " +
+                        $"primary .datum file and must not appear in the table.");
+                }
+                string resolvedPath = Path.IsPathRooted(entry.RelativePath)
+                    ? entry.RelativePath
+                    : Path.Combine(baseDirectory, entry.RelativePath);
+                result[entry.FileId] = new DatumPackReader(resolvedPath, entry.Fingerprint);
+            }
+            return result;
+        }
+        catch
+        {
+            // On any failure, dispose the packs we managed to open.
+            foreach (DatumPackReader pack in result.Values)
+            {
+                pack.Dispose();
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -202,8 +288,12 @@ public sealed class DatumFileReaderV2 : IDisposable
 
     /// <summary>
     /// Reads the bytes for the page at <c>(columnIndex, pageIndex)</c>
-    /// into a fresh byte array. The returned memory is independent of the
-    /// reader and remains valid after the reader is disposed.
+    /// into a fresh byte array. Dispatches by
+    /// <see cref="PageDescriptorV2.FileId"/>: <c>0</c> reads from the
+    /// primary <c>.datum</c>, non-zero reads from the corresponding
+    /// external <c>.datum-pack</c> via the file-table entry. The
+    /// returned memory is independent of the reader and remains
+    /// valid after the reader is disposed.
     /// </summary>
     public ReadOnlyMemory<byte> ReadPageBytes(int columnIndex, int pageIndex)
     {
@@ -217,8 +307,24 @@ public sealed class DatumFileReaderV2 : IDisposable
 
         PageDescriptorV2 descriptor = column.Pages[pageIndex];
         byte[] buffer = new byte[descriptor.PageByteLength];
-        _stream.Position = descriptor.PageOffset;
-        _stream.ReadExactly(buffer);
+
+        if (descriptor.FileId == DatumFormatV2.LocalFileId)
+        {
+            _stream.Position = descriptor.PageOffset;
+            _stream.ReadExactly(buffer);
+        }
+        else
+        {
+            if (_packReaders is null || !_packReaders.TryGetValue(descriptor.FileId, out DatumPackReader? pack))
+            {
+                throw new InvalidDataException(
+                    $"Page descriptor for column '{column.Descriptor.Name}' page {pageIndex} " +
+                    $"references FileId {descriptor.FileId}, but no matching pack reader was " +
+                    "opened. The footer's file table is missing an entry for this id, or the " +
+                    "reader was opened without a base directory.");
+            }
+            pack.ReadBytesAt(descriptor.PageOffset, buffer);
+        }
         return buffer;
     }
 
@@ -242,7 +348,10 @@ public sealed class DatumFileReaderV2 : IDisposable
             column.Descriptor, bytes, descriptor.RowCount, sidecarStoreId, sidecarSource, eagerStore);
     }
 
-    /// <summary>Closes the underlying stream when the reader owns it.</summary>
+    /// <summary>
+    /// Closes the underlying stream (when the reader owns it) and
+    /// every pack reader opened for the file table.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -250,6 +359,13 @@ public sealed class DatumFileReaderV2 : IDisposable
         if (_ownsStream)
         {
             _stream.Dispose();
+        }
+        if (_packReaders is not null)
+        {
+            foreach (DatumPackReader pack in _packReaders.Values)
+            {
+                pack.Dispose();
+            }
         }
     }
 }
