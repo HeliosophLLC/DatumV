@@ -172,4 +172,30 @@ public sealed class Florence2ModelTests : ServiceTestBase
         IModel model = lease.Model;
         Assert.IsType<Florence2Model>(model);
     }
+
+    /// <summary>
+    /// OCR-with-region uses the same fp16 files as the caption variants,
+    /// so registration + resolution must succeed without any extra
+    /// downloads. Locks in the wiring before screenshot-comparison work.
+    /// </summary>
+    [Fact]
+    public void Catalog_RegisterFlorence2OcrWithRegion_ResolvesToFlorence2Model()
+    {
+        if (!ModelAvailable) return;
+
+        ModelCatalog catalog = new(modelDirectory: ModelCatalog.DefaultModelDirectory);
+        BuiltinModels.RegisterFlorence2OcrWithRegion(catalog);
+
+        ModelCatalogEntry? entry = catalog.TryGetEntry("florence2_ocr_region");
+        Assert.NotNull(entry);
+        Assert.Equal("onnx", entry!.Backend);
+        Assert.NotNull(entry.Files);
+        Assert.Equal(11, entry.Files!.Count);
+        Assert.Single(entry.InputKinds);
+        Assert.Equal(DataKind.Image, entry.InputKinds[0]);
+        Assert.Equal(DataKind.String, entry.OutputKind);
+
+        using ModelLease lease = catalog.ResolveLeaseSynchronously("florence2_ocr_region");
+        Assert.IsType<Florence2Model>(lease.Model);
+    }
 }

@@ -801,12 +801,12 @@ one folder and one tokenizer:
   per-image (~3-5s vs SD's ~1-2s). Use SDXL-Turbo for hero outputs;
   SD-Turbo for fast iteration.
 
-### Florence-2 captioners (`florence2_*`)
+### Florence-2 vision tasks (`florence2_*`)
 
 Microsoft's prompt-driven vision-language model. One model handles
-multiple caption styles plus future detection / OCR / segmentation
-tasks. Registered as four separate catalog entries that share the
-same backbone:
+multiple caption styles, OCR with region grounding, and additional
+detection / segmentation tasks via task tokens. Registered as five
+separate catalog entries that share the same backbone:
 
 | Catalog name | Task prompt | Output style |
 |---|---|---|
@@ -814,6 +814,22 @@ same backbone:
 | `florence2_detailed_caption` | `<DETAILED_CAPTION>` | Full sentence with context |
 | `florence2_more_detailed_caption` | `<MORE_DETAILED_CAPTION>` | Paragraph-level description |
 | `florence2_caption_q8` | `<CAPTION>` (int8 quant) | Short caption, ¼ size |
+| `florence2_ocr_region` | `<OCR_WITH_REGION>` | OCR text interleaved with `<loc_*>` bbox tokens |
+
+`florence2_ocr_region` returns a single string with each detected text
+run followed by four `<loc_N>` tokens that encode its bounding box in
+Florence-2's quantized 0–999 coordinate space. Example output for a
+screenshot:
+
+```
+File<loc_42><loc_18><loc_72><loc_36>Edit<loc_78><loc_18><loc_108><loc_36>...
+```
+
+This is a license-clean (MIT) substitute for OmniParser's AGPL-licensed
+icon detector when the downstream consumer is an LLM that can parse the
+location-token stream. The SQL surface returns the raw string;
+consumers extract `(text, bbox)` pairs themselves with a regex over
+the `<loc_*>` markers.
 
 - **License**: MIT (Microsoft)
 - **Source**: [huggingface.co/onnx-community/Florence-2-base-ft](https://huggingface.co/onnx-community/Florence-2-base-ft)

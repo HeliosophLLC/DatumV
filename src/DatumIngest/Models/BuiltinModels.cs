@@ -90,10 +90,13 @@ public static class BuiltinModels
 
         // Captioner zoo — Florence-2 in three caption styles plus a
         // quantized comparison entry. Same model, different task tokens.
+        // OCR-with-region reuses the same files via a different task token
+        // and is the license-clean baseline for screenshot text extraction.
         RegisterFlorence2Caption(modelCatalog);
         RegisterFlorence2DetailedCaption(modelCatalog);
         RegisterFlorence2MoreDetailedCaption(modelCatalog);
         RegisterFlorence2CaptionQuantized(modelCatalog);
+        RegisterFlorence2OcrWithRegion(modelCatalog);
 
         // Image generation. SD-Turbo is the closing leg of the
         // image-in → caption → LLM-narrative → image-out pipeline.
@@ -1485,6 +1488,29 @@ public static class BuiltinModels
             componentSuffix: "_quantized",
             licenseTag: "q8",
             maxTokens: 50);
+
+    /// <summary>
+    /// Registers Florence-2 in OCR-with-region mode (fp16). Output is a
+    /// single string interleaving each detected text run with four
+    /// <c>&lt;loc_*&gt;</c> tokens encoding its bounding box (Florence-2's
+    /// 0–999 quantized-coordinate convention). License-clean substitute for
+    /// the AGPL-encumbered OmniParser detector when the consumer is an LLM
+    /// that can parse the location-token stream itself; structured
+    /// <c>Array&lt;Struct{text, bbox}&gt;</c> parsing is a follow-up.
+    /// </summary>
+    public static void RegisterFlorence2OcrWithRegion(ModelCatalog catalog) =>
+        RegisterFlorence2Caption(
+            catalog,
+            modelName: "florence2_ocr_region",
+            displayName: "Florence-2 OCR with Region (fp16)",
+            taskPrompt: "<OCR_WITH_REGION>",
+            folder: Florence2Fp16Folder,
+            componentSuffix: "_fp16",
+            licenseTag: "fp16",
+            // Dense screenshots can produce many text regions, each
+            // contributing text tokens + four location tokens. 1024 keeps
+            // the generation budget generous without runaway latency.
+            maxTokens: 1024);
 
     /// <summary>
     /// Default filename for the SCRFD-10G ONNX file (InsightFace's
