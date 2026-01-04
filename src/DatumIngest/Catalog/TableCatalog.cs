@@ -347,6 +347,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyAlterTableDropColumn(alterDrop);
                 return EmptyQueryPlan.Instance;
 
+            case InsertStatement insert:
+                InsertExecutor.Execute(this, insert);
+                return EmptyQueryPlan.Instance;
+
             default:
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
