@@ -32,6 +32,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
     private readonly int[] _schemaIndices;
     private readonly byte _sidecarStoreId;
     private readonly Arena? _targetArena;
+    private readonly byte[]?[]? _chapterTombstoneBitmaps;
     private DatumFileReaderV2? _reader;
     private SidecarReadStore? _sidecar;
     private bool _disposed;
@@ -52,6 +53,10 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
         _schemaIndices = schemaIndices;
         _sidecarStoreId = sidecarStoreId;
         _targetArena = targetArena;
+        // Load tombstone bitmaps once at session construction so the
+        // inner row-iteration loop fast-paths when the file has no
+        // soft-deletes (the common case).
+        _chapterTombstoneBitmaps = reader.LoadChapterTombstoneBitmaps();
     }
 
     /// <inheritdoc/>
@@ -115,6 +120,16 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Skip soft-deleted rows. currentRow advances regardless
+                // (it tracks logical row positions, not yielded rows) so
+                // the seek's start/count semantics still address the
+                // pre-delete row range.
+                if (IsRowDeleted(pageIndex, row, pageSize))
+                {
+                    currentRow++;
+                    continue;
+                }
+
                 if (batch.IsFull)
                 {
                     yield return batch;
@@ -141,9 +156,46 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
                 currentRow++;
             }
 
-            yield return batch;
+            // Yield only non-empty batches — when every row in this
+            // page is tombstoned the batch is empty and consumers
+            // would otherwise misinterpret it as end-of-stream.
+            if (batch.Count > 0)
+            {
+                yield return batch;
+            }
+            else
+            {
+                _pool.ReturnRowBatch(batch);
+            }
             pageIndex++;
         }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the row at
+    /// <c>(pageIndex, rowInPage)</c> has been soft-deleted — its bit
+    /// is set in this session's chapter tombstone bitmap. Fast-paths
+    /// when the file has no tombstones at all
+    /// (<see cref="_chapterTombstoneBitmaps"/> is <see langword="null"/>)
+    /// or no tombstones in the row's chapter.
+    /// </summary>
+    private bool IsRowDeleted(int pageIndex, int rowInPage, int pageSize)
+    {
+        if (_chapterTombstoneBitmaps is null) return false;
+
+        int chapterIndex = pageIndex / DatumFormatV2.PagesPerChapter;
+        if (chapterIndex >= _chapterTombstoneBitmaps.Length) return false;
+
+        byte[]? bitmap = _chapterTombstoneBitmaps[chapterIndex];
+        if (bitmap is null) return false;
+
+        int pageOffsetInChapter = pageIndex % DatumFormatV2.PagesPerChapter;
+        int rowInChapter = pageOffsetInChapter * pageSize + rowInPage;
+        if ((uint)rowInChapter >= (uint)(bitmap.Length * 8)) return false;
+
+        int byteIndex = rowInChapter >> 3;
+        int bitMask = 1 << (rowInChapter & 7);
+        return (bitmap[byteIndex] & bitMask) != 0;
     }
 
     /// <inheritdoc/>

@@ -54,6 +54,17 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// addressable from the live schema.
     /// </summary>
     private readonly int[] _schemaToFooterIndex;
+    /// <summary>
+    /// Per-chapter row tombstone bitmaps, indexed by chapter index.
+    /// <c>null</c> when the file has no row-level soft-deletes
+    /// (<see cref="DatumFileFlagsV2.HasTombstones"/> clear). Element
+    /// is <c>null</c> for chapters whose offset is
+    /// <see cref="DatumFormatV2.NoTombstoneBlock"/> (no deletes in
+    /// that chapter); otherwise an 8 KiB bitmap. Loaded eagerly at
+    /// provider construction so per-page reads don't touch disk for
+    /// the bitmap.
+    /// </summary>
+    private readonly byte[]?[]? _chapterTombstoneBitmaps;
     private readonly QueryResultsManifest? _manifest;
     private readonly MappedSourceIndexSet? _mappedIndexSet;
     private readonly SourceIndex? _sourceIndex;
@@ -74,6 +85,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _reader = DatumFileReaderV2.Open(descriptor.FilePath);
         _sidecar = TryOpenSidecar(descriptor.FilePath, _reader);
         (_schema, _schemaToFooterIndex) = BuildSchema(_reader.Footer);
+        _chapterTombstoneBitmaps = _reader.LoadChapterTombstoneBitmaps();
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
     }
@@ -184,6 +196,11 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Skip soft-deleted rows. Fast-paths when the file has
+                // no tombstones (IsRowDeleted returns false without
+                // touching the bitmap array).
+                if (IsRowDeleted(pageIndex, rowIndex)) continue;
+
                 DataValue[] values = _pool.RentDataValues(projectedCount);
                 for (int i = 0; i < projectedCount; i++)
                 {
@@ -192,7 +209,17 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 batch.Add(values);
             }
 
-            yield return batch;
+            // Skip empty batches — a page where every row was tombstoned
+            // produces a zero-length batch that consumers might interpret
+            // as end-of-stream. Yield only batches with at least one row.
+            if (batch.Count > 0)
+            {
+                yield return batch;
+            }
+            else
+            {
+                _pool.ReturnRowBatch(batch);
+            }
         }
     }
 
@@ -427,6 +454,35 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     // ──────────────────── Helpers ────────────────────
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the row at
+    /// <c>(pageIndex, rowInPage)</c> has been soft-deleted — its bit
+    /// is set in the chapter tombstone bitmap. Fast-paths when the
+    /// file has no tombstones at all (<c>_chapterTombstoneBitmaps</c>
+    /// is <see langword="null"/>) or no tombstones in the row's
+    /// chapter (<c>_chapterTombstoneBitmaps[c]</c> is
+    /// <see langword="null"/>).
+    /// </summary>
+    private bool IsRowDeleted(int pageIndex, int rowInPage)
+    {
+        if (_chapterTombstoneBitmaps is null) return false;
+
+        int pageSize = _reader.Header.PageSize;
+        int chapterIndex = pageIndex / DatumFormatV2.PagesPerChapter;
+        if (chapterIndex >= _chapterTombstoneBitmaps.Length) return false;
+
+        byte[]? bitmap = _chapterTombstoneBitmaps[chapterIndex];
+        if (bitmap is null) return false;
+
+        int pageOffsetInChapter = pageIndex % DatumFormatV2.PagesPerChapter;
+        int rowInChapter = pageOffsetInChapter * pageSize + rowInPage;
+        if ((uint)rowInChapter >= (uint)(bitmap.Length * 8)) return false;
+
+        int byteIndex = rowInChapter >> 3;
+        int bitMask = 1 << (rowInChapter & 7);
+        return (bitmap[byteIndex] & bitMask) != 0;
+    }
 
     /// <summary>
     /// Builds an engine-facing <see cref="Schema"/> from the v2 footer's

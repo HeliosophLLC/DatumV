@@ -151,6 +151,56 @@ public sealed class DatumFileReaderV2 : IDisposable
     }
 
     /// <summary>
+    /// Reads <paramref name="destination"/>.Length bytes starting at
+    /// the given absolute file offset. Used by callers that need
+    /// fixed-position reads of file-level structures (e.g. chapter
+    /// tombstone bitmaps referenced from the footer prologue) without
+    /// going through the column-page indirection.
+    /// </summary>
+    public void ReadBytesAt(long offset, Span<byte> destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _stream.Position = offset;
+        _stream.ReadExactly(destination);
+    }
+
+    /// <summary>
+    /// Loads every chapter's row-tombstone bitmap into memory so
+    /// per-page filtering loops can skip soft-deleted rows without an
+    /// I/O per page. Returns <see langword="null"/> when the file
+    /// declares no tombstones (<see cref="DatumFileFlagsV2.HasTombstones"/>
+    /// clear) or the prologue's offset list is empty — fast-path skip
+    /// for the common case.
+    /// </summary>
+    /// <remarks>
+    /// Total memory cost = 8 KiB × number of chapters with non-empty
+    /// tombstone blocks. For a 1 M-row file (16 chapters) at most
+    /// 128 KiB. Loading eagerly at provider/session construction lets
+    /// the inner scan loop check a row's tombstone status without
+    /// further I/O.
+    /// </remarks>
+    public byte[]?[]? LoadChapterTombstoneBitmaps()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if ((Header.Flags & DatumFileFlagsV2.HasTombstones) == 0) return null;
+
+        IReadOnlyList<long> offsets = Footer.Prologue.ChapterTombstoneOffsets;
+        if (offsets.Count == 0) return null;
+
+        byte[]?[] result = new byte[]?[offsets.Count];
+        for (int c = 0; c < offsets.Count; c++)
+        {
+            long offset = offsets[c];
+            if (offset == DatumFormatV2.NoTombstoneBlock) continue;
+
+            byte[] bytes = new byte[DatumFormatV2.ChapterTombstoneBlockBytes];
+            ReadBytesAt(offset, bytes);
+            result[c] = bytes;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Reads the bytes for the page at <c>(columnIndex, pageIndex)</c>
     /// into a fresh byte array. The returned memory is independent of the
     /// reader and remains valid after the reader is disposed.

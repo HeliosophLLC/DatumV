@@ -84,6 +84,16 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// </summary>
     public ulong WriterId { get; set; } = WriterIdentity.Default;
 
+    // Soft-delete state. Pending tombstone bits accumulate per chapter
+    // in memory (lazy-loaded from disk on first edit) and flush to a
+    // fresh COW block per affected chapter on FinalizeWriter.
+    // _existingTombstoneOffsets carries forward unchanged chapters'
+    // offsets — those blocks stay live on disk and remain referenced by
+    // the new prologue.
+    private Dictionary<int, ChapterTombstoneBlock>? _pendingTombstoneEdits;
+    private long[]? _existingTombstoneOffsets;
+    private long _existingChapterCount;
+
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
     /// path. If <paramref name="sidecarPath"/> is non-null a
@@ -304,37 +314,34 @@ public sealed class DatumFileWriterV2 : IDisposable
         {
             flags |= DatumFileFlagsV2.HasSidecarReferences;
         }
-        // HasExternalPages and HasTombstones are clear in PR2 — those
-        // capabilities ship in PR5/PR7.
+        // HasExternalPages: clear in PR4 — cross-file pages ship in PR7.
+
+        // Build the per-chapter tombstone offsets array. Three states
+        // per chapter: edited this session (write a fresh COW block at
+        // a new offset), unchanged-but-existed (carry forward the old
+        // offset), or never-tombstoned (use NoTombstoneBlock = -1).
+        IReadOnlyList<long> chapterTombstoneOffsets = BuildTombstoneOffsetsAndWriteBlocks(columnFooters);
+        bool anyTombstones = false;
+        foreach (long offset in chapterTombstoneOffsets)
+        {
+            if (offset != DatumFormatV2.NoTombstoneBlock) { anyTombstones = true; break; }
+        }
+        if (anyTombstones) flags |= DatumFileFlagsV2.HasTombstones;
 
         // Build the prologue: initial write starts at generation 1;
         // append bumps the existing generation and records the prior
         // value as baseGeneration so future MVCC layers can trace
         // commit lineage. WriterId is stamped on every commit (default
         // process-stable, configurable per instance).
-        FooterPrologueV4 prologue;
-        if (_isAppend)
-        {
-            prologue = new FooterPrologueV4(
-                Generation: _existingGeneration + 1,
-                WriterId: WriterId,
-                BaseGeneration: _existingGeneration,
-                TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
-                ColumnCount: _columns.Length,
-                FileTableEntries: Array.Empty<FileTableEntryV4>(),
-                ChapterTombstoneOffsets: Array.Empty<long>());
-        }
-        else
-        {
-            prologue = new FooterPrologueV4(
-                Generation: 1,
-                WriterId: WriterId,
-                BaseGeneration: 0,
-                TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
-                ColumnCount: _columns.Length,
-                FileTableEntries: Array.Empty<FileTableEntryV4>(),
-                ChapterTombstoneOffsets: Array.Empty<long>());
-        }
+        FooterPrologueV4 prologue = new(
+            Generation: _isAppend ? _existingGeneration + 1 : 1,
+            WriterId: WriterId,
+            BaseGeneration: _isAppend ? _existingGeneration : 0,
+            TombstoneGranularity: DatumFormatV2.TombstoneGranularityChapter,
+            ColumnCount: _columns.Length,
+            FileTableEntries: Array.Empty<FileTableEntryV4>(),
+            ChapterTombstoneOffsets: chapterTombstoneOffsets);
+
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
         // Write the footer body, capture offset and length.
@@ -571,6 +578,127 @@ public sealed class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Marks the row at logical index <paramref name="rowIndex"/> as
+    /// soft-deleted. The data bytes stay on disk (page directory, zone
+    /// maps, sidecar refs all unchanged) but readers skip the row at
+    /// materialization time. Idempotent — marking an already-deleted
+    /// row is a no-op.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mutation is buffered in memory; <see cref="FinalizeWriter"/>
+    /// writes a fresh tombstone bitmap block per affected chapter at a
+    /// new file offset (copy-on-write) and updates the footer's
+    /// <see cref="FooterPrologueV4.ChapterTombstoneOffsets"/> to point
+    /// at it. Old blocks become orphan bytes (reachable only from
+    /// pre-commit footers — i.e., reader snapshots opened before this
+    /// commit).
+    /// </para>
+    /// <para>
+    /// Only valid in append mode (writer opened via
+    /// <see cref="OpenForAppend"/>). Throws on out-of-range
+    /// <paramref name="rowIndex"/>.
+    /// </para>
+    /// </remarks>
+    public void MarkRowDeleted(long rowIndex)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_initialized) throw new InvalidOperationException(
+            "MarkRowDeleted requires an initialized writer; open the file with OpenForAppend.");
+        if (_finalized) throw new InvalidOperationException("Writer is finalized.");
+        if (rowIndex < 0 || rowIndex >= _totalRowsWritten)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(rowIndex), rowIndex,
+                $"Row index must be in [0, {_totalRowsWritten}).");
+        }
+
+        int chapterRowSpan = ChapterTombstoneBlock.MaxRowsPerChapter;
+        int chapterIndex = (int)(rowIndex / chapterRowSpan);
+        int rowInChapter = (int)(rowIndex - (long)chapterIndex * chapterRowSpan);
+
+        ChapterTombstoneBlock block = GetOrLoadPendingBlock(chapterIndex);
+        block.MarkDeleted(rowInChapter);
+    }
+
+    /// <summary>
+    /// Marks <paramref name="count"/> consecutive rows starting at
+    /// <paramref name="startRow"/> as soft-deleted. Equivalent to
+    /// looping <see cref="MarkRowDeleted"/> but skips repeated chapter
+    /// resolution for ranges that span only a few chapters. Idempotent.
+    /// </summary>
+    public void MarkRowsDeleted(long startRow, long count)
+    {
+        if (count == 0) return;
+        if (count < 0) throw new ArgumentOutOfRangeException(nameof(count), count, "Count must be non-negative.");
+        long endExclusive = checked(startRow + count);
+        if (startRow < 0 || endExclusive > _totalRowsWritten)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                $"[{startRow}..{endExclusive}) out of range; file has {_totalRowsWritten} rows.");
+        }
+
+        int chapterRowSpan = ChapterTombstoneBlock.MaxRowsPerChapter;
+        long current = startRow;
+        while (current < endExclusive)
+        {
+            int chapterIndex = (int)(current / chapterRowSpan);
+            long chapterStart = (long)chapterIndex * chapterRowSpan;
+            long chapterEnd = Math.Min(chapterStart + chapterRowSpan, endExclusive);
+            ChapterTombstoneBlock block = GetOrLoadPendingBlock(chapterIndex);
+            for (long r = current; r < chapterEnd; r++)
+            {
+                block.MarkDeleted((int)(r - chapterStart));
+            }
+            current = chapterEnd;
+        }
+    }
+
+    /// <summary>
+    /// Lazy-loads the pending tombstone block for
+    /// <paramref name="chapterIndex"/>. If the file already has a
+    /// committed block for this chapter, the bytes are read in so
+    /// further <see cref="MarkRowDeleted"/> calls accumulate on top.
+    /// Otherwise a fresh all-zeros block is created.
+    /// </summary>
+    private ChapterTombstoneBlock GetOrLoadPendingBlock(int chapterIndex)
+    {
+        _pendingTombstoneEdits ??= new Dictionary<int, ChapterTombstoneBlock>();
+        if (_pendingTombstoneEdits.TryGetValue(chapterIndex, out ChapterTombstoneBlock? cached))
+        {
+            return cached;
+        }
+
+        ChapterTombstoneBlock block;
+        if (_existingTombstoneOffsets is not null
+            && chapterIndex < _existingTombstoneOffsets.Length
+            && _existingTombstoneOffsets[chapterIndex] != DatumFormatV2.NoTombstoneBlock)
+        {
+            // Read existing committed block; new edits OR'd on top.
+            byte[] bytes = new byte[DatumFormatV2.ChapterTombstoneBlockBytes];
+            long savedPosition = _stream.Position;
+            try
+            {
+                _stream.Position = _existingTombstoneOffsets[chapterIndex];
+                _stream.ReadExactly(bytes);
+            }
+            finally
+            {
+                _stream.Position = savedPosition;
+            }
+            block = new ChapterTombstoneBlock(bytes);
+        }
+        else
+        {
+            block = new ChapterTombstoneBlock();
+        }
+
+        _pendingTombstoneEdits[chapterIndex] = block;
+        return block;
+    }
+
+    /// <summary>
     /// One-shot helper that opens <paramref name="datumPath"/>, marks
     /// <paramref name="columnName"/> as tombstoned, and commits via
     /// tail flip. Resolves the sidecar path from the source filename
@@ -591,6 +719,28 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
         writer.MarkColumnTombstoned(columnName);
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// One-shot helper that opens <paramref name="datumPath"/>, marks
+    /// the given row indices as soft-deleted, and commits via tail
+    /// flip. Generation bumps by one regardless of how many rows are
+    /// affected.
+    /// </summary>
+    public static void SoftDeleteRows(string datumPath, IReadOnlyList<long> rowIndices)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(rowIndices);
+        if (rowIndices.Count == 0) return;
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+        foreach (long rowIndex in rowIndices)
+        {
+            writer.MarkRowDeleted(rowIndex);
+        }
         writer.FinalizeWriter();
     }
 
@@ -676,6 +826,26 @@ public sealed class DatumFileWriterV2 : IDisposable
         _existingGeneration = footer.Prologue.Generation;
         _existingSidecarReferences = (header.Flags & DatumFileFlagsV2.HasSidecarReferences) != 0;
         _totalRowsWritten = header.TotalRowCount;
+
+        // Carry forward the existing tombstone state. The prologue's
+        // offset array is either empty (no tombstones ever) or sized to
+        // the file's chapter count; either way we copy it so commit can
+        // either re-emit unchanged offsets verbatim or replace them
+        // when MarkRow(s)Deleted produced edits.
+        if (footer.Prologue.ChapterTombstoneOffsets.Count > 0)
+        {
+            _existingTombstoneOffsets = footer.Prologue.ChapterTombstoneOffsets.ToArray();
+            _existingChapterCount = _existingTombstoneOffsets.Length;
+        }
+        else
+        {
+            _existingTombstoneOffsets = null;
+            // Derive chapter count from any column's chapter zone-map
+            // list — all live columns share the same count.
+            _existingChapterCount = footer.Columns.Count > 0
+                ? footer.Columns[0].ChapterZoneMaps.Count
+                : 0;
+        }
 
         int columnCount = footer.Columns.Count;
         _columns = new ColumnDescriptorV2[columnCount];
@@ -1034,6 +1204,99 @@ public sealed class DatumFileWriterV2 : IDisposable
         // Truncate file to the last clean tail's EOF.
         stream.SetLength(lastCleanTailEof);
         stream.Position = lastCleanTailEof;
+    }
+
+    /// <summary>
+    /// Writes copy-on-write tombstone blocks for every chapter that
+    /// received <see cref="MarkRowDeleted"/> calls in this session and
+    /// returns the per-chapter offset array to embed in the new
+    /// prologue.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One offset per chapter in the (post-append) file. Three cases per chapter:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>Edited this session — a fresh 8 KiB block is written at current EOF and the
+    ///         offset slot points at it.</item>
+    ///   <item>Not edited but had an existing committed block — the slot carries forward
+    ///         the old offset (the old block stays referenced).</item>
+    ///   <item>Never tombstoned — slot = <see cref="DatumFormatV2.NoTombstoneBlock"/> (-1).</item>
+    /// </list>
+    /// <para>
+    /// Returns an empty array (count = 0) when the file has no
+    /// tombstones at all (no edits, no prior tombstones). The reader
+    /// fast-paths past tombstone resolution when the array is empty.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<long> BuildTombstoneOffsetsAndWriteBlocks(IReadOnlyList<ColumnFooterV2> columnFooters)
+    {
+        // Determine post-commit chapter count from the per-column zone-map
+        // hierarchy we just finalized. All live columns share this count.
+        int postCommitChapterCount = 0;
+        foreach (ColumnFooterV2 cf in columnFooters)
+        {
+            if (cf.Descriptor.IsTombstoned) continue;
+            postCommitChapterCount = cf.ChapterZoneMaps.Count;
+            break;
+        }
+        if (postCommitChapterCount == 0)
+        {
+            return Array.Empty<long>();
+        }
+
+        bool hasPendingEdits = _pendingTombstoneEdits is { Count: > 0 };
+        bool hadExistingBlocks = _existingTombstoneOffsets is not null
+            && Array.Exists(_existingTombstoneOffsets, o => o != DatumFormatV2.NoTombstoneBlock);
+
+        if (!hasPendingEdits && !hadExistingBlocks)
+        {
+            // No tombstones in the file at all. Empty offset array
+            // signals fast-path skip to readers.
+            return Array.Empty<long>();
+        }
+
+        long[] offsets = new long[postCommitChapterCount];
+        for (int c = 0; c < postCommitChapterCount; c++)
+        {
+            // Default to "no tombstones in this chapter" — overridden
+            // below if either edited this session or carried forward.
+            offsets[c] = DatumFormatV2.NoTombstoneBlock;
+
+            if (_existingTombstoneOffsets is not null
+                && c < _existingTombstoneOffsets.Length)
+            {
+                offsets[c] = _existingTombstoneOffsets[c];
+            }
+        }
+
+        if (hasPendingEdits)
+        {
+            foreach ((int chapterIndex, ChapterTombstoneBlock block) in _pendingTombstoneEdits!)
+            {
+                if (chapterIndex >= postCommitChapterCount)
+                {
+                    // Defensive — shouldn't happen since MarkRowDeleted
+                    // bounds-checks against _totalRowsWritten and a row
+                    // can't live in a chapter past the file's count.
+                    continue;
+                }
+                if (!block.HasAnyDeletes())
+                {
+                    // Block was created (lazy-load) but no bits were
+                    // ultimately set. Skip emitting; carry forward the
+                    // existing offset (which is what 'offsets[c]' already
+                    // holds from the loop above).
+                    continue;
+                }
+
+                long blockOffset = _stream.Position;
+                _stream.Write(block.AsSpan());
+                offsets[chapterIndex] = blockOffset;
+            }
+        }
+
+        return offsets;
     }
 
     /// <summary>
