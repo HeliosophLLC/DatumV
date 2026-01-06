@@ -13,11 +13,14 @@ namespace DatumIngest.Catalog;
 /// <see cref="ITableProvider.AppendRowsAsync"/>.
 /// </summary>
 /// <remarks>
-/// PR10c covers <c>INSERT … VALUES (…)</c> with literal expressions only
-/// (matching <c>DEFAULT</c>'s literal-only restriction from PR10b).
-/// <c>INSERT … SELECT</c> is rejected with a <see cref="NotSupportedException"/>
-/// pending PR10c'; that PR will reuse <see cref="ResolveColumnPlan"/>
-/// and <see cref="LiteralCoercion.Coerce"/> on each source batch.
+/// PR10c shipped <c>INSERT … VALUES (…)</c> with literal expressions
+/// only (matching <c>DEFAULT</c>'s literal-only restriction from PR10b).
+/// PR10c' adds <c>INSERT … SELECT</c>: the source query is planned via
+/// <see cref="TableCatalog.PlanQuery"/>, batches stream through the
+/// shared column plan + per-value coercion, and rows commit through an
+/// <see cref="IAppendSession"/>. VALUES still rejects non-literal
+/// expressions; users who need expressions can write
+/// <c>INSERT INTO t SELECT 1 + 2, 'foo'</c>.
 /// </remarks>
 internal static class InsertExecutor
 {
@@ -53,10 +56,9 @@ internal static class InsertExecutor
                 ApplyValues(catalog.Pool, provider, targetSchema, insert.ColumnNames, values);
                 break;
 
-            case InsertQuerySource:
-                throw new NotSupportedException(
-                    $"INSERT INTO '{insert.TableName}' SELECT … is not yet supported. " +
-                    "PR10c ships INSERT … VALUES; INSERT … SELECT lands in the next pass.");
+            case InsertQuerySource queryRow:
+                ApplySelect(catalog, provider, targetSchema, insert.ColumnNames, queryRow);
+                break;
 
             default:
                 throw new NotSupportedException(
@@ -79,7 +81,11 @@ internal static class InsertExecutor
             return;
         }
 
-        ColumnPlan plan = ResolveColumnPlan(targetSchema, columnList, values);
+        // Source-column count is the column list size if provided, else
+        // the full schema arity. Per-row arity is validated below — the
+        // common case is that every VALUES row matches.
+        int sourceColumnCount = columnList?.Count ?? targetSchema.Columns.Count;
+        ColumnPlan plan = ResolveColumnPlan(targetSchema, columnList, sourceColumnCount);
 
         // Build a single batch covering every VALUES row. INSERT VALUES
         // is bounded — users don't write 10M rows inline — so a one-shot
@@ -130,34 +136,176 @@ internal static class InsertExecutor
     }
 
     /// <summary>
+    /// Streams an <c>INSERT … SELECT</c>'s source query through an
+    /// <see cref="IAppendSession"/>. Plans the source, sizes the column
+    /// plan from the source projection's arity (read off the first
+    /// non-empty batch's <see cref="ColumnLookup"/>), then per source
+    /// batch builds a target-shaped batch via <see cref="ConvertSourceValue"/>
+    /// and writes through the session. Commit fires on completion;
+    /// exceptions abort via the session's dispose-without-commit
+    /// semantics (PR9 behaviour).
+    /// </summary>
+    private static void ApplySelect(
+        TableCatalog catalog,
+        ITableProvider provider,
+        Schema targetSchema,
+        IReadOnlyList<string>? columnList,
+        InsertQuerySource source)
+    {
+        ApplySelectAsync(catalog, provider, targetSchema, columnList, source)
+            .GetAwaiter().GetResult();
+    }
+
+    private static async Task ApplySelectAsync(
+        TableCatalog catalog,
+        ITableProvider provider,
+        Schema targetSchema,
+        IReadOnlyList<string>? columnList,
+        InsertQuerySource source)
+    {
+        IQueryPlan sourcePlan = catalog.PlanQuery(source.Query);
+        ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
+
+        // Plan resolution is deferred to the first batch — that's where
+        // we learn the source projection arity. An empty source ends up
+        // a no-op (matches PostgreSQL's INSERT … SELECT-with-no-rows
+        // semantics).
+        ColumnPlan? plan = null;
+        IAppendSession? session = null;
+
+        try
+        {
+            await foreach (RowBatch sourceBatch in
+                sourcePlan.ExecuteAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                if (sourceBatch.Count == 0) continue;
+
+                if (plan is null)
+                {
+                    int sourceColumnCount = sourceBatch.ColumnLookup.Count;
+                    plan = ResolveColumnPlan(targetSchema, columnList, sourceColumnCount);
+                    session = provider.BeginAppend();
+                }
+
+                IValueStore sourceStore = sourceBatch.Arena;
+                Arena targetArena = new();
+                RowBatch targetBatch = catalog.Pool.RentRowBatch(
+                    targetLookup, capacity: sourceBatch.Count, arena: targetArena);
+
+                for (int r = 0; r < sourceBatch.Count; r++)
+                {
+                    Row sourceRow = sourceBatch[r];
+                    DataValue[] targetRow = catalog.Pool.RentDataValues(targetSchema.Columns.Count);
+
+                    for (int targetIndex = 0; targetIndex < targetSchema.Columns.Count; targetIndex++)
+                    {
+                        ColumnInfo target = targetSchema.Columns[targetIndex];
+                        int sourceIndex = plan.SourceIndexForTarget[targetIndex];
+
+                        targetRow[targetIndex] = sourceIndex >= 0
+                            ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, target, targetArena, target.Name)
+                            : ResolveOmittedFill(plan, targetIndex, target, targetArena);
+                    }
+
+                    targetBatch.Add(targetRow);
+                }
+
+                await session!.WriteAsync(targetBatch).ConfigureAwait(false);
+            }
+
+            if (session is not null)
+            {
+                await session.CommitAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (session is not null)
+            {
+                // Dispose closes / aborts whichever the session is in.
+                // After a successful CommitAsync this is a no-op; on an
+                // unhandled exception it triggers the abort path.
+                await session.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts a single value out of an <c>INSERT … SELECT</c> source
+    /// batch into the target column's <see cref="DataKind"/>, routing
+    /// through <see cref="LiteralCoercion.Coerce"/> so the lossless
+    /// numeric / string / boolean / Uuid coercion rules stay shared
+    /// with VALUES. Source kinds outside the supported set throw with a
+    /// descriptive message — composite kinds (Struct, typed arrays,
+    /// Image, Audio, ByteArray, …) are intentionally deferred to a
+    /// future PR.
+    /// </summary>
+    private static DataValue ConvertSourceValue(
+        DataValue source,
+        IValueStore sourceStore,
+        ColumnInfo target,
+        Arena targetArena,
+        string columnName)
+    {
+        if (source.IsNull)
+        {
+            return LiteralCoercion.Coerce(null, target, targetArena, columnName);
+        }
+
+        object scalar = source.Kind switch
+        {
+            DataKind.String => source.AsString(sourceStore),
+            DataKind.Boolean => source.AsBoolean(),
+            DataKind.Uuid => source.AsUuid(),
+            DataKind.Int8 => source.AsInt8(),
+            DataKind.Int16 => source.AsInt16(),
+            DataKind.Int32 => source.AsInt32(),
+            DataKind.Int64 => source.AsInt64(),
+            DataKind.UInt8 => source.AsUInt8(),
+            DataKind.UInt16 => source.AsUInt16(),
+            DataKind.UInt32 => source.AsUInt32(),
+            DataKind.UInt64 => source.AsUInt64(),
+            DataKind.Float32 => source.AsFloat32(),
+            DataKind.Float64 => source.AsFloat64(),
+            _ => throw new InvalidOperationException(
+                $"INSERT … SELECT for target column '{columnName}': source kind " +
+                $"{source.Kind} is not yet supported. Composite kinds (Struct, " +
+                "typed arrays, Image / Audio / ByteArray) will land in a later PR."),
+        };
+
+        return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
+    }
+
+    /// <summary>
     /// Resolves how each target schema column gets its value: either an
-    /// index into the source <c>VALUES</c> row, or a default-fill plan
-    /// (<see cref="OmittedFill.Default"/>) / null-fill plan
-    /// (<see cref="OmittedFill.Null"/>). Rejects every shape that can't
-    /// produce a value (omitted column with no <c>DEFAULT</c> on a
-    /// non-nullable target).
+    /// index into the source row (VALUES tuple or SELECT projection),
+    /// or a default-fill plan (<see cref="OmittedFill.Default"/>) /
+    /// null-fill plan (<see cref="OmittedFill.Null"/>). Rejects every
+    /// shape that can't produce a value (omitted column with no
+    /// <c>DEFAULT</c> on a non-nullable target). Shared between
+    /// <see cref="ApplyValues"/> and <see cref="ApplySelect"/> — the
+    /// only difference is whether <paramref name="sourceColumnCount"/>
+    /// comes from the column list / VALUES tuple width or from the
+    /// source query's projection arity (read off the first batch's
+    /// <see cref="ColumnLookup"/>).
     /// </summary>
     private static ColumnPlan ResolveColumnPlan(
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
-        InsertValuesSource values)
+        int sourceColumnCount)
     {
-        int sourceColumnCount = columnList?.Count ?? targetSchema.Columns.Count;
-
-        // Validate every VALUES row has the same arity. Done here so
-        // the per-row loop can assume consistent column counts.
-        for (int i = 0; i < values.Rows.Count; i++)
+        // Column-list arity must match source-row arity when both are
+        // present; otherwise the per-source-row arity is implied to be
+        // the schema's column count (positional default).
+        if (columnList is not null && columnList.Count != sourceColumnCount)
         {
-            if (values.Rows[i].Count != sourceColumnCount)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT VALUES row {i + 1} has {values.Rows[i].Count} value(s), " +
-                    $"but the {(columnList is null ? "table schema" : "column list")} expects {sourceColumnCount}.");
-            }
+            throw new InvalidOperationException(
+                $"INSERT column list has {columnList.Count} column(s), but the source produces " +
+                $"{sourceColumnCount} value(s) per row. The two must match.");
         }
 
-        // SourceIndexForTarget[i] = index into the source VALUES row
-        // that supplies column i, or -1 if column i is omitted.
+        // SourceIndexForTarget[i] = index into the source row that
+        // supplies target column i, or -1 if column i is omitted.
         int[] sourceIndexForTarget = new int[targetSchema.Columns.Count];
         Array.Fill(sourceIndexForTarget, -1);
 

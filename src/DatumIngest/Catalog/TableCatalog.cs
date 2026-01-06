@@ -731,7 +731,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         return PlanQuery(syntheticQuery);
     }
 
-    private IQueryPlan PlanQuery(QueryExpression query)
+    internal IQueryPlan PlanQuery(QueryExpression query)
     {
         QueryExpression inlined = UdfInliner.Inline(query, _udfs);
         QueryPlanner planner = new(this, _functions);

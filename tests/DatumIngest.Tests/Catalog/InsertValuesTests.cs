@@ -305,17 +305,8 @@ public sealed class InsertValuesTests : IAsyncLifetime
         Assert.Contains("literal", ex.Message);
     }
 
-    [Fact]
-    public void InsertSelect_NotYetSupported()
-    {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
-        catalog.Plan("CREATE TEMP TABLE t (id Int32)");
-
-        // INSERT SELECT is parsed but rejected at execution in PR10c.
-        Assert.Throws<NotSupportedException>(() =>
-            catalog.Plan("INSERT INTO t SELECT 1"));
-    }
+    // INSERT SELECT (the PR10c'-NotYetSupported case) — covered in
+    // InsertSelectTests now that the path ships.
 
     // ──────────────────── Persistent table ────────────────────
 
