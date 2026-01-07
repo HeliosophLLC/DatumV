@@ -351,6 +351,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 InsertExecutor.Execute(this, insert);
                 return EmptyQueryPlan.Instance;
 
+            case DeleteStatement delete:
+                DeleteExecutor.Execute(this, delete);
+                return EmptyQueryPlan.Instance;
+
             default:
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
