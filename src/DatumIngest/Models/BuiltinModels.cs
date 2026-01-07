@@ -146,6 +146,14 @@ public static class BuiltinModels
         RegisterPaliGemma2Mix224(modelCatalog);
         RegisterPaliGemma2Mix448(modelCatalog);
 
+        // VLM zoo — Apache/MIT-licensed alternatives to OmniParser's
+        // AGPL detector. Free-form prompt as the second positional arg:
+        // `models.moondream2(image, 'Describe this screenshot')`.
+        // Phi-3.5-vision uses ORT GenAI for IO-binding-accelerated
+        // generation; Moondream2 is the hand-rolled baseline.
+        RegisterPhi35Vision(modelCatalog);
+        RegisterMoondream2(modelCatalog);
+
         // Python-bridge models. These show status=bridge in system.models
         // (rather than available/missing) when their worker scripts and
         // model files exist, signalling that runnability also depends on
@@ -2827,6 +2835,156 @@ public static class BuiltinModels
             displayName: "PaliGemma 2 mix-448 (Captioner)",
             defaultPrompt: defaultPrompt,
             maxTokens: maxTokens);
+
+    /// <summary>Default folder for the Xenova / onnx-community Moondream2 export.</summary>
+    public const string Moondream2Folder = "moondream2-onnx";
+
+    /// <summary>
+    /// File-existence anchor for Moondream2: the fp16 vision encoder.
+    /// The model loader resolves embed_tokens, the merged decoder, and
+    /// tokenizer files relative to this file.
+    /// </summary>
+    public const string Moondream2VisionAnchor = Moondream2Folder + "/onnx/vision_encoder_fp16.onnx";
+
+    /// <summary>
+    /// Files needed for any Moondream2 install (relative to the model
+    /// directory). Tokenizer files live at the export root; the three
+    /// ONNX files live in the <c>onnx/</c> subfolder.
+    /// </summary>
+    private static IReadOnlyList<string> Moondream2Files() =>
+    [
+        Moondream2Folder + "/onnx/vision_encoder_fp16.onnx",
+        Moondream2Folder + "/onnx/embed_tokens_fp16.onnx",
+        Moondream2Folder + "/onnx/decoder_model_merged_fp16.onnx",
+        Moondream2Folder + "/onnx/decoder_model_merged_fp16.onnx_data",
+        Moondream2Folder + "/vocab.json",
+        Moondream2Folder + "/merges.txt",
+        Moondream2Folder + "/tokenizer.json",
+        Moondream2Folder + "/config.json",
+        Moondream2Folder + "/preprocessor_config.json",
+    ];
+
+    /// <summary>Default subfolder for the Microsoft GenAI-format Phi-3.5-vision GPU build.</summary>
+    public const string Phi35VisionGpuSubfolder = "phi35-vision-onnx/gpu/gpu-int4-rtn-block-32";
+
+    /// <summary>
+    /// File-existence anchor for Phi-3.5-vision: the <c>genai_config.json</c>
+    /// inside the chosen variant subfolder. ORT GenAI loads the directory
+    /// as a single unit and resolves the three ONNX bundles + tokenizer
+    /// from the bundled config.
+    /// </summary>
+    public const string Phi35VisionAnchor = Phi35VisionGpuSubfolder + "/genai_config.json";
+
+    /// <summary>
+    /// Files needed for any Phi-3.5-vision install (relative to the
+    /// model directory). The three <c>.onnx</c> sidecars (<c>.data</c>)
+    /// hold the bulk of the weights; the JSON files are config /
+    /// tokenizer.
+    /// </summary>
+    private static IReadOnlyList<string> Phi35VisionFiles() =>
+    [
+        Phi35VisionGpuSubfolder + "/genai_config.json",
+        Phi35VisionGpuSubfolder + "/processor_config.json",
+        Phi35VisionGpuSubfolder + "/tokenizer.json",
+        Phi35VisionGpuSubfolder + "/tokenizer_config.json",
+        Phi35VisionGpuSubfolder + "/special_tokens_map.json",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-vision.onnx",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-vision.onnx.data",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-embedding.onnx",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-embedding.onnx.data",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-text.onnx",
+        Phi35VisionGpuSubfolder + "/phi-3.5-v-instruct-text.onnx.data",
+    ];
+
+    /// <summary>
+    /// Registers Microsoft Phi-3.5-vision via the ORT GenAI managed
+    /// runtime. SQL surface:
+    /// <c>models.phi35_vision(image, prompt) → string</c>. Anchors on
+    /// the int4-quantized GPU build's <c>genai_config.json</c>; ORT
+    /// GenAI handles vision encoder + embedding + decoder orchestration,
+    /// IO binding, and KV-cache management internally — dramatically
+    /// faster than hand-rolled ORT for decoder-only generation.
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name. Defaults to <c>"phi35_vision"</c>.</param>
+    /// <param name="maxTokens">
+    /// Cap on generated tokens per prompt. 256 is generous for
+    /// descriptions and short Q&amp;A; raise for long-form summarisation.
+    /// </param>
+    public static void RegisterPhi35Vision(
+        ModelCatalog catalog,
+        string modelName = "phi35_vision",
+        int maxTokens = 256)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            // Distinct from "onnx" so system_models can render the runtime
+            // boundary (ORT GenAI vs raw ORT) for users debugging.
+            Backend: "onnx_genai",
+            RelativePath: Phi35VisionAnchor,
+            InputKinds: [DataKind.Image, DataKind.String],
+            OutputKind: DataKind.String,
+            // genai_config.json pins do_sample=false + top_k=1 — pure greedy.
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string anchorPath = Path.Combine(ctx.ModelDirectory, Phi35VisionAnchor);
+                string bundleDirectory = Path.GetDirectoryName(anchorPath)!;
+                return new Phi35VisionModel(modelName, bundleDirectory, maxTokens);
+            },
+            DisplayName: "Phi-3.5-vision (Vision-Language, ORT GenAI)",
+            Parameters: "4.2B",
+            License: "MIT",
+            LicenseHolder: "Microsoft",
+            SourceUrl: "https://huggingface.co/microsoft/Phi-3.5-vision-instruct-onnx",
+            Category: "vlm",
+            Modalities: ["image", "text"],
+            Files: Phi35VisionFiles()));
+    }
+
+    /// <summary>
+    /// Registers Moondream2 — small (1.9B-param) vision-language model
+    /// with a SigLIP-style 378×378 encoder and a Phi-1.5/2 decoder.
+    /// SQL surface: <c>models.moondream2(image, prompt) → string</c>.
+    /// First registration in the catalog with the
+    /// <c>(Image, String) → String</c> shape; pairs with Florence-2's
+    /// fixed-task captioners and OCR-with-region for the screenshot-
+    /// interpretation comparison harness.
+    /// </summary>
+    /// <param name="catalog">Catalog to register against.</param>
+    /// <param name="modelName">SQL-visible name. Defaults to <c>"moondream2"</c>.</param>
+    /// <param name="maxTokens">
+    /// Cap on generated tokens per prompt. 256 is generous for descriptions
+    /// and short Q&amp;A; raise for long-form summarisation.
+    /// </param>
+    public static void RegisterMoondream2(
+        ModelCatalog catalog,
+        string modelName = "moondream2",
+        int maxTokens = 256)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: Moondream2VisionAnchor,
+            InputKinds: [DataKind.Image, DataKind.String],
+            OutputKind: DataKind.String,
+            // Greedy argmax sampling — same image+prompt produces the same
+            // text every call.
+            IsDeterministic: true,
+            Loader: ctx =>
+            {
+                string visionPath = Path.Combine(ctx.ModelDirectory, Moondream2VisionAnchor);
+                return new Moondream2Model(modelName, visionPath, maxTokens: maxTokens);
+            },
+            DisplayName: "Moondream2 (Vision-Language)",
+            Parameters: "1.9B",
+            License: "Apache-2.0",
+            LicenseHolder: "vikhyatk",
+            SourceUrl: "https://huggingface.co/Xenova/moondream2",
+            Category: "vlm",
+            Modalities: ["image", "text"],
+            Files: Moondream2Files()));
+    }
 
     /// <summary>
     /// Registers Kokoro-82M TTS under the catalog name <paramref name="modelName"/>

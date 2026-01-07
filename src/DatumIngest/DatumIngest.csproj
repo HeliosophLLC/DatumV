@@ -47,6 +47,13 @@
     <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.20.1" />
+    <!--
+      ORT GenAI 0.5.x targets ORT 1.20.x — the matching managed-runtime layer
+      for decoder-only / multimodal inference (Phi-3-vision, Llama, etc.).
+      Used by Phi35VisionModel; the .Cuda variant pulls in the GPU-enabled
+      native runtime to match Microsoft.ML.OnnxRuntime.Gpu above.
+    -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Cuda" Version="0.5.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.22.0" />
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
