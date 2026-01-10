@@ -41,6 +41,28 @@ public static class FunctionMetadata
     }
 
     /// <summary>
+    /// Walks <paramref name="signatures"/> and returns the first variant that
+    /// matches <paramref name="argumentKinds"/>, or <see langword="null"/> when
+    /// no variant matches. Companion to <see cref="Validate{T}"/> for callers
+    /// that need the matched <see cref="FunctionSignatureVariant"/> itself —
+    /// e.g. to read its <see cref="FunctionSignatureVariant.ReturnType"/> and
+    /// inspect <see cref="ReturnTypeRule.ProducesArray"/>.
+    /// </summary>
+    public static FunctionSignatureVariant? MatchVariant(
+        IReadOnlyList<FunctionSignatureVariant> signatures,
+        ReadOnlySpan<DataKind> argumentKinds)
+    {
+        for (int i = 0; i < signatures.Count; i++)
+        {
+            if (TryMatch(signatures[i], argumentKinds))
+            {
+                return signatures[i];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// True when <paramref name="argumentKinds"/> match
     /// <paramref name="variant"/>'s parameter list and trailing variadic.
     /// </summary>

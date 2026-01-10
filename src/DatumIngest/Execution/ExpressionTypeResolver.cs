@@ -21,7 +21,63 @@ public static class ExpressionTypeResolver
     /// <param name="sourceSchema">The schema providing column type information.</param>
     /// <param name="functions">The function registry for resolving scalar function return types.</param>
     /// <returns>The inferred data kind, or <c>null</c> if it cannot be determined.</returns>
-    public static DataKind? ResolveType(Expression expression, Schema sourceSchema, FunctionRegistry functions)
+    public static DataKind? ResolveType(Expression expression, Schema sourceSchema, FunctionRegistry functions) =>
+        ResolveTypeShape(expression, sourceSchema, functions)?.Kind;
+
+    /// <summary>
+    /// Resolves both the <see cref="DataKind"/> and array-ness of an
+    /// expression. Companion to <see cref="ResolveType"/> for callers that
+    /// need to know whether the expression yields a typed array (the array
+    /// flag is separate from <see cref="DataKind"/> because element kind and
+    /// array-ness are tracked independently throughout the engine). Returns
+    /// <c>null</c> when the type cannot be determined statically.
+    /// </summary>
+    /// <remarks>
+    /// Branches that may yield <c>IsArray = true</c>:
+    /// <list type="bullet">
+    ///   <item>Column references — from <see cref="ColumnInfo.IsArray"/>.</item>
+    ///   <item>Cast targets — from <see cref="TypeAnnotationResolver.TryParse"/>.</item>
+    ///   <item>Function calls — from the matched signature variant's
+    ///   <see cref="ReturnTypeRule.ProducesArray"/>, falling back to
+    ///   <see cref="IScalarFunction.ProducesArray"/>.</item>
+    ///   <item>Aggregate calls — from <see cref="IAggregateFunction.ProducesArray"/>.</item>
+    /// </list>
+    /// All other branches yield <c>IsArray = false</c>. Index access strips
+    /// the array dimension (indexing a typed array yields the element kind).
+    /// </remarks>
+    public static (DataKind Kind, bool IsArray)? ResolveTypeShape(
+        Expression expression, Schema sourceSchema, FunctionRegistry functions)
+    {
+        switch (expression)
+        {
+            case ColumnReference column:
+            {
+                ColumnInfo? info = ResolveColumnInfo(column, sourceSchema);
+                return info is null ? null : (info.Kind, info.IsArray);
+            }
+            case CastExpression cast:
+            {
+                if (TypeAnnotationResolver.TryParse(cast.TargetType, out DataKind k, out bool arr))
+                {
+                    return (k, arr);
+                }
+                // Fall through to legacy resolver for unrecognised aliases.
+                DataKind? legacy = ResolveCastTargetKind(cast.TargetType);
+                return legacy is null ? null : (legacy.Value, false);
+            }
+            case FunctionCallExpression function:
+            {
+                return ResolveFunctionShape(function, sourceSchema, functions);
+            }
+        }
+
+        // All other branches can't produce IsArray = true. Reuse the kind
+        // resolution path and tag IsArray = false.
+        DataKind? kind = ResolveTypeKindOnly(expression, sourceSchema, functions);
+        return kind is null ? null : (kind.Value, false);
+    }
+
+    private static DataKind? ResolveTypeKindOnly(Expression expression, Schema sourceSchema, FunctionRegistry functions)
     {
         return expression switch
         {
@@ -355,6 +411,69 @@ public static class ExpressionTypeResolver
         // IndexOutOfRangeException because the function is dispatched anyway
         // with whatever args were supplied.
         return scalarFunction.ValidateArguments(argumentKinds);
+    }
+
+    /// <summary>
+    /// Resolves both kind and array-ness for a function call. For scalar
+    /// functions, array-ness is read from the matched signature variant's
+    /// <see cref="ReturnTypeRule.ProducesArray"/> (per-signature precision),
+    /// falling back to the function-level
+    /// <see cref="IScalarFunction.ProducesArray"/> when no descriptor exists
+    /// or no variant matches (e.g. <c>ProceduralUdfFunction</c> whose
+    /// array-ness is parsed from <c>RETURNS</c>). For aggregates, array-ness
+    /// is read from the function-level
+    /// <see cref="IAggregateFunction.ProducesArray"/> — aggregates do not
+    /// expose per-signature variants.
+    /// </summary>
+    private static (DataKind Kind, bool IsArray)? ResolveFunctionShape(
+        FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
+    {
+        IScalarFunction? scalarFunction = functions.TryGetScalar(function.FunctionName);
+
+        if (scalarFunction is null)
+        {
+            // Aggregate fallback — same as ResolveFunction's path.
+            IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.FunctionName);
+            if (aggregateFunction is null) return null;
+
+            DataKind[] aggArgs = new DataKind[function.Arguments.Count];
+            for (int index = 0; index < function.Arguments.Count; index++)
+            {
+                DataKind? kind = ResolveType(function.Arguments[index], sourceSchema, functions);
+                if (kind is null) return null;
+                aggArgs[index] = kind.Value;
+            }
+
+            DataKind aggKind = aggregateFunction.ValidateArguments(aggArgs);
+            return (aggKind, aggregateFunction.ProducesArray);
+        }
+
+        DataKind[] argumentKinds = new DataKind[function.Arguments.Count];
+        for (int index = 0; index < function.Arguments.Count; index++)
+        {
+            DataKind? kind = ResolveType(function.Arguments[index], sourceSchema, functions);
+            if (kind is null) return null;
+            argumentKinds[index] = kind.Value;
+        }
+
+        DataKind resultKind = scalarFunction.ValidateArguments(argumentKinds);
+
+        // Per-signature array-ness wins when available; fall back to the
+        // function-level bool for functions whose signatures haven't been
+        // migrated to ReturnTypeRule.ArrayOf.
+        bool isArray = scalarFunction.ProducesArray;
+        FunctionDescriptor? descriptor = functions.TryGetScalarDescriptor(function.FunctionName);
+        if (descriptor is not null)
+        {
+            FunctionSignatureVariant? matched = FunctionMetadata.MatchVariant(
+                descriptor.Signatures, argumentKinds);
+            if (matched is not null)
+            {
+                isArray = matched.ReturnType.ProducesArray;
+            }
+        }
+
+        return (resultKind, isArray);
     }
 
     /// <summary>
