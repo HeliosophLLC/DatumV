@@ -30,7 +30,7 @@ namespace DatumIngest.DatumFile.V2;
 /// finalize.
 /// </para>
 /// </remarks>
-public sealed class DatumFileWriterV2 : IDisposable
+public sealed partial class DatumFileWriterV2 : IDisposable
 {
     private readonly Stream _stream;
     private readonly bool _ownsStream;
