@@ -73,6 +73,32 @@ namespace DatumIngest.DatumFile.V2;
 /// without a matching <see cref="ColumnDefaultV4.ColumnIndex"/> have no
 /// default.
 /// </param>
+/// <param name="IdentityColumnIndex">
+/// Index of the table's <c>IDENTITY</c> column, or <c>-1</c> when no
+/// column carries IDENTITY. At most one IDENTITY column per table —
+/// validated at <c>CREATE TABLE</c> time. Always <c>-1</c> in files
+/// written by binaries that predate PR10e (the missing trailing field
+/// reads back as zero/-1; on next commit the writer stamps a real
+/// value).
+/// </param>
+/// <param name="IdentitySeed">
+/// First value the IDENTITY counter produced; captured at
+/// <c>CREATE TABLE</c> time and never changes. Meaningless when
+/// <see cref="IdentityColumnIndex"/> is <c>-1</c>.
+/// </param>
+/// <param name="IdentityStep">
+/// Increment applied after each generated IDENTITY value. Must be
+/// non-zero; meaningless when <see cref="IdentityColumnIndex"/> is
+/// <c>-1</c>.
+/// </param>
+/// <param name="IdentityNextValue">
+/// The value the next INSERT-driven reservation would return.
+/// Initially equals <see cref="IdentitySeed"/>; advanced by every
+/// commit that fills IDENTITY rows. Persisted on the prologue so a
+/// reopen (and standalone <c>.datum</c> tools) see the live counter
+/// without consulting <c>.datum-catalog.json</c>. Meaningless when
+/// <see cref="IdentityColumnIndex"/> is <c>-1</c>.
+/// </param>
 public sealed record FooterPrologueV4(
     ulong Generation,
     ulong WriterId,
@@ -81,7 +107,11 @@ public sealed record FooterPrologueV4(
     int ColumnCount,
     IReadOnlyList<FileTableEntryV4> FileTableEntries,
     IReadOnlyList<long> ChapterTombstoneOffsets,
-    IReadOnlyList<ColumnDefaultV4> ColumnDefaults)
+    IReadOnlyList<ColumnDefaultV4> ColumnDefaults,
+    short IdentityColumnIndex,
+    long IdentitySeed,
+    long IdentityStep,
+    long IdentityNextValue)
 {
     /// <summary>
     /// Default prologue for a fresh single-writer commit with no
@@ -96,7 +126,11 @@ public sealed record FooterPrologueV4(
         ColumnCount: columnCount,
         FileTableEntries: Array.Empty<FileTableEntryV4>(),
         ChapterTombstoneOffsets: Array.Empty<long>(),
-        ColumnDefaults: Array.Empty<ColumnDefaultV4>());
+        ColumnDefaults: Array.Empty<ColumnDefaultV4>(),
+        IdentityColumnIndex: -1,
+        IdentitySeed: 0,
+        IdentityStep: 0,
+        IdentityNextValue: 0);
 
     /// <summary>
     /// Serializes the prologue. Layout:
@@ -107,6 +141,7 @@ public sealed record FooterPrologueV4(
     ///   <item>fileTableEntryCount (4) + entries[]</item>
     ///   <item>chapterTombstoneCount (4) + int64 offsets[]</item>
     ///   <item>columnDefaultCount (4) + entries[]</item>
+    ///   <item>identityColumnIndex (2) + identitySeed (8) + identityStep (8) + identityNextValue (8)</item>
     /// </list>
     /// </summary>
     internal void Serialize(BinaryWriter writer)
@@ -134,6 +169,11 @@ public sealed record FooterPrologueV4(
         {
             entry.Serialize(writer);
         }
+
+        writer.Write(IdentityColumnIndex);
+        writer.Write(IdentitySeed);
+        writer.Write(IdentityStep);
+        writer.Write(IdentityNextValue);
     }
 
     /// <summary>Deserializes a prologue written by <see cref="Serialize"/>.</summary>
@@ -193,11 +233,20 @@ public sealed record FooterPrologueV4(
             columnDefaults[i] = ColumnDefaultV4.Deserialize(reader);
         }
 
+        short identityColumnIndex = reader.ReadInt16();
+        long identitySeed = reader.ReadInt64();
+        long identityStep = reader.ReadInt64();
+        long identityNextValue = reader.ReadInt64();
+
         return new FooterPrologueV4(
             generation, writerId, baseGeneration,
             tombstoneGranularity, columnCount,
             fileTable, chapterTombstoneOffsets,
-            columnDefaults);
+            columnDefaults,
+            identityColumnIndex,
+            identitySeed,
+            identityStep,
+            identityNextValue);
     }
 }
 

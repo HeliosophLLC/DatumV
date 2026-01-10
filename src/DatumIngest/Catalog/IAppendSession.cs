@@ -52,4 +52,24 @@ public interface IAppendSession : IAsyncDisposable
     /// throws.
     /// </summary>
     Task CommitAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Captures the table's <c>IDENTITY</c> spec and the live next-value
+    /// at session-start time. <see langword="null"/> when the table has
+    /// no IDENTITY column. Default returns <see langword="null"/>;
+    /// providers that support IDENTITY override.
+    /// </summary>
+    IdentityState? IdentityState => null;
+
+    /// <summary>
+    /// Reserves the next IDENTITY value for an INSERT-driven row fill
+    /// and advances the session-local counter. Throws when the table
+    /// has no IDENTITY column. Persisted to the provider on
+    /// <see cref="CommitAsync"/>; reverted on abort (dispose without
+    /// commit), so a session that fails partway never exposes the
+    /// reserved values to anyone else.
+    /// </summary>
+    long ReserveNextIdentityValue() =>
+        throw new InvalidOperationException(
+            "This session's table has no IDENTITY column.");
 }

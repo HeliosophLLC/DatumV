@@ -2355,11 +2355,12 @@ public static class SqlParser
         select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
 
     /// <summary>
-    /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY] [DEFAULT literal]</c>.
-    /// The <c>DEFAULT</c> clause accepts any expression here; the catalog
-    /// rejects non-literal defaults at <c>CREATE TABLE</c> time, so the
-    /// validation surface stays in one place rather than spread across
-    /// the parser.
+    /// Parses a single column definition:
+    /// <c>name type [NOT NULL] [PRIMARY KEY] [DEFAULT literal] [IDENTITY[(seed, step)]]</c>.
+    /// The <c>DEFAULT</c> and <c>IDENTITY</c> clauses accept their inputs
+    /// loosely here; the catalog enforces "literal only" / "integer column /
+    /// at most one per table" at <c>CREATE TABLE</c> time so validation
+    /// stays in one place rather than spread across the parser.
     /// </summary>
     private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
         from name in IdentifierOrKeywordAsName
@@ -2379,11 +2380,50 @@ public static class SqlParser
             from expr in SP.Ref(() => ExpressionParser!)
             select expr
         ).AsNullable().OptionalOrDefault()
+        from identity in IdentityClauseParser.AsNullable().OptionalOrDefault()
         select new ColumnDefinition(
             name, typeName,
             Nullable: !notNull && !primaryKey,
             PrimaryKey: primaryKey,
-            DefaultValue: defaultValue);
+            DefaultValue: defaultValue,
+            Identity: identity);
+
+    /// <summary>
+    /// Parses the <c>IDENTITY[(seed, step)]</c> clause. Bare <c>IDENTITY</c>
+    /// defaults to <c>(1, 1)</c>; the parametrized form requires both
+    /// integer literals and accepts a leading <c>-</c> on each so
+    /// negative steps / seeds parse cleanly.
+    /// </summary>
+    /// <summary>
+    /// Parses a signed integer literal (<c>5</c> or <c>-5</c>) as a
+    /// <see cref="long"/>. Used by <see cref="IdentityClauseParser"/>
+    /// where the surrounding grammar is rigid (no general expression
+    /// parsing) but negative seeds / steps must still be writable.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, long> SignedIntegerLiteral =
+        from sign in Token.EqualTo(SqlToken.Minus).Value(true).OptionalOrDefault(false)
+        from numberToken in Token.EqualTo(SqlToken.NumberLiteral)
+        select ParseSignedInteger(numberToken.ToStringValue(), sign);
+
+    private static long ParseSignedInteger(string text, bool negate)
+    {
+        double parsed = double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+        long magnitude = checked((long)parsed);
+        return negate ? checked(-magnitude) : magnitude;
+    }
+
+    private static readonly TokenListParser<SqlToken, IdentitySpec> IdentitySeedStepParser =
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from seed in SignedIntegerLiteral
+        from comma in Token.EqualTo(SqlToken.Comma)
+        from step in SignedIntegerLiteral
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new IdentitySpec(seed, step);
+
+    private static readonly TokenListParser<SqlToken, IdentitySpec> IdentityClauseParser =
+        Token.EqualTo(SqlToken.Identity)
+            .IgnoreThen(IdentitySeedStepParser.AsNullable().OptionalOrDefault())
+            .Select(spec => spec ?? new IdentitySpec(1, 1));
 
     /// <summary>
     /// Parses <c>IF NOT EXISTS</c> as an optional guard clause for CREATE statements.

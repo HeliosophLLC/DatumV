@@ -174,7 +174,11 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
             ColumnCount: 3,
             FileTableEntries: [entry],
             ChapterTombstoneOffsets: [DatumFormatV2.NoTombstoneBlock, 1024L, 8192L],
-            ColumnDefaults: []);
+            ColumnDefaults: [],
+            IdentityColumnIndex: -1,
+            IdentitySeed: 0,
+            IdentityStep: 0,
+            IdentityNextValue: 0);
 
         using MemoryStream ms = new();
         using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))

@@ -84,4 +84,15 @@ public sealed record ColumnInfo
     /// when the column has no default.
     /// </summary>
     public Expression? DefaultExpression { get; init; }
+
+    /// <summary>
+    /// Optional <c>IDENTITY(seed, step)</c> spec captured from the
+    /// column's <c>CREATE TABLE</c> definition. <see langword="null"/>
+    /// for non-IDENTITY columns; non-null implies the catalog auto-fills
+    /// the column at INSERT time and rejects any explicit value supplied
+    /// for it (PostgreSQL <c>GENERATED ALWAYS</c> semantics). At most
+    /// one column per table may carry this — enforced at <c>CREATE TABLE</c>
+    /// time by the catalog.
+    /// </summary>
+    public IdentitySpec? Identity { get; init; }
 }

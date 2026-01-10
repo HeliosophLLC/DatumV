@@ -71,6 +71,14 @@ internal static class InsertExecutor
         ITableProvider provider,
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
+        InsertValuesSource values) =>
+        ApplyValuesAsync(pool, provider, targetSchema, columnList, values).GetAwaiter().GetResult();
+
+    private static async Task ApplyValuesAsync(
+        Pool pool,
+        ITableProvider provider,
+        Schema targetSchema,
+        IReadOnlyList<string>? columnList,
         InsertValuesSource values)
     {
         if (values.Rows.Count == 0)
@@ -86,6 +94,11 @@ internal static class InsertExecutor
         // common case is that every VALUES row matches.
         int sourceColumnCount = columnList?.Count ?? targetSchema.Columns.Count;
         ColumnPlan plan = ResolveColumnPlan(targetSchema, columnList, sourceColumnCount);
+
+        // Open the session early so IDENTITY-reservation calls have a
+        // place to land. Dispose-without-commit aborts on any throw,
+        // matching the existing semantics of AppendRowsAsync.
+        await using IAppendSession session = provider.BeginAppend();
 
         // Build a single batch covering every VALUES row. INSERT VALUES
         // is bounded — users don't write 10M rows inline — so a one-shot
@@ -117,22 +130,19 @@ internal static class InsertExecutor
                 }
                 else
                 {
-                    // Omitted column: pre-resolved fill from default
-                    // (rebuild the DataValue per row so each row owns its
-                    // own arena-backed copy of strings/byte arrays — the
-                    // underlying expression is still literal so this is
-                    // cheap and avoids share-arena hazards).
-                    targetRow[targetIndex] = ResolveOmittedFill(plan, targetIndex, target, arena);
+                    // Omitted column: pre-resolved fill (Default / Null /
+                    // Identity). Rebuild the DataValue per row so each
+                    // row owns its own arena-backed copy of strings /
+                    // byte arrays.
+                    targetRow[targetIndex] = ResolveOmittedFill(plan, targetIndex, target, arena, session);
                 }
             }
 
             batch.Add(targetRow);
         }
 
-        // Single-batch commit. AppendRowsAsync wraps BeginAppend and
-        // commits on completion; aborts on exception via the session's
-        // dispose-without-commit semantics.
-        provider.AppendRowsAsync(YieldOnce(batch), CancellationToken.None).GetAwaiter().GetResult();
+        await session.WriteAsync(batch).ConfigureAwait(false);
+        await session.CommitAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -204,7 +214,7 @@ internal static class InsertExecutor
 
                         targetRow[targetIndex] = sourceIndex >= 0
                             ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, target, targetArena, target.Name)
-                            : ResolveOmittedFill(plan, targetIndex, target, targetArena);
+                            : ResolveOmittedFill(plan, targetIndex, target, targetArena, session!);
                     }
 
                     targetBatch.Add(targetRow);
@@ -321,6 +331,13 @@ internal static class InsertExecutor
             }
             for (int i = 0; i < targetSchema.Columns.Count; i++)
             {
+                if (targetSchema.Columns[i].Identity is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"INSERT into '{targetSchema.Columns[i].Name}': cannot supply an explicit " +
+                        "value for an IDENTITY column. Use an explicit column list that excludes " +
+                        $"'{targetSchema.Columns[i].Name}', or omit the IDENTITY column declaration.");
+                }
                 sourceIndexForTarget[i] = i;
             }
         }
@@ -344,14 +361,21 @@ internal static class InsertExecutor
                     throw new InvalidOperationException(
                         $"INSERT column '{name}' does not exist on the target table.");
                 }
+                if (targetSchema.Columns[targetIdx].Identity is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"INSERT into '{name}': cannot supply an explicit value for an IDENTITY " +
+                        "column. Drop it from the INSERT column list and the catalog will fill it " +
+                        "automatically.");
+                }
                 sourceIndexForTarget[targetIdx] = sourceIdx;
             }
         }
 
-        // For every omitted target column, decide the fill: DEFAULT
-        // expression (must be a LiteralExpression — PR10b's validation
-        // already enforced this at CREATE TABLE time) → cached object,
-        // else NULL (column must be Nullable), else throw.
+        // For every omitted target column, decide the fill: IDENTITY →
+        // session.ReserveNextIdentityValue, DEFAULT (must be a literal —
+        // PR10b's validation enforces this at CREATE TABLE time), NULL
+        // (column must be Nullable), else throw.
         OmittedFill[] omittedFills = new OmittedFill[targetSchema.Columns.Count];
         for (int i = 0; i < targetSchema.Columns.Count; i++)
         {
@@ -362,6 +386,13 @@ internal static class InsertExecutor
             }
 
             ColumnInfo target = targetSchema.Columns[i];
+
+            if (target.Identity is not null)
+            {
+                omittedFills[i] = OmittedFill.Identity;
+                continue;
+            }
+
             if (target.DefaultExpression is not null)
             {
                 // PR10b validates DEFAULT is a literal at CREATE TABLE
@@ -389,7 +420,7 @@ internal static class InsertExecutor
     }
 
     private static DataValue ResolveOmittedFill(
-        ColumnPlan plan, int targetIndex, ColumnInfo target, Arena arena)
+        ColumnPlan plan, int targetIndex, ColumnInfo target, Arena arena, IAppendSession session)
     {
         OmittedFill fill = plan.OmittedFills[targetIndex];
         return fill.Kind switch
@@ -397,6 +428,8 @@ internal static class InsertExecutor
             OmittedFill.FillKind.Null => DataValue.Null(target.Kind),
             OmittedFill.FillKind.Default
                 => LiteralCoercion.Coerce(fill.LiteralValue, target, arena, target.Name),
+            OmittedFill.FillKind.Identity
+                => LiteralCoercion.Coerce(session.ReserveNextIdentityValue(), target, arena, target.Name),
             _ => throw new InvalidOperationException(
                 $"Internal error: column '{target.Name}' has no source index and no fill."),
         };
@@ -464,12 +497,6 @@ internal static class InsertExecutor
         return new ColumnLookup(names);
     }
 
-    private static async IAsyncEnumerable<RowBatch> YieldOnce(RowBatch batch)
-    {
-        yield return batch;
-        await Task.CompletedTask;
-    }
-
     /// <summary>
     /// Resolved column-binding plan for an <c>INSERT</c>: how each
     /// target schema column is filled, plus the cached fill for omitted
@@ -488,7 +515,7 @@ internal static class InsertExecutor
     /// </summary>
     private readonly struct OmittedFill
     {
-        public enum FillKind : byte { None, Null, Default }
+        public enum FillKind : byte { None, Null, Default, Identity }
 
         public FillKind Kind { get; }
         public object? LiteralValue { get; }
@@ -502,6 +529,7 @@ internal static class InsertExecutor
         public static OmittedFill None => default;
         public static OmittedFill Null { get; } = new(FillKind.Null, null);
         public static OmittedFill Default(object? literalValue) => new(FillKind.Default, literalValue);
+        public static OmittedFill Identity { get; } = new(FillKind.Identity, null);
     }
 }
 

@@ -435,6 +435,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
         List<ColumnDefaultV4>? columnDefaults = null;
+        IdentityWriterSpec? identityWriterSpec = null;
         for (int i = 0; i < schema.Columns.Count; i++)
         {
             ColumnInfo c = schema.Columns[i];
@@ -452,9 +453,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     ColumnIndex: checked((ushort)i),
                     SqlFragment: QueryExplainer.FormatExpression(c.DefaultExpression)));
             }
+
+            if (c.Identity is { } identity)
+            {
+                // Schema-build validates "at most one IDENTITY column", so
+                // hitting two here would be a structural bug — fall through
+                // and let the writer's invariants surface it.
+                identityWriterSpec = new IdentityWriterSpec(i, identity.Seed, identity.Step);
+            }
         }
 
-        DatumFileWriterV2.CreateEmpty(targetPath, descriptors, columnDefaults);
+        DatumFileWriterV2.CreateEmpty(targetPath, descriptors, columnDefaults, identityWriterSpec);
 
         Add(new TableDescriptor(create.TableName, targetPath));
 
@@ -518,6 +527,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private Schema BuildSchemaFromColumnDefinitions(IReadOnlyList<ColumnDefinition> definitions)
     {
         ColumnInfo[] columns = new ColumnInfo[definitions.Count];
+        int identityColumnIndex = -1;
         for (int i = 0; i < definitions.Count; i++)
         {
             ColumnDefinition d = definitions[i];
@@ -536,13 +546,72 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 defaultExpression = d.DefaultValue;
             }
 
+            IdentitySpec? identity = null;
+            if (d.Identity is not null)
+            {
+                if (identityColumnIndex >= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Table may have at most one IDENTITY column; both " +
+                        $"'{definitions[identityColumnIndex].Name}' and '{d.Name}' carry IDENTITY.");
+                }
+                if (isArray)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': IDENTITY is not supported on typed-array columns.");
+                }
+                if (!DataValueComparer.IsIntegerKind(kind) ||
+                    kind is DataKind.Int128 or DataKind.UInt128)
+                {
+                    // Int128 / UInt128 are integer kinds per the comparer
+                    // but don't fit in the prologue's int64 seed/step
+                    // storage; reject them explicitly so the error names
+                    // the actual constraint.
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': IDENTITY requires a 8/16/32/64-bit integer column kind " +
+                        "(Int8/Int16/Int32/Int64 or UInt8/UInt16/UInt32/UInt64); got " + kind + ".");
+                }
+                if (d.Identity.Step == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': IDENTITY step must be non-zero.");
+                }
+                ValidateIdentityValueFitsInKind(kind, d.Identity.Seed, d.Name, "seed");
+                ValidateIdentityValueFitsInKind(kind, d.Identity.Step, d.Name, "step");
+
+                identity = d.Identity;
+                identityColumnIndex = i;
+            }
+
             columns[i] = new ColumnInfo(d.Name, kind, d.Nullable)
             {
                 IsArray = isArray,
                 DefaultExpression = defaultExpression,
+                Identity = identity,
             };
         }
         return new Schema(columns);
+    }
+
+    private static void ValidateIdentityValueFitsInKind(DataKind kind, long value, string columnName, string label)
+    {
+        bool fits = kind switch
+        {
+            DataKind.Int8 => value is >= sbyte.MinValue and <= sbyte.MaxValue,
+            DataKind.Int16 => value is >= short.MinValue and <= short.MaxValue,
+            DataKind.Int32 => value is >= int.MinValue and <= int.MaxValue,
+            DataKind.Int64 => true,
+            DataKind.UInt8 => value is >= 0 and <= byte.MaxValue,
+            DataKind.UInt16 => value is >= 0 and <= ushort.MaxValue,
+            DataKind.UInt32 => value is >= 0 and <= uint.MaxValue,
+            DataKind.UInt64 => value >= 0,
+            _ => false,
+        };
+        if (!fits)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': IDENTITY {label} {value} does not fit in {kind}.");
+        }
     }
 
     /// <summary>

@@ -1014,12 +1014,31 @@ public sealed record CreateTableStatement(
 /// rejects non-literal defaults at <c>CREATE TABLE</c> time; only
 /// <see cref="LiteralExpression"/> is honored in PR10b.
 /// </param>
+/// <param name="Identity">
+/// Optional <c>IDENTITY[(seed, step)]</c> spec. When non-<see langword="null"/>,
+/// the column is auto-filled at INSERT time and explicit values for it
+/// are rejected (PostgreSQL <c>GENERATED ALWAYS</c> semantics).
+/// </param>
 public sealed record ColumnDefinition(
     string Name,
     string TypeName,
     bool Nullable = true,
     bool PrimaryKey = false,
-    Expression? DefaultValue = null);
+    Expression? DefaultValue = null,
+    IdentitySpec? Identity = null);
+
+/// <summary>
+/// <c>IDENTITY[(seed, step)]</c> spec on a <see cref="ColumnDefinition"/>
+/// (also surfaced through the model's <c>ColumnInfo.Identity</c> after
+/// resolution). Captured verbatim by the parser and validated at
+/// <c>CREATE TABLE</c> time (one IDENTITY per table, integer column
+/// kind, non-zero step, seed/step in range for the column's kind).
+/// The running counter (next value the next INSERT would hand out)
+/// lives on the provider, not here.
+/// </summary>
+/// <param name="Seed">First value the counter produces.</param>
+/// <param name="Step">Increment applied after each generated value. Must be non-zero.</param>
+public sealed record IdentitySpec(long Seed, long Step);
 
 /// <summary>
 /// <c>CREATE [TEMP] TABLE name AS SELECT ...</c> — creates a table

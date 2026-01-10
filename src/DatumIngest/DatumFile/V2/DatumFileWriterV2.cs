@@ -103,6 +103,16 @@ public sealed class DatumFileWriterV2 : IDisposable
     // tombstone). FinalizeWriter emits this list verbatim.
     private List<ColumnDefaultV4>? _columnDefaults;
 
+    // IDENTITY state (PR10e). Seeded by Initialize for fresh writes
+    // and by RehydrateFromFooter for appends; the running counter
+    // (_identityNextValue) bumps via UpdateIdentityNextValue so each
+    // commit's prologue stamps the live value. -1 means no IDENTITY
+    // column on this table.
+    private short _identityColumnIndex = -1;
+    private long _identitySeed;
+    private long _identityStep;
+    private long _identityNextValue;
+
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
     /// path. If <paramref name="sidecarPath"/> is non-null a
@@ -192,7 +202,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// encoder + zone-map builder per column.
     /// </summary>
     public void Initialize(IReadOnlyList<ColumnDescriptorV2> columns) =>
-        Initialize(columns, columnDefaults: null);
+        Initialize(columns, columnDefaults: null, identity: null);
 
     /// <summary>
     /// Initializes the writer with the column schema and an optional
@@ -203,7 +213,20 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// </summary>
     public void Initialize(
         IReadOnlyList<ColumnDescriptorV2> columns,
-        IReadOnlyList<ColumnDefaultV4>? columnDefaults)
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults) =>
+        Initialize(columns, columnDefaults, identity: null);
+
+    /// <summary>
+    /// Initializes the writer with the column schema, optional per-column
+    /// <c>DEFAULT</c> literal table, and optional <c>IDENTITY</c> spec
+    /// for one of the columns. The IDENTITY counter starts at the
+    /// supplied seed; <see cref="UpdateIdentityNextValue"/> advances it
+    /// before <see cref="FinalizeWriter"/> stamps the prologue.
+    /// </summary>
+    public void Initialize(
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity)
     {
         if (_initialized) throw new InvalidOperationException("Writer already initialized.");
         if (columns.Count == 0) throw new ArgumentException("At least one column required.", nameof(columns));
@@ -223,6 +246,14 @@ public sealed class DatumFileWriterV2 : IDisposable
         if (columnDefaults is { Count: > 0 })
         {
             _columnDefaults = new List<ColumnDefaultV4>(columnDefaults);
+        }
+
+        if (identity is { } id)
+        {
+            _identityColumnIndex = checked((short)id.ColumnIndex);
+            _identitySeed = id.Seed;
+            _identityStep = id.Step;
+            _identityNextValue = id.Seed;
         }
 
         // Reserve header bytes (placeholder zeros). Patched at finalize.
@@ -369,7 +400,11 @@ public sealed class DatumFileWriterV2 : IDisposable
             ChapterTombstoneOffsets: chapterTombstoneOffsets,
             ColumnDefaults: _columnDefaults is { Count: > 0 }
                 ? _columnDefaults.ToArray()
-                : Array.Empty<ColumnDefaultV4>());
+                : Array.Empty<ColumnDefaultV4>(),
+            IdentityColumnIndex: _identityColumnIndex,
+            IdentitySeed: _identitySeed,
+            IdentityStep: _identityStep,
+            IdentityNextValue: _identityNextValue);
 
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
@@ -751,7 +786,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// descriptors.
     /// </remarks>
     public static void CreateEmpty(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns) =>
-        CreateEmpty(datumPath, columns, columnDefaults: null);
+        CreateEmpty(datumPath, columns, columnDefaults: null, identity: null);
 
     /// <summary>
     /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2})"/>,
@@ -763,7 +798,21 @@ public sealed class DatumFileWriterV2 : IDisposable
     public static void CreateEmpty(
         string datumPath,
         IReadOnlyList<ColumnDescriptorV2> columns,
-        IReadOnlyList<ColumnDefaultV4>? columnDefaults)
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults) =>
+        CreateEmpty(datumPath, columns, columnDefaults, identity: null);
+
+    /// <summary>
+    /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2}, IReadOnlyList{ColumnDefaultV4}?)"/>,
+    /// but additionally stamps an <c>IDENTITY(seed, step)</c> spec into
+    /// the footer prologue. The starting next-value equals
+    /// <see cref="IdentityWriterSpec.Seed"/>; subsequent commits advance
+    /// it via <see cref="UpdateIdentityNextValue"/>.
+    /// </summary>
+    public static void CreateEmpty(
+        string datumPath,
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(columns);
@@ -775,8 +824,26 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         // No sidecar — empty file has no values to spill.
         using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
-        writer.Initialize(columns, columnDefaults);
+        writer.Initialize(columns, columnDefaults, identity);
         writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// Updates the running IDENTITY counter to be stamped at the next
+    /// <see cref="FinalizeWriter"/>. Called by an <c>IAppendSession</c>
+    /// after it has reserved values for IDENTITY-filled rows so the
+    /// committed prologue carries the live next-value. Throws when the
+    /// table has no IDENTITY column.
+    /// </summary>
+    public void UpdateIdentityNextValue(long newNextValue)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_identityColumnIndex < 0)
+        {
+            throw new InvalidOperationException(
+                "UpdateIdentityNextValue called on a writer whose footer has no IDENTITY column.");
+        }
+        _identityNextValue = newNextValue;
     }
 
     /// <summary>
@@ -1093,6 +1160,14 @@ public sealed class DatumFileWriterV2 : IDisposable
         {
             _columnDefaults = new List<ColumnDefaultV4>(footer.Prologue.ColumnDefaults);
         }
+
+        // Carry forward IDENTITY state. The next-value carries the live
+        // counter; AddColumn/MarkColumnTombstoned don't shift indices,
+        // so the stored ColumnIndex stays valid across appends.
+        _identityColumnIndex = footer.Prologue.IdentityColumnIndex;
+        _identitySeed = footer.Prologue.IdentitySeed;
+        _identityStep = footer.Prologue.IdentityStep;
+        _identityNextValue = footer.Prologue.IdentityNextValue;
 
         int columnCount = footer.Columns.Count;
         _columns = new ColumnDescriptorV2[columnCount];
@@ -1537,3 +1612,11 @@ public sealed class DatumFileWriterV2 : IDisposable
         }
     }
 }
+
+/// <summary>
+/// Writer-facing IDENTITY spec passed to <see cref="DatumFileWriterV2.Initialize(IReadOnlyList{ColumnDescriptorV2}, IReadOnlyList{ColumnDefaultV4}?, IdentityWriterSpec?)"/>.
+/// Carries the column index, seed, and step; the writer derives the
+/// initial next-value from the seed and persists the live counter
+/// through subsequent commits.
+/// </summary>
+public sealed record IdentityWriterSpec(int ColumnIndex, long Seed, long Step);

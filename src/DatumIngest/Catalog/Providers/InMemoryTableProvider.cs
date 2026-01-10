@@ -38,6 +38,16 @@ public sealed class InMemoryTableProvider : ITableProvider
     private readonly Lazy<SourceIndex?>? _lazySourceIndex;
     private SourceIndex? _overrideIndex;
 
+    // IDENTITY state (PR10e). Captured from the schema-only ctor when
+    // a column carries IdentitySpec; -1 otherwise. _identityNextValue
+    // starts at the spec's seed and advances per ReserveNextIdentityValue
+    // call (sessions hold the mutation lock so concurrent INSERTs
+    // serialize). Lives in-memory only — temp tables die with the catalog.
+    private int _identityColumnIndex = -1;
+    private long _identitySeed;
+    private long _identityStep;
+    private long _identityNextValue;
+
     /// <summary>
     /// Serializes mutations and append sessions across async awaits.
     /// A session holds the permit for its entire lifetime so two
@@ -108,6 +118,20 @@ public sealed class InMemoryTableProvider : ITableProvider
         _fullLookup = new ColumnLookup(_columns);
         _indexEnabled = false; // empty table — no point auto-building.
         _lazySourceIndex = null;
+
+        // Capture IDENTITY state from the schema. The catalog already
+        // validates "at most one IDENTITY column"; we trust the input.
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (schema.Columns[i].Identity is { } spec)
+            {
+                _identityColumnIndex = i;
+                _identitySeed = spec.Seed;
+                _identityStep = spec.Step;
+                _identityNextValue = spec.Seed;
+                break;
+            }
+        }
     }
 
     /// <summary>
@@ -795,9 +819,47 @@ public sealed class InMemoryTableProvider : ITableProvider
         private bool _committed;
         private bool _disposed;
 
+        // Captured at session start. Reservations advance the
+        // session-local counter; commit pushes back to the provider.
+        private readonly long _initialIdentityNextValue;
+        private long _identityNextValue;
+        private bool _identityReserved;
+
         public InMemoryAppendSession(InMemoryTableProvider provider)
         {
             _provider = provider;
+            _initialIdentityNextValue = provider._identityNextValue;
+            _identityNextValue = _initialIdentityNextValue;
+        }
+
+        public IdentityState? IdentityState
+        {
+            get
+            {
+                int idx = _provider._identityColumnIndex;
+                if (idx < 0) return null;
+                return new IdentityState(
+                    ColumnIndex: idx,
+                    ColumnKind: _provider._schema.Columns[idx].Kind,
+                    Spec: new IdentitySpec(_provider._identitySeed, _provider._identityStep),
+                    NextValue: _identityNextValue);
+            }
+        }
+
+        public long ReserveNextIdentityValue()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("Cannot reserve IDENTITY values after CommitAsync.");
+            if (_provider._identityColumnIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Table '{_provider.Name}' has no IDENTITY column.");
+            }
+
+            long reserved = _identityNextValue;
+            _identityNextValue = checked(_identityNextValue + _provider._identityStep);
+            _identityReserved = true;
+            return reserved;
         }
 
         public Task WriteAsync(RowBatch batch, CancellationToken cancellationToken = default)
@@ -856,6 +918,14 @@ public sealed class InMemoryTableProvider : ITableProvider
                 }
                 _provider._rows = newRows;
                 _provider._overrideIndex = null;
+            }
+            // Persist the advanced IDENTITY counter even when no rows
+            // committed — same semantics as the .datum provider:
+            // reservations always burn (matches PostgreSQL's nextval()
+            // sequence semantics).
+            if (_identityReserved)
+            {
+                _provider._identityNextValue = _identityNextValue;
             }
             _committed = true;
             return Task.CompletedTask;

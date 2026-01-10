@@ -298,6 +298,9 @@ public enum SqlToken
     /// <summary>The KEY keyword (primary key constraint).</summary>
     Key,
 
+    /// <summary>The IDENTITY keyword (auto-incrementing column).</summary>
+    Identity,
+
     /// <summary>The IF keyword (conditional DDL guard).</summary>
     If,
 

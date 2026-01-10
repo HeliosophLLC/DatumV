@@ -694,6 +694,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             }
         }
 
+        // IDENTITY spec — at most one column carries it, identified by
+        // footer-column index. Resolve to the schema-column index after
+        // tombstone-skipping below.
+        IdentitySpec? identitySpec = null;
+        int identityFooterIndex = footer.Prologue.IdentityColumnIndex;
+        if (identityFooterIndex >= 0)
+        {
+            identitySpec = new IdentitySpec(
+                footer.Prologue.IdentitySeed,
+                footer.Prologue.IdentityStep);
+        }
+
         List<ColumnInfo> columns = new(footer.Columns.Count);
         List<int> indices = new(footer.Columns.Count);
         for (int i = 0; i < footer.Columns.Count; i++)
@@ -711,6 +723,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             {
                 IsArray = d.IsArray,
                 DefaultExpression = defaultExpression,
+                Identity = i == identityFooterIndex ? identitySpec : null,
             });
             indices.Add(i);
         }
@@ -1096,12 +1109,75 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         private bool _disposed;
         private bool _anyWrites;
 
+        // Captured at construction; unchanged across the session's
+        // lifetime (column index + spec are CREATE-time properties).
+        // null when the table has no IDENTITY column.
+        private readonly IdentityState? _initialIdentityState;
+        private long _identityNextValue;
+        private bool _identityReserved;
+
         public DatumAppendSession(DatumFileTableProviderV2 provider)
         {
             _provider = provider;
             // Writer opened lazily on first WriteAsync — empty sessions
             // (Begin → Commit with no writes) are no-ops with no file
             // mutation, matching the in-memory provider's semantics.
+
+            // Snapshot IDENTITY state once. Reservations advance the
+            // session-local counter; commit pushes it back through the
+            // writer's prologue.
+            Snapshot snapshot = provider.AcquireSnapshot();
+            try
+            {
+                IdentityState? state = ResolveIdentityStateLocked(snapshot);
+                _initialIdentityState = state;
+                _identityNextValue = state?.NextValue ?? 0;
+            }
+            finally
+            {
+                provider.ReleaseSnapshot(snapshot);
+            }
+        }
+
+        public IdentityState? IdentityState => _initialIdentityState is null
+            ? null
+            : _initialIdentityState with { NextValue = _identityNextValue };
+
+        public long ReserveNextIdentityValue()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_committed) throw new InvalidOperationException("Cannot reserve IDENTITY values after CommitAsync.");
+            if (_initialIdentityState is null)
+            {
+                throw new InvalidOperationException(
+                    $"Table '{_provider.Name}' has no IDENTITY column.");
+            }
+
+            long reserved = _identityNextValue;
+            _identityNextValue = checked(_identityNextValue + _initialIdentityState.Spec.Step);
+            _identityReserved = true;
+            return reserved;
+        }
+
+        private static IdentityState? ResolveIdentityStateLocked(Snapshot snapshot)
+        {
+            // Snapshot.Schema's tombstone-skipping is symmetric with the
+            // schema-to-footer index map; walk live schema columns and
+            // pick the one whose ColumnInfo.Identity is non-null.
+            Schema schema = snapshot.Schema;
+            for (int i = 0; i < schema.Columns.Count; i++)
+            {
+                ColumnInfo c = schema.Columns[i];
+                if (c.Identity is { } spec)
+                {
+                    return new IdentityState(
+                        ColumnIndex: i,
+                        ColumnKind: c.Kind,
+                        Spec: spec,
+                        NextValue: snapshot.Reader.Footer.Prologue.IdentityNextValue);
+                }
+            }
+            return null;
         }
 
         public Task WriteAsync(RowBatch batch, CancellationToken cancellationToken = default)
@@ -1129,8 +1205,23 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             try
             {
+                // If the session reserved IDENTITY values but never
+                // wrote a batch, we still need to bump the prologue's
+                // counter so the wasted reservations aren't handed out
+                // again on a future session. Open the writer in append
+                // mode — it carries forward existing state, including
+                // the IDENTITY counter, and rewrites the prologue.
+                if (_writer is null && _identityReserved)
+                {
+                    _writer = _provider.OpenAppendWriter();
+                }
+
                 if (_writer is not null)
                 {
+                    if (_initialIdentityState is not null && _identityReserved)
+                    {
+                        _writer.UpdateIdentityNextValue(_identityNextValue);
+                    }
                     _writer.FinalizeWriter();
                     _writer.Dispose();
                     _writer = null;
