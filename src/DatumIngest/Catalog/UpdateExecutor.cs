@@ -128,10 +128,25 @@ internal static class UpdateExecutor
                         ColumnInfo target = schema.Columns[columnIndex];
                         DataValue coerced = CoerceForUpdate(
                             raw, sourceArena, workArena, target, update.TableName);
+
+                        // No-op detection: when the new value matches the
+                        // existing cell, drop it from the per-row map.
+                        // Catches `SET col = col`, idempotent updates
+                        // (`SET status = 'pending' WHERE status = 'pending'`),
+                        // and partial-row matches in multi-column SETs.
+                        // DataValue.Equals returns false for cross-store
+                        // non-inline values, so this is conservative —
+                        // sidecar-pass-through above keeps wide-string
+                        // value-copies on the same sidecar pointer so
+                        // their offset+length fast path matches.
+                        if (coerced.Equals(row[columnIndex])) continue;
                         rowValues[columnIndex] = coerced;
                     }
 
-                    requests.Add(new RowUpdateRequest(liveRowIndex, rowValues));
+                    if (rowValues.Count > 0)
+                    {
+                        requests.Add(new RowUpdateRequest(liveRowIndex, rowValues));
+                    }
                 }
             }
             finally
@@ -352,8 +367,21 @@ internal static class UpdateExecutor
                             ColumnInfo target = targetSchema.Columns[columnIndex];
                             DataValue coerced = CoerceForUpdate(
                                 raw, targetArena, workArena, target, update.TableName);
-                            // Last-match-wins: every match overwrites prior values for the same column.
-                            rowValues[columnIndex] = coerced;
+
+                            // Last-match-wins with no-op detection: if the
+                            // final value matches the existing cell, drop
+                            // any prior accumulated entry for this column
+                            // (an earlier source-row may have set it to a
+                            // different value, but a later match toggles
+                            // back to identity → still a no-op).
+                            if (coerced.Equals(targetRow[columnIndex]))
+                            {
+                                rowValues.Remove(columnIndex);
+                            }
+                            else
+                            {
+                                rowValues[columnIndex] = coerced;
+                            }
                         }
                     }
                 }
@@ -372,8 +400,16 @@ internal static class UpdateExecutor
         List<RowUpdateRequest> requests = new(matched.Count);
         foreach ((long liveIdx, Dictionary<int, DataValue> values) in matched)
         {
-            requests.Add(new RowUpdateRequest(liveIdx, values));
+            // Drop matched rows whose final SET evaluation equalled the
+            // existing cell on every column — see no-op detection in the
+            // scan loop above.
+            if (values.Count > 0)
+            {
+                requests.Add(new RowUpdateRequest(liveIdx, values));
+            }
         }
+
+        if (requests.Count == 0) return;
 
         provider.UpdateRows(requests, workArena);
     }
@@ -402,6 +438,20 @@ internal static class UpdateExecutor
                     "produced a null value.");
             }
             return DataValue.Null(target.Kind);
+        }
+
+        // Fast path: source already has the right kind and is either
+        // self-contained (inline) or sidecar-backed. Pass through without
+        // a CLR round-trip + LiteralCoercion re-encode. Critical for
+        // value-copy SET on wide-string / byte-array columns: the encoder
+        // recognises the IsInSidecar pointer and emits a slot referencing
+        // the original sidecar bytes — no duplicate is appended to
+        // .datum-blob. Arena-backed source values are deliberately
+        // excluded because the scan's per-batch arena disposes after the
+        // batch loop; passing one through would dangle into UpdateRows.
+        if (source.Kind == target.Kind && (source.IsInSidecar || source.IsInline))
+        {
+            return source;
         }
 
         object scalar = source.Kind switch
