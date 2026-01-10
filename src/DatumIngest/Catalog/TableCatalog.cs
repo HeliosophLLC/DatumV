@@ -475,6 +475,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         DatumFileWriterV2.CreateEmpty(
             targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices);
 
+        // Create the on-disk PK index sidecar when the table has a
+        // single-column PK (PR10h scope). Composite PKs continue to use
+        // InsertExecutor's scan-based PK check until the encoder lands.
+        // Dispose explicitly so the file handle is released before the
+        // provider's TryOpenPrimaryKeyIndex re-opens it below.
+        if (schema.PrimaryKeyColumnIndices.Count == 1)
+        {
+            string pkIndexPath = Catalog.Providers.DatumFileTableProviderV2.GetPrimaryKeyIndexPath(targetPath);
+            DataKind pkKind = schema.Columns[schema.PrimaryKeyColumnIndices[0]].Kind;
+            Indexing.BTree.Mutable.MutableBPlusTree pkTree =
+                Indexing.BTree.Mutable.MutableBPlusTree.Create(pkIndexPath, pkKind);
+            pkTree.Dispose();
+        }
+
         Add(new TableDescriptor(create.TableName, targetPath));
 
         // Record in catalog json. Store the path relative to the
@@ -518,6 +532,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-blob"));
             TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-index"));
             TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-manifest"));
+            TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-pkindex"));
 
             _persistentTableEntries.Remove(drop.TableName);
             _catalogStore?.Save(_udfs, _procedures);

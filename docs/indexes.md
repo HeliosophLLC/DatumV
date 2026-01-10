@@ -2,7 +2,9 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest can build `.datum-index` sidecar files that accelerate queries by enabling chunk-level pruning without reading source data. Any provider and format can benefit — unlike Parquet's built-in row group statistics, source indexes are format-independent and support bloom filters, sorted value indexes, and cached schema inference.
+DatumIngest builds `.datum-index` sidecar files that accelerate queries by enabling chunk-level pruning without reading source data. Any provider and format can benefit — unlike Parquet's built-in row group statistics, source indexes are format-independent and support bloom filters, B+Tree indexes, bitmap indexes, and cached schema inference.
+
+A separate `.datum-pkindex` sidecar holds a maintained mutable B+Tree backing a table's `PRIMARY KEY` constraint. See [Mutable B+Tree (PRIMARY KEY index)](#mutable-btree-primary-key-index) at the end of this page.
 
 ## Binary format
 
@@ -101,7 +103,11 @@ Specify columns at index build time:
 datum-ingest index --source "csv:data=./data.csv" --bloom-columns "id,category"
 ```
 
-## Sorted value indexes
+## Sorted value indexes (legacy)
+
+Sorted value indexes are a legacy `.datum-index` section. New index builds emit B+Tree indexes instead — sorted indexes can't be incrementally maintained, and B+Tree covers the same point and range query surface. Existing `.datum-index` files containing sorted-index sections still load and serve queries; the on-disk format is preserved for backward compatibility but no current writer emits new sorted-index sections.
+
+The remainder of this section documents the on-disk format for read-side compatibility.
 
 Sorted value indexes store every distinct value in a column alongside its chunk index and row offset, sorted for binary search. They support:
 
@@ -545,13 +551,24 @@ When a session-owned temp table is populated via `CREATE TEMP TABLE AS SELECT` o
 
 Auto-indexing uses `autoIndexColumns: true`, which selects columns for sorted indexes based on compact type heuristics (the same logic used by the CLI `--with-index` flag). Bloom filters are not enabled by default for temp tables to minimize I/O overhead.
 
-For tables mutated after initial population (`UPDATE`, `DELETE`, `ALTER TABLE ADD COLUMN`), the index becomes stale. Use `ANALYZE` to rebuild:
+When a `.datum` file is mutated via `INSERT` / `DELETE` / `ALTER TABLE ADD COLUMN` / `ALTER TABLE DROP COLUMN`, the `.datum-index` sidecar's stored fingerprint no longer matches the data file's fingerprint. The provider detects the mismatch at open time and discards the stale index — queries fall back to scan-based execution until the index is rebuilt by re-running the indexer.
 
-```sql
-CREATE TEMP TABLE features AS SELECT * FROM raw_data;
-ALTER TABLE features ADD COLUMN risk FLOAT64 DEFAULT 0.0;
-UPDATE features SET risk = 0.9 WHERE score > 0.8;
-ANALYZE features   -- rebuilds index and manifest
-```
+## Mutable B+Tree (PRIMARY KEY index)
 
-See [SQL Reference — ANALYZE](sql/ddl-dml.md#analyze) for details.
+When a table has a single-column `PRIMARY KEY`, the catalog maintains a separate `.datum-pkindex` sidecar — a mutable B+Tree updated on every `INSERT` rather than rebuilt on mutation. Distinct from the bulk-loaded B+Tree sections in `.datum-index`:
+
+| Property | `.datum-index` B+Tree | `.datum-pkindex` |
+|----------|----------------------|------------------|
+| Build | Bulk load on `index` build pass | Created at `CREATE TABLE`, maintained on every `INSERT` |
+| Leaf compression | Zstd | Uncompressed |
+| Crash safety | Whole-file fingerprint; rebuild on mismatch | Dual-slot CRC32 header; torn writes recover to previous commit |
+| Allocation | Bottom-up bulk pack | Bump-only (free-list reserved for future) |
+| Lifetime | Invalidated on data mutation | Updated atomically with each `INSERT` commit |
+| Query surface | Point + range + chunk pruning | Point lookup only (PK uniqueness check) |
+| Composite keys | Yes | Single column only |
+
+The PK index is owned by the provider, not the indexer. `CREATE TABLE` with a single-column PK creates the file via `MutableBPlusTree.Create`; `DatumFileTableProviderV2` opens it at provider construction; each `INSERT` extracts PK keys at `WriteAsync` and flushes them into the tree at `CommitAsync` after the data commit succeeds. `DROP TABLE` deletes it alongside the other sidecars.
+
+`InsertExecutor`'s PK uniqueness check probes the tree directly when the provider exposes one, turning per-INSERT enforcement from `O(table_size)` (preload all existing PK values into a `HashSet`) into `O(insert_size × log table_size)` (per-row tree probe).
+
+See [.datum format — `.datum-pkindex`](datum-format.md#optional-sidecar-datum-pkindex) for the on-disk layout.

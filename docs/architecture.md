@@ -93,10 +93,10 @@ DatumIngest/
     DatumIngest/             # Core library
       Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo, SourceSchema
       Parsing/                    # SQL tokenizer and parser (Superpower)
-      Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet)
+      Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet, .datum), DDL/DML executors, IPrimaryKeyLookup
       Execution/                  # Query planner, operators, expression evaluator
       Functions/                  # Scalar and table-valued functions
-      Indexing/                   # Source indexes, bloom filters, sorted indexes, B+Tree indexes, binary I/O
+      Indexing/                   # Source indexes, bloom filters, B+Tree indexes (bulk + mutable PK), bitmap indexes, binary I/O
       Manifest/                   # Manifest model, serialization, schema matching
       Statistics/                 # Column statistics with pluggable accumulators
       Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest

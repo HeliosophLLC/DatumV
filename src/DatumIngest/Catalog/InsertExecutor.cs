@@ -525,34 +525,58 @@ internal static class InsertExecutor
         OmittedFill[] OmittedFills);
 
     /// <summary>
-    /// Walks the target table's existing rows once, captures the live
-    /// PRIMARY KEY values, and rejects per-row INSERT candidates whose
-    /// PK either collides with an existing row, collides with another
-    /// row in the same batch, or contains a NULL in any PK column.
-    /// Lazily constructed only when the target schema declares a PK;
-    /// no overhead on PK-less tables.
+    /// Rejects per-row INSERT candidates whose PRIMARY KEY collides with an
+    /// existing row, collides with another row in the same batch, or
+    /// contains a NULL in any PK column.
     /// </summary>
+    /// <remarks>
+    /// Two backing modes:
+    /// <list type="bullet">
+    /// <item><b>Lookup-backed (PR10h, single-column PK)</b> — when the
+    /// provider exposes a non-null <see cref="IPrimaryKeyLookup"/>, the
+    /// checker probes the on-disk B+Tree per row instead of pre-scanning.
+    /// O(insert size × log table size) instead of O(table size).</item>
+    /// <item><b>Scan-backed (PR10f fallback)</b> — for composite PK or
+    /// providers without an on-disk index (TEMP / InMemory), pre-loads
+    /// every existing row's PK into a <c>HashSet&lt;string&gt;</c>.</item>
+    /// </list>
+    /// Both modes share the same within-batch dedup HashSet so a duplicate
+    /// inside the same INSERT is caught without consulting the index.
+    /// </remarks>
     private sealed class PrimaryKeyChecker
     {
         private readonly IReadOnlyList<int> _pkIndices;
         private readonly HashSet<string> _seenKeys;
+        private readonly IPrimaryKeyLookup? _lookup;
 
-        private PrimaryKeyChecker(IReadOnlyList<int> pkIndices, HashSet<string> seenKeys)
+        private PrimaryKeyChecker(
+            IReadOnlyList<int> pkIndices,
+            HashSet<string> seenKeys,
+            IPrimaryKeyLookup? lookup)
         {
             _pkIndices = pkIndices;
             _seenKeys = seenKeys;
+            _lookup = lookup;
         }
 
         /// <summary>
         /// Returns <see langword="null"/> when the target schema has no
-        /// PRIMARY KEY; otherwise builds a checker pre-loaded with the
-        /// existing row keys via a full scan.
+        /// PRIMARY KEY. For a single-column PK with a provider-supplied
+        /// <see cref="IPrimaryKeyLookup"/>, returns a lookup-backed checker
+        /// (no pre-scan). Otherwise falls back to PR10f's scan + HashSet.
         /// </summary>
         public static async Task<PrimaryKeyChecker?> CreateAsync(
             ITableProvider provider, Schema targetSchema)
         {
             IReadOnlyList<int> pkIndices = targetSchema.PrimaryKeyColumnIndices;
             if (pkIndices.Count == 0) return null;
+
+            // Single-column PK + provider-supplied on-disk index → lookup-backed checker.
+            // Composite PK falls back to scan path (encoder is a follow-up).
+            if (pkIndices.Count == 1 && provider.GetPrimaryKeyLookup() is { } lookup)
+            {
+                return new PrimaryKeyChecker(pkIndices, seenKeys: new HashSet<string>(), lookup: lookup);
+            }
 
             HashSet<string> seen = new();
             await foreach (RowBatch batch in provider.ScanAsync(
@@ -575,7 +599,7 @@ internal static class InsertExecutor
                     batch.Dispose();
                 }
             }
-            return new PrimaryKeyChecker(pkIndices, seen);
+            return new PrimaryKeyChecker(pkIndices, seen, lookup: null);
         }
 
         /// <summary>
@@ -587,11 +611,26 @@ internal static class InsertExecutor
         /// </summary>
         public void EnsureUnique(DataValue[] targetRow, IReadOnlyList<ColumnInfo> columns)
         {
+            // NULL-in-PK check + within-batch dedup is shared between
+            // lookup and scan paths.
             string key = BuildKeyFromArray(targetRow, _pkIndices, columns);
             if (!_seenKeys.Add(key))
             {
                 throw new PrimaryKeyViolationException(
                     BuildDuplicateMessage(_pkIndices, columns, targetRow));
+            }
+
+            // Lookup-backed: probe the on-disk index for an existing row
+            // with this key. The lookup queries live tree state; no
+            // staleness vs the scan-based pre-load.
+            if (_lookup is not null)
+            {
+                DataValue pkValue = targetRow[_pkIndices[0]];
+                if (_lookup.TryFind(pkValue, out _))
+                {
+                    throw new PrimaryKeyViolationException(
+                        BuildDuplicateMessage(_pkIndices, columns, targetRow));
+                }
             }
         }
 

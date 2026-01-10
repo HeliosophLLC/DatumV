@@ -6,10 +6,11 @@ The `.datum` format is a binary columnar store designed for high-throughput ML/E
 
 The current on-disk format version is **`4`**. v4 introduces a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag. These hooks back: crash-safe append (tail-flip-as-commit + torn-tail recovery), soft-drop column, soft-delete rows (chapter-level tombstone bitmaps with copy-on-write per commit), add column (all-null backfill), and external pages in companion `.datum-pack` files. Catalog-level `ALTER TABLE` / `INSERT` / `DELETE` route to these primitives through `TableCatalog`.
 
-Two optional companion sidecars extend the base format:
+Three optional companion sidecars extend the base format:
 
-- A companion [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics for query acceleration. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) variant provides memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
+- A companion [`.datum-index`](indexes.md) sidecar carries bloom filters, B+Tree indexes, bitmap indexes, and chunk-level statistics for query acceleration. (Older files may also contain sorted value indexes; readers still consume them, but new builds emit B+Tree only.)
 - A companion [`.datum-blob`](#optional-sidecar-datum-blob) sidecar carries non-inline payloads (long strings, byte arrays, images, vectors, structs) addressed by 64-bit offsets so the data file itself stays compact. The sidecar is created lazily — only `.datum` files that actually carry non-inline payload produce one.
+- A companion [`.datum-pkindex`](#optional-sidecar-datum-pkindex) sidecar holds a mutable B+Tree backing the table's `PRIMARY KEY` constraint. Created at `CREATE TABLE` time when a single-column PK is declared; maintained on every `INSERT`. Distinct from `.datum-index`: the PK index is updated incrementally (no rebuild on mutation), uses a dual-slot crash-safe header, and supports point lookup only.
 
 ## Design goals
 
@@ -156,9 +157,26 @@ int32  : chapterTombstoneCount       (zero until first soft-delete; otherwise eq
 int64[chapterTombstoneCount] : tombstoneOffsets
                                      (one per chapter index; -1 = no tombstones, otherwise the
                                       absolute file offset of an 8 KiB chapter tombstone bitmap)
+
+int32  : columnDefaultCount          (number of columns carrying a SQL DEFAULT literal)
+For each column-default entry:
+  uint16 : columnIndex               (footer column index)
+  string : sqlFragment               (length-prefixed UTF-8; SQL literal text re-parsed at read time
+                                      via `SqlParser.Parse("SELECT <fragment>")`)
+
+int16  : identityColumnIndex         (-1 = no IDENTITY column)
+int64  : identitySeed                (starting value)
+int64  : identityStep                (per-row increment; non-zero, may be negative)
+int64  : identityNextValue           (running counter; updated on every commit that reserved values)
+
+byte   : primaryKeyColumnCount       (0 = no PK)
+uint16[primaryKeyColumnCount] : primaryKeyColumnIndices
+                                     (footer column indices in PK declaration order)
 ```
 
 When `chapterTombstoneCount` is non-zero, it equals the file's actual chapter count (`⌈totalRowCount / (PagesPerChapter × pageSize)⌉`). The prologue's chapter tombstone offsets describe the file as a whole — tombstones apply to logical rows, not per-column-page, so a single bitmap per chapter index covers every column's view of that row range.
+
+`columnDefaults`, the `IDENTITY` block, and `primaryKeyColumnIndices` make a `.datum` file self-describing for SQL DDL state — opening the file is enough to reconstruct the table's `DEFAULT` literals, `IDENTITY` spec + counter, and `PRIMARY KEY` columns without consulting `.datum-catalog.json`. Indices stay valid across `ADD COLUMN` and `DROP COLUMN` (drop is soft-tombstone, not index-shifting).
 
 ### Per-column block
 
@@ -325,6 +343,87 @@ The codec byte is reserved for future use; the writer always emits `Raw` today:
 | `ZstdShuffle` | 2 | Reserved — byte-shuffle pre-filter + Zstd. Intended for Vector/Matrix/Tensor where shuffle dramatically improves compression. |
 
 Per-blob codec means each value in a column can choose its own compression independently. The `Image` column might mix already-compressed JPEGs (codec=Raw) with uncompressed bitmaps that benefit from Zstd; the writer picks per blob.
+
+## Optional sidecar (`.datum-pkindex`)
+
+A `.datum-pkindex` companion file is a **mutable B+Tree** backing the table's `PRIMARY KEY` constraint when the PK is a single column. Distinct from `.datum-index` (bulk-loaded acceleration structures, invalidated on mutation): the PK index is updated incrementally on every `INSERT` and never goes stale. The same 8 KiB page format is used, but leaves are uncompressed (splits stay simple) and the file carries its own crash-safe header.
+
+The sidecar is created at `CREATE TABLE` time when a single-column PK is declared; tables with no PK or a composite PK don't produce one (composite PK uses a scan-based uniqueness check at the executor layer).
+
+### File layout
+
+```
+[ Header Slot A : 256 bytes ]   offset 0
+[ Header Slot B : 256 bytes ]   offset 256
+[ Page 0       : 8 KiB     ]   offset 512
+[ Page 1       : 8 KiB     ]
+   ...
+```
+
+Each commit writes pages to fresh page ids (copy-on-write), then flips the inactive header slot to point at the new root. A torn write past the page region but before the new header lands leaves the previous slot's commit gen highest — readers pick that slot and see the previous tree.
+
+### Header slot (256 bytes)
+
+| Offset | Size | Field | Type | Description |
+|--------|------|-------|------|-------------|
+| 0 | 4 | Magic | bytes | `PKBT` |
+| 4 | 4 | Version | uint32 | `1` |
+| 8 | 8 | CommitGen | int64 | Monotonic counter, incremented per commit |
+| 16 | 4 | RootPageId | uint32 | `0xFFFFFFFF` if tree is empty |
+| 20 | 4 | FreeListHead | uint32 | `0xFFFFFFFF` (free-list reuse not yet emitted; bump-only allocation) |
+| 24 | 4 | PageCount | uint32 | Total pages allocated in the file |
+| 28 | 2 | TreeHeight | uint16 | 0 for empty, 1 if root is a leaf, etc. |
+| 30 | 8 | EntryCount | int64 | Total key/pointer pairs across leaves |
+| 38 | 2 | KeyDataKind | uint16 | `DataKind` of the indexed column |
+| 40 | 212 | Reserved | zero | |
+| 252 | 4 | Crc32 | uint32 | CRC32 over bytes [0..251] |
+
+Reader open: read both slots, validate magic + version + CRC on each, pick the slot with the higher commit gen. If both slots fail validation the file is rejected as corrupt.
+
+### Page layouts
+
+The common header (4 bytes) prefixes every page:
+
+```
+[ PageType : 1 byte ]  (0=Free, 1=Internal, 2=Leaf)
+[ KeyCount : 2 bytes ]
+[ Reserved : 1 byte  ]
+```
+
+**Leaf page** (8 KiB, uncompressed):
+
+```
+[ Common header     : 4 bytes  ]
+[ PrevLeaf          : 4 bytes  ]   (uint32, 0xFFFFFFFF if first)
+[ NextLeaf          : 4 bytes  ]   (uint32, 0xFFFFFFFF if last)
+[ PayloadLength     : 4 bytes  ]   (int32, used bytes in entries region)
+[ Entries           : variable ]   (DataValue + int32 chunkIndex + int64 rowOffset, repeated)
+[ Zero padding to 8 KiB        ]
+```
+
+**Internal page** (8 KiB):
+
+```
+[ Common header        : 4 bytes ]
+[ Separator keys       : variable ]   (DataValue, KeyCount entries)
+[ Child page ids       : (KeyCount + 1) × 4 bytes ]
+[ Zero padding to 8 KiB ]
+```
+
+**Free page** (8 KiB):
+
+```
+[ PageType=0 : 1 byte ]
+[ Padding    : 3 bytes ]
+[ NextFreeId : 4 bytes ]   (uint32 linked-list pointer; reserved for future free-list reuse)
+[ Zero padding to 8 KiB ]
+```
+
+### Insert and commit
+
+Insert walks root→leaf recording the path, builds the merged entry list, then COW-rewrites every page on the path with fresh page ids. If a leaf would overflow it splits and the separator key bubbles up; recursive internal splits can grow a new root. After all new pages are written and fsync'd, the inactive header slot is rewritten with the new root id + CommitGen+1 + CRC and fsync'd a second time. Old pages (the path that was just rewritten) are leaked on disk pending a future free-list reuse pass.
+
+The PK index is single-writer per data path. The provider's mutation lock (the same one that gates `INSERT`/`DELETE`/`ALTER`) serialises all access; the file is opened with `FileShare.None`.
 
 ## Reading flow
 

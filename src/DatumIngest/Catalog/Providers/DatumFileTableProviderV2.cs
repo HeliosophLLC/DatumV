@@ -6,6 +6,7 @@ using DatumIngest.DatumFile.V2;
 using DatumIngest.DatumFile.V2.Decoding;
 using DatumIngest.Execution;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.BTree.Mutable;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
@@ -114,13 +115,34 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private readonly SemaphoreSlim _mutationLock = new(1, 1);
 
     /// <summary>
+    /// Mutable B+Tree backing PRIMARY KEY uniqueness checks, when the table
+    /// has a single-column PK and the <c>.datum-pkindex</c> sidecar exists
+    /// alongside the data file. <see langword="null"/> for tables with no PK,
+    /// composite PKs (PR10h scope: single-col only), or files predating PR10h.
+    /// Opened once at provider construction; updated by
+    /// <see cref="DatumAppendSession"/> on commit; closed at provider
+    /// dispose. Single-writer through <see cref="_mutationLock"/>.
+    /// </summary>
+    private MutableBPlusTree? _pkIndex;
+
+    /// <summary>
+    /// Schema column index of the single-column PK when <see cref="_pkIndex"/>
+    /// is non-null. -1 otherwise. Captured at provider construction; the
+    /// schema-build pipeline guarantees it doesn't move (ALTER DROP COLUMN of
+    /// a PK column is rejected by the catalog).
+    /// </summary>
+    private int _pkColumnIndex = -1;
+
+    /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
     /// the v2 <c>.datum</c> file, parses its footer, and (when the file
     /// declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>)
     /// memory-maps the companion <c>.datum-blob</c> for sidecar reads.
     /// Auto-discovers <c>.datum-manifest</c> and <c>.datum-index</c>
     /// sidecars alongside the source so <see cref="GetManifest"/> /
-    /// <see cref="GetSourceIndex"/> return live data.
+    /// <see cref="GetSourceIndex"/> return live data. Also opens the
+    /// <c>.datum-pkindex</c> sidecar when the schema has a single-column
+    /// PK and the file exists (created by <c>CREATE TABLE</c> in PR10h+).
     /// </summary>
     public DatumFileTableProviderV2(TableDescriptor descriptor, Pool pool)
     {
@@ -129,7 +151,33 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _snapshot = OpenSnapshot(descriptor.FilePath);
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
+        TryOpenPrimaryKeyIndex();
     }
+
+    /// <summary>
+    /// Opens the <c>.datum-pkindex</c> sidecar when the schema has a
+    /// single-column PK and the file exists. No-op for composite PKs
+    /// (PR10h scope) or when the sidecar is missing — those tables fall
+    /// back to <c>InsertExecutor</c>'s scan-based PK check.
+    /// </summary>
+    private void TryOpenPrimaryKeyIndex()
+    {
+        IReadOnlyList<int> pkIndices = _snapshot.Schema.PrimaryKeyColumnIndices;
+        if (pkIndices.Count != 1) return;
+
+        string pkIndexPath = GetPrimaryKeyIndexPath(_descriptor.FilePath);
+        if (!File.Exists(pkIndexPath)) return;
+
+        _pkIndex = MutableBPlusTree.Open(pkIndexPath);
+        _pkColumnIndex = pkIndices[0];
+    }
+
+    /// <summary>
+    /// Returns the <c>.datum-pkindex</c> path companion for the given
+    /// <c>.datum</c> file path.
+    /// </summary>
+    internal static string GetPrimaryKeyIndexPath(string datumPath) =>
+        Path.ChangeExtension(datumPath, ".datum-pkindex");
 
     /// <summary>
     /// Opens a fresh <see cref="DatumFileReaderV2"/> + sidecar for
@@ -614,6 +662,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public void Dispose()
     {
         _mappedIndexSet?.Dispose();
+        _pkIndex?.Dispose();
+        _pkIndex = null;
 
         // Dispose whichever snapshot is current; in-flight scans hold
         // their own refs so they remain safe until they finish.
@@ -633,6 +683,10 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         }
         toDispose.Dispose();
     }
+
+    /// <inheritdoc/>
+    public IPrimaryKeyLookup? GetPrimaryKeyLookup() =>
+        _pkIndex is null ? null : new MutableBPlusTreePrimaryKeyLookup(_pkIndex);
 
     // ──────────────────── Helpers ────────────────────
 
@@ -1157,6 +1211,14 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         private long _identityNextValue;
         private bool _identityReserved;
 
+        // PK keys queued for index commit. Populated per WriteAsync row
+        // when the parent provider has an open PK index; flushed into
+        // the tree on CommitAsync (after the data commit succeeds).
+        // null when there's no on-disk PK index — InsertExecutor's
+        // scan-based fallback path handles uniqueness for those tables.
+        private readonly List<DataValue>? _pendingPkKeys;
+        private readonly int _pkColumnIndex;
+
         public DatumAppendSession(DatumFileTableProviderV2 provider)
         {
             _provider = provider;
@@ -1177,6 +1239,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             finally
             {
                 provider.ReleaseSnapshot(snapshot);
+            }
+
+            // PK index state. Captured once; the column index can't move
+            // because ALTER DROP COLUMN of a PK column is rejected.
+            if (provider._pkIndex is not null)
+            {
+                _pendingPkKeys = new List<DataValue>();
+                _pkColumnIndex = provider._pkColumnIndex;
+            }
+            else
+            {
+                _pkColumnIndex = -1;
             }
         }
 
@@ -1232,6 +1306,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             ValidateBatchSchema(batch);
 
+            // Capture PK keys before WriteRowBatch streams to the writer —
+            // the row reads need to happen against the live batch values,
+            // and the batch may be released back to the pool after commit.
+            // Stabilise each value into a fresh DataValue so the queued
+            // key survives any arena lifecycle the source batch had.
+            if (_pendingPkKeys is not null)
+            {
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    Row row = batch[r];
+                    DataValue key = row[_pkColumnIndex];
+                    _pendingPkKeys.Add(key);
+                }
+            }
+
             _writer ??= _provider.OpenAppendWriter();
             _writer.WriteRowBatch(batch);
             _anyWrites = true;
@@ -1273,6 +1362,28 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     // appended rows spilled non-inline payloads.
                     _provider.RebuildSnapshotAfterMutation(sidecarMayHaveGrown: _anyWrites);
                 }
+
+                // Flush queued PK keys into the on-disk B+Tree. Done after
+                // the .datum file commit succeeds so a writer crash between
+                // the two leaves the index either consistent (no data, no
+                // index update) or slightly stale (rows present, missing
+                // from index). The latter only widens the window for a
+                // duplicate to slip past on the next INSERT — caught at
+                // REINDEX (PR12) until we add a 2-phase commit.
+                if (_pendingPkKeys is not null && _provider._pkIndex is not null)
+                {
+                    foreach (DataValue key in _pendingPkKeys)
+                    {
+                        // ChunkIndex / RowOffset are placeholder zeros —
+                        // PR10h's lookup is uniqueness-only; the actual
+                        // (chunk, row) addressing for "find me the row"
+                        // is a follow-up PR. Storing 0/0 keeps the entry
+                        // shape compatible.
+                        _provider._pkIndex.Insert(new ValueIndexEntry(key, ChunkIndex: 0, RowOffsetInChunk: 0L));
+                    }
+                    _pendingPkKeys.Clear();
+                }
+
                 _committed = true;
             }
             catch

@@ -49,9 +49,10 @@ After tables have been registered and expanded, call `catalog.DiscoverSidecars()
 
 | Sidecar | Naming Convention | Contents |
 |---------|-------------------|----------|
-| `.datum-index` | `{source-file}.datum-index` | Binary source index (chunk statistics, bloom filters, sorted indexes, B+Tree indexes) |
+| `.datum-index` | `{source-file}.datum-index` | Binary source index (chunk statistics, bloom filters, B+Tree indexes, bitmap indexes) |
 | `.datum-manifest` | `{source-file}.datum-manifest` | JSON feature manifest (per-column statistics, interactions) |
 | `.datum-schema` | `{source-file}.datum-schema` | JSON schema cache (column names, data kinds, nullability) |
+| `.datum-pkindex` | `{source-file}.datum-pkindex` | Mutable B+Tree backing a `PRIMARY KEY` constraint. Auto-managed by `DatumFileTableProviderV2` (created at `CREATE TABLE`, maintained on every `INSERT`); not consumed by `DiscoverSidecars`. |
 
 ```csharp
 TableCatalog catalog = new();

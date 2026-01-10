@@ -194,4 +194,19 @@ public interface ITableProvider : IDisposable
     void DeleteRows(IReadOnlyList<long> rowIndices) =>
         throw new NotSupportedException(
             $"Table '{Name}' does not support DeleteRows (CanDeleteRows is false).");
+
+    /// <summary>
+    /// Returns an on-disk PRIMARY KEY lookup if the provider maintains one,
+    /// or <see langword="null"/> if the executor should fall back to the
+    /// scan-based PK uniqueness check (PR10f's HashSet path).
+    /// </summary>
+    /// <remarks>
+    /// Default implementation returns <see langword="null"/>. Providers that
+    /// back single-column PRIMARY KEYs with the mutable B+Tree
+    /// (<c>.datum-pkindex</c>) override to expose the lookup so
+    /// <c>InsertExecutor</c> can probe in O(log table-size) instead of
+    /// pre-loading every existing row into a <c>HashSet</c>. Composite PKs
+    /// stay on the scan path until a follow-up extends the encoder.
+    /// </remarks>
+    IPrimaryKeyLookup? GetPrimaryKeyLookup() => null;
 }
