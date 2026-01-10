@@ -6,10 +6,10 @@ namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
 /// PR11a tests for plan-time validation of <c>UPDATE</c> statements.
-/// The executor itself is a stub that throws
-/// <see cref="NotSupportedException"/> after validation passes (the
-/// rewrite path lands in PR11b/c). These tests pin the validation
-/// surface so the executor can be slotted in without API churn.
+/// PR11c shipped the executor, so successful-validation tests here only
+/// assert that no exception is thrown; deeper end-to-end coverage lives
+/// in <c>UpdateExecutorTests</c>. <c>UPDATE … FROM</c> still goes through
+/// the PR11d-pending rejection path.
 /// </summary>
 public sealed class UpdateValidationTests
 {
@@ -79,10 +79,11 @@ public sealed class UpdateValidationTests
         catalog.Plan(
             "CREATE TEMP TABLE t (a Int32, b Int32, c String, PRIMARY KEY (a, b))");
 
-        // Updating a non-PK column is fine (validation passes; stub throws NotSupportedException).
-        Assert.Throws<NotSupportedException>(() => catalog.Plan("UPDATE t SET c = 'x'"));
+        // Updating a non-PK column passes validation (and executes —
+        // empty table, so it's a no-op, but it must not throw).
+        catalog.Plan("UPDATE t SET c = 'x'");
 
-        // Updating either PK component is rejected.
+        // Updating either PK component is rejected at plan time.
         Assert.Throws<QueryPlanException>(() => catalog.Plan("UPDATE t SET a = 1"));
         Assert.Throws<QueryPlanException>(() => catalog.Plan("UPDATE t SET b = 2"));
     }
@@ -93,34 +94,20 @@ public sealed class UpdateValidationTests
         using TableCatalog catalog = NewCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String, score Float32)");
 
-        // Validation passes; executor stub throws NotSupportedException.
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(
-            () => catalog.Plan("UPDATE t SET name = 'a', score = 1.0"));
-        Assert.Contains("PR11b", ex.Message);
+        // No exception — validation passes, executor runs (empty table, no-op).
+        catalog.Plan("UPDATE t SET name = 'a', score = 1.0");
     }
 
     [Fact]
-    public void Update_AfterValidation_StubThrowsWithPr11bHint()
-    {
-        using TableCatalog catalog = NewCatalog();
-        catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
-
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(
-            () => catalog.Plan("UPDATE t SET name = 'a' WHERE id = 1"));
-        Assert.Contains("PR11b", ex.Message);
-    }
-
-    [Fact]
-    public void Update_WithFromClause_ValidationPasses()
+    public void Update_WithFromClause_RejectedAsPr11d()
     {
         using TableCatalog catalog = NewCatalog();
         catalog.Plan("CREATE TEMP TABLE features (id Int32, score Float32)");
         catalog.Plan("CREATE TEMP TABLE raw (id Int32, value Float32)");
 
-        // Validation should pass through to the executor stub.
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(
+        QueryPlanException ex = Assert.Throws<QueryPlanException>(
             () => catalog.Plan(
                 "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id"));
-        Assert.Contains("PR11b", ex.Message);
+        Assert.Contains("PR11d", ex.Message);
     }
 }

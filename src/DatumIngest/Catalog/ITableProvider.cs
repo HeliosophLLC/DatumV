@@ -117,6 +117,14 @@ public interface ITableProvider : IDisposable
     bool CanDeleteRows => false;
 
     /// <summary>
+    /// True when this provider supports per-cell row updates via
+    /// <see cref="UpdateRows"/>. Default <see langword="false"/>;
+    /// providers that opt in (.datum file via page-COW rewrite, in-memory)
+    /// override.
+    /// </summary>
+    bool CanUpdateRows => false;
+
+    /// <summary>
     /// Adds a new column to the table. The new column is populated with
     /// nulls for every existing row and so must be nullable.
     /// </summary>
@@ -194,6 +202,33 @@ public interface ITableProvider : IDisposable
     void DeleteRows(IReadOnlyList<long> rowIndices) =>
         throw new NotSupportedException(
             $"Table '{Name}' does not support DeleteRows (CanDeleteRows is false).");
+
+    /// <summary>
+    /// Replaces specific cell values in specific rows. Each
+    /// <see cref="RowUpdateRequest"/> names a row by its 0-based linear
+    /// index over the live row sequence (post-tombstone — the same
+    /// numbering a fresh <c>SELECT * FROM table</c> would yield) and
+    /// supplies a sparse map of column index → new value.
+    /// </summary>
+    /// <param name="requests">
+    /// Update requests. Order is irrelevant; the provider may reorder
+    /// internally (e.g. group by page for the .datum page-COW path).
+    /// Empty list is a no-op.
+    /// </param>
+    /// <param name="sourceStore">
+    /// Backing store for any non-inline <see cref="DataValue"/> in the
+    /// per-row <see cref="RowUpdateRequest.NewValues"/> maps. Pass
+    /// <see langword="null"/> when every supplied value is inline. The
+    /// store must remain valid for the duration of the call.
+    /// </param>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Providers that maintain a writable backing store override and opt
+    /// in via <see cref="CanUpdateRows"/>.
+    /// </remarks>
+    void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support UpdateRows (CanUpdateRows is false).");
 
     /// <summary>
     /// Returns an on-disk PRIMARY KEY lookup if the provider maintains one,

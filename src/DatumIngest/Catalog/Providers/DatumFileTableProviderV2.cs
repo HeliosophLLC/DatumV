@@ -1064,6 +1064,9 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public bool CanDeleteRows => true;
 
     /// <inheritdoc/>
+    public bool CanUpdateRows => true;
+
+    /// <inheritdoc/>
     public void AddColumn(ColumnInfo column)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -1141,6 +1144,123 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             DatumFileWriterV2.SoftDeleteRows(_descriptor.FilePath, rowIndices);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        if (requests.Count == 0) return;
+
+        _mutationLock.Wait();
+        try
+        {
+            // Map every request's live row index to a raw (pageIndex,
+            // rowInPage) tuple by walking the page directory once,
+            // skipping tombstoned rows. Using the current snapshot's
+            // footer + tombstone bitmaps — same numbering as the scan
+            // path emits.
+            Snapshot snap = _snapshot;
+            int[] schemaToFooter = snap.SchemaToFooterIndex;
+            FooterV2 footer = snap.Reader.Footer;
+            byte[]?[]? tombstones = snap.ChapterTombstoneBitmaps;
+            int chapterRowSpan = ChapterTombstoneBlock.MaxRowsPerChapter;
+
+            // Build live-row → (pageIndex, rowInPage) for the unique set
+            // of live indices in `requests`. Sort indices ascending so a
+            // single forward walk over the page directory resolves all
+            // of them.
+            HashSet<long> uniqueLiveIndices = new(requests.Count);
+            foreach (RowUpdateRequest req in requests) uniqueLiveIndices.Add(req.LiveRowIndex);
+            long[] sortedLive = uniqueLiveIndices.ToArray();
+            Array.Sort(sortedLive);
+
+            Dictionary<long, (int Page, int Row)> liveToRaw = new(sortedLive.Length);
+            int pageCount = footer.Columns.Count > 0 ? footer.Columns[0].Pages.Count : 0;
+            int sortedIndex = 0;
+            long liveCounter = 0;
+            long rawRow = 0;
+            for (int p = 0; p < pageCount && sortedIndex < sortedLive.Length; p++)
+            {
+                int rowsInPage = footer.Columns[0].Pages[p].RowCount;
+                for (int r = 0; r < rowsInPage; r++, rawRow++)
+                {
+                    int chapterIndex = (int)(rawRow / chapterRowSpan);
+                    int rowInChapter = (int)(rawRow - (long)chapterIndex * chapterRowSpan);
+                    bool tombstoned = tombstones is not null
+                        && chapterIndex < tombstones.Length
+                        && tombstones[chapterIndex] is byte[] bits
+                        && (bits[rowInChapter >> 3] & (1 << (rowInChapter & 7))) != 0;
+                    if (tombstoned) continue;
+
+                    while (sortedIndex < sortedLive.Length && sortedLive[sortedIndex] == liveCounter)
+                    {
+                        liveToRaw[liveCounter] = (p, r);
+                        sortedIndex++;
+                    }
+                    liveCounter++;
+                    if (sortedIndex >= sortedLive.Length) break;
+                }
+            }
+
+            if (sortedIndex < sortedLive.Length)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(requests), sortedLive[sortedIndex],
+                    $"UpdateRows: live row index {sortedLive[sortedIndex]} is out of range " +
+                    $"for table '{Name}' (table has {liveCounter} live row(s)).");
+            }
+
+            // Group requests by page; translate schema-column indices to
+            // footer-column indices using SchemaToFooterIndex (the schema
+            // skips tombstoned columns; the footer keeps them).
+            Dictionary<int, List<RowUpdate>> grouped = new();
+            foreach (RowUpdateRequest req in requests)
+            {
+                (int page, int row) = liveToRaw[req.LiveRowIndex];
+                Dictionary<int, DataValue> footerKeyedValues = new(req.NewValues.Count);
+                foreach ((int schemaColIdx, DataValue value) in req.NewValues)
+                {
+                    if (schemaColIdx < 0 || schemaColIdx >= schemaToFooter.Length)
+                    {
+                        throw new ArgumentOutOfRangeException(
+                            nameof(requests), schemaColIdx,
+                            $"UpdateRows: schema column index {schemaColIdx} out of range for " +
+                            $"table '{Name}' (schema has {schemaToFooter.Length} column(s)).");
+                    }
+                    footerKeyedValues[schemaToFooter[schemaColIdx]] = value;
+                }
+                if (!grouped.TryGetValue(page, out List<RowUpdate>? bucket))
+                {
+                    bucket = new List<RowUpdate>();
+                    grouped[page] = bucket;
+                }
+                bucket.Add(new RowUpdate(row, footerKeyedValues));
+            }
+
+            // RewritePages handles the page-COW commit (including
+            // generation bump and torn-tail recovery). Pass the
+            // conventional sidecar path; the rewriter only opens it if
+            // a VariableSlot column is touched.
+            Dictionary<int, IReadOnlyList<RowUpdate>> dispatch = new(grouped.Count);
+            foreach ((int p, List<RowUpdate> rows) in grouped)
+            {
+                dispatch[p] = rows;
+            }
+
+            string sidecarPath = Path.ChangeExtension(_descriptor.FilePath, SidecarConstants.FileExtension);
+            DatumFileWriterV2.RewritePages(
+                _descriptor.FilePath,
+                sidecarPath,
+                dispatch,
+                sourceStore);
+
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: true);
         }
         finally
         {

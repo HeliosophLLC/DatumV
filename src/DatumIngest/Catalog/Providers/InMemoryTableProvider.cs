@@ -307,6 +307,9 @@ public sealed class InMemoryTableProvider : ITableProvider
     public bool CanDeleteRows => true;
 
     /// <inheritdoc/>
+    public bool CanUpdateRows => true;
+
+    /// <inheritdoc/>
     public void AddColumn(ColumnInfo column)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -461,6 +464,94 @@ public sealed class InMemoryTableProvider : ITableProvider
         {
             _mutationLock.Release();
             throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        if (requests.Count == 0) return;
+
+        _mutationLock.Wait();
+        try
+        {
+            // Validate up-front so a partial mutation never lands.
+            foreach (RowUpdateRequest req in requests)
+            {
+                if (req.LiveRowIndex < 0 || req.LiveRowIndex >= _rows.Length)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(requests), req.LiveRowIndex,
+                        $"UpdateRows: row index {req.LiveRowIndex} out of range for table " +
+                        $"'{Name}' (row count {_rows.Length}).");
+                }
+                foreach (int columnIndex in req.NewValues.Keys)
+                {
+                    if (columnIndex < 0 || columnIndex >= _columns.Length)
+                    {
+                        throw new ArgumentOutOfRangeException(
+                            nameof(requests), columnIndex,
+                            $"UpdateRows: column index {columnIndex} out of range for table " +
+                            $"'{Name}' (column count {_columns.Length}).");
+                    }
+                }
+            }
+
+            // Apply: copy-on-write per affected row so concurrent scan
+            // iterators reading _rows pre-swap see the old values, and
+            // the swap in _rows = newRows publishes the post-update view.
+            object?[][] newRows = new object?[_rows.Length][];
+            HashSet<long> touchedRows = new(requests.Count);
+            foreach (RowUpdateRequest req in requests) touchedRows.Add(req.LiveRowIndex);
+            for (int r = 0; r < _rows.Length; r++)
+            {
+                if (touchedRows.Contains(r))
+                {
+                    object?[] copy = new object?[_rows[r].Length];
+                    Array.Copy(_rows[r], copy, _rows[r].Length);
+                    newRows[r] = copy;
+                }
+                else
+                {
+                    newRows[r] = _rows[r];
+                }
+            }
+
+            // ConvertDataValueToCell needs an Arena for resolving
+            // non-inline payloads (strings, byte arrays). UPDATE executors
+            // pass an Arena as sourceStore; if a caller hands us an
+            // IValueStore that isn't an Arena the resolution falls back
+            // to a fresh local arena (works for inline values and arena-
+            // backed values supplied via AsString(arena)/AsUInt8Array(arena)
+            // — the latter may be wrong for sidecar-resident values, but
+            // the InMemory provider isn't a sensible target for those
+            // anyway).
+            using Arena materializeArena = new();
+            Arena resolveArena = sourceStore as Arena ?? materializeArena;
+
+            foreach (RowUpdateRequest req in requests)
+            {
+                object?[] row = newRows[req.LiveRowIndex];
+                foreach ((int columnIndex, DataValue newValue) in req.NewValues)
+                {
+                    ColumnInfo column = _schema.Columns[columnIndex];
+                    if (newValue.IsNull && !column.Nullable)
+                    {
+                        throw new InvalidOperationException(
+                            $"UpdateRows: column '{column.Name}' is NOT NULL but the supplied value is null.");
+                    }
+                    row[columnIndex] = ConvertDataValueToCell(newValue, resolveArena);
+                }
+            }
+
+            _rows = newRows;
+            _overrideIndex = null;
+        }
+        finally
+        {
+            _mutationLock.Release();
         }
     }
 
