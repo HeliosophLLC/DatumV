@@ -10,11 +10,15 @@ namespace DatumIngest.Catalog;
 /// <see cref="TableCatalog.Plan(Statement)"/>.
 /// </summary>
 /// <remarks>
-/// PR11a shipped parse + plan-time validation. PR11c wires the
-/// executor: a single scan of the target with the WHERE predicate
+/// PR11a shipped parse + plan-time validation. PR11c wired the plain
+/// path: a single scan of the target with the WHERE predicate
 /// accumulates per-row SET expression results, then dispatches the
 /// page-COW rewrite via <see cref="ITableProvider.UpdateRows"/>.
-/// <c>UPDATE … FROM</c> (joins) lands in PR11d.
+/// PR11d adds <c>UPDATE … FROM &lt;single-source&gt;</c>: a Cartesian
+/// nested-loop join (target × source) drives the same accumulator,
+/// with last-match-wins for multiple source rows matching the same
+/// target. JOINs inside the <c>FROM</c> clause are rejected pending a
+/// follow-up.
 /// </remarks>
 internal static class UpdateExecutor
 {
@@ -25,14 +29,23 @@ internal static class UpdateExecutor
 
         ITableProvider provider = Validate(catalog, update);
 
-        if (update.From is not null || update.Joins is { Count: > 0 })
+        if (update.Joins is { Count: > 0 })
         {
             throw new QueryPlanException(
-                $"UPDATE '{update.TableName}': UPDATE … FROM / JOIN is PR11d; " +
-                "this build only supports plain UPDATE.");
+                $"UPDATE '{update.TableName}': UPDATE … FROM with JOIN inside the " +
+                "FROM clause is pending a follow-up. The current build accepts a " +
+                "single source table; encode multi-table joins by collapsing them " +
+                "into the WHERE clause when possible.");
         }
 
-        ExecuteAsync(catalog, provider, update).GetAwaiter().GetResult();
+        if (update.From is not null)
+        {
+            ExecuteWithFromAsync(catalog, provider, update).GetAwaiter().GetResult();
+        }
+        else
+        {
+            ExecuteAsync(catalog, provider, update).GetAwaiter().GetResult();
+        }
     }
 
     private static async Task ExecuteAsync(
@@ -131,6 +144,238 @@ internal static class UpdateExecutor
         {
             provider.UpdateRows(requests, workArena);
         }
+    }
+
+    /// <summary>
+    /// PR11d's <c>UPDATE … FROM</c> path. Materialises every source row
+    /// into a long-lived arena, then nested-loops target × source,
+    /// evaluating the WHERE predicate against each pair. Matches feed
+    /// the SET evaluator with a synthetic joined row that resolves
+    /// <c>target.col</c> / <c>alias.col</c> / bare <c>col</c> against
+    /// the target side and <c>source.col</c> / <c>sourcealias.col</c>
+    /// against the source side. Multiple source rows matching the same
+    /// target are last-wins (PostgreSQL semantics) — the accumulator
+    /// dictionary overwrites prior values for the same target row.
+    /// </summary>
+    private static async Task ExecuteWithFromAsync(
+        TableCatalog catalog,
+        ITableProvider provider,
+        UpdateStatement update)
+    {
+        // Source table resolution. PR11d MVP only handles a single
+        // TableReference in FROM; subqueries / nested joins are rejected.
+        if (update.From!.Source is not TableReference sourceRef)
+        {
+            throw new QueryPlanException(
+                $"UPDATE '{update.TableName}': the FROM clause must name a single " +
+                $"table; got {update.From.Source.GetType().Name}.");
+        }
+        if (string.Equals(sourceRef.Name, update.TableName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new QueryPlanException(
+                $"UPDATE '{update.TableName}': the target table must not appear in the " +
+                "FROM clause. PostgreSQL semantics: target is implicitly the leftmost source.");
+        }
+        if (!catalog.TryGetTable(sourceRef.Name, out ITableProvider? source))
+        {
+            throw new QueryPlanException(
+                $"UPDATE '{update.TableName}' FROM '{sourceRef.Name}': source table " +
+                "is not registered in the catalog.");
+        }
+
+        Schema targetSchema = provider.GetSchema();
+        Schema sourceSchema = source.GetSchema();
+
+        // Resolve SET column names → target-schema column indices.
+        (int columnIndex, Expression valueExpression)[] setBindings =
+            new (int, Expression)[update.Assignments.Count];
+        for (int i = 0; i < update.Assignments.Count; i++)
+        {
+            ColumnAssignment a = update.Assignments[i];
+            int idx = FindColumnIndex(targetSchema, a.ColumnName);
+            setBindings[i] = (idx, a.Value);
+        }
+
+        // Build the joined ColumnLookup. Target columns get all
+        // qualifications (bare + table-name + alias); source columns
+        // get qualifications only (bare names resolve to target on
+        // collision, matching PostgreSQL's leftmost-wins).
+        string targetTableName = update.TableName;
+        string? targetAlias = update.Alias;
+        string sourceTableName = sourceRef.Name;
+        string? sourceAlias = sourceRef.Alias;
+
+        int targetColumnCount = targetSchema.Columns.Count;
+        int sourceColumnCount = sourceSchema.Columns.Count;
+        int totalColumns = targetColumnCount + sourceColumnCount;
+        string[] orderedNames = new string[totalColumns];
+        Dictionary<string, int> nameIndex = new(totalColumns * 3, StringComparer.OrdinalIgnoreCase);
+
+        for (int c = 0; c < targetColumnCount; c++)
+        {
+            string col = targetSchema.Columns[c].Name;
+            orderedNames[c] = $"{targetAlias ?? targetTableName}.{col}";
+            nameIndex[col] = c;
+            nameIndex[$"{targetTableName}.{col}"] = c;
+            if (targetAlias is not null && !string.Equals(targetAlias, targetTableName, StringComparison.OrdinalIgnoreCase))
+            {
+                nameIndex[$"{targetAlias}.{col}"] = c;
+            }
+        }
+        for (int c = 0; c < sourceColumnCount; c++)
+        {
+            string col = sourceSchema.Columns[c].Name;
+            int slot = targetColumnCount + c;
+            orderedNames[slot] = $"{sourceAlias ?? sourceTableName}.{col}";
+            nameIndex[$"{sourceTableName}.{col}"] = slot;
+            if (sourceAlias is not null && !string.Equals(sourceAlias, sourceTableName, StringComparison.OrdinalIgnoreCase))
+            {
+                nameIndex[$"{sourceAlias}.{col}"] = slot;
+            }
+        }
+        ColumnLookup joinedLookup = new(orderedNames, nameIndex);
+
+        // workArena: long-lived store for stabilised source rows AND
+        // SET expression results that need to outlive batch arenas.
+        using Arena workArena = new();
+
+        // Materialise source rows into workArena.
+        List<DataValue[]> sourceRows = new();
+        await foreach (RowBatch batch in source.ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None).ConfigureAwait(false))
+        {
+            try
+            {
+                Arena srcArena = batch.Arena;
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    Row sourceRow = batch[r];
+                    DataValue[] copy = new DataValue[sourceColumnCount];
+                    for (int c = 0; c < sourceColumnCount; c++)
+                    {
+                        copy[c] = DataValueRetention.Stabilize(sourceRow[c], srcArena, workArena);
+                    }
+                    sourceRows.Add(copy);
+                }
+            }
+            finally
+            {
+                batch.Dispose();
+            }
+        }
+
+        if (sourceRows.Count == 0)
+        {
+            // No source rows → no joined matches → no UPDATE.
+            return;
+        }
+
+        ExpressionEvaluator evaluator = new(
+            functions: catalog.Functions,
+            sidecarRegistry: catalog.SidecarRegistry);
+
+        // Last-match-wins accumulator: liveRowIndex → (column → new value).
+        Dictionary<long, Dictionary<int, DataValue>> matched = new();
+        long liveRowIndex = 0;
+
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None).ConfigureAwait(false))
+        {
+            try
+            {
+                Arena targetArena = batch.Arena;
+                for (int r = 0; r < batch.Count; r++, liveRowIndex++)
+                {
+                    Row targetRow = batch[r];
+
+                    foreach (DataValue[] sourceCols in sourceRows)
+                    {
+                        // Build joined row. Reuse the same array shape
+                        // every iteration via a fresh allocation so
+                        // ColumnLookup-keyed reads see consistent slot
+                        // contents during predicate / SET evaluation.
+                        DataValue[] joined = new DataValue[totalColumns];
+                        for (int c = 0; c < targetColumnCount; c++) joined[c] = targetRow[c];
+                        for (int c = 0; c < sourceColumnCount; c++) joined[targetColumnCount + c] = sourceCols[c];
+                        Row joinedRow = new(joinedLookup, joined);
+
+                        // WHERE — resolves columns from both sides.
+                        // Both arenas back the joined row: target side
+                        // is targetArena; source side is workArena.
+                        // Predicate frame target = source = targetArena
+                        // (predicates produce inline bools; non-bool
+                        // intermediates land here briefly).
+                        if (update.Where is not null)
+                        {
+                            EvaluationFrame predFrame = new(
+                                joinedRow,
+                                targetArena,
+                                targetArena,
+                                outerRow: null,
+                                sidecarRegistry: catalog.SidecarRegistry,
+                                types: null);
+                            if (!await evaluator.EvaluateAsBooleanAsync(
+                                    update.Where, predFrame, CancellationToken.None).ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+                        }
+
+                        // SET — results land in workArena so they
+                        // survive past targetArena disposal at end of
+                        // this batch.
+                        EvaluationFrame setFrame = new(
+                            joinedRow,
+                            targetArena,
+                            workArena,
+                            outerRow: null,
+                            sidecarRegistry: catalog.SidecarRegistry,
+                            types: null);
+
+                        if (!matched.TryGetValue(liveRowIndex, out Dictionary<int, DataValue>? rowValues))
+                        {
+                            rowValues = new Dictionary<int, DataValue>(setBindings.Length);
+                            matched[liveRowIndex] = rowValues;
+                        }
+
+                        foreach ((int columnIndex, Expression valueExpression) in setBindings)
+                        {
+                            DataValue raw = await evaluator.EvaluateAsync(
+                                valueExpression, setFrame, CancellationToken.None).ConfigureAwait(false);
+
+                            ColumnInfo target = targetSchema.Columns[columnIndex];
+                            DataValue coerced = CoerceForUpdate(
+                                raw, targetArena, workArena, target, update.TableName);
+                            // Last-match-wins: every match overwrites prior values for the same column.
+                            rowValues[columnIndex] = coerced;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                batch.Dispose();
+            }
+        }
+
+        if (matched.Count == 0)
+        {
+            return;
+        }
+
+        List<RowUpdateRequest> requests = new(matched.Count);
+        foreach ((long liveIdx, Dictionary<int, DataValue> values) in matched)
+        {
+            requests.Add(new RowUpdateRequest(liveIdx, values));
+        }
+
+        provider.UpdateRows(requests, workArena);
     }
 
     /// <summary>

@@ -99,15 +99,31 @@ public sealed class UpdateValidationTests
     }
 
     [Fact]
-    public void Update_WithFromClause_RejectedAsPr11d()
+    public void Update_WithFromClause_PassesValidation()
     {
+        // PR11d wired UPDATE … FROM end-to-end. Validation passes;
+        // executor runs against empty target, no-op.
         using TableCatalog catalog = NewCatalog();
         catalog.Plan("CREATE TEMP TABLE features (id Int32, score Float32)");
         catalog.Plan("CREATE TEMP TABLE raw (id Int32, value Float32)");
 
+        catalog.Plan(
+            "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id");
+    }
+
+    [Fact]
+    public void Update_WithJoinInsideFrom_RejectedAsPending()
+    {
+        using TableCatalog catalog = NewCatalog();
+        catalog.Plan("CREATE TEMP TABLE features (id Int32, score Float32)");
+        catalog.Plan("CREATE TEMP TABLE raw (id Int32, model_id Int32, value Float32)");
+        catalog.Plan("CREATE TEMP TABLE model (id Int32, weight Float32)");
+
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
             () => catalog.Plan(
-                "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id"));
-        Assert.Contains("PR11d", ex.Message);
+                "UPDATE features SET score = raw.value * model.weight " +
+                "FROM raw JOIN model ON raw.model_id = model.id " +
+                "WHERE features.id = raw.id"));
+        Assert.Contains("JOIN inside the FROM clause", ex.Message);
     }
 }
