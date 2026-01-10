@@ -117,7 +117,7 @@ internal static class KeywordRegistry
         [CompletionZoneKind.StatementStart] =
         [
             // Query / DML / DDL statements
-            "SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "EXEC",
+            "SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "REINDEX", "EXEC",
             // Procedural-batch statements. Reachable both at the top of a
             // batch and after IF/WHILE/FOR/TRY/CATCH/ELSE/BEGIN — wherever
             // the parser expects a fresh statement.
@@ -346,12 +346,14 @@ internal static class KeywordRegistry
         [SqlToken.Set] = [],            // Component: part of UPDATE SET (not independently completable)
         [SqlToken.Delete] = ["DELETE"],
         [SqlToken.Analyze] = ["ANALYZE"],
+        [SqlToken.Reindex] = ["REINDEX"],
         [SqlToken.Alter] = ["ALTER"],
         [SqlToken.Add] = ["ADD"],
         [SqlToken.Column] = ["COLUMN"],
         [SqlToken.Default] = ["DEFAULT"],
         [SqlToken.Primary] = ["PRIMARY KEY"],
         [SqlToken.Key] = [],            // Component: part of PRIMARY KEY
+        [SqlToken.Identity] = [],       // Component: part of CREATE TABLE column spec (IDENTITY(seed, step))
         [SqlToken.If] = ["IF EXISTS"],
         [SqlToken.Function] = ["FUNCTION"],
         [SqlToken.Procedure] = ["PROCEDURE"],

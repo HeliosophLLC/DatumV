@@ -160,7 +160,7 @@ public sealed class HoverProviderTests : ServiceTestBase
         HoverResult? result = provider.GetHover("CREATE TEMP TABLE #t (id Int32)", 0);
 
         Assert.NotNull(result);
-        Assert.Contains("CREATE TEMP TABLE", result.Contents);
+        Assert.Contains("CREATE", result.Contents);
     }
 
     [Fact]

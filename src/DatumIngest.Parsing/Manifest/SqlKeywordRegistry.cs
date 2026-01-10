@@ -57,7 +57,7 @@ public static class SqlKeywordRegistry
         "CREATE", "TABLE", "TEMP", "TEMPORARY", "DROP", "ALTER", "ADD",
         "COLUMN", "DEFAULT", "PRIMARY", "KEY", "IF", "INDEX",
         "FUNCTION", "PROCEDURE", "RETURNS", "RETURN", "PURE", "REPLACE",
-        "ANALYZE",
+        "ANALYZE", "REINDEX",
 
         // DML keywords
         "INSERT", "VALUES", "UPDATE", "SET", "DELETE",

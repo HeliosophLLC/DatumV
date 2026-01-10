@@ -677,6 +677,13 @@ public static class CompletionContext
                     // After ANALYZE — offer table names.
                     return CompletionZoneKind.AfterFrom;
 
+                case SqlToken.Reindex:
+                    // After REINDEX — offer table names. The optional TABLE
+                    // keyword between REINDEX and the table name is handled by
+                    // the parser; for completion purposes both forms accept a
+                    // table name next.
+                    return CompletionZoneKind.AfterFrom;
+
                 case SqlToken.Let:
                     // After LET — user may be typing a binding name or expression.
                     // Return AfterSelect to offer columns and functions for the expression.
