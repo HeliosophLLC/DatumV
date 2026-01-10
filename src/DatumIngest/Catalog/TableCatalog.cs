@@ -339,6 +339,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyDropTable(dropTable);
                 return EmptyQueryPlan.Instance;
 
+            case ReindexTableStatement reindex:
+                ApplyReindexTable(reindex);
+                return EmptyQueryPlan.Instance;
+
             case AlterTableAddColumnStatement alterAdd:
                 ApplyAlterTableAddColumn(alterAdd);
                 return EmptyQueryPlan.Instance;
@@ -541,6 +545,30 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             _persistentTableEntries.Remove(drop.TableName);
             _catalogStore?.Save(_udfs, _procedures);
         }
+    }
+
+    /// <summary>
+    /// Applies a <c>REINDEX</c> statement: rebuilds the table's
+    /// <c>.datum-index</c> sidecar from current data. Indexed queries
+    /// run after this see acceleration restored. In-memory tables have
+    /// no acceleration sidecar, so REINDEX rejects them.
+    /// </summary>
+    private void ApplyReindexTable(ReindexTableStatement reindex)
+    {
+        if (!Tables.TryGetValue(reindex.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' is not registered in the catalog.");
+        }
+
+        if (!provider.CanRebuildIndex)
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' does not support REINDEX " +
+                $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
+        }
+
+        provider.RebuildIndex();
     }
 
     private static void TryDeleteFile(string path)

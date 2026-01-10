@@ -231,6 +231,29 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support UpdateRows (CanUpdateRows is false).");
 
     /// <summary>
+    /// True when this provider supports rebuilding its <c>.datum-index</c>
+    /// acceleration sidecar via <see cref="RebuildIndex"/>. Default
+    /// <see langword="false"/>; only the persistent <c>.datum</c> file
+    /// provider opts in. In-memory tables have no index sidecar.
+    /// </summary>
+    bool CanRebuildIndex => false;
+
+    /// <summary>
+    /// Rebuilds the table's <c>.datum-index</c> sidecar from the current
+    /// data file. Replaces any previously cached or stale index — after
+    /// the call returns, <see cref="GetSourceIndex"/> reflects the
+    /// freshly-built file with a fingerprint that matches the live
+    /// <c>.datum</c> contents.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Providers override and opt in via <see cref="CanRebuildIndex"/>.
+    /// </remarks>
+    void RebuildIndex() =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support RebuildIndex (CanRebuildIndex is false).");
+
+    /// <summary>
     /// Returns an on-disk PRIMARY KEY lookup if the provider maintains one,
     /// or <see langword="null"/> if the executor should fall back to the
     /// scan-based PK uniqueness check (PR10f's HashSet path).

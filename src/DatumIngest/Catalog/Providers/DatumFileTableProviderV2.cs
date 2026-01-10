@@ -7,6 +7,7 @@ using DatumIngest.DatumFile.V2.Decoding;
 using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.BTree.Mutable;
+using DatumIngest.Ingestion;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
@@ -51,7 +52,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// mutation path nulls these fields out so subsequent
     /// <see cref="GetSourceIndex"/> calls return <see langword="null"/>
     /// and queries fall back to scan instead of using a stale index.
-    /// A future REINDEX command (PR12) will repopulate.
+    /// <c>REINDEX</c> rebuilds the sidecar and refreshes these fields.
     /// </summary>
     private MappedSourceIndexSet? _mappedIndexSet;
     private SourceIndex? _sourceIndex;
@@ -1272,6 +1273,41 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     {
         string sidecarPath = Path.ChangeExtension(_descriptor.FilePath, SidecarConstants.FileExtension);
         return DatumFileWriterV2.OpenForAppend(_descriptor.FilePath, sidecarPath);
+    }
+
+    /// <inheritdoc/>
+    public bool CanRebuildIndex => true;
+
+    /// <inheritdoc/>
+    public void RebuildIndex()
+    {
+        _mutationLock.Wait();
+        try
+        {
+            // Drop the live mmap of the existing .datum-index before
+            // overwriting the file. Windows blocks file replacement
+            // while a memory-mapped view is open; releasing the mapping
+            // here makes the subsequent FileMode.Create succeed.
+            MappedSourceIndexSet? previous = _mappedIndexSet;
+            _mappedIndexSet = null;
+            _sourceIndex = null;
+            previous?.Dispose();
+
+            string indexPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
+            OutputDescriptor destination = new(indexPath);
+            Indexer indexer = new(_pool);
+            indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
+                .GetAwaiter().GetResult();
+
+            // Reload the freshly-built sidecar so subsequent
+            // GetSourceIndex calls return live data without waiting for
+            // a provider reopen.
+            (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(_descriptor);
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
     }
 
     /// <summary>

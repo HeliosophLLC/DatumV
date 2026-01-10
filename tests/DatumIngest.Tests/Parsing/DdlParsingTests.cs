@@ -670,6 +670,48 @@ public class DdlParsingTests : ServiceTestBase
         Assert.IsType<AnalyzeTableStatement>(statements[1]);
     }
 
+    // ───────────────────── REINDEX ─────────────────────
+
+    [Fact]
+    public void ReindexTable()
+    {
+        Statement statement = SqlParser.ParseStatement("REINDEX features");
+
+        ReindexTableStatement reindex = Assert.IsType<ReindexTableStatement>(statement);
+        Assert.Equal("features", reindex.TableName);
+    }
+
+    [Fact]
+    public void ReindexTableWithKeyword()
+    {
+        // PostgreSQL-compatible `REINDEX TABLE name` form.
+        Statement statement = SqlParser.ParseStatement("REINDEX TABLE features");
+
+        ReindexTableStatement reindex = Assert.IsType<ReindexTableStatement>(statement);
+        Assert.Equal("features", reindex.TableName);
+    }
+
+    [Fact]
+    public void ReindexAsColumnName()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (reindex STRING, value INT)");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Equal("reindex", create.Columns[0].Name);
+    }
+
+    [Fact]
+    public void ReindexInBatch()
+    {
+        IReadOnlyList<Statement> statements = SqlParser.ParseBatch(
+            "INSERT INTO t VALUES (1); REINDEX t");
+
+        Assert.Equal(2, statements.Count);
+        Assert.IsType<InsertStatement>(statements[0]);
+        Assert.IsType<ReindexTableStatement>(statements[1]);
+    }
+
     // ───────────────────── Backward compatibility ─────────────────────
 
     [Fact]

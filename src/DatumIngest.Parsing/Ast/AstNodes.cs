@@ -1176,6 +1176,17 @@ public sealed record AlterTableDropColumnStatement(
 public sealed record AnalyzeTableStatement(string TableName) : Statement;
 
 /// <summary>
+/// <c>REINDEX table</c> — rebuilds the <c>.datum-index</c> sidecar for
+/// the specified table from its current contents. Replaces the
+/// passive-invalidation behaviour: after any mutation
+/// (INSERT / UPDATE / DELETE / ALTER) the cached index is dropped and
+/// indexed queries fall back to scan; running <c>REINDEX</c> rebuilds
+/// the sidecar and restores acceleration.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+public sealed record ReindexTableStatement(string TableName) : Statement;
+
+/// <summary>
 /// A single declared parameter of a user-defined function:
 /// <c>@name TYPE [IS NOT NULL]</c>. Parameter names use the <c>@</c>-
 /// prefix at the call site declaration but are stored without it on

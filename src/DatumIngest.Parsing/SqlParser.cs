@@ -525,7 +525,8 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Key))
             .Or(Token.EqualTo(SqlToken.Primary))
             .Or(Token.EqualTo(SqlToken.If))
-            .Or(Token.EqualTo(SqlToken.Analyze));
+            .Or(Token.EqualTo(SqlToken.Analyze))
+            .Or(Token.EqualTo(SqlToken.Reindex));
 
     private static readonly TokenListParser<SqlToken, (string? Namespace, Superpower.Model.Token<SqlToken> Name)> NamespacedFunctionName =
         (from ns in Token.EqualTo(SqlToken.Identifier)
@@ -2320,6 +2321,7 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Primary).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Key).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Analyze).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Reindex).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.TypeKeyword).Select(t => t.ToStringValue()));
 
     /// <summary>
@@ -3366,6 +3368,18 @@ public static class SqlParser
         select (Statement)new AnalyzeTableStatement(tableName);
 
     /// <summary>
+    /// Parses <c>REINDEX [TABLE] name</c>. The optional <c>TABLE</c>
+    /// keyword mirrors PostgreSQL's surface — useful for symmetry with
+    /// <c>DROP TABLE</c> and to leave room for future <c>REINDEX
+    /// DATABASE</c> / <c>REINDEX INDEX</c> variants.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ReindexTableParser =
+        from reindexKw in Token.EqualTo(SqlToken.Reindex)
+        from tableKw in Token.EqualTo(SqlToken.Table).Optional()
+        from tableName in IdentifierOrKeywordAsName
+        select (Statement)new ReindexTableStatement(tableName);
+
+    /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.
     /// </summary>
     /// <remarks>
@@ -3409,6 +3423,7 @@ public static class SqlParser
             .Or(DeleteParser.Try())
             .Or(AlterTableParser)
             .Or(AnalyzeTableParser.Try())
+            .Or(ReindexTableParser.Try())
             .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
 
     /// <summary>

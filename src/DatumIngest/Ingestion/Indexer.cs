@@ -56,27 +56,51 @@ public sealed class Indexer(Pool pool)
         IndexOptions options,
         CancellationToken cancellationToken = default)
     {
-        Stopwatch sw = Stopwatch.StartNew();
-
-        SourceFingerprint fingerprint = await ComputeFingerprintAsync(source.FilePath, cancellationToken)
-            .ConfigureAwait(false);
-
-        SourceIndexBuilder builder = ConfigureBuilder(options);
-        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
-
         TableDescriptor descriptor = new(
             Name: PathDetector.DeriveTableName(source.FilePath),
             FilePath: source.FilePath);
-
-        SourceIndex index;
-        long bytesWritten;
-        long rowCount = 0;
 
         // v2 reader validates magic + version inside its constructor.
         // v2 files emit sidecar-bound DataValues for long strings / byte
         // arrays / images; the index builder skips those at the bloom
         // layer (see IncrementalIndexBuilder.AddRow).
         using DatumFileTableProviderV2 provider = new(descriptor, pool);
+        return await IndexAsync(provider, source.FilePath, destination, options, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Indexes a <c>.datum</c> file via an already-open provider. Used by
+    /// <c>REINDEX</c>, which holds the live provider's mutation lock and
+    /// already has a reader open against the file — opening a second
+    /// provider here would conflict with the live <c>.datum-pkindex</c>
+    /// (whose backing tree opens with <see cref="FileShare.None"/>).
+    /// </summary>
+    /// <param name="provider">An open provider for the source file. The caller retains ownership.</param>
+    /// <param name="datumPath">Path of the source <c>.datum</c> file (used for the fingerprint).</param>
+    /// <param name="destination">Output target for the rebuilt <c>.datum-index</c> sidecar.</param>
+    /// <param name="options">Memory / throughput options.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<IndexResult> IndexAsync(
+        ITableProvider provider,
+        string datumPath,
+        OutputDescriptor destination,
+        IndexOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        Stopwatch sw = Stopwatch.StartNew();
+
+        SourceFingerprint fingerprint = await ComputeFingerprintAsync(datumPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        SourceIndexBuilder builder = ConfigureBuilder(options);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        string tableName = PathDetector.DeriveTableName(datumPath);
+
+        SourceIndex index;
+        long bytesWritten;
+        long rowCount = 0;
 
         try
         {
@@ -93,7 +117,7 @@ public sealed class Indexer(Pool pool)
 
             index = incremental.Finalize();
 
-            SourceIndexSet indexSet = SourceIndexSet.Create(descriptor.Name, index);
+            SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
 
             await using Stream outputStream = await destination.OpenAsync(cancellationToken)
                 .ConfigureAwait(false);

@@ -280,6 +280,9 @@ public enum SqlToken
     /// <summary>The ANALYZE keyword (statistics and index rebuild).</summary>
     Analyze,
 
+    /// <summary>The REINDEX keyword (rebuild a table's <c>.datum-index</c> sidecar).</summary>
+    Reindex,
+
     /// <summary>The ALTER keyword (DDL table modification).</summary>
     Alter,
 
