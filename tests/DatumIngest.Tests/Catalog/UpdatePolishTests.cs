@@ -138,23 +138,91 @@ public sealed class UpdatePolishTests : IAsyncLifetime
     }
 
     // ──────────────────── Sidecar pass-through ────────────────────
-    //
-    // The pass-through fast path in CoerceForUpdate (kind-match +
-    // IsInSidecar / IsInline) avoids the CLR round-trip when SET copies
-    // a value verbatim. It is most valuable for wide strings (where the
-    // round-trip would duplicate sidecar bytes) but is also a small win
-    // for inline values. End-to-end testing of the wide-string case is
-    // blocked on a pre-existing INSERT path that fails to register a
-    // newly-created sidecar with the catalog's SidecarRegistry — see
-    // SidecarRegistry.UpdateAt's "no source registered at storeId 0"
-    // path. With no SQL-level entry that produces a sidecar-backed
-    // value, sidecar size cannot be observed across an UPDATE in tests.
-    // The pass-through path is exercised indirectly by the existing
-    // UPDATE FROM tests in UpdateFromExecutorTests (which run scans
-    // that produce inline-or-sidecar values and feed them through
-    // CoerceForUpdate); breaking the fast path would not change their
-    // results, but the round-trip cost on wide-string columns would
-    // grow the sidecar — that observation is the missing assertion.
+
+    [Fact]
+    public void Update_WideStringValueCopy_NoSidecarGrowth()
+    {
+        // A wide string lives in the .datum-blob sidecar. `SET col = col`
+        // (or any value-copy where source and target columns share kind)
+        // must NOT round-trip through CLR + LiteralCoercion — otherwise
+        // every matched row would append a duplicate of the bytes to the
+        // sidecar. Pass-through preserves the existing pointer so the
+        // sidecar size is stable across the no-op UPDATE.
+        string filePath = Path.Combine(_tempDir, "t.datum");
+        string sidecarPath = Path.ChangeExtension(filePath, ".datum-blob");
+
+        // Strings long enough to spill to sidecar (well above the
+        // inline-tier cap).
+        string longA = new('a', 200);
+        string longB = new('b', 200);
+
+        long sidecarBefore;
+        using (TableCatalog catalog = NewFileCatalog())
+        {
+            catalog.Plan("CREATE TABLE t (id Int32, body String)");
+            catalog.Plan($"INSERT INTO t VALUES (1, '{longA}'), (2, '{longB}')");
+            sidecarBefore = new FileInfo(sidecarPath).Length;
+
+            // Pure self-copy. No-op detection should skip the rewrite
+            // entirely; even if it didn't, sidecar pass-through prevents
+            // any duplicate appends.
+            catalog.Plan("UPDATE t SET body = body");
+        }
+
+        long sidecarAfter = new FileInfo(sidecarPath).Length;
+        Assert.Equal(sidecarBefore, sidecarAfter);
+    }
+
+    [Fact]
+    public async Task Update_WideStringFromSource_NoSidecarDuplication()
+    {
+        // UPDATE … FROM with a wide-string value-copy: target.body :=
+        // source.body. Without sidecar pass-through, the value would
+        // round-trip through CLR and produce a duplicate sidecar entry
+        // for every matched target row.
+        string filePath = Path.Combine(_tempDir, "features.datum");
+        string sidecarPath = Path.ChangeExtension(filePath, ".datum-blob");
+
+        string longText = new('x', 200);
+
+        long sidecarBefore;
+        using (TableCatalog catalog = NewFileCatalog())
+        {
+            catalog.Plan("CREATE TABLE features (id Int32, body String)");
+            catalog.Plan("CREATE TABLE raw (id Int32, body String)");
+            catalog.Plan($"INSERT INTO features VALUES (1, '{longText}'), (2, '{longText}')");
+            catalog.Plan($"INSERT INTO raw VALUES (1, '{longText}'), (2, '{longText}')");
+
+            sidecarBefore = new FileInfo(sidecarPath).Length;
+
+            // Value identical for every (target, source) pair → pure
+            // no-op. With both optimisations, no rewrite, no append.
+            catalog.Plan(
+                "UPDATE features SET body = raw.body FROM raw WHERE features.id = raw.id");
+        }
+
+        long sidecarAfter = new FileInfo(sidecarPath).Length;
+        Assert.Equal(sidecarBefore, sidecarAfter);
+
+        // Row count intact across reopen — wide-string body resolution
+        // requires the sidecar registry, so we check via the inline id
+        // column only (sufficient signal that the rows weren't dropped).
+        using TableCatalog reopened = NewFileCatalog();
+        List<int> ids = new();
+        await foreach (RowBatch batch in reopened["features"]
+            .ScanAsync(null, null, null, CancellationToken.None))
+        {
+            try
+            {
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    ids.Add(batch[r][0].AsInt32());
+                }
+            }
+            finally { batch.Dispose(); }
+        }
+        Assert.Equal(new[] { 1, 2 }, ids);
+    }
 
     // ──────────────────── helpers ────────────────────
 

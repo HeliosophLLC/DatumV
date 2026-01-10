@@ -1316,16 +1316,35 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <see cref="_mutationLock"/>. When
     /// <paramref name="sidecarMayHaveGrown"/> is <see langword="true"/>
     /// (i.e. an append just ran), the catalog's
-    /// <see cref="SidecarRegistry"/> is updated with the new
+    /// <see cref="SidecarRegistry"/> is reconciled with the new
     /// <see cref="IBlobSource"/> so existing storeId-stamped DataValues
-    /// in flight resolve through bytes the new mmap can see.
+    /// in flight resolve through bytes the new mmap can see. When the
+    /// sidecar appears for the first time on this commit (the table was
+    /// created without one and an append just spilled a wide value),
+    /// the registry has no slot for it yet — the provider allocates a
+    /// fresh <c>storeId</c> via <see cref="SidecarRegistry.Register"/>
+    /// instead of <see cref="SidecarRegistry.UpdateAt"/>.
     /// </summary>
     private void RebuildSnapshotAfterMutation(bool sidecarMayHaveGrown)
     {
         Snapshot next = OpenSnapshot(_descriptor.FilePath);
         if (sidecarMayHaveGrown && next.Sidecar is not null && SidecarRegistry is not null)
         {
-            SidecarRegistry.UpdateAt(SidecarStoreId, next.Sidecar);
+            // First-appearance vs growth. The previous snapshot had no
+            // sidecar exactly when the catalog never registered one for
+            // this provider (RegisterProviderSidecar early-returns when
+            // Sidecar is null at provider-add time). In that case the
+            // current `SidecarStoreId` is the default zero, which would
+            // collide with whatever else lives at slot 0.
+            bool firstAppearance = _snapshot.Sidecar is null;
+            if (firstAppearance)
+            {
+                SidecarStoreId = SidecarRegistry.Register(next.Sidecar);
+            }
+            else
+            {
+                SidecarRegistry.UpdateAt(SidecarStoreId, next.Sidecar);
+            }
         }
         SwapSnapshot(next);
 
