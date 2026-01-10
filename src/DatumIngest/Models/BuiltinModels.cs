@@ -108,6 +108,7 @@ public static class BuiltinModels
         RegisterEpicrealismHyper(modelCatalog);
         RegisterOpenjourneyHyper(modelCatalog);
         RegisterMoDiHyper(modelCatalog);
+        RegisterAbsoluteRealityHyper(modelCatalog);
         RegisterSdxlTurbo(modelCatalog);
         RegisterJuggernautXlLightning(modelCatalog);
 
@@ -1450,6 +1451,87 @@ public static class BuiltinModels
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "nitrosocke / ByteDance",
             SourceUrl: "https://huggingface.co/nitrosocke/mo-di-diffusion",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the AbsoluteReality + Hyper-SD diffusers ONNX layout.</summary>
+    public const string AbsoluteRealityHyperFolder = "absolute-reality-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for AbsoluteReality + Hyper-SD: the UNet weights,
+    /// ~865M params (same architecture as SD-Turbo / SD 1.5, but the
+    /// underlying weights are Lykon's AbsoluteReality finetune of SD 1.5
+    /// with ByteDance's Hyper-SD 4-step distillation LoRA fused in).
+    /// </summary>
+    public const string AbsoluteRealityHyperAnchor = AbsoluteRealityHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers AbsoluteReality (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"absolute_reality_hyper"</c>). Lykon's photoreal SD 1.5 flagship —
+    /// the SFW general workhorse niche. Versatile coverage across portraits,
+    /// scenes, and characters; less stylized than DreamShaper, more general
+    /// than epiCRealism's environment lean. Same wall-clock cost as the other
+    /// SD 1.5 + Hyper exports (~250–330ms per 512×512 image at 4 steps);
+    /// notably less NSFW-leaning than Realistic Vision V6.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the
+    /// AbsoluteReality base and the Hyper-SD LoRA. See the model cards
+    /// at <a href="https://huggingface.co/Lykon/AbsoluteReality">Lykon/AbsoluteReality</a>
+    /// and <a href="https://huggingface.co/ByteDance/Hyper-SD">ByteDance/Hyper-SD</a>
+    /// for the full terms.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout — AbsoluteReality
+    /// ships with its own bundled VAE, no separate sd-vae-ft-mse pairing.
+    /// </para>
+    /// </remarks>
+    public static void RegisterAbsoluteRealityHyper(
+        ModelCatalog catalog,
+        string modelName = "absolute_reality_hyper",
+        string folder = AbsoluteRealityHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "AbsoluteReality + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "Lykon / ByteDance",
+            SourceUrl: "https://huggingface.co/Lykon/AbsoluteReality",
             Category: "generator",
             Modalities: ["text", "image"],
             Files:

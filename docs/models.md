@@ -765,6 +765,50 @@ one folder and one tokenizer:
   Reuses the same `.venv` the ViT-GPT2 export created. ~5–10 minutes
   including download.
 
+### SD 1.5 + Hyper-SD finetune ladder (`*_hyper`)
+
+Six SD 1.5 finetunes paired with ByteDance's Hyper-SD 4-step LoRA, fused
+into the UNet at export time. Same architecture as `sd_turbo`, same
+wall-clock cost (~250–330ms per 512×512 image at 4 steps); each variant
+fills a distinct aesthetic envelope. Loaded by the same
+`StableDiffusionTurboModel` pipeline — only the weights differ.
+
+- **License**: CreativeML OpenRAIL-M for both the SD 1.5 finetune bases
+  and the Hyper-SD LoRA. Allows commercial use with usage restrictions
+  on harmful content.
+- **Folder**: `<variant>-hyper-onnx/` — diffusers-format layout
+- **Files** (relative to the folder, identical across all six):
+  - `text_encoder/model.onnx` (~500 MB) — CLIP-L (768 hidden dim)
+  - `unet/model.onnx` + `unet/model.onnx_data` (~3.4 GB FP32, ~1.7 GB FP16) — fused UNet
+  - `vae_decoder/model.onnx` — bundled VAE (`sd-vae-ft-mse` for Realistic Vision; finetune-bundled for the others)
+  - `vae_encoder/model.onnx` — only used by img2img
+  - `tokenizer/{vocab.json, merges.txt, ...}`
+  - `scheduler/scheduler_config.json`, `model_index.json`
+- **Disk footprint per variant**: ~5 GB FP32 (~2.5 GB FP16)
+- **Setup**: each variant has its own export script under
+  `scripts/export-*-hyper.ps1`. Each script downloads the base finetune,
+  fuses the Hyper-SD LoRA via diffusers + peft, and runs `optimum-cli`
+  to export to ONNX. ~5–10 minutes per export. Reuses the same `.venv`
+  as the other diffusion exports. Pass `-Fp16` to halve the disk
+  footprint:
+  ```powershell
+  ./scripts/export-realistic-vision-hyper.ps1 -Fp16
+  ./scripts/export-dreamshaper-hyper.ps1 -Fp16
+  # etc.
+  ```
+
+| Catalog name | Aesthetic | Base finetune | Notes |
+|---|---|---|---|
+| `realistic_vision_hyper` | Photoreal portraits, character-focused | [`SG161222/Realistic_Vision_V6.0_B1_noVAE`](https://huggingface.co/SG161222/Realistic_Vision_V6.0_B1_noVAE) | Strongest people coherence; trained on a narrow portrait distribution. Tends to leak NSFW on suggestive prompts — reach for AbsoluteReality / DreamShaper / epiCRealism for SFW-by-default workflows. Paired with `stabilityai/sd-vae-ft-mse` since the base ships `noVAE`. |
+| `dreamshaper_hyper` | Stylized fantasy, painterly, concept art | [`Lykon/dreamshaper-8`](https://huggingface.co/Lykon/dreamshaper-8) | Fit for fantasy characters, monsters, and atmospheric scenes. Less NSFW-leaning than RV. |
+| `epicrealism_hyper` | Photoreal scenes, environments, group shots | [`emilianJR/epiCRealism`](https://huggingface.co/emilianJR/epiCRealism) | Broader subject coverage than RV; strong on taverns, landscapes, group compositions. |
+| `openjourney_hyper` | Midjourney v4 cinematic, dramatic lighting | [`prompthero/openjourney-v4`](https://huggingface.co/prompthero/openjourney-v4) | Set-pieces and atmospheric reveals. v4 dropped the `mdjrny-v4 style` trigger; prompts work without prefix. |
+| `mo_di_hyper` | Disney / Pixar 3D-render style | [`nitrosocke/mo-di-diffusion`](https://huggingface.co/nitrosocke/mo-di-diffusion) | **Trigger phrase:** prepend `"modern disney style"` to fully exercise the look. Useful for tone shifts, comic-relief NPCs, family-friendly campaigns. |
+| `absolute_reality_hyper` | SFW general workhorse, photoreal-leaning | [`Lykon/AbsoluteReality`](https://huggingface.co/Lykon/AbsoluteReality) | Versatile across portraits / scenes / characters; less stylized than DreamShaper, more general than epiCRealism. |
+
+The API is identical across variants — `models.<name>(prompt)`. Pick by
+aesthetic; swap by changing the model name in your query.
+
 ### `sdxl_turbo` — text-to-image generator (high quality)
 
 - **What it does**: Generates 1024×1024 images from a text prompt in
