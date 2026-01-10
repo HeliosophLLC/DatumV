@@ -229,6 +229,61 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Null(update.Where);
     }
 
+    [Fact]
+    public void UpdateWithAlias()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "UPDATE features f SET score = 1.0 WHERE f.id = 5");
+
+        UpdateStatement update = Assert.IsType<UpdateStatement>(statement);
+        Assert.Equal("features", update.TableName);
+        Assert.Equal("f", update.Alias);
+        Assert.Single(update.Assignments);
+        Assert.NotNull(update.Where);
+    }
+
+    [Fact]
+    public void UpdateWithAsAlias()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "UPDATE features AS f SET score = 1.0");
+
+        UpdateStatement update = Assert.IsType<UpdateStatement>(statement);
+        Assert.Equal("features", update.TableName);
+        Assert.Equal("f", update.Alias);
+    }
+
+    [Fact]
+    public void UpdateWithFromClause()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id");
+
+        UpdateStatement update = Assert.IsType<UpdateStatement>(statement);
+        Assert.Equal("features", update.TableName);
+        Assert.NotNull(update.From);
+        TableReference rawSource = Assert.IsType<TableReference>(update.From!.Source);
+        Assert.Equal("raw", rawSource.Name);
+        Assert.NotNull(update.Where);
+        Assert.Null(update.Joins);
+    }
+
+    [Fact]
+    public void UpdateWithFromAndJoin()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "UPDATE features SET score = raw.value * m.weight " +
+            "FROM raw JOIN model AS m ON raw.model_id = m.id " +
+            "WHERE features.id = raw.id");
+
+        UpdateStatement update = Assert.IsType<UpdateStatement>(statement);
+        Assert.Equal("features", update.TableName);
+        Assert.NotNull(update.From);
+        Assert.NotNull(update.Joins);
+        Assert.Single(update.Joins!);
+        Assert.NotNull(update.Where);
+    }
+
     // ───────────────────── DELETE ─────────────────────
 
     /// <summary>DELETE FROM without WHERE parses with null predicate.</summary>
