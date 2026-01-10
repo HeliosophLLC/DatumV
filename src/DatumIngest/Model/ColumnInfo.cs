@@ -95,4 +95,14 @@ public sealed record ColumnInfo
     /// time by the catalog.
     /// </summary>
     public IdentitySpec? Identity { get; init; }
+
+    /// <summary>
+    /// True when this column is part of the table's PRIMARY KEY. The
+    /// canonical ordered list of PK columns lives on
+    /// <see cref="Schema.PrimaryKeyColumnIndices"/>; this flag is the
+    /// per-column convenience for "is this column in the PK?". Columns
+    /// with this flag are implicitly NOT NULL (catalog auto-promotes
+    /// at <c>CREATE TABLE</c> time).
+    /// </summary>
+    public bool IsPrimaryKey { get; init; }
 }

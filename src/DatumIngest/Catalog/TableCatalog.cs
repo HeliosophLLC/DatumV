@@ -372,13 +372,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     /// <remarks>
     /// PR10a covers shape only — column kinds, NULL/NOT NULL,
-    /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PRIMARY KEY and
-    /// IDENTITY are recorded in the AST but not yet enforced
-    /// (PR10e/PR10f). PR10b adds <c>DEFAULT &lt;literal&gt;</c> on each
-    /// column — validated literal-only at this layer and persisted in
-    /// the footer prologue (<see cref="FooterPrologueV4.ColumnDefaults"/>)
-    /// for persistent tables; the INSERT layer (PR10c) materialises the
-    /// default when a row omits the column.
+    /// <c>IF NOT EXISTS</c>, optional <c>AT 'path'</c>. PR10b adds
+    /// <c>DEFAULT &lt;literal&gt;</c> persisted in the footer prologue;
+    /// PR10c/PR10c' adds INSERT VALUES/SELECT auto-fill from those
+    /// defaults. PR10e adds <c>IDENTITY</c> with a per-table counter
+    /// in the prologue and <c>IAppendSession.ReserveNextIdentityValue</c>
+    /// auto-fill at INSERT time. PR10f adds <c>PRIMARY KEY</c>
+    /// enforcement: the prologue carries the ordered PK column-index
+    /// list, the catalog rejects tables whose key exceeds 16 bytes,
+    /// and the INSERT layer scans existing rows to reject duplicate /
+    /// null PK values.
     /// </remarks>
     private void ApplyCreateTable(CreateTableStatement create)
     {
@@ -411,7 +414,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         // Build ColumnInfo[] from the AST's ColumnDefinition list.
-        Schema schema = BuildSchemaFromColumnDefinitions(create.Columns);
+        Schema schema = BuildSchemaFromColumnDefinitions(create.Columns, create.PrimaryKeyColumns);
 
         if (create.IsTemp)
         {
@@ -463,7 +466,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
         }
 
-        DatumFileWriterV2.CreateEmpty(targetPath, descriptors, columnDefaults, identityWriterSpec);
+        // PK indices on the schema are already in declaration order;
+        // translate to ushort for the prologue's storage.
+        ushort[]? pkColumnIndices = schema.PrimaryKeyColumnIndices.Count == 0
+            ? null
+            : schema.PrimaryKeyColumnIndices.Select(i => checked((ushort)i)).ToArray();
+
+        DatumFileWriterV2.CreateEmpty(
+            targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices);
 
         Add(new TableDescriptor(create.TableName, targetPath));
 
@@ -524,10 +534,24 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
-    private Schema BuildSchemaFromColumnDefinitions(IReadOnlyList<ColumnDefinition> definitions)
+    private Schema BuildSchemaFromColumnDefinitions(
+        IReadOnlyList<ColumnDefinition> definitions,
+        IReadOnlyList<string>? primaryKeyColumnNames)
     {
         ColumnInfo[] columns = new ColumnInfo[definitions.Count];
         int identityColumnIndex = -1;
+
+        // Resolve the PK column-name list (already deduplicated /
+        // ordered by the parser — see CreateTableParser) into schema
+        // indices, validating along the way.
+        int[]? pkSchemaIndices = null;
+        if (primaryKeyColumnNames is { Count: > 0 })
+        {
+            pkSchemaIndices = ResolvePrimaryKeyColumnIndices(definitions, primaryKeyColumnNames);
+            ValidatePrimaryKeySize(definitions, pkSchemaIndices);
+        }
+        HashSet<int>? pkIndexSet = pkSchemaIndices is null ? null : new HashSet<int>(pkSchemaIndices);
+
         for (int i = 0; i < definitions.Count; i++)
         {
             ColumnDefinition d = definitions[i];
@@ -583,14 +607,119 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 identityColumnIndex = i;
             }
 
-            columns[i] = new ColumnInfo(d.Name, kind, d.Nullable)
+            // PK columns are implicitly NOT NULL — auto-promote so the
+            // Nullable flag is consistent with the runtime check the
+            // INSERT layer performs.
+            bool isPrimaryKey = pkIndexSet is not null && pkIndexSet.Contains(i);
+            bool effectiveNullable = isPrimaryKey ? false : d.Nullable;
+
+            columns[i] = new ColumnInfo(d.Name, kind, effectiveNullable)
             {
                 IsArray = isArray,
                 DefaultExpression = defaultExpression,
                 Identity = identity,
+                IsPrimaryKey = isPrimaryKey,
             };
         }
-        return new Schema(columns);
+        return new Schema(columns, pkSchemaIndices);
+    }
+
+    /// <summary>
+    /// Resolves PK column names (in user-declared order) to schema
+    /// indices. Rejects unknown column names and duplicates that
+    /// somehow slipped past the parser's PK-list validation.
+    /// </summary>
+    private static int[] ResolvePrimaryKeyColumnIndices(
+        IReadOnlyList<ColumnDefinition> definitions,
+        IReadOnlyList<string> primaryKeyColumnNames)
+    {
+        int[] indices = new int[primaryKeyColumnNames.Count];
+        HashSet<int> seen = new();
+        for (int p = 0; p < primaryKeyColumnNames.Count; p++)
+        {
+            string name = primaryKeyColumnNames[p];
+            int found = -1;
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                if (string.Equals(definitions[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = i;
+                    break;
+                }
+            }
+            if (found < 0)
+            {
+                throw new InvalidOperationException(
+                    $"PRIMARY KEY references column '{name}' which is not declared in the table.");
+            }
+            if (!seen.Add(found))
+            {
+                throw new InvalidOperationException(
+                    $"PRIMARY KEY column '{name}' appears more than once.");
+            }
+            indices[p] = found;
+        }
+        return indices;
+    }
+
+    /// <summary>
+    /// Enforces the PR10f constraint that the total PK key size is
+    /// ≤ 16 bytes (sum of fixed-size column kinds). Variable-size
+    /// kinds (String, byte arrays, typed arrays, structs, image /
+    /// audio) are rejected up front because they have no bounded
+    /// per-row size.
+    /// </summary>
+    private static void ValidatePrimaryKeySize(
+        IReadOnlyList<ColumnDefinition> definitions,
+        IReadOnlyList<int> pkSchemaIndices)
+    {
+        const int MaxKeyBytes = 16;
+        int total = 0;
+        foreach (int idx in pkSchemaIndices)
+        {
+            ColumnDefinition d = definitions[idx];
+            if (!Model.TypeAnnotationResolver.TryParse(d.TypeName, out DataKind kind, out bool isArray))
+            {
+                // Type-parse error will be surfaced by the main loop;
+                // skip the size check here so the user sees the more
+                // specific error.
+                continue;
+            }
+            if (isArray || !TryGetFixedKindSizeBytes(kind, out int size))
+            {
+                throw new InvalidOperationException(
+                    $"PRIMARY KEY column '{d.Name}' has variable-size kind {kind}" +
+                    (isArray ? "[]" : "") +
+                    "; PR10f requires fixed-size scalar kinds in the PK (total ≤ 16 bytes).");
+            }
+            total += size;
+        }
+        if (total > MaxKeyBytes)
+        {
+            throw new InvalidOperationException(
+                $"PRIMARY KEY total key size is {total} bytes; the catalog enforces a 16-byte cap " +
+                "(sum of column kind sizes). Use fewer / smaller PK columns, or split the table.");
+        }
+    }
+
+    /// <summary>
+    /// Returns the byte size for a fixed-size scalar <paramref name="kind"/>.
+    /// Used by the PRIMARY KEY size check; <see langword="false"/> for
+    /// variable-size kinds (String, byte arrays, struct, image / audio).
+    /// </summary>
+    private static bool TryGetFixedKindSizeBytes(DataKind kind, out int size)
+    {
+        size = kind switch
+        {
+            DataKind.Boolean or DataKind.Int8 or DataKind.UInt8 => 1,
+            DataKind.Int16 or DataKind.UInt16 or DataKind.Float16 => 2,
+            DataKind.Int32 or DataKind.UInt32 or DataKind.Float32 or DataKind.Date => 4,
+            DataKind.Int64 or DataKind.UInt64 or DataKind.Float64 or
+                DataKind.Time or DataKind.DateTime or DataKind.Duration => 8,
+            DataKind.Int128 or DataKind.UInt128 or DataKind.Decimal or DataKind.Uuid => 16,
+            _ => 0,
+        };
+        return size > 0;
     }
 
     private static void ValidateIdentityValueFitsInKind(DataKind kind, long value, string columnName, string label)
@@ -700,12 +829,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Honor IF EXISTS — schema lookup is the cheapest way to ask
         // "does this column exist?" without poking at provider internals.
         bool columnPresent = false;
+        bool columnIsPrimaryKey = false;
         Schema schema = provider.GetSchema();
         foreach (ColumnInfo c in schema.Columns)
         {
             if (string.Equals(c.Name, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
             {
                 columnPresent = true;
+                columnIsPrimaryKey = c.IsPrimaryKey;
                 break;
             }
         }
@@ -714,6 +845,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             if (alter.IfExists) return;
             throw new InvalidOperationException(
                 $"Column '{alter.ColumnName}' does not exist on table '{alter.TableName}'.");
+        }
+        if (columnIsPrimaryKey)
+        {
+            // PK columns are load-bearing on the prologue's PK index
+            // list and on the runtime uniqueness check. Dropping one
+            // would leave the table referencing a non-existent column;
+            // require the user to drop the constraint first (a future
+            // ALTER TABLE DROP CONSTRAINT path).
+            throw new InvalidOperationException(
+                $"Column '{alter.ColumnName}' is part of the table's PRIMARY KEY and cannot be " +
+                "dropped. Drop the PRIMARY KEY constraint first (not yet supported), or recreate " +
+                "the table without the constraint.");
         }
 
         DropColumn(alter.TableName, alter.ColumnName);

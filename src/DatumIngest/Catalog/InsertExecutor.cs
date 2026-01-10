@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -95,6 +96,14 @@ internal static class InsertExecutor
         int sourceColumnCount = columnList?.Count ?? targetSchema.Columns.Count;
         ColumnPlan plan = ResolveColumnPlan(targetSchema, columnList, sourceColumnCount);
 
+        // Build the PK uniqueness checker before opening the session.
+        // The pre-scan runs against the same snapshot the writer is
+        // about to mutate; concurrent INSERTs serialize via the
+        // provider's mutation lock so the snapshot stays valid through
+        // commit.
+        PrimaryKeyChecker? pkChecker = await PrimaryKeyChecker.CreateAsync(provider, targetSchema)
+            .ConfigureAwait(false);
+
         // Open the session early so IDENTITY-reservation calls have a
         // place to land. Dispose-without-commit aborts on any throw,
         // matching the existing semantics of AppendRowsAsync.
@@ -138,6 +147,7 @@ internal static class InsertExecutor
                 }
             }
 
+            pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
             batch.Add(targetRow);
         }
 
@@ -175,6 +185,12 @@ internal static class InsertExecutor
     {
         IQueryPlan sourcePlan = catalog.PlanQuery(source.Query);
         ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
+
+        // PK uniqueness check — built once against the pre-INSERT
+        // snapshot. Per-row collisions throw, aborting the session
+        // (dispose without commit).
+        PrimaryKeyChecker? pkChecker = await PrimaryKeyChecker.CreateAsync(provider, targetSchema)
+            .ConfigureAwait(false);
 
         // Plan resolution is deferred to the first batch — that's where
         // we learn the source projection arity. An empty source ends up
@@ -217,6 +233,7 @@ internal static class InsertExecutor
                             : ResolveOmittedFill(plan, targetIndex, target, targetArena, session!);
                     }
 
+                    pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
                     targetBatch.Add(targetRow);
                 }
 
@@ -506,6 +523,138 @@ internal static class InsertExecutor
         int SourceColumnCount,
         int[] SourceIndexForTarget,
         OmittedFill[] OmittedFills);
+
+    /// <summary>
+    /// Walks the target table's existing rows once, captures the live
+    /// PRIMARY KEY values, and rejects per-row INSERT candidates whose
+    /// PK either collides with an existing row, collides with another
+    /// row in the same batch, or contains a NULL in any PK column.
+    /// Lazily constructed only when the target schema declares a PK;
+    /// no overhead on PK-less tables.
+    /// </summary>
+    private sealed class PrimaryKeyChecker
+    {
+        private readonly IReadOnlyList<int> _pkIndices;
+        private readonly HashSet<string> _seenKeys;
+
+        private PrimaryKeyChecker(IReadOnlyList<int> pkIndices, HashSet<string> seenKeys)
+        {
+            _pkIndices = pkIndices;
+            _seenKeys = seenKeys;
+        }
+
+        /// <summary>
+        /// Returns <see langword="null"/> when the target schema has no
+        /// PRIMARY KEY; otherwise builds a checker pre-loaded with the
+        /// existing row keys via a full scan.
+        /// </summary>
+        public static async Task<PrimaryKeyChecker?> CreateAsync(
+            ITableProvider provider, Schema targetSchema)
+        {
+            IReadOnlyList<int> pkIndices = targetSchema.PrimaryKeyColumnIndices;
+            if (pkIndices.Count == 0) return null;
+
+            HashSet<string> seen = new();
+            await foreach (RowBatch batch in provider.ScanAsync(
+                requiredColumns: null,
+                filterHint: null,
+                targetArena: null,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false))
+            {
+                try
+                {
+                    for (int r = 0; r < batch.Count; r++)
+                    {
+                        Row row = batch[r];
+                        string key = BuildKeyFromRow(row, pkIndices);
+                        seen.Add(key); // duplicates in existing data are silently kept (the table is already in this state)
+                    }
+                }
+                finally
+                {
+                    batch.Dispose();
+                }
+            }
+            return new PrimaryKeyChecker(pkIndices, seen);
+        }
+
+        /// <summary>
+        /// Validates a candidate target row: rejects NULLs in any PK
+        /// column, rejects duplicate keys against existing rows, and
+        /// rejects within-batch duplicates. Adds the key to the seen
+        /// set on success so the next row in the same INSERT can
+        /// detect a duplicate without a re-scan.
+        /// </summary>
+        public void EnsureUnique(DataValue[] targetRow, IReadOnlyList<ColumnInfo> columns)
+        {
+            string key = BuildKeyFromArray(targetRow, _pkIndices, columns);
+            if (!_seenKeys.Add(key))
+            {
+                throw new PrimaryKeyViolationException(
+                    BuildDuplicateMessage(_pkIndices, columns, targetRow));
+            }
+        }
+
+        private static string BuildKeyFromRow(Row row, IReadOnlyList<int> pkIndices)
+        {
+            System.Text.StringBuilder sb = new();
+            for (int p = 0; p < pkIndices.Count; p++)
+            {
+                if (p > 0) sb.Append('\x1f');
+                AppendKeyPart(sb, row[pkIndices[p]]);
+            }
+            return sb.ToString();
+        }
+
+        private static string BuildKeyFromArray(
+            DataValue[] row,
+            IReadOnlyList<int> pkIndices,
+            IReadOnlyList<ColumnInfo> columns)
+        {
+            System.Text.StringBuilder sb = new();
+            for (int p = 0; p < pkIndices.Count; p++)
+            {
+                if (p > 0) sb.Append('\x1f');
+                int idx = pkIndices[p];
+                DataValue v = row[idx];
+                if (v.IsNull)
+                {
+                    throw new PrimaryKeyViolationException(
+                        $"PRIMARY KEY column '{columns[idx].Name}' is NULL; PK values must be non-null.");
+                }
+                AppendKeyPart(sb, v);
+            }
+            return sb.ToString();
+        }
+
+        private static void AppendKeyPart(System.Text.StringBuilder sb, DataValue v)
+        {
+            // PK columns are restricted to fixed-size scalar kinds at
+            // CREATE TABLE time, so ToObject covers everything we'll
+            // see here. InvariantCulture so number formatting doesn't
+            // shift under different locales.
+            object? scalar = v.IsNull ? null : v.ToObject();
+            sb.Append(System.FormattableString.Invariant($"{scalar}"));
+        }
+
+        private static string BuildDuplicateMessage(
+            IReadOnlyList<int> pkIndices,
+            IReadOnlyList<ColumnInfo> columns,
+            DataValue[] row)
+        {
+            System.Text.StringBuilder sb = new("PRIMARY KEY violation: row with ");
+            for (int p = 0; p < pkIndices.Count; p++)
+            {
+                if (p > 0) sb.Append(", ");
+                int idx = pkIndices[p];
+                sb.Append(columns[idx].Name).Append('=');
+                DataValue v = row[idx];
+                sb.Append(System.FormattableString.Invariant($"{(v.IsNull ? "NULL" : v.ToObject())}"));
+            }
+            sb.Append(" already exists or is duplicated within the same INSERT.");
+            return sb.ToString();
+        }
+    }
 
     /// <summary>
     /// Per-target-column fill descriptor for columns omitted from the

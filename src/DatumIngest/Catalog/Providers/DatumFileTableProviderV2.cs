@@ -706,12 +706,29 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 footer.Prologue.IdentityStep);
         }
 
+        // PRIMARY KEY — set of footer column indices for the per-column
+        // IsPrimaryKey flag. Schema-level ordered list is derived after
+        // we know each column's schema-position.
+        HashSet<ushort>? pkFooterIndexSet = null;
+        if (footer.Prologue.PrimaryKeyColumnIndices.Count > 0)
+        {
+            pkFooterIndexSet = new HashSet<ushort>(footer.Prologue.PrimaryKeyColumnIndices);
+        }
+
         List<ColumnInfo> columns = new(footer.Columns.Count);
         List<int> indices = new(footer.Columns.Count);
+        // footerIndexToSchemaIndex[i] = schema-position of footer column i
+        // (or -1 when tombstoned). Used to translate the prologue's
+        // footer-indexed PK list into schema-indexed form.
+        int[] footerIndexToSchemaIndex = new int[footer.Columns.Count];
         for (int i = 0; i < footer.Columns.Count; i++)
         {
             ColumnDescriptorV2 d = footer.Columns[i].Descriptor;
-            if (d.IsTombstoned) continue;
+            if (d.IsTombstoned)
+            {
+                footerIndexToSchemaIndex[i] = -1;
+                continue;
+            }
 
             Expression? defaultExpression = null;
             if (defaultsByIndex is not null && defaultsByIndex.TryGetValue((ushort)i, out string? fragment))
@@ -719,15 +736,39 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 defaultExpression = ParseDefaultFragment(fragment, d.Name);
             }
 
+            footerIndexToSchemaIndex[i] = columns.Count;
             columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable)
             {
                 IsArray = d.IsArray,
                 DefaultExpression = defaultExpression,
                 Identity = i == identityFooterIndex ? identitySpec : null,
+                IsPrimaryKey = pkFooterIndexSet is not null && pkFooterIndexSet.Contains((ushort)i),
             });
             indices.Add(i);
         }
-        return (new Schema(columns.ToArray()), indices.ToArray());
+
+        // Translate the prologue's footer-indexed PK list to schema-indexed.
+        IReadOnlyList<int>? schemaPkIndices = null;
+        if (footer.Prologue.PrimaryKeyColumnIndices.Count > 0)
+        {
+            int[] translated = new int[footer.Prologue.PrimaryKeyColumnIndices.Count];
+            for (int p = 0; p < translated.Length; p++)
+            {
+                ushort footerIdx = footer.Prologue.PrimaryKeyColumnIndices[p];
+                if (footerIdx >= footerIndexToSchemaIndex.Length || footerIndexToSchemaIndex[footerIdx] < 0)
+                {
+                    // PK column was tombstoned — shouldn't happen because
+                    // ALTER DROP COLUMN of a PK column is rejected; surface
+                    // as a corruption-style error.
+                    throw new InvalidDataException(
+                        $"PRIMARY KEY references footer column {footerIdx} but it is missing or tombstoned.");
+                }
+                translated[p] = footerIndexToSchemaIndex[footerIdx];
+            }
+            schemaPkIndices = translated;
+        }
+
+        return (new Schema(columns.ToArray(), schemaPkIndices), indices.ToArray());
     }
 
     /// <summary>

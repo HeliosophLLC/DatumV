@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Catalog;
 /// resolution from column type names, <c>IF NOT EXISTS</c> /
 /// <c>IF EXISTS</c>, the <c>AT 'path'</c> clause + production flag,
 /// catalog-file persistence (v2), and rehydration on catalog reopen.
-/// PRIMARY KEY syntax is parsed but not enforced yet (PR10f).
+/// PRIMARY KEY enforcement (uniqueness, NULL rejection, 16-byte cap) ships in PR10f and is exercised in [PrimaryKeyTests](PrimaryKeyTests.cs).
 /// </summary>
 public sealed class CreateTableTests : IAsyncLifetime
 {

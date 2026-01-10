@@ -178,7 +178,8 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
             IdentityColumnIndex: -1,
             IdentitySeed: 0,
             IdentityStep: 0,
-            IdentityNextValue: 0);
+            IdentityNextValue: 0,
+            PrimaryKeyColumnIndices: []);
 
         using MemoryStream ms = new();
         using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))

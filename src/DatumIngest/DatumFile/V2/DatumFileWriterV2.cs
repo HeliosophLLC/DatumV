@@ -113,6 +113,13 @@ public sealed class DatumFileWriterV2 : IDisposable
     private long _identityStep;
     private long _identityNextValue;
 
+    // PRIMARY KEY column indices (PR10f). Empty when the table has
+    // no PK. Carries forward unchanged across appends — neither
+    // AddColumn nor MarkColumnTombstoned shifts indices, so stored
+    // values stay valid. Initialize seeds it for fresh writes;
+    // RehydrateFromFooter copies it from the existing prologue.
+    private ushort[]? _primaryKeyColumnIndices;
+
     /// <summary>
     /// Creates a writer that opens (and disposes) the given .datum file
     /// path. If <paramref name="sidecarPath"/> is non-null a
@@ -202,7 +209,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// encoder + zone-map builder per column.
     /// </summary>
     public void Initialize(IReadOnlyList<ColumnDescriptorV2> columns) =>
-        Initialize(columns, columnDefaults: null, identity: null);
+        Initialize(columns, columnDefaults: null, identity: null, primaryKeyColumnIndices: null);
 
     /// <summary>
     /// Initializes the writer with the column schema and an optional
@@ -214,7 +221,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     public void Initialize(
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults) =>
-        Initialize(columns, columnDefaults, identity: null);
+        Initialize(columns, columnDefaults, identity: null, primaryKeyColumnIndices: null);
 
     /// <summary>
     /// Initializes the writer with the column schema, optional per-column
@@ -226,7 +233,21 @@ public sealed class DatumFileWriterV2 : IDisposable
     public void Initialize(
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults,
-        IdentityWriterSpec? identity)
+        IdentityWriterSpec? identity) =>
+        Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices: null);
+
+    /// <summary>
+    /// As <see cref="Initialize(IReadOnlyList{ColumnDescriptorV2}, IReadOnlyList{ColumnDefaultV4}?, IdentityWriterSpec?)"/>,
+    /// but additionally stamps a PRIMARY KEY column-index list into
+    /// the footer prologue. The catalog validates the keys (at most
+    /// one PK, columns exist, total key size ≤ 16 bytes) before calling
+    /// in.
+    /// </summary>
+    public void Initialize(
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity,
+        IReadOnlyList<ushort>? primaryKeyColumnIndices)
     {
         if (_initialized) throw new InvalidOperationException("Writer already initialized.");
         if (columns.Count == 0) throw new ArgumentException("At least one column required.", nameof(columns));
@@ -254,6 +275,11 @@ public sealed class DatumFileWriterV2 : IDisposable
             _identitySeed = id.Seed;
             _identityStep = id.Step;
             _identityNextValue = id.Seed;
+        }
+
+        if (primaryKeyColumnIndices is { Count: > 0 })
+        {
+            _primaryKeyColumnIndices = primaryKeyColumnIndices.ToArray();
         }
 
         // Reserve header bytes (placeholder zeros). Patched at finalize.
@@ -404,7 +430,8 @@ public sealed class DatumFileWriterV2 : IDisposable
             IdentityColumnIndex: _identityColumnIndex,
             IdentitySeed: _identitySeed,
             IdentityStep: _identityStep,
-            IdentityNextValue: _identityNextValue);
+            IdentityNextValue: _identityNextValue,
+            PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>());
 
         FooterV2 footer = new(prologue, columnFooters, emitVolumes);
 
@@ -786,7 +813,7 @@ public sealed class DatumFileWriterV2 : IDisposable
     /// descriptors.
     /// </remarks>
     public static void CreateEmpty(string datumPath, IReadOnlyList<ColumnDescriptorV2> columns) =>
-        CreateEmpty(datumPath, columns, columnDefaults: null, identity: null);
+        CreateEmpty(datumPath, columns, columnDefaults: null, identity: null, primaryKeyColumnIndices: null);
 
     /// <summary>
     /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2})"/>,
@@ -799,7 +826,7 @@ public sealed class DatumFileWriterV2 : IDisposable
         string datumPath,
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults) =>
-        CreateEmpty(datumPath, columns, columnDefaults, identity: null);
+        CreateEmpty(datumPath, columns, columnDefaults, identity: null, primaryKeyColumnIndices: null);
 
     /// <summary>
     /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2}, IReadOnlyList{ColumnDefaultV4}?)"/>,
@@ -812,7 +839,22 @@ public sealed class DatumFileWriterV2 : IDisposable
         string datumPath,
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults,
-        IdentityWriterSpec? identity)
+        IdentityWriterSpec? identity) =>
+        CreateEmpty(datumPath, columns, columnDefaults, identity, primaryKeyColumnIndices: null);
+
+    /// <summary>
+    /// As <see cref="CreateEmpty(string, IReadOnlyList{ColumnDescriptorV2}, IReadOnlyList{ColumnDefaultV4}?, IdentityWriterSpec?)"/>,
+    /// but additionally stamps a PRIMARY KEY column-index list into the
+    /// footer prologue. PK validation (column existence, total key
+    /// size ≤ 16 bytes) happens at the catalog layer; the writer
+    /// treats the list as opaque payload.
+    /// </summary>
+    public static void CreateEmpty(
+        string datumPath,
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity,
+        IReadOnlyList<ushort>? primaryKeyColumnIndices)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(columns);
@@ -824,7 +866,7 @@ public sealed class DatumFileWriterV2 : IDisposable
 
         // No sidecar — empty file has no values to spill.
         using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
-        writer.Initialize(columns, columnDefaults, identity);
+        writer.Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices);
         writer.FinalizeWriter();
     }
 
@@ -1168,6 +1210,12 @@ public sealed class DatumFileWriterV2 : IDisposable
         _identitySeed = footer.Prologue.IdentitySeed;
         _identityStep = footer.Prologue.IdentityStep;
         _identityNextValue = footer.Prologue.IdentityNextValue;
+
+        // Carry forward PRIMARY KEY column indices verbatim.
+        if (footer.Prologue.PrimaryKeyColumnIndices.Count > 0)
+        {
+            _primaryKeyColumnIndices = footer.Prologue.PrimaryKeyColumnIndices.ToArray();
+        }
 
         int columnCount = footer.Columns.Count;
         _columns = new ColumnDescriptorV2[columnCount];

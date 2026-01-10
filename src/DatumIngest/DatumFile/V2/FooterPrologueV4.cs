@@ -99,6 +99,14 @@ namespace DatumIngest.DatumFile.V2;
 /// without consulting <c>.datum-catalog.json</c>. Meaningless when
 /// <see cref="IdentityColumnIndex"/> is <c>-1</c>.
 /// </param>
+/// <param name="PrimaryKeyColumnIndices">
+/// Ordered list of footer column indices forming the table's
+/// <c>PRIMARY KEY</c>. Empty when the table has no PK. Order matches
+/// the user's PK declaration (table-level <c>PRIMARY KEY (b, a)</c>
+/// keeps <c>b</c> first regardless of column-declaration order). PR10f
+/// caps the total PK key size at 16 bytes (sum of column-kind sizes);
+/// the catalog enforces this at <c>CREATE TABLE</c> time.
+/// </param>
 public sealed record FooterPrologueV4(
     ulong Generation,
     ulong WriterId,
@@ -111,7 +119,8 @@ public sealed record FooterPrologueV4(
     short IdentityColumnIndex,
     long IdentitySeed,
     long IdentityStep,
-    long IdentityNextValue)
+    long IdentityNextValue,
+    IReadOnlyList<ushort> PrimaryKeyColumnIndices)
 {
     /// <summary>
     /// Default prologue for a fresh single-writer commit with no
@@ -130,7 +139,8 @@ public sealed record FooterPrologueV4(
         IdentityColumnIndex: -1,
         IdentitySeed: 0,
         IdentityStep: 0,
-        IdentityNextValue: 0);
+        IdentityNextValue: 0,
+        PrimaryKeyColumnIndices: Array.Empty<ushort>());
 
     /// <summary>
     /// Serializes the prologue. Layout:
@@ -142,6 +152,7 @@ public sealed record FooterPrologueV4(
     ///   <item>chapterTombstoneCount (4) + int64 offsets[]</item>
     ///   <item>columnDefaultCount (4) + entries[]</item>
     ///   <item>identityColumnIndex (2) + identitySeed (8) + identityStep (8) + identityNextValue (8)</item>
+    ///   <item>primaryKeyCount (1) + uint16 indices[]</item>
     /// </list>
     /// </summary>
     internal void Serialize(BinaryWriter writer)
@@ -174,6 +185,15 @@ public sealed record FooterPrologueV4(
         writer.Write(IdentitySeed);
         writer.Write(IdentityStep);
         writer.Write(IdentityNextValue);
+
+        // PR10f caps PK column count at 16 (a fixed-size byte budget,
+        // not a column count, but in practice 16 columns is more than
+        // enough). Stored as a single byte to keep the prologue tight.
+        writer.Write(checked((byte)PrimaryKeyColumnIndices.Count));
+        foreach (ushort columnIndex in PrimaryKeyColumnIndices)
+        {
+            writer.Write(columnIndex);
+        }
     }
 
     /// <summary>Deserializes a prologue written by <see cref="Serialize"/>.</summary>
@@ -238,6 +258,13 @@ public sealed record FooterPrologueV4(
         long identityStep = reader.ReadInt64();
         long identityNextValue = reader.ReadInt64();
 
+        byte primaryKeyCount = reader.ReadByte();
+        ushort[] primaryKeyColumnIndices = new ushort[primaryKeyCount];
+        for (int i = 0; i < primaryKeyCount; i++)
+        {
+            primaryKeyColumnIndices[i] = reader.ReadUInt16();
+        }
+
         return new FooterPrologueV4(
             generation, writerId, baseGeneration,
             tombstoneGranularity, columnCount,
@@ -246,7 +273,8 @@ public sealed record FooterPrologueV4(
             identityColumnIndex,
             identitySeed,
             identityStep,
-            identityNextValue);
+            identityNextValue,
+            primaryKeyColumnIndices);
     }
 }
 

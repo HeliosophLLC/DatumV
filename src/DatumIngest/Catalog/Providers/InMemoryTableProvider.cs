@@ -350,9 +350,15 @@ public sealed class InMemoryTableProvider : ITableProvider
             for (int i = 0; i < _schema.Columns.Count; i++) newSchemaColumns[i] = _schema.Columns[i];
             newSchemaColumns[^1] = column;
 
+            // PK indices stay valid: the new column is appended past
+            // the existing range, so no shift is needed.
+            int[]? carriedPkIndices = _schema.PrimaryKeyColumnIndices.Count > 0
+                ? _schema.PrimaryKeyColumnIndices.ToArray()
+                : null;
+
             _columns = newColumns;
             _rows = newRows;
-            _schema = new Schema(newSchemaColumns);
+            _schema = new Schema(newSchemaColumns, carriedPkIndices);
             _fullLookup = new ColumnLookup(_columns);
             _overrideIndex = null;
         }
@@ -413,9 +419,26 @@ public sealed class InMemoryTableProvider : ITableProvider
                 newSchemaColumns[j++] = _schema.Columns[i];
             }
 
+            // Carry forward PRIMARY KEY indices, shifting any index past
+            // the dropped position down by one. The catalog rejects
+            // dropping a PK column itself (so dropIndex is never in the
+            // PK set here), but we still need the shift for indices to
+            // the right of the drop.
+            int[]? newPkIndices = null;
+            if (_schema.PrimaryKeyColumnIndices.Count > 0)
+            {
+                int[] shifted = new int[_schema.PrimaryKeyColumnIndices.Count];
+                for (int p = 0; p < shifted.Length; p++)
+                {
+                    int oldIdx = _schema.PrimaryKeyColumnIndices[p];
+                    shifted[p] = oldIdx > dropIndex ? oldIdx - 1 : oldIdx;
+                }
+                newPkIndices = shifted;
+            }
+
             _columns = newColumns;
             _rows = newRows;
-            _schema = new Schema(newSchemaColumns);
+            _schema = new Schema(newSchemaColumns, newPkIndices);
             _fullLookup = new ColumnLookup(_columns);
             _overrideIndex = null;
         }
