@@ -106,6 +106,8 @@ public static class BuiltinModels
         RegisterRealisticVisionHyper(modelCatalog);
         RegisterDreamshaperHyper(modelCatalog);
         RegisterEpicrealismHyper(modelCatalog);
+        RegisterOpenjourneyHyper(modelCatalog);
+        RegisterMoDiHyper(modelCatalog);
         RegisterSdxlTurbo(modelCatalog);
         RegisterJuggernautXlLightning(modelCatalog);
         RegisterSdxlLightning2Step(modelCatalog);
@@ -1281,6 +1283,174 @@ public static class BuiltinModels
             License: "CreativeML OpenRAIL-M",
             LicenseHolder: "emilianJR / ByteDance",
             SourceUrl: "https://huggingface.co/emilianJR/epiCRealism",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the Openjourney v4 + Hyper-SD diffusers ONNX layout.</summary>
+    public const string OpenjourneyHyperFolder = "openjourney-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for Openjourney v4 + Hyper-SD: the UNet weights,
+    /// ~865M params (same architecture as SD-Turbo / SD 1.5, but the
+    /// underlying weights are PromptHero's Openjourney v4 finetune of SD 1.5
+    /// — trained on Midjourney v4 outputs — with ByteDance's Hyper-SD 4-step
+    /// distillation LoRA fused in).
+    /// </summary>
+    public const string OpenjourneyHyperAnchor = OpenjourneyHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers Openjourney v4 (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"openjourney_hyper"</c>). Reproduces Midjourney v4's dramatic
+    /// lighting, painterly atmosphere, and cinematic composition fingerprint
+    /// — strong fit for D&amp;D set-pieces and atmospheric scenes (temple
+    /// approaches, dusk vistas, dramatic NPC reveals). Same wall-clock cost
+    /// as the other SD 1.5 + Hyper exports (~250–330ms per 512×512 image at 4 steps).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the
+    /// Openjourney v4 base and the Hyper-SD LoRA. v4 dropped the
+    /// "mdjrny-v4 style" trigger token that v3 required — prompts work
+    /// without any prefix.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout — Openjourney
+    /// ships with its own bundled VAE, no separate sd-vae-ft-mse pairing.
+    /// </para>
+    /// </remarks>
+    public static void RegisterOpenjourneyHyper(
+        ModelCatalog catalog,
+        string modelName = "openjourney_hyper",
+        string folder = OpenjourneyHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "Openjourney v4 + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "PromptHero / ByteDance",
+            SourceUrl: "https://huggingface.co/prompthero/openjourney-v4",
+            Category: "generator",
+            Modalities: ["text", "image"],
+            Files:
+            [
+                $"{folder}/text_encoder/model.onnx",
+                $"{folder}/unet/model.onnx",
+                $"{folder}/unet/model.onnx_data",
+                $"{folder}/vae_decoder/model.onnx",
+                $"{folder}/vae_encoder/model.onnx",
+                $"{folder}/tokenizer/vocab.json",
+                $"{folder}/tokenizer/merges.txt",
+                $"{folder}/tokenizer/special_tokens_map.json",
+                $"{folder}/tokenizer/tokenizer_config.json",
+                $"{folder}/scheduler/scheduler_config.json",
+                $"{folder}/model_index.json",
+            ]));
+    }
+
+    /// <summary>Default folder for the Mo Di Diffusion + Hyper-SD diffusers ONNX layout.</summary>
+    public const string MoDiHyperFolder = "mo-di-hyper-onnx";
+
+    /// <summary>
+    /// File-existence anchor for Mo Di Diffusion + Hyper-SD: the UNet weights,
+    /// ~865M params (same architecture as SD-Turbo / SD 1.5, but the
+    /// underlying weights are nitrosocke's Mo Di Diffusion finetune of SD 1.5
+    /// — trained on modern Disney/Pixar 3D animated stills — with ByteDance's
+    /// Hyper-SD 4-step distillation LoRA fused in).
+    /// </summary>
+    public const string MoDiHyperAnchor = MoDiHyperFolder + "/unet/model.onnx";
+
+    /// <summary>
+    /// Registers Mo Di Diffusion (SD 1.5 finetune) + Hyper-SD 4-step LoRA
+    /// under the catalog name <paramref name="modelName"/> (defaults to
+    /// <c>"mo_di_hyper"</c>). Disney / Pixar 3D-render style — whimsical,
+    /// rounded, character-forward. A radically different visual envelope
+    /// from the photoreal / painterly / Midjourney finetunes; useful for
+    /// tone shifts (lighter side-quests, comic-relief NPCs, family-friendly
+    /// campaign lines).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Trigger phrase:</strong> Mo Di was trained with the trigger
+    /// token <c>"modern disney style"</c>. Prompts without it still produce
+    /// reasonable images, but the Disney/Pixar fingerprint only fully kicks
+    /// in when the trigger is present. Prepend it in calls:
+    /// <c>models.mo_di_hyper('modern disney style, halfling rogue with a sly grin')</c>.
+    /// The trigger is purely a prompt convention — nothing about the loader
+    /// or scheduler has to know about it.
+    /// </para>
+    /// <para>
+    /// <strong>Architecture:</strong> SD 1.5 UNet (CLIP-L text encoder, 768
+    /// hidden dim, 512×512 native). Identical pipeline shape to SD-Turbo, so
+    /// the same <see cref="StableDiffusionTurboModel"/> loader handles it.
+    /// </para>
+    /// <para>
+    /// <strong>License:</strong> CreativeML OpenRAIL-M for both the Mo Di
+    /// base and the Hyper-SD LoRA. Same nitrosocke lineage as Arcane-Diffusion
+    /// and Redshift if you want more stylized variants later.
+    /// </para>
+    /// <para>
+    /// <strong>Layout:</strong> standard diffusers folder layout — Mo Di
+    /// ships with its own bundled VAE.
+    /// </para>
+    /// </remarks>
+    public static void RegisterMoDiHyper(
+        ModelCatalog catalog,
+        string modelName = "mo_di_hyper",
+        string folder = MoDiHyperFolder,
+        int? seed = null,
+        int steps = 4)
+    {
+        catalog.Register(new ModelCatalogEntry(
+            Name: modelName,
+            Backend: "onnx",
+            RelativePath: $"{folder}/unet/model.onnx",
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.Image,
+            IsDeterministic: false,
+            Loader: ctx =>
+            {
+                string modelDirectory = Path.Combine(ctx.ModelDirectory, folder);
+                return new StableDiffusionTurboModel(modelName, modelDirectory, seed, steps);
+            },
+            DisplayName: "Mo Di Diffusion + Hyper-SD",
+            Parameters: "865M (UNet) + 123M (text encoder)",
+            License: "CreativeML OpenRAIL-M",
+            LicenseHolder: "nitrosocke / ByteDance",
+            SourceUrl: "https://huggingface.co/nitrosocke/mo-di-diffusion",
             Category: "generator",
             Modalities: ["text", "image"],
             Files:
