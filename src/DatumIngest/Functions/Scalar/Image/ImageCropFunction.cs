@@ -6,15 +6,20 @@ using SkiaSharp;
 namespace DatumIngest.Functions.Scalar.Image;
 
 /// <summary>
-/// Crops a rectangular region out of an image. Two call shapes:
+/// Crops a rectangular region out of an image. Three call shapes:
 /// <list type="bullet">
-///   <item><c>image_crop(image, x, y, w, h)</c> — explicit coordinates.</item>
+///   <item><c>image_crop(image, x, y, w, h)</c> — explicit coordinates,
+///   returns a single Image.</item>
 ///   <item><c>image_crop(image, rect)</c> — <c>rect</c> is a struct with
-///   numeric fields <c>x</c>, <c>y</c>, <c>w</c>, <c>h</c> (case-insensitive).</item>
+///   numeric fields <c>x</c>, <c>y</c>, <c>w</c>, <c>h</c> (case-insensitive),
+///   returns a single Image.</item>
+///   <item><c>image_crop(image, rects)</c> — <c>rects</c> is an array of
+///   such structs; returns <c>Array&lt;Image&gt;</c>, one cropped image
+///   per rect in input order.</item>
 /// </list>
 /// All numeric kinds accepted for the coordinate values (float values
-/// truncate to integer pixel offsets). Returns a null Image when any argument
-/// is null.
+/// truncate to integer pixel offsets). Returns a null Image when the image
+/// or rect argument is null.
 /// </summary>
 public sealed class ImageCropFunction : IFunction, IScalarFunction
 {
@@ -48,10 +53,18 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("rect",  DataKindMatcher.Exact(DataKind.Struct)),
+                new ParameterSpec("rect",  DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("rects", DataKindMatcher.Exact(DataKind.Struct), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Image))),
     ];
 
     /// <inheritdoc />
@@ -72,16 +85,10 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
         }
 
-        int x, y, w, h;
-        if (args.Length == 2)
-        {
-            ValueRef rectArg = args[1];
-            if (rectArg.IsNull)
-                return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
+        SKBitmap source = imgArg.AsImage();
 
-            (x, y, w, h) = ReadRectStruct(rectArg, frame);
-        }
-        else
+        // 5-arg form: explicit coordinates.
+        if (args.Length == 5)
         {
             ValueRef xArg = args[1];
             ValueRef yArg = args[2];
@@ -91,14 +98,44 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
             if (xArg.IsNull || yArg.IsNull || wArg.IsNull || hArg.IsNull)
                 return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
 
-            x = xArg.ToInt32();
-            y = yArg.ToInt32();
-            w = wArg.ToInt32();
-            h = hArg.ToInt32();
+            ValueRef cropped = CropOne(source, xArg.ToInt32(), yArg.ToInt32(),
+                                              wArg.ToInt32(), hArg.ToInt32());
+            return new ValueTask<ValueRef>(cropped);
         }
 
-        SKBitmap source = imgArg.AsImage();
+        // 2-arg form: struct or struct array.
+        ValueRef rectArg = args[1];
+        if (rectArg.IsNull)
+        {
+            return rectArg.IsArray
+                ? new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Image))
+                : new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
+        }
 
+        if (rectArg.IsArray)
+        {
+            ReadOnlySpan<ValueRef> rectStructs = rectArg.GetArrayElements();
+            ValueRef[] images = new ValueRef[rectStructs.Length];
+            for (int i = 0; i < rectStructs.Length; i++)
+            {
+                ValueRef element = rectStructs[i];
+                if (element.IsNull)
+                {
+                    images[i] = ValueRef.Null(DataKind.Image);
+                    continue;
+                }
+                (int x, int y, int w, int h) = ReadRectStruct(element, frame);
+                images[i] = CropOne(source, x, y, w, h);
+            }
+            return new ValueTask<ValueRef>(ValueRef.FromArray(DataKind.Image, images));
+        }
+
+        (int sx, int sy, int sw, int sh) = ReadRectStruct(rectArg, frame);
+        return new ValueTask<ValueRef>(CropOne(source, sx, sy, sw, sh));
+    }
+
+    private static ValueRef CropOne(SKBitmap source, int x, int y, int w, int h)
+    {
         if (w <= 0 || h <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -114,7 +151,7 @@ public sealed class ImageCropFunction : IFunction, IScalarFunction
         }
 
         // subset shares pixel memory with source — Copy() produces an owned bitmap.
-        return new ValueTask<ValueRef>(ValueRef.FromImage(subset.Copy()));
+        return ValueRef.FromImage(subset.Copy());
     }
 
     private static (int X, int Y, int W, int H) ReadRectStruct(ValueRef rect, EvaluationFrame frame)

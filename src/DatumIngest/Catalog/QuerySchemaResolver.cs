@@ -207,14 +207,15 @@ public sealed class QuerySchemaResolver
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
-                    DataKind? kind = ExpressionTypeResolver.ResolveType(
+                    (DataKind Kind, bool IsArray)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, flatSourceSchema, _functionRegistry);
 
                     outputColumns.Add(new ResolvedColumn(
                         outputName,
-                        kind ?? DataKind.String,
+                        shape?.Kind ?? DataKind.String,
                         Nullable: true,
-                        sourceIdentifier));
+                        sourceIdentifier,
+                        IsArray: shape?.IsArray ?? false));
 
                     if (selectColumn.Alias is not null)
                     {
@@ -318,14 +319,15 @@ public sealed class QuerySchemaResolver
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
-                    DataKind? kind = ExpressionTypeResolver.ResolveType(
+                    (DataKind Kind, bool IsArray)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, innerSchema, _functionRegistry);
 
                     outputColumns.Add(new ResolvedColumn(
                         outputName,
-                        kind ?? DataKind.String,
+                        shape?.Kind ?? DataKind.String,
                         Nullable: true,
-                        subquery.Alias));
+                        subquery.Alias,
+                        IsArray: shape?.IsArray ?? false));
                     if (selectColumn.Alias is not null)
                     {
                         aliasedPositions.Add(outputColumns.Count - 1);

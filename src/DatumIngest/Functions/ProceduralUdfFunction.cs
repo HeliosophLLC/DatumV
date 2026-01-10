@@ -51,7 +51,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
     private readonly UdfDescriptor _descriptor;
     private readonly FunctionRegistry _functions;
     private readonly DataKind _returnKind;
-    private readonly bool _returnIsArray;
 
     /// <summary>
     /// Creates an adapter for <paramref name="descriptor"/>. The descriptor
@@ -80,7 +79,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
 
         _descriptor = descriptor;
         _functions = functions;
-        if (!TypeAnnotationResolver.TryParse(descriptor.ReturnTypeName, out _returnKind, out _returnIsArray))
+        if (!TypeAnnotationResolver.TryParse(descriptor.ReturnTypeName, out _returnKind, out _))
         {
             throw new ArgumentException(
                 $"Procedural UDF '{descriptor.Name}': cannot resolve return type '{descriptor.ReturnTypeName}'.",
@@ -110,9 +109,6 @@ public sealed class ProceduralUdfFunction : IScalarFunction
         }
         return _returnKind;
     }
-
-    /// <inheritdoc/>
-    public bool ProducesArray => _returnIsArray;
 
     /// <inheritdoc/>
     public bool IsPure => _descriptor.IsPure;

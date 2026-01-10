@@ -82,9 +82,6 @@ internal sealed class ModelScalarFunction : IScalarFunction
     }
 
     /// <inheritdoc/>
-    public bool ProducesArray => false;
-
-    /// <inheritdoc/>
     /// <remarks>
     /// Mirrors <see cref="ModelCatalogEntry.IsDeterministic"/>: a model whose
     /// output depends only on its inputs is pure, so the planner's CSE pass

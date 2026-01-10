@@ -1,5 +1,7 @@
 using DatumIngest.Execution;
 using DatumIngest.Functions;
+using DatumIngest.Manifest;
+using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Catalog;
@@ -422,11 +424,51 @@ internal sealed class RoutineRegistrar
     private void RegisterProceduralAdapter(UdfDescriptor descriptor, bool replace)
     {
         ProceduralUdfFunction adapter = new(descriptor, _functions);
+        FunctionDescriptor catalogDescriptor = BuildProceduralDescriptor(descriptor);
         _functions.RegisterScalarInstance(
             UdfNameForFunctionRegistry(descriptor.Name),
             adapter,
-            descriptor: null,
+            descriptor: catalogDescriptor,
             replace: replace);
+    }
+
+    /// <summary>
+    /// Synthesises a <see cref="FunctionDescriptor"/> for a procedural UDF so the
+    /// type resolver can read its return shape (including <c>Array&lt;T&gt;</c>
+    /// returns) via the standard per-signature path. Parameters use
+    /// <see cref="DataKindMatcher.Any"/> because the UDF adapter does its own
+    /// arity check — the synthesised signature exists to carry the return rule,
+    /// not to gate calls.
+    /// </summary>
+    private static FunctionDescriptor BuildProceduralDescriptor(UdfDescriptor udf)
+    {
+        DataKind returnKind = DataKind.String;
+        bool returnIsArray = false;
+        if (udf.ReturnTypeName is not null)
+        {
+            TypeAnnotationResolver.TryParse(udf.ReturnTypeName, out returnKind, out returnIsArray);
+        }
+
+        ReturnTypeRule returnRule = returnIsArray
+            ? ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(returnKind))
+            : ReturnTypeRule.Constant(returnKind);
+
+        ParameterSpec[] parameters = new ParameterSpec[udf.Parameters.Count];
+        for (int i = 0; i < udf.Parameters.Count; i++)
+        {
+            UdfParameter p = udf.Parameters[i];
+            parameters[i] = new ParameterSpec(p.Name, DataKindMatcher.Any, IsOptional: p.Default is not null);
+        }
+
+        return new FunctionDescriptor(
+            PrimaryName: UdfNameForFunctionRegistry(udf.Name),
+            Aliases: Array.Empty<string>(),
+            Category: FunctionCategory.Utility,
+            Description: $"User-defined procedural function {udf.Name}.",
+            Signatures:
+            [
+                new FunctionSignatureVariant(parameters, VariadicTrailing: null, ReturnType: returnRule),
+            ]);
     }
 
     /// <summary>

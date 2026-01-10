@@ -40,9 +40,6 @@ public sealed class CyclicalEncodeFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public bool ProducesArray => true;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<CyclicalEncodeFunction>(argumentKinds);
 

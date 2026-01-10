@@ -63,6 +63,95 @@ public static class FunctionMetadata
     }
 
     /// <summary>
+    /// Array-aware variant of <see cref="MatchVariant"/>. Walks
+    /// <paramref name="signatures"/> and returns the first variant that
+    /// matches both <see cref="DataKind"/> and array-ness for each argument.
+    /// Use this from the type resolver, where the per-arg <c>IsArray</c>
+    /// flag is known. Falls back to <see cref="MatchVariant"/>-equivalent
+    /// behaviour for parameters whose <see cref="ParameterSpec.IsArray"/>
+    /// is <see cref="ArrayMatch.Either"/>.
+    /// </summary>
+    public static FunctionSignatureVariant? MatchVariantWithShape(
+        IReadOnlyList<FunctionSignatureVariant> signatures,
+        ReadOnlySpan<(DataKind Kind, bool IsArray)> argumentShapes)
+    {
+        for (int i = 0; i < signatures.Count; i++)
+        {
+            if (TryMatchWithShape(signatures[i], argumentShapes))
+            {
+                return signatures[i];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Array-aware version of <see cref="TryMatch"/>. Identical to
+    /// <see cref="TryMatch"/> except each fixed parameter and the variadic
+    /// also enforce <see cref="ParameterSpec.IsArray"/> /
+    /// <see cref="VariadicSpec.IsArray"/> against the argument's actual
+    /// array-ness.
+    /// </summary>
+    public static bool TryMatchWithShape(
+        FunctionSignatureVariant variant,
+        ReadOnlySpan<(DataKind Kind, bool IsArray)> argumentShapes)
+    {
+        IReadOnlyList<ParameterSpec> parameters = variant.Parameters;
+        int requiredCount = 0;
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            if (!parameters[i].IsOptional) requiredCount++;
+        }
+
+        VariadicSpec? variadic = variant.VariadicTrailing;
+        int minTotal = requiredCount + (variadic?.MinOccurrences ?? 0);
+        int maxFixed = parameters.Count;
+
+        if (argumentShapes.Length < minTotal) return false;
+        if (variadic is null && argumentShapes.Length > maxFixed) return false;
+
+        int fixedToCheck = Math.Min(argumentShapes.Length, maxFixed);
+        for (int i = 0; i < fixedToCheck; i++)
+        {
+            (DataKind kind, bool isArray) = argumentShapes[i];
+            if (!parameters[i].Kind.Matches(kind)) return false;
+            if (!ArrayMatchSatisfied(parameters[i].IsArray, isArray)) return false;
+        }
+
+        if (variadic is not null)
+        {
+            DataKind? firstVariadic = null;
+            for (int i = maxFixed; i < argumentShapes.Length; i++)
+            {
+                (DataKind kind, bool isArray) = argumentShapes[i];
+                if (!variadic.Kind.Matches(kind)) return false;
+                if (!ArrayMatchSatisfied(variadic.IsArray, isArray)) return false;
+                if (variadic.RequireSameKindAcrossArgs)
+                {
+                    if (firstVariadic is null)
+                    {
+                        firstVariadic = kind;
+                    }
+                    else if (firstVariadic.Value != kind)
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ArrayMatchSatisfied(ArrayMatch spec, bool actualIsArray) => spec switch
+    {
+        ArrayMatch.Either => true,
+        ArrayMatch.Scalar => !actualIsArray,
+        ArrayMatch.Array => actualIsArray,
+        _ => true,
+    };
+
+    /// <summary>
     /// True when <paramref name="argumentKinds"/> match
     /// <paramref name="variant"/>'s parameter list and trailing variadic.
     /// </summary>

@@ -34,9 +34,6 @@ public sealed class ArrayConstructorFunction : IFunction, IScalarFunction
     ];
 
     /// <inheritdoc />
-    public bool ProducesArray => true;
-
-    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length == 0)

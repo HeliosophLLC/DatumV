@@ -73,16 +73,6 @@ public interface IScalarFunction
     int QueryUnitCost => 1;
 
     /// <summary>
-    /// Whether this function's result is a typed array whose element kind is
-    /// returned by <see cref="ValidateArguments"/>. Mirrors
-    /// <see cref="IAggregateFunction.ProducesArray"/>. Defaults to
-    /// <see langword="false"/>; override to <see langword="true"/> on
-    /// functions like <c>array()</c> and <c>cyclical_encode()</c> that
-    /// return <c>Array&lt;T&gt;</c> values.
-    /// </summary>
-    bool ProducesArray => false;
-
-    /// <summary>
     /// Whether this function is pure: same arguments always yield the same
     /// result, with no observable side effects. Defaults to <see langword="true"/>;
     /// functions whose output depends on time, randomness, or external state
