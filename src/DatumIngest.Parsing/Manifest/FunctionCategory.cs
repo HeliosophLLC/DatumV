@@ -45,6 +45,9 @@ public enum FunctionCategory
     /// </summary>
     Array,
 
+    /// <summary>File path manipulation: filename, extension, directory, and path concatenation.</summary>
+    File,
+
     /// <summary>Table-valued functions that produce multiple rows (used in FROM/JOIN clauses).</summary>
     Table,
 

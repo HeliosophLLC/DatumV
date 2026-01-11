@@ -371,6 +371,12 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Math.CeilFunction>();
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
         registry.RegisterScalar<Scalar.Math.SqrtFunction>();
+        registry.RegisterScalar<Scalar.File.GetFilenameFunction>();
+        registry.RegisterScalar<Scalar.File.GetFilenameExtFunction>();
+        registry.RegisterScalar<Scalar.File.GetDirectoryFunction>();
+        registry.RegisterScalar<Scalar.File.PathConcatFunction>();
+        registry.RegisterScalar<Scalar.File.GetFilenameNoExtFunction>();
+        registry.RegisterScalar<Scalar.File.ChangeFilenameExtFunction>();
         registry.RegisterScalar<Scalar.RandomChoiceFunction>();
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
