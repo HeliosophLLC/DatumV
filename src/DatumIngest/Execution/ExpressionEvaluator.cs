@@ -228,6 +228,11 @@ public sealed class ExpressionEvaluator
     {
     }
 
+    /// <summary>
+    /// Gets the <see cref="QueryMeter" /> associated with this <see cref="ExpressionEvaluator"/>
+    /// </summary>
+    public QueryMeter? QueryMeter => _meter;
+
     /// <summary>Resolves a string DataValue against the frame's source arena.</summary>
     private static string Str(DataValue v, EvaluationFrame frame) => v.AsString(frame.Source);
 

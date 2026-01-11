@@ -16,6 +16,7 @@ namespace DatumIngest.Tests.Execution;
 public class QueryMeteringTests : ServiceTestBase
 {
     private static readonly string[] XColumns = ["x"];
+    private ExpressionEvaluator _evaluator = new(FunctionRegistry.CreateDefault(), store: new Arena(), meter: new QueryMeter());
 
     /// <summary>
     /// Evaluating a single scalar function call adds its QU cost to the meter.
@@ -23,16 +24,14 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task EvaluateFunction_AccumulatesQueryUnits()
     {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromString("hello")]);
 
         // `len` has a QU cost of 1 (default).
-        await evaluator.EvaluateAsync(
+        await _evaluator.EvaluateAsync(
             new FunctionCallExpression("len", [new ColumnReference("x")]),
             row);
 
-        Assert.Equal(1, meter.QueryUnits);
+        Assert.Equal(1, _evaluator.QueryMeter!.QueryUnits);
     }
 
     /// <summary>
@@ -41,19 +40,17 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task MultipleFunctionCalls_AccumulateCosts()
     {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(1.5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → total 3 QU.
         for (int i = 0; i < 3; i++)
         {
-            await evaluator.EvaluateAsync(
+            await _evaluator.EvaluateAsync(
                 new FunctionCallExpression("abs", [new ColumnReference("x")]),
                 row);
         }
 
-        Assert.Equal(3, meter.QueryUnits);
+        Assert.Equal(3, _evaluator.QueryMeter!.QueryUnits);
     }
 
     /// <summary>
@@ -62,10 +59,9 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task NoMeter_FunctionStillExecutes()
     {
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
         Row row = MakeRow(["x"], [DataValue.FromFloat32(4f)]);
 
-        DataValue result = await evaluator.EvaluateAsync(
+        DataValue result = await _evaluator.EvaluateAsync(
             new FunctionCallExpression("sqrt", [new ColumnReference("x")]),
             row);
 
@@ -78,8 +74,9 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task BudgetExceeded_AfterFunctionCalls()
     {
+        using Arena arena = new();
         QueryMeter meter = new(budget: 2);
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
+        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter, store: arena);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(-5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → 3 QU, budget is 2.
@@ -101,16 +98,14 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task EvaluateCast_AccumulatesQueryUnits()
     {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(3.7f)]);
 
         // CAST(x AS String) — "cast" is a Tier 1 function (QU 1).
-        await evaluator.EvaluateAsync(
+        await _evaluator.EvaluateAsync(
             new CastExpression(new ColumnReference("x"), "String"),
             row);
 
-        Assert.Equal(1, meter.QueryUnits);
+        Assert.Equal(1, _evaluator.QueryMeter!.QueryUnits);
     }
 
     /// <summary>
@@ -119,14 +114,12 @@ public class QueryMeteringTests : ServiceTestBase
     [Fact]
     public async Task NonFunctionExpression_DoesNotAccumulate()
     {
-        QueryMeter meter = new();
-        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
         Row row = MakeRow(["x"], [DataValue.FromFloat32(42f)]);
 
-        await evaluator.EvaluateAsync(new LiteralExpression(1), row);
-        await evaluator.EvaluateAsync(new ColumnReference("x"), row);
+        await _evaluator.EvaluateAsync(new LiteralExpression(1), row);
+        await _evaluator.EvaluateAsync(new ColumnReference("x"), row);
 
-        Assert.Equal(0, meter.QueryUnits);
+        Assert.Equal(0, _evaluator.QueryMeter!.QueryUnits);
     }
 
     /// <summary>
