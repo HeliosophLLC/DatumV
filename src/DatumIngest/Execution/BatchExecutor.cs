@@ -302,23 +302,16 @@ public sealed class BatchExecutor
                             .ConfigureAwait(false);
                         break;
                     }
-
-                    IQueryPlan plan = _catalog.Plan(q);
-                    BatchEventStreamingSink sink = new(cellId, onEvent);
-                    await foreach (RowBatch batch in plan
-                        .ExecuteAsync(ct, sink, batchContext)
-                        .ConfigureAwait(false))
-                    {
-                        await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
-                    }
-                    break;
+                    // Regular SELECT — fall through to the unified
+                    // catalog-dispatch arm.
+                    goto default;
                 }
                 case ExecStatement exec:
                 {
                     // Detect EXEC proc.<name>(args) and route to the
                     // procedure-invocation path. Anything else (UDF or
-                    // built-in scalar) flows through the existing
-                    // catalog.Plan(exec) machinery.
+                    // built-in scalar) flows through catalog.Plan via
+                    // the unified default arm.
                     if (TryGetProcedureCall(exec, out string? procName, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
@@ -326,16 +319,7 @@ public sealed class BatchExecutor
                             .ConfigureAwait(false);
                         break;
                     }
-
-                    IQueryPlan plan = _catalog.Plan(exec);
-                    BatchEventStreamingSink sink = new(cellId, onEvent);
-                    await foreach (RowBatch batch in plan
-                        .ExecuteAsync(ct, sink, batchContext)
-                        .ConfigureAwait(false))
-                    {
-                        await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
-                    }
-                    break;
+                    goto default;
                 }
                 case BlockStatement block:
                 {
@@ -466,20 +450,38 @@ public sealed class BatchExecutor
                         ?? "RAISE: <null>";
                     throw new InvalidOperationException(message);
                 }
-                case CreateFunctionStatement:
-                case DropFunctionStatement:
-                case DropProcedureStatement:
-                case CreateProcedureStatement:
-                    // DDL statements modify the catalog as a side effect and
-                    // produce no rows. Delegate to Plan(Statement, sourceText)
-                    // which already handles all four types; the source slice
-                    // (when non-null) is what lets procedural CREATE FUNCTION
-                    // and CREATE PROCEDURE round-trip through catalog persistence.
-                    _catalog.Plan(stmt, sourceText);
-                    break;
                 default:
-                    throw new NotSupportedException(
-                        $"Procedural statement type '{stmt.GetType().Name}' is not yet supported.");
+                    // Unified catalog-dispatch arm. Every non-procedural
+                    // statement — SELECT (without LET-assignment), EXEC
+                    // (without procedure-call form), all DDL (CREATE /
+                    // DROP / ALTER / ANALYZE / REINDEX for tables and
+                    // functions / procedures), and all DML (INSERT /
+                    // UPDATE / DELETE) — flows through TableCatalog.Plan.
+                    // Mutation/DDL statements return EmptyQueryPlan
+                    // (their work happened as a side effect of Plan);
+                    // query forms return a real plan whose batches stream
+                    // out as CellRowBatchEvents.
+                    //
+                    // Aligning here means new statement types only need a
+                    // case in TableCatalog.Plan — BatchExecutor picks them
+                    // up automatically. The source slice (when non-null)
+                    // threads through so procedural CREATE FUNCTION /
+                    // CREATE PROCEDURE round-trip through catalog
+                    // persistence.
+                    {
+                        IQueryPlan plan = _catalog.Plan(stmt, sourceText);
+                        if (plan is not EmptyQueryPlan)
+                        {
+                            BatchEventStreamingSink sink = new(cellId, onEvent);
+                            await foreach (RowBatch batch in plan
+                                .ExecuteAsync(ct, sink, batchContext)
+                                .ConfigureAwait(false))
+                            {
+                                await onEvent(new CellRowBatchEvent(cellId, batch)).ConfigureAwait(false);
+                            }
+                        }
+                        break;
+                    }
             }
 
             await onEvent(new CellCompletedBatchEvent(cellId, sw.Elapsed.TotalMilliseconds))

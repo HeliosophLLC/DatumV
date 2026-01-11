@@ -1622,4 +1622,37 @@ public sealed class BatchExecutorTests : ServiceTestBase
             }
         });
     }
+
+    // ───────────────────── Catalog dispatch alignment ─────────────────────
+
+    /// <summary>
+    /// Regression: every DDL/DML statement type must flow through BatchExecutor
+    /// without hitting the throw-on-unknown-statement default. The streaming
+    /// endpoint runs everything via <c>RunWithEventsAsync</c>, so any statement
+    /// the parser accepts but BatchExecutor doesn't dispatch lands as an
+    /// uncaught exception in the user's browser. The unified catalog-dispatch
+    /// arm makes this list growable from <c>TableCatalog.Plan</c> alone.
+    /// </summary>
+    [Fact]
+    public async Task BatchExecutor_DispatchesAllDdlAndDml()
+    {
+        TableCatalog catalog = CreateCatalog();
+        // CREATE TABLE → INSERT → UPDATE → DELETE → REINDEX (skipped on TEMP
+        // — we exercise it on a persistent table elsewhere). ALTER TABLE
+        // ADD/DROP COLUMN. All run through the same BatchExecutor path the
+        // streaming endpoint uses.
+        BatchResult result = await RunAsync(
+            "CREATE TEMP TABLE t (id Int32, name String); " +
+            "INSERT INTO t VALUES (1, 'a'), (2, 'b'); " +
+            "UPDATE t SET name = 'X' WHERE id = 1; " +
+            "DELETE FROM t WHERE id = 2; " +
+            "ALTER TABLE t ADD COLUMN extra String; " +
+            "ALTER TABLE t DROP COLUMN extra; " +
+            "DROP TABLE t",
+            catalog);
+
+        // No throw is the regression signal. Bindings should be empty —
+        // these statements bind no variables.
+        Assert.Empty(result.FinalBindings);
+    }
 }
