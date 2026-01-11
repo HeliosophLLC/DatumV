@@ -13,10 +13,11 @@ public interface IAggregateFunction
 
     /// <summary>
     /// Validates the argument types and returns the result kind. For aggregates
-    /// that produce a typed array (those whose <see cref="ProducesArray"/> is
-    /// <see langword="true"/>), this returns the <em>element</em> kind — the
-    /// array-ness is communicated via the <see cref="ProducesArray"/> flag.
-    /// Scalar aggregates return their result kind directly.
+    /// whose <see cref="ReturnRule"/> reports
+    /// <see cref="ReturnTypeRule.ProducesArray"/> = <see langword="true"/>, this
+    /// returns the <em>element</em> kind; array-ness is communicated through
+    /// <see cref="ReturnRule"/>. Scalar aggregates return their result kind
+    /// directly.
     /// </summary>
     /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
     /// <returns>
@@ -35,12 +36,14 @@ public interface IAggregateFunction
     IAggregateAccumulator CreateAccumulator();
 
     /// <summary>
-    /// Whether this aggregate's result is an array of <see cref="ValidateArguments"/>'s
-    /// returned element kind (rather than a scalar of that kind). Defaults to
-    /// <see langword="false"/>; aggregates such as <c>ARRAY_AGG</c> override
-    /// to <see langword="true"/>.
+    /// Optional rule describing the result shape. Aggregates that produce a
+    /// typed array (e.g. <c>ARRAY_AGG</c>) override this with
+    /// <see cref="ReturnTypeRule.ArrayOf"/> so the type resolver can detect
+    /// array-ness without a separate boolean flag. Scalar aggregates leave it
+    /// <see langword="null"/>; <see cref="ValidateArguments"/> remains
+    /// authoritative for the result kind.
     /// </summary>
-    bool ProducesArray => false;
+    ReturnTypeRule? ReturnRule => null;
 
     /// <summary>
     /// The cost weight of a single invocation of this function, measured in Query Units (QU).

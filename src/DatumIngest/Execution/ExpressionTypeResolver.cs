@@ -39,7 +39,7 @@ public static class ExpressionTypeResolver
     ///   <item>Cast targets — from <see cref="TypeAnnotationResolver.TryParse"/>.</item>
     ///   <item>Function calls — from the matched signature variant's
     ///   <see cref="ReturnTypeRule.ProducesArray"/>.</item>
-    ///   <item>Aggregate calls — from <see cref="IAggregateFunction.ProducesArray"/>.</item>
+    ///   <item>Aggregate calls — from <see cref="IAggregateFunction.ReturnRule"/>.</item>
     /// </list>
     /// All other branches yield <c>IsArray = false</c>. Index access strips
     /// the array dimension (indexing a typed array yields the element kind).
@@ -196,14 +196,14 @@ public static class ExpressionTypeResolver
         DataKind? sourceKind = ResolveType(indexAccess.Source, sourceSchema, functions);
 
         // Typed-array source via an aggregate or scalar function whose result
-        // is an array. For scalar functions, prefer the matched signature
-        // variant's ReturnTypeRule.ProducesArray (per-signature precision);
-        // fall back to the function-level IScalarFunction.ProducesArray for
-        // signatures that haven't been migrated to ReturnTypeRule.ArrayOf.
-        // For aggregates, use the function-level IAggregateFunction.ProducesArray.
+        // is an array. For scalar functions, the matched signature variant's
+        // ReturnTypeRule.ProducesArray is the source of truth. For aggregates,
+        // the optional IAggregateFunction.ReturnRule reports the same thing
+        // (null = scalar, ArrayOf(...) = array).
         if (indexAccess.Source is FunctionCallExpression arrayFnSource)
         {
-            if (functions.TryGetAggregate(arrayFnSource.FunctionName) is { ProducesArray: true })
+            IAggregateFunction? aggregate = functions.TryGetAggregate(arrayFnSource.FunctionName);
+            if (aggregate?.ReturnRule?.ProducesArray == true)
             {
                 return sourceKind;
             }
@@ -425,9 +425,9 @@ public static class ExpressionTypeResolver
     /// Functions without a registered descriptor or without a matching
     /// variant default to scalar; runtime-constructed adapters that return
     /// arrays must register a synthetic descriptor (see procedural UDFs).
-    /// For aggregates, array-ness is read from the function-level
-    /// <see cref="IAggregateFunction.ProducesArray"/> — aggregates do not
-    /// expose per-signature variants.
+    /// For aggregates, array-ness is read from the optional
+    /// <see cref="IAggregateFunction.ReturnRule"/> — aggregates do not expose
+    /// per-signature variants, so a single rule covers the function.
     /// </summary>
     private static (DataKind Kind, bool IsArray)? ResolveFunctionShape(
         FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
@@ -449,7 +449,7 @@ public static class ExpressionTypeResolver
             }
 
             DataKind aggKind = aggregateFunction.ValidateArguments(aggArgs);
-            return (aggKind, aggregateFunction.ProducesArray);
+            return (aggKind, aggregateFunction.ReturnRule?.ProducesArray ?? false);
         }
 
         DataKind[] argumentKinds = new DataKind[function.Arguments.Count];

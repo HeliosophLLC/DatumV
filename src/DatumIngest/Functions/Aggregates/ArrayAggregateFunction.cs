@@ -28,7 +28,7 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     /// <remarks>
     /// ARRAY_AGG produces <c>Array&lt;Scalar&gt;</c>, so the per-element kind
     /// equals the argument kind. Array-ness is signalled via
-    /// <see cref="ProducesArray"/>; this method returns the leaf element kind.
+    /// <see cref="ReturnRule"/>; this method returns the leaf element kind.
     /// </remarks>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
@@ -42,7 +42,7 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     }
 
     /// <inheritdoc/>
-    public bool ProducesArray => true;
+    public ReturnTypeRule ReturnRule { get; } = ReturnTypeRule.ArrayOf(ReturnTypeRule.SameAs(0));
 
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new ArrayAggregateAccumulator();

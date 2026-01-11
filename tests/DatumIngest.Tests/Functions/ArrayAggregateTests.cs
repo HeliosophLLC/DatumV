@@ -19,11 +19,11 @@ public class ArrayAggregateTests : ServiceTestBase
         ArrayAggregateFunction function = new();
 
         // Post-IAggregateFunction migration: ValidateArguments returns the
-        // per-element kind. Array-ness is signalled via ProducesArray.
+        // per-element kind. Array-ness is signalled via ReturnRule.
         DataKind result = function.ValidateArguments([DataKind.Float32]);
 
         Assert.Equal(DataKind.Float32, result);
-        Assert.True(function.ProducesArray);
+        Assert.True(function.ReturnRule?.ProducesArray);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class ArrayAggregateTests : ServiceTestBase
             Assert.Equal(kind, result);
         }
 
-        Assert.True(function.ProducesArray);
+        Assert.True(function.ReturnRule?.ProducesArray);
     }
 
     [Fact]
