@@ -125,13 +125,26 @@ app.Lifetime.ApplicationStopping.Register(() => catalog.Dispose());
 // streaming query in one tab doesn't block a quick `system_udfs` lookup
 // from another.
 
-// Shared LanguageService initialized from the live catalog. The manifest is a
-// snapshot — if we ever support runtime DDL or AddFile, this will need to be
-// rebuilt and Initialize'd again. Today the catalog is fixed at boot.
+// Shared LanguageService initialized from the live catalog. The manifest
+// is a snapshot of the catalog at a point in time, so DDL run through
+// /api/query/stream (CREATE TABLE, DROP TABLE, etc.) won't show up in
+// completions / diagnostics until the manifest is rebuilt. The
+// streaming endpoint refreshes after every successful batch via
+// RefreshLanguageManifest below; LSP endpoints read the live snapshot.
 LanguageService languageService = new();
+object languageManifestSync = new();
 DatumIngest.Manifest.LanguageServerManifest languageManifest =
     CatalogManifestBuilder.Build(catalog, catalog.Functions);
 languageService.Initialize(languageManifest);
+
+void RefreshLanguageManifest()
+{
+    lock (languageManifestSync)
+    {
+        languageManifest = CatalogManifestBuilder.Build(catalog, catalog.Functions);
+        languageService.Initialize(languageManifest);
+    }
+}
 
 JsonSerializerOptions jsonOptions = new()
 {
@@ -257,6 +270,11 @@ app.MapPost("/api/lang/complete", async (HttpRequest request, CancellationToken 
     }
     if (body is null) return Results.Json(new { error = "sql/offset required" }, jsonOptions, statusCode: 400);
 
+    // DDL (CREATE TABLE / DROP / ALTER / …) run through /api/query/stream
+    // mutates the live catalog; the language manifest is a snapshot, so
+    // refresh it before serving completion / hover / signature so newly
+    // created tables become discoverable on the user's next keystroke.
+    RefreshLanguageManifest();
     CompletionItem[] items = languageService.GetCompletions(body.Sql ?? string.Empty, body.Offset);
     return Results.Json(items, jsonOptions);
 });
@@ -275,6 +293,7 @@ app.MapPost("/api/lang/hover", async (HttpRequest request, CancellationToken ct)
     }
     if (body is null) return Results.Json(new { error = "sql/offset required" }, jsonOptions, statusCode: 400);
 
+    RefreshLanguageManifest();
     HoverResult? hover = languageService.GetHover(body.Sql ?? string.Empty, body.Offset);
     return Results.Json(hover, jsonOptions);
 });
@@ -293,6 +312,7 @@ app.MapPost("/api/lang/signature", async (HttpRequest request, CancellationToken
     }
     if (body is null) return Results.Json(new { error = "sql/offset required" }, jsonOptions, statusCode: 400);
 
+    RefreshLanguageManifest();
     SignatureHelp? sig = languageService.GetSignatureHelp(body.Sql ?? string.Empty, body.Offset);
     return Results.Json(sig, jsonOptions);
 });
@@ -345,6 +365,7 @@ app.MapPost("/api/lang/diagnose", async (HttpRequest request, CancellationToken 
     }
     if (body is null) return Results.Json(new { error = "sql required" }, jsonOptions, statusCode: 400);
 
+    RefreshLanguageManifest();
     Diagnostic[] diagnostics = languageService.GetDiagnostics(body.Sql ?? string.Empty);
     return Results.Json(diagnostics, jsonOptions);
 });

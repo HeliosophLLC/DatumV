@@ -284,4 +284,36 @@ public sealed class CreateTableTests : IAsyncLifetime
             catalog.Plan("CREATE TEMP TABLE t (a NotARealType)"));
         Assert.Contains("Unknown column type", ex.Message);
     }
+
+    [Fact]
+    public void TableLookup_CaseInsensitive()
+    {
+        // SQL identifiers are conventionally case-insensitive. CREATE
+        // TABLE Test must be reachable via SELECT * FROM TEST or test.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE Test (id Int32)");
+
+        Assert.True(catalog.HasTable("Test"));
+        Assert.True(catalog.HasTable("TEST"));
+        Assert.True(catalog.HasTable("test"));
+
+        // Plan resolves through the same case-insensitive lookup.
+        catalog.Plan("SELECT * FROM TEST");
+        catalog.Plan("SELECT * FROM test");
+    }
+
+    [Fact]
+    public void CreateTempTable_DuplicateNameDifferentCase_Rejected()
+    {
+        // Two CREATE TABLE statements differing only in case must collide;
+        // otherwise the case-insensitive lookup couldn't pick a winner.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE foo (id Int32)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE FOO (id Int32)"));
+        Assert.Contains("already exists", ex.Message);
+    }
 }

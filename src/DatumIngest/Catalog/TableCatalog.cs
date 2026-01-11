@@ -78,7 +78,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._functions.SetModelCatalogResolver(() => Models);
         this._udfs = new UdfRegistry();
         this._procedures = new ProcedureRegistry();
-        this.Tables = new();
+        // Case-insensitive lookup matches SQL identifier semantics:
+        // CREATE TABLE Test and SELECT * FROM TEST resolve to the same
+        // entry. The persistent-table-entry map already uses
+        // OrdinalIgnoreCase; aligning here keeps the two in sync.
+        this.Tables = new(StringComparer.OrdinalIgnoreCase);
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
         this._routines = new RoutineRegistrar(_udfs, _procedures, _functions, _catalogStore);
 
