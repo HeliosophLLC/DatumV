@@ -13,8 +13,13 @@ namespace DatumIngest.Tests.Indexing;
 public sealed class IndexWriterRoundTripTests : ServiceTestBase
 {
     /// <summary>
-    /// Kinds that are intentionally unsupported by the index serializer because
-    /// they are composite types with recursive structure.
+    /// Kinds that are intentionally unsupported by the no-store
+    /// <see cref="DataValueWriter.WriteDataValue(BinaryWriter, DataValue)"/>
+    /// overload. These either need an arena-backed payload (Image / Audio /
+    /// Video / Json — bytes live in a value store), are recursive composites
+    /// (Struct), or are sentinel values (Unknown). Production callers route
+    /// these through the IValueStore-aware overload instead — the indexable
+    /// = self-contained rule means an indexed key is never one of these.
     /// </summary>
     private static readonly HashSet<DataKind> UnsupportedKinds =
     [
@@ -23,6 +28,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Audio,
         DataKind.Video,
         DataKind.Json,
+        DataKind.Image,
     ];
 
     /// <summary>
@@ -126,8 +132,10 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
     internal static DataValue CreateSampleValue(DataKind kind) => kind switch
     {
         DataKind.Unknown  => default,
+        DataKind.Float16  => DataValue.FromFloat16((Half)1.5),
         DataKind.Float32  => DataValue.FromFloat32(3.14f),
         DataKind.Float64  => DataValue.FromFloat64(2.718281828),
+        DataKind.Decimal  => DataValue.FromDecimal(123.456m),
         DataKind.UInt8    => DataValue.FromUInt8(42),
         DataKind.Int8     => DataValue.FromInt8(-7),
         DataKind.Int16    => DataValue.FromInt16(-1234),
@@ -136,6 +144,8 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.UInt32   => DataValue.FromUInt32(200_000),
         DataKind.Int64    => DataValue.FromInt64(-9_000_000_000L),
         DataKind.UInt64   => DataValue.FromUInt64(18_000_000_000UL),
+        DataKind.Int128   => DataValue.FromInt128((Int128)(-1_000_000_000_000L)),
+        DataKind.UInt128  => DataValue.FromUInt128((UInt128)2_000_000_000_000UL),
         DataKind.Boolean  => DataValue.FromBoolean(true),
         DataKind.String   => DataValue.FromString("hello world"),
         DataKind.Date     => DataValue.FromDate(new DateOnly(2026, 4, 15)),
@@ -144,10 +154,13 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Time     => DataValue.FromTime(new TimeOnly(14, 30, 59, 123)),
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
-        DataKind.Image    => DataValue.FromImage([0xFF, 0xD8, 0xFF, 0xE0]),
-        DataKind.Audio    => DataValue.FromAudio([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]),
-        DataKind.Video    => DataValue.FromVideo([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]),
-        DataKind.Json     => DataValue.FromJson([0xA1, 0x61, 0x61, 0x01]),  // {"a":1} canonical CBOR
+        // Sidecar pointers carry no payload; cheap test-side construction
+        // for the unsupported-kinds path (we only need a DataValue with
+        // the right Kind to check that WriteDataValue throws).
+        DataKind.Image    => DataValue.FromImageInSidecar(offset: 0, length: 4),
+        DataKind.Audio    => DataValue.FromAudioInSidecar(offset: 0, length: 12),
+        DataKind.Video    => DataValue.FromVideoInSidecar(offset: 0, length: 12),
+        DataKind.Json     => DataValue.FromJsonInSidecar(offset: 0, length: 4),
         DataKind.Struct   => DataValue.NullUntypedStruct(),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
@@ -162,11 +175,23 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
 
         switch (kind)
         {
+            case DataKind.Float16:
+                Assert.Equal(expected.AsFloat16(), actual.AsFloat16());
+                break;
             case DataKind.Float32:
                 Assert.Equal(expected.AsFloat32(), actual.AsFloat32());
                 break;
             case DataKind.Float64:
                 Assert.Equal(expected.AsFloat64(), actual.AsFloat64());
+                break;
+            case DataKind.Decimal:
+                Assert.Equal(expected.AsDecimal(), actual.AsDecimal());
+                break;
+            case DataKind.Int128:
+                Assert.Equal(expected.AsInt128(), actual.AsInt128());
+                break;
+            case DataKind.UInt128:
+                Assert.Equal(expected.AsUInt128(), actual.AsUInt128());
                 break;
             case DataKind.UInt8:
                 Assert.Equal(expected.AsUInt8(), actual.AsUInt8());
@@ -212,9 +237,6 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 break;
             case DataKind.Uuid:
                 Assert.Equal(expected.AsUuid(), actual.AsUuid());
-                break;
-            case DataKind.Image:
-                Assert.Equal(expected.AsImage(), actual.AsImage());
                 break;
             case DataKind.Type:
                 Assert.Equal(expected.AsType(), actual.AsType());

@@ -223,9 +223,13 @@ internal sealed class BPlusTreeBulkLoader
         using IEnumerator<ValueIndexEntry> enumerator = sortedEntries.GetEnumerator();
         bool hasMore = enumerator.MoveNext();
 
-        while (hasMore)
+        while (hasMore || currentLeafEntries.Count > 0)
         {
-            currentLeafEntries.Clear();
+            // Note: don't clear currentLeafEntries at the top of the
+            // loop. The back-off path (acceptedCount < count) leaves
+            // unwritten entries here; they must survive the iteration
+            // boundary and slot into the next leaf. Clear runs at the
+            // end of the no-back-off branch instead.
 
             // Fill the current leaf batch.
             while (hasMore && currentLeafEntries.Count < targetEntriesPerLeaf)

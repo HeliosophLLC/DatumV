@@ -220,12 +220,6 @@ internal static class DataValueWriter
                 writer.Write((short)dateTimeOffset.Offset.TotalMinutes);
                 break;
 
-            case DataKind.Image:
-                byte[] imageBytes = value.AsImage();
-                writer.Write(imageBytes.Length);
-                writer.Write(imageBytes);
-                break;
-
             case DataKind.Time:
                 writer.Write(value.AsTime().Ticks);
                 break;
@@ -234,10 +228,11 @@ internal static class DataValueWriter
                 writer.Write(value.AsDuration().Ticks);
                 break;
 
-            // Byte arrays aren't supported in the no-store wire format
-            // (zone maps don't carry byte-array min/max). Falls through to the
-            // default arm if any caller actually constructs one — a clear
-            // NotSupportedException is the right failure mode.
+            // Byte arrays + Image / Audio / Video / Json aren't supported
+            // in the no-store wire format. Indexed keys are inline-only
+            // (≤16 byte values) per the indexable rule, and zone maps
+            // don't carry byte-array min/max. Callers that need
+            // arena-backed payloads use the IValueStore overload.
 
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());
@@ -361,16 +356,11 @@ internal static class DataValueWriter
                 writer.Write(value.AsDuration().Ticks);
                 break;
 
-            // Byte arrays aren't supported in the no-store wire format
-            // (zone maps don't carry byte-array min/max). Falls through to the
-            // default arm if any caller actually constructs one — a clear
-            // NotSupportedException is the right failure mode.
-
-            case DataKind.Image:
-                byte[] imageData = value.AsImage();
-                writer.Write(imageData.Length);
-                writer.Write(imageData);
-                break;
+            // Byte arrays + Image / Audio / Video / Json aren't supported
+            // in the no-store wire format. Indexed keys are inline-only
+            // (≤16 byte values) per the indexable rule, and zone maps
+            // don't carry byte-array min/max. Callers that need
+            // arena-backed payloads use the IValueStore overload.
 
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());

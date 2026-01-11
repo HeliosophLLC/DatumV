@@ -460,9 +460,13 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
     [Fact]
     public void Encode_UnsupportedKind_Throws()
     {
-        DataValue vector = DataValue.FromInlineArray<float>([1.0f, 2.0f], DataKind.Float32);
+        // Image is not a sortable key kind — the encoder hits the
+        // default arm and throws. (Vector is no longer a separate kind:
+        // arrays are Float32 + IsArray; column-selection filters them
+        // out before the encoder sees them.)
+        DataValue image = DataValue.FromImageInSidecar(offset: 0, length: 4);
         byte[] buffer = new byte[16];
-        Assert.Throws<NotSupportedException>(() => SortedIndexKeyEncoder.Encode(vector, buffer));
+        Assert.Throws<NotSupportedException>(() => SortedIndexKeyEncoder.Encode(image, buffer));
     }
 
     // ──────────────── Helpers ────────────────

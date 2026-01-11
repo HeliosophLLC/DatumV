@@ -295,21 +295,28 @@ public sealed class BPlusTreePageCodecTests : ServiceTestBase
 
     /// <summary>
     /// Regression: <see cref="BPlusTreePageCodec.EncodeInternalPage"/> previously used a
-    /// non-expandable <see cref="MemoryStream"/> backed by a fixed 8 KiB array. When keys
-    /// were large enough to overflow the page, the stream threw
+    /// non-expandable <see cref="MemoryStream"/> backed by a fixed 8 KiB array. When the
+    /// payload was large enough to overflow the page, the stream threw
     /// <see cref="NotSupportedException"/> instead of <see cref="InvalidOperationException"/>,
     /// causing <c>FindMaxInternalKeys</c> to miss the catch and crash the index build.
     /// </summary>
     [Fact]
     public void EncodeInternalPage_OversizedKeys_ThrowsInvalidOperationException()
     {
-        // A single string key larger than the 8 KiB page capacity guarantees overflow.
-        using Arena arena = new();
-        arena.AddReference();
-
-        string longKey = new('x', 8192);
-        DataValue[] keys = [DataValue.FromString(longKey, arena)];
-        uint[] children = [0, 1];
+        // The indexable-inline rule caps individual keys at 16 bytes
+        // (Uuid is the widest), so the only way to overflow an 8 KiB
+        // page is many keys. 500 Uuids (~17 bytes each on the wire)
+        // plus 501 child indexes well exceed 8 KiB.
+        DataValue[] keys = new DataValue[500];
+        for (int i = 0; i < keys.Length; i++)
+        {
+            keys[i] = DataValue.FromUuid(Guid.NewGuid());
+        }
+        uint[] children = new uint[keys.Length + 1];
+        for (int i = 0; i < children.Length; i++)
+        {
+            children[i] = (uint)i;
+        }
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
             () => BPlusTreePageCodec.EncodeInternalPage(keys, children));

@@ -352,35 +352,43 @@ public sealed class BPlusTreeBulkLoaderTests : ServiceTestBase
     /// which was not caught by the <see cref="InvalidOperationException"/> handler.
     /// </summary>
     [Fact]
-    public void Build_LongStringKeys_ProducesValidTree()
+    public void Build_WideKeys_ProducesValidTree()
     {
-        using Arena arena = new();
-        arena.AddReference();
-
-        // Use strings ~500 chars each — enough that only a handful of separator keys
-        // fit per 8 KiB internal page, forcing the probing loop.
+        // Original "long string keys" test forced the probing loop by
+        // building 500-char strings as separator keys. The indexable
+        // rule retired that — string keys are inline-only (≤16 UTF-8
+        // bytes). The widest possible inline key is a 16-byte Uuid;
+        // ~500 Uuids overflow an 8 KiB internal page, exercising the
+        // same probing back-off path that the original test pinned.
         int entryCount = 500;
         ValueIndexEntry[] entries = new ValueIndexEntry[entryCount];
         int chunkSize = 100;
 
+        // Deterministic Uuid generation so the sort order is stable.
+        Random rng = new(12345);
+        Guid[] guids = new Guid[entryCount];
+        for (int i = 0; i < entryCount; i++)
+        {
+            byte[] bytes = new byte[16];
+            rng.NextBytes(bytes);
+            guids[i] = new Guid(bytes);
+        }
+        Array.Sort(guids);
+
         for (int index = 0; index < entryCount; index++)
         {
-            string key = new string((char)('A' + (index % 26)), 500) + index.ToString("D5");
             int chunkIndex = index / chunkSize;
             long rowOffset = index % chunkSize;
             entries[index] = new ValueIndexEntry(
-                DataValue.FromString(key, arena), chunkIndex, rowOffset);
+                DataValue.FromUuid(guids[index]), chunkIndex, rowOffset);
         }
 
-        Array.Sort(entries, (left, right) =>
-            string.Compare(left.Key.AsString(), right.Key.AsString(), StringComparison.Ordinal));
-
-        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "long_strings", DataKind.String);
+        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "wide_keys", DataKind.Uuid);
 
         Assert.Equal(entryCount, header.EntryCount);
         Assert.True(header.TreeHeight >= 1, "Tree should have at least one level.");
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "long_strings", DataKind.String);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "wide_keys", DataKind.Uuid);
 
         // Verify every entry is retrievable.
         for (int index = 0; index < entryCount; index++)

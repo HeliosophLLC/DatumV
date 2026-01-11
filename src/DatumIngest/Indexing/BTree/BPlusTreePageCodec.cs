@@ -91,10 +91,27 @@ internal static class BPlusTreePageCodec
             byte[] page = new byte[BPlusTreeConstants.PageSize];
             int payloadOffset = BPlusTreeConstants.PageHeaderSize + LeafHeaderSize;
 
-            int compressedLength = DatumCompressor.CompressZstdInto(
-                rentedEntryBuffer.AsSpan(0, uncompressedLength),
-                page,
-                payloadOffset);
+            int compressedLength;
+            try
+            {
+                compressedLength = DatumCompressor.CompressZstdInto(
+                    rentedEntryBuffer.AsSpan(0, uncompressedLength),
+                    page,
+                    payloadOffset);
+            }
+            catch (ZstdSharp.ZstdException ex) when (ex.Message.Contains("Destination buffer is too small"))
+            {
+                // Incompressible payload (random / high-entropy data
+                // expands rather than shrinks) overflows the page's
+                // payload region. Surface it as the same
+                // InvalidOperationException the post-compression bound
+                // check uses so the bulk loader's probing loop can
+                // catch it and retry with fewer entries.
+                throw new InvalidOperationException(
+                    $"Compressed leaf payload exceeds page capacity " +
+                    $"({BPlusTreeConstants.LeafPayloadCapacity} bytes) for {entries.Length} entries " +
+                    $"(uncompressed = {uncompressedLength} bytes).", ex);
+            }
 
             if (compressedLength > BPlusTreeConstants.LeafPayloadCapacity)
             {
@@ -159,10 +176,21 @@ internal static class BPlusTreePageCodec
         byte[] page = new byte[BPlusTreeConstants.PageSize];
         int payloadOffset = BPlusTreeConstants.PageHeaderSize + LeafHeaderSize;
 
-        int compressedLength = DatumCompressor.CompressZstdInto(
-            uncompressed,
-            page,
-            payloadOffset);
+        int compressedLength;
+        try
+        {
+            compressedLength = DatumCompressor.CompressZstdInto(
+                uncompressed,
+                page,
+                payloadOffset);
+        }
+        catch (ZstdSharp.ZstdException ex) when (ex.Message.Contains("Destination buffer is too small"))
+        {
+            throw new InvalidOperationException(
+                $"Compressed leaf payload exceeds page capacity " +
+                $"({BPlusTreeConstants.LeafPayloadCapacity} bytes) for {entries.Length} entries " +
+                $"(uncompressed = {uncompressed.Length} bytes).", ex);
+        }
 
         if (compressedLength > BPlusTreeConstants.LeafPayloadCapacity)
         {

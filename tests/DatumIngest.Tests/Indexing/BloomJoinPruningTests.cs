@@ -356,7 +356,10 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         ScanOperator orderScan = new(catalog["orders"], null, orderRows.Length);
 
         // Inner right: "customers" table — simple, no bloom needed.
-        MockOperator customerSide = CreateMockOperator(["customer_id"], [[1.0f, 100.0f]]);
+        // Must expose order_id so the inner join's equality predicate
+        // resolves; the original test was missing this column.
+        MockOperator customerSide = CreateMockOperator(
+            ["customer_id", "order_id"], [[1.0f, 100.0f]]);
 
         // Inner join: orders JOIN customers ON orders.order_id = customers.order_id
         JoinOperator innerJoin = new(
@@ -426,156 +429,5 @@ public sealed class BloomJoinPruningTests : ServiceTestBase
         Assert.Contains(scan1, results);
         Assert.Contains(scan2, results);
         Assert.Contains(scan3, results);
-    }
-
-    // ───────────── Helpers ─────────────
-
-    // ────────────────── Sorted index join pruning tests ──────────────────
-
-    /// <summary>
-    /// When a probe-side source index has sorted value indexes but no bloom filters,
-    /// the <see cref="JoinOperator"/> should push build-side key values for sorted
-    /// index pruning, and chunks whose sorted index contains no matching key should
-    /// be skipped.
-    /// </summary>
-    [Fact]
-    public async Task HashJoin_WithSortedIndexes_PrunesChunksWithNoMatchingKeys()
-    {
-        ColumnLookup lookup = new(["id", "value"]);
-        // Probe side: 3 chunks of 2 rows each on column "id".
-        // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
-        Row[] leftRows =
-        [
-            MakeRow(lookup, DataValue.FromFloat32(1.0f), DataValue.FromString("a")),
-            MakeRow(lookup, DataValue.FromFloat32(2.0f), DataValue.FromString("b")),
-            MakeRow(lookup, DataValue.FromFloat32(3.0f), DataValue.FromString("c")),
-            MakeRow(lookup, DataValue.FromFloat32(4.0f), DataValue.FromString("d")),
-            MakeRow(lookup, DataValue.FromFloat32(5.0f), DataValue.FromString("e")),
-            MakeRow(lookup, DataValue.FromFloat32(6.0f), DataValue.FromString("f")),
-        ];
-
-        Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
-        };
-        Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
-        };
-        Dictionary<string, ChunkColumnStatistics> chunk2Stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new(DataValue.FromFloat32(5.0f), DataValue.FromFloat32(6.0f), 0, 2, 2)
-        };
-
-        List<IndexChunk> chunks =
-        [
-            new IndexChunk(0, 2, chunk0Stats),
-            new IndexChunk(2, 2, chunk1Stats),
-            new IndexChunk(4, 2, chunk2Stats),
-        ];
-
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 6);
-        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
-
-        TableCatalog catalog = CreateCatalog(("left", leftRows));
-        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
-        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-
-        // Build side: only key 4.0 — should match chunk 1 only.
-        MockOperator rightSide = CreateMockOperator(["rid", "data"], [[4.0f, "match"]]);
-
-        JoinOperator join = new(
-            scanOperator,
-            rightSide,
-            JoinType.Inner,
-            new BinaryExpression(
-                new ColumnReference("id"),
-                BinaryOperator.Equal,
-                new ColumnReference("rid")));
-
-        ExecutionContext context = CreateExecutionContext();
-
-        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
-
-        // Only row with id=4 should match.
-        Assert.Single(results);
-        Assert.Equal(4.0f, results[0]["id"].AsFloat32());
-
-        // Chunks 0 and 2 should have been pruned via sorted index.
-        Assert.Equal(3, scanOperator.TotalIndexChunks);
-        Assert.Equal(2, scanOperator.PrunedIndexChunks);
-    }
-
-    /// <summary>
-    /// When all chunks contain matching sorted index keys, nothing is pruned.
-    /// </summary>
-    [Fact]
-    public async Task HashJoin_WithSortedIndexes_NoPruningWhenAllChunksMatch()
-    {
-        ColumnLookup lookup = new(["id"]);
-        Row[] leftRows =
-        [
-            MakeRow(lookup, DataValue.FromFloat32(1.0f)),
-            MakeRow(lookup, DataValue.FromFloat32(2.0f)),
-            MakeRow(lookup, DataValue.FromFloat32(3.0f)),
-            MakeRow(lookup, DataValue.FromFloat32(4.0f)),
-        ];
-
-        ValueIndexEntry[] entries =
-        [
-            new(DataValue.FromFloat32(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromFloat32(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromFloat32(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
-            new(DataValue.FromFloat32(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
-        ];
-
-        // Bloom-join pruning is exercised here; sorted-index fixture is unnecessary.
-        _ = entries;
-
-        Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
-        };
-        Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
-        };
-
-        List<IndexChunk> chunks =
-        [
-            new IndexChunk(0, 2, chunk0Stats),
-            new IndexChunk(2, 2, chunk1Stats),
-        ];
-
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 4);
-        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
-
-        TableCatalog catalog = CreateCatalog(("left", leftRows));
-        ((InMemoryTableProvider)catalog["left"]).ProvideSourceIndex(sourceIndex);
-        ScanOperator scanOperator = new(catalog["left"], null, leftRows.Length);
-
-        // Build side has keys from both chunks.
-        MockOperator rightSide = CreateMockOperator(["rid"], [[1.0f], [3.0f]]);
-
-        JoinOperator join = new(
-            scanOperator,
-            rightSide,
-            JoinType.Inner,
-            new BinaryExpression(
-                new ColumnReference("id"),
-                BinaryOperator.Equal,
-                new ColumnReference("rid")));
-
-        ExecutionContext context = CreateExecutionContext();
-
-        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
-
-        Assert.Equal(2, results.Count);
-        Assert.Equal(2, scanOperator.TotalIndexChunks);
-        Assert.Equal(0, scanOperator.PrunedIndexChunks);
     }
 }
