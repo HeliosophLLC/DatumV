@@ -51,18 +51,33 @@ internal sealed class MutableBPlusTree : IDisposable
     internal DataKind KeyKind => _activeHeader.KeyKind;
 
     /// <summary>
-    /// Creates a new <c>.datum-pkindex</c> file with both header slots initialized
-    /// to an empty tree. Both slots get the same content with consecutive commit-gens
-    /// so reader-open is deterministic regardless of which slot is read first.
+    /// Whether this tree allows duplicate keys (multi-value, acceleration mode).
+    /// When false, the tree throws <see cref="DuplicatePrimaryKeyException"/> on
+    /// <see cref="Insert"/> with an existing key (PK-style).
     /// </summary>
+    internal bool AllowDuplicates => _activeHeader.AllowDuplicates;
+
+    /// <summary>
+    /// Creates a new mutable B+Tree file (<c>.datum-pkindex</c> for PK uniqueness, or
+    /// <c>.datum-bptree-{column}</c> for acceleration). Both header slots are
+    /// initialized to an empty tree with consecutive commit-gens so reader-open is
+    /// deterministic regardless of which slot is read first.
+    /// </summary>
+    /// <param name="path">Target file path.</param>
+    /// <param name="keyKind">Data kind of the indexed column.</param>
+    /// <param name="allowDuplicates">
+    /// <see langword="true"/> for multi-value acceleration trees (entries are sorted by
+    /// composite (Key, ChunkIndex, RowOffsetInChunk)); <see langword="false"/> for
+    /// PK uniqueness (Insert throws on duplicate key).
+    /// </param>
     /// <exception cref="IOException">If the file already exists.</exception>
-    internal static MutableBPlusTree Create(string path, DataKind keyKind)
+    internal static MutableBPlusTree Create(string path, DataKind keyKind, bool allowDuplicates = false)
     {
         FileStream file = new(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         try
         {
-            MutableBPlusTreeHeader empty = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 0);
-            MutableBPlusTreeHeader emptyB = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 1);
+            MutableBPlusTreeHeader empty = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 0, allowDuplicates: allowDuplicates);
+            MutableBPlusTreeHeader emptyB = MutableBPlusTreeHeader.Empty(keyKind, commitGen: 1, allowDuplicates: allowDuplicates);
 
             byte[] slot = new byte[MutableBPlusTreeConstants.HeaderSlotSize];
 
@@ -151,9 +166,12 @@ internal sealed class MutableBPlusTree : IDisposable
     }
 
     /// <summary>
-    /// Inserts an entry. Throws <see cref="DuplicatePrimaryKeyException"/> if the
-    /// key already exists — caller can pattern-match to surface a user-friendly
-    /// PK-violation error.
+    /// Inserts an entry. When the tree was created with <c>allowDuplicates: false</c>
+    /// (PK mode), throws <see cref="DuplicatePrimaryKeyException"/> if the key already
+    /// exists — caller can pattern-match to surface a user-friendly PK-violation error.
+    /// When <c>allowDuplicates: true</c> (acceleration mode), entries with the same key
+    /// are sorted by composite (Key, ChunkIndex, RowOffsetInChunk) and Insert never
+    /// throws on equal keys.
     /// </summary>
     internal void Insert(ValueIndexEntry entry)
     {
@@ -177,8 +195,9 @@ internal sealed class MutableBPlusTree : IDisposable
 
         MutableLeafPage leaf = ReadLeafPage(pageId);
 
-        // Uniqueness check.
-        if (leaf.BinarySearchFirst(entry.Key) >= 0)
+        // Uniqueness check (PK mode only). In acceleration mode duplicates are
+        // expected — the composite (key, chunk, row) acts as the unique sort key.
+        if (!_activeHeader.AllowDuplicates && leaf.BinarySearchFirst(entry.Key) >= 0)
         {
             throw new DuplicatePrimaryKeyException(entry.Key);
         }
@@ -219,9 +238,350 @@ internal sealed class MutableBPlusTree : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Returns all entries whose key falls in the inclusive range [<paramref name="low"/>,
+    /// <paramref name="high"/>]. Walks via internal-page navigation (no leaf-chain
+    /// pointers — those become stale under page-COW splits and the standard COW B+Tree
+    /// approach is to navigate via parent pages instead).
+    /// </summary>
+    internal IReadOnlyList<ValueIndexEntry> FindRange(DataValue low, DataValue high)
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            return Array.Empty<ValueIndexEntry>();
+        }
+
+        List<ValueIndexEntry> results = new();
+        DescentPath path = DescendForKey(low);
+
+        // FindChildSlot uses ≤ semantics — for `low` matching a separator, we land on
+        // the right child. The leaf to the left might also contain entries with key=low.
+        // Walk back while the previous leaf's last entry is still >= low.
+        while (true)
+        {
+            DescentPath? prevPath = path.TryStepLeft();
+            if (prevPath is null) break;
+            MutableLeafPage prevLeaf = ReadLeafPage(prevPath.Value.LeafPageId);
+            if (prevLeaf.EntryCount == 0)
+            {
+                path = prevPath.Value;
+                continue;
+            }
+            if (StatisticsPredicateEvaluator.CompareValues(
+                    prevLeaf.Entries[prevLeaf.EntryCount - 1].Key, low) < 0)
+            {
+                break;
+            }
+            path = prevPath.Value;
+        }
+
+        // Scan forward.
+        while (true)
+        {
+            MutableLeafPage leaf = ReadLeafPage(path.LeafPageId);
+
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                ValueIndexEntry e = leaf.Entries[i];
+                int cmpHigh = StatisticsPredicateEvaluator.CompareValues(e.Key, high);
+                if (cmpHigh > 0) return results;
+
+                if (StatisticsPredicateEvaluator.CompareValues(e.Key, low) >= 0)
+                {
+                    results.Add(e);
+                }
+            }
+
+            DescentPath? nextPath = path.TryStepRight();
+            if (nextPath is null) break;
+            path = nextPath.Value;
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Returns all entries whose key equals <paramref name="key"/>. In acceleration
+    /// (multi-value) mode, multiple entries can share a key — they may even straddle
+    /// adjacent leaves after a split. <see cref="FindRange"/> handles both cases.
+    /// </summary>
+    internal IReadOnlyList<ValueIndexEntry> FindAll(DataValue key) => FindRange(key, key);
+
+    /// <summary>
+    /// Enumerates all entries in ascending key order via leftmost-leaf descent and
+    /// then internal-navigation forward stepping.
+    /// </summary>
+    internal IEnumerable<ValueIndexEntry> TraverseForward()
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            yield break;
+        }
+
+        DescentPath? cursor = DescendLeftmost();
+        while (cursor is not null)
+        {
+            MutableLeafPage leaf = ReadLeafPage(cursor.Value.LeafPageId);
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                yield return leaf.Entries[i];
+            }
+            cursor = cursor.Value.TryStepRight();
+        }
+    }
+
+    /// <summary>
+    /// Enumerates all entries in descending key order via rightmost-leaf descent and
+    /// internal-navigation backward stepping.
+    /// </summary>
+    internal IEnumerable<ValueIndexEntry> TraverseBackward()
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            yield break;
+        }
+
+        DescentPath? cursor = DescendRightmost();
+        while (cursor is not null)
+        {
+            MutableLeafPage leaf = ReadLeafPage(cursor.Value.LeafPageId);
+            for (int i = leaf.EntryCount - 1; i >= 0; i--)
+            {
+                yield return leaf.Entries[i];
+            }
+            cursor = cursor.Value.TryStepLeft();
+        }
+    }
+
+    /// <summary>
+    /// Removes the entry matching <paramref name="entry"/> by composite (Key,
+    /// ChunkIndex, RowOffsetInChunk). Returns <see langword="true"/> if an entry
+    /// was found and removed, <see langword="false"/> otherwise. Lazy deletion:
+    /// the leaf may end up under-full or empty; rebalancing/merging is deferred
+    /// until a follow-up PR. An empty single-leaf root collapses to height-0 (no
+    /// root); empty leaves under a multi-level tree are tolerated and skipped on
+    /// traversal.
+    /// </summary>
+    internal bool Delete(ValueIndexEntry entry)
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            return false;
+        }
+
+        List<PathStep> path = new(_activeHeader.TreeHeight);
+        uint pageId = _activeHeader.RootPageId;
+
+        for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
+        {
+            MutableInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.FindChildSlot(entry.Key);
+            path.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        MutableLeafPage leaf = ReadLeafPage(pageId);
+        int idx = FindEntryIndex(leaf, entry);
+
+        if (idx < 0)
+        {
+            // Entry not in the descended leaf. With multi-value duplicates spanning
+            // leaves it could live in the previous leaf. Try one step left.
+            DescentPath descent = new(this, path, pageId);
+            DescentPath? prev = descent.TryStepLeft();
+            if (prev is not null)
+            {
+                MutableLeafPage prevLeaf = ReadLeafPage(prev.Value.LeafPageId);
+                int prevIdx = FindEntryIndex(prevLeaf, entry);
+                if (prevIdx >= 0)
+                {
+                    return DeleteFromLeafAndPropagate(prevLeaf, prevIdx, prev.Value.PathSteps);
+                }
+            }
+            return false;
+        }
+
+        return DeleteFromLeafAndPropagate(leaf, idx, path);
+    }
+
+    private bool DeleteFromLeafAndPropagate(MutableLeafPage leaf, int entryIndex, IReadOnlyList<PathStep> path)
+    {
+        ValueIndexEntry[] newEntries = new ValueIndexEntry[leaf.EntryCount - 1];
+        leaf.Entries[..entryIndex].CopyTo(newEntries.AsSpan(0, entryIndex));
+        leaf.Entries[(entryIndex + 1)..].CopyTo(newEntries.AsSpan(entryIndex));
+
+        uint newPageCount = _activeHeader.PageCount;
+
+        if (newEntries.Length == 0 && _activeHeader.TreeHeight == 1)
+        {
+            // Last entry of a single-leaf root removed; tree becomes empty.
+            CommitNewHeader(
+                rootPageId: MutableBPlusTreeConstants.NoLinkedPage,
+                pageCount: newPageCount,
+                treeHeight: 0,
+                entryCount: 0);
+            return true;
+        }
+
+        uint newLeafId = AllocatePage(ref newPageCount);
+        byte[] leafBytes = MutablePageCodec.EncodeLeafPage(
+            newEntries, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
+        WritePage(newLeafId, leafBytes);
+
+        // Walk path[..] up rewriting parents to point at newLeafId.
+        List<PathStep> mutablePath = new(path);
+        uint newRootId = PropagateChildReplacement(mutablePath, newLeafId, ref newPageCount);
+
+        CommitNewHeader(
+            rootPageId: newRootId,
+            pageCount: newPageCount,
+            treeHeight: _activeHeader.TreeHeight,
+            entryCount: _activeHeader.EntryCount - 1);
+        return true;
+    }
+
+    private static int FindEntryIndex(MutableLeafPage leaf, ValueIndexEntry target)
+    {
+        // BinarySearchFirst returns the first index matching target.Key. From there
+        // walk forward through equal keys until we find the matching (chunk, row).
+        int firstKeyMatch = leaf.BinarySearchFirst(target.Key);
+        if (firstKeyMatch < 0) return -1;
+
+        for (int i = firstKeyMatch; i < leaf.EntryCount; i++)
+        {
+            ValueIndexEntry e = leaf.Entries[i];
+            if (StatisticsPredicateEvaluator.CompareValues(e.Key, target.Key) != 0) break;
+            if (e.ChunkIndex == target.ChunkIndex && e.RowOffsetInChunk == target.RowOffsetInChunk)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public void Dispose()
     {
         _file.Dispose();
+    }
+
+    // --- Descent / navigation helpers ---
+
+    /// <summary>
+    /// Descent state: the path from root to a leaf, plus the leaf's page id. Supports
+    /// stepping left or right via internal-page navigation.
+    /// </summary>
+    private readonly struct DescentPath
+    {
+        internal readonly MutableBPlusTree Tree;
+        internal readonly List<PathStep> PathSteps;
+        internal readonly uint LeafPageId;
+
+        internal DescentPath(MutableBPlusTree tree, List<PathStep> pathSteps, uint leafPageId)
+        {
+            Tree = tree;
+            PathSteps = pathSteps;
+            LeafPageId = leafPageId;
+        }
+
+        /// <summary>
+        /// Steps to the leaf immediately to the right of this one (the next leaf in
+        /// ascending key order), or returns null if at the end of the tree.
+        /// </summary>
+        internal DescentPath? TryStepRight()
+        {
+            // Walk up until we find a parent whose slot can advance.
+            int level = PathSteps.Count - 1;
+            while (level >= 0)
+            {
+                PathStep step = PathSteps[level];
+                if (step.SlotIndex + 1 < step.Page.ChildCount)
+                {
+                    // Build a new path: same up to level, then advance, then leftmost descend.
+                    List<PathStep> newPath = new(PathSteps.Count);
+                    for (int i = 0; i < level; i++) newPath.Add(PathSteps[i]);
+                    newPath.Add(new PathStep(step.Page, step.SlotIndex + 1));
+                    uint childId = step.Page.GetChildPageId(step.SlotIndex + 1);
+                    return Tree.DescendLeftmostFrom(childId, newPath);
+                }
+                level--;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Steps to the leaf immediately to the left of this one (the previous leaf
+        /// in ascending key order), or returns null if at the start of the tree.
+        /// </summary>
+        internal DescentPath? TryStepLeft()
+        {
+            int level = PathSteps.Count - 1;
+            while (level >= 0)
+            {
+                PathStep step = PathSteps[level];
+                if (step.SlotIndex > 0)
+                {
+                    List<PathStep> newPath = new(PathSteps.Count);
+                    for (int i = 0; i < level; i++) newPath.Add(PathSteps[i]);
+                    newPath.Add(new PathStep(step.Page, step.SlotIndex - 1));
+                    uint childId = step.Page.GetChildPageId(step.SlotIndex - 1);
+                    return Tree.DescendRightmostFrom(childId, newPath);
+                }
+                level--;
+            }
+            return null;
+        }
+    }
+
+    private DescentPath DescendForKey(DataValue key)
+    {
+        List<PathStep> path = new(_activeHeader.TreeHeight);
+        uint pageId = _activeHeader.RootPageId;
+
+        for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
+        {
+            MutableInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.FindChildSlot(key);
+            path.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        return new DescentPath(this, path, pageId);
+    }
+
+    private DescentPath DescendLeftmost() => DescendLeftmostFrom(_activeHeader.RootPageId, new List<PathStep>(_activeHeader.TreeHeight));
+
+    private DescentPath DescendRightmost() => DescendRightmostFrom(_activeHeader.RootPageId, new List<PathStep>(_activeHeader.TreeHeight));
+
+    private DescentPath DescendLeftmostFrom(uint subtreeRoot, List<PathStep> pathPrefix)
+    {
+        // Determine remaining levels: pathPrefix already has internal-level entries.
+        int remainingInternalLevels = _activeHeader.TreeHeight - 1 - pathPrefix.Count;
+        uint pageId = subtreeRoot;
+
+        for (int i = 0; i < remainingInternalLevels; i++)
+        {
+            MutableInternalPage internalPage = ReadInternalPage(pageId);
+            pathPrefix.Add(new PathStep(internalPage, 0));
+            pageId = internalPage.GetChildPageId(0);
+        }
+
+        return new DescentPath(this, pathPrefix, pageId);
+    }
+
+    private DescentPath DescendRightmostFrom(uint subtreeRoot, List<PathStep> pathPrefix)
+    {
+        int remainingInternalLevels = _activeHeader.TreeHeight - 1 - pathPrefix.Count;
+        uint pageId = subtreeRoot;
+
+        for (int i = 0; i < remainingInternalLevels; i++)
+        {
+            MutableInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.ChildCount - 1;
+            pathPrefix.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        return new DescentPath(this, pathPrefix, pageId);
     }
 
     // --- Insert internals ---
@@ -537,7 +897,12 @@ internal sealed class MutableBPlusTree : IDisposable
         return MutablePageCodec.DecodeInternalPage(ReadPageBytes(pageId), pageId);
     }
 
-    private void CommitNewHeader(uint rootPageId, uint pageCount, ushort treeHeight, long entryCount)
+    private void CommitNewHeader(
+        uint rootPageId,
+        uint pageCount,
+        ushort treeHeight,
+        long entryCount,
+        uint freeListHead = MutableBPlusTreeConstants.NoLinkedPage)
     {
         // Pages are already on disk (caller flushed before this). Now flip the header slot.
         _file.Flush(flushToDisk: true);
@@ -545,11 +910,12 @@ internal sealed class MutableBPlusTree : IDisposable
         MutableBPlusTreeHeader newHeader = new(
             CommitGen: _activeHeader.CommitGen + 1,
             RootPageId: rootPageId,
-            FreeListHead: MutableBPlusTreeConstants.NoLinkedPage, // PR10g: no recycling.
+            FreeListHead: freeListHead,
             PageCount: pageCount,
             TreeHeight: treeHeight,
             EntryCount: entryCount,
-            KeyKind: _activeHeader.KeyKind);
+            KeyKind: _activeHeader.KeyKind,
+            AllowDuplicates: _activeHeader.AllowDuplicates);
 
         int targetSlot = 1 - _activeSlotIndex;
         long targetOffset = targetSlot == 0
