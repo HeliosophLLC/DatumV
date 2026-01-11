@@ -168,10 +168,13 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Reindex_AfterUpdate_RestoresSourceIndex()
+    public async Task Reindex_AfterUpdate_StaysValid()
     {
-        // PR11's UPDATE drops the cached index too — REINDEX must
-        // restore it.
+        // PR13c: UPDATE auto-refreshes .datum-index in its commit
+        // path (full rebuild, not extend — UPDATE rewrites existing
+        // chunks rather than appending). The post-update index is
+        // already Valid; REINDEX is now a no-op (rebuilds an
+        // already-current file).
         string datumPath = await IngestAndIndex("after_update.datum");
 
         Pool pool = new(new PoolBacking());
@@ -180,8 +183,10 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         Assert.NotNull(provider.GetSourceIndex());
 
         catalog.Plan("UPDATE t SET name = 'updated' WHERE id = 1");
-        Assert.Null(provider.GetSourceIndex());
+        Assert.NotNull(provider.GetSourceIndex());
+        Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
 
+        // REINDEX still works on an already-current file.
         catalog.Plan("REINDEX t");
         Assert.NotNull(provider.GetSourceIndex());
     }

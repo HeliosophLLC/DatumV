@@ -1291,11 +1291,30 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 sourceStore);
 
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: true);
-            // PR13b: UPDATE drops the cached index. Extend-on-update is
-            // PR13c — UPDATE may rewrite existing chunks, so the merge
-            // shape is different from INSERT (chunk-level delta, not
-            // append-only).
-            InvalidateSourceIndexCache();
+
+            // PR13c: auto-refresh .datum-index after UPDATE. Mirrors
+            // PR13a-2's INSERT unlock — the user no longer needs a
+            // manual REINDEX to restore acceleration after a row
+            // rewrite. Full rebuild rather than chunk-splice extend:
+            // UPDATE may rewrite an arbitrary subset of existing
+            // chunks, so the append-only merge from PR13b doesn't
+            // apply. Per-chunk replacement (decompress affected
+            // chunks' bitmaps, OR new value into bloom, recompute zone
+            // map, splice back) is the future PR13c-perf optimisation;
+            // v1 trades correctness + simplicity for the per-INSERT
+            // cost we already pay. Best-effort: a failure here leaves
+            // the data commit in place and the index Stale (visible
+            // via datum_catalog.indexes.is_valid = false).
+            try
+            {
+                RebuildIndexNoLock(existingForExtend: null);
+            }
+            catch
+            {
+                // Swallowed — data commit stands. The catch above
+                // already invalidated the cache so GetSourceIndex
+                // returns null and queries fall back to scan.
+            }
         }
         finally
         {
@@ -1364,6 +1383,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// </remarks>
     private void RebuildIndexNoLock(SourceIndex? existingForExtend)
     {
+        // Detach the cached index immediately. After mutation, the
+        // post-mutation snapshot is already live but the in-memory
+        // index still describes the pre-mutation file. A concurrent
+        // reader that observes that pair can issue indexed queries
+        // whose pruning is wrong — for INSERT, chunks past the
+        // existing tail are invisible; for UPDATE, the new value's
+        // bloom/bitmap entries don't exist anywhere in the old index.
+        // Setting _sourceIndex = null forces the read path back to
+        // scan during the rebuild window. The caller's
+        // existingForExtend reference (when non-null) keeps the
+        // SourceIndex object — and therefore the mmap accessor it
+        // reads through — alive for the merge step. _mappedIndexSet
+        // is disposed below once the new file is written.
+        _sourceIndex = null;
+
         string finalPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
         string tempPath = finalPath + ".tmp";
 
@@ -1372,37 +1406,31 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
         try
         {
+            OutputDescriptor destination = new(tempPath);
             if (useExtend)
             {
-                OutputDescriptor destination = new(tempPath);
                 indexer.ExtendAsync(this, _descriptor.FilePath, destination, existingForExtend!, IndexOptions.Default)
                     .GetAwaiter().GetResult();
             }
             else
             {
-                // Full rebuild: drop the cached mmap before scanning so
-                // the scan path doesn't fight an open accessor on the
-                // about-to-be-overwritten file. (The full rebuild does
-                // not need the existing index, so dropping it here is
-                // free.)
-                InvalidateSourceIndexCache();
-                OutputDescriptor destination = new(tempPath);
                 indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
                     .GetAwaiter().GetResult();
             }
         }
         catch
         {
-            // Best-effort cleanup of the orphaned temp file.
+            // Best-effort cleanup of the orphaned temp file. The
+            // pre-existing on-disk .datum-index is left in place but
+            // its fingerprint no longer matches the data file → next
+            // open sees it as Stale.
             try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-            // Ensure the cache is invalidated on failure — we can't
-            // trust it covers either pre- or post-mutation state.
             InvalidateSourceIndexCache();
             throw;
         }
 
-        // Tear down the old mapping (if any) and atomically promote
-        // the freshly-written temp file. File.Move(overwrite: true) is
+        // Tear down the old mapping and atomically promote the
+        // freshly-written temp file. File.Move(overwrite: true) is
         // atomic on Windows when source and destination are on the
         // same volume.
         InvalidateSourceIndexCache();

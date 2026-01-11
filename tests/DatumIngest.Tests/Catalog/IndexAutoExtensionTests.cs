@@ -300,6 +300,88 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Update_AutoRefreshesIndex_WithoutManualReindex()
+    {
+        // PR13c: UPDATE no longer leaves .datum-index Stale until the
+        // user runs REINDEX. The full rebuild fires inside the UPDATE
+        // mutation lock so the next GetSourceIndex call returns a
+        // valid snapshot whose values reflect the rewrite.
+        string datumPath = await IngestAndIndex("update_auto_refresh.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        Assert.NotNull(provider.GetSourceIndex());
+        Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
+
+        catalog.Plan("UPDATE t SET name = 'renamed' WHERE id = 2");
+
+        // Without PR13c this would be null (Stale) and require REINDEX.
+        Assert.NotNull(provider.GetSourceIndex());
+        Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
+    }
+
+    [Fact]
+    public async Task Update_BitmapFindsNewValue_NoManualReindex()
+    {
+        // PR13c correctness: UPDATE replaces a value; the bitmap on
+        // the post-UPDATE index must locate the new value (which
+        // didn't exist pre-UPDATE) in the chunk that holds the
+        // rewritten row. Without auto-refresh the new value would be
+        // a false negative — bitmap/bloom would say "absent in all
+        // chunks" → indexed lookup misses the row.
+        string datumPath = await IngestAndIndex("update_bitmap.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        SourceIndex? before = provider.GetSourceIndex();
+        Assert.NotNull(before);
+        Assert.NotNull(before.BitmapIndexes);
+
+        // Pre-UPDATE: 'renamed' is not present anywhere.
+        IReadOnlySet<int> chunksForRenamedBefore = FindChunksContainingString(before, "name", "renamed");
+        Assert.Empty(chunksForRenamedBefore);
+
+        catalog.Plan("UPDATE t SET name = 'renamed' WHERE id = 2");
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.NotNull(after.BitmapIndexes);
+
+        IReadOnlySet<int> chunksForRenamedAfter = FindChunksContainingString(after, "name", "renamed");
+        Assert.NotEmpty(chunksForRenamedAfter);
+    }
+
+    [Fact]
+    public async Task Update_BloomMembership_RecognizesNewValue()
+    {
+        // PR13c bloom correctness: bloom for the affected chunk must
+        // test-positive for the new value post-UPDATE. Without
+        // auto-refresh, bloom would say "definitely absent" — a
+        // false negative that prunes the chunk from indexed scans.
+        string datumPath = await IngestAndIndex("update_bloom.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("UPDATE t SET name = 'morphed' WHERE id = 3");
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.NotNull(after.BloomFilters);
+
+        // All 4 original rows live in chunk 0; UPDATE didn't add
+        // chunks. Bloom for chunk 0 must test-positive for 'morphed'.
+        Assert.True(after.BloomFilters.TryGetFilter("name", 0, out BloomFilter? bloomChunk0));
+        Arena bloomArena = new();
+        Assert.True(bloomChunk0.MayContain(DataValue.FromString("morphed"), bloomArena));
+    }
+
+    [Fact]
     public async Task Append_BloomMembershipPreserved()
     {
         // PR13b bloom carry-forward: a value present in the prefix's
