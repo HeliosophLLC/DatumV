@@ -129,6 +129,41 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Analyze_AfterAppend_RestoresSourceIndex()
+    {
+        // ANALYZE is an alias for REINDEX in this build — same end state:
+        // .datum-index sidecar refreshed against current data.
+        string datumPath = await IngestAndIndex("analyze_after_append.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+        Assert.NotNull(provider.GetSourceIndex());
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
+            CancellationToken.None);
+        Assert.Null(provider.GetSourceIndex());
+
+        catalog.Plan("ANALYZE t");
+
+        Assert.NotNull(provider.GetSourceIndex());
+    }
+
+    [Fact]
+    public void Analyze_TempTable_Rejected()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+            () => catalog.Plan("ANALYZE t"));
+        Assert.Contains("does not support ANALYZE", ex.Message);
+    }
+
+    [Fact]
     public async Task Reindex_AfterUpdate_RestoresSourceIndex()
     {
         // PR11's UPDATE drops the cached index too — REINDEX must

@@ -343,6 +343,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyReindexTable(reindex);
                 return EmptyQueryPlan.Instance;
 
+            case AnalyzeTableStatement analyze:
+                ApplyAnalyzeTable(analyze);
+                return EmptyQueryPlan.Instance;
+
             case AlterTableAddColumnStatement alterAdd:
                 ApplyAlterTableAddColumn(alterAdd);
                 return EmptyQueryPlan.Instance;
@@ -566,6 +570,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             throw new InvalidOperationException(
                 $"Table '{reindex.TableName}' does not support REINDEX " +
                 $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
+        }
+
+        provider.RebuildIndex();
+    }
+
+    /// <summary>
+    /// Applies an <c>ANALYZE</c> statement: rebuilds the table's
+    /// acceleration sidecar (<c>.datum-index</c>) so the query planner's
+    /// chunk-pruning decisions reflect current data. Functionally an
+    /// alias for <c>REINDEX</c> in this build — the
+    /// <c>.datum-manifest</c> column-statistics refresh will land
+    /// alongside the per-kind <see cref="Manifest.FeatureManifest"/>
+    /// expansion (see project_pr14_feature_manifest_refresh.md).
+    /// </summary>
+    private void ApplyAnalyzeTable(AnalyzeTableStatement analyze)
+    {
+        if (!Tables.TryGetValue(analyze.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{analyze.TableName}' is not registered in the catalog.");
+        }
+
+        if (!provider.CanRebuildIndex)
+        {
+            throw new InvalidOperationException(
+                $"Table '{analyze.TableName}' does not support ANALYZE " +
+                $"(provider type '{provider.GetType().Name}' has no acceleration sidecar to refresh).");
         }
 
         provider.RebuildIndex();
