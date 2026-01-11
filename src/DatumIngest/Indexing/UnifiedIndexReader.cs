@@ -28,6 +28,12 @@ internal static class UnifiedIndexReader
     /// <exception cref="InvalidDataException">Bad magic bytes, unsupported version, or corrupt section data.</exception>
     public static MappedSourceIndexSet Open(string filePath)
     {
+        // Capture the on-disk file length explicitly. MemoryMappedViewAccessor.Capacity
+        // is rounded up to the OS allocation granularity (e.g. 64 KiB on Windows), so
+        // it overestimates the file end and breaks "is the IDXT magic at the right
+        // offset?" tail validation.
+        long fileLength = new FileInfo(filePath).Length;
+
         MemoryMappedFile memoryMappedFile = MemoryMappedFile.CreateFromFile(
             filePath, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
 
@@ -38,7 +44,7 @@ internal static class UnifiedIndexReader
 
             try
             {
-                SourceIndexSet indexSet = ReadIndexSet(memoryMappedFile, sharedAccessor);
+                SourceIndexSet indexSet = ReadIndexSet(memoryMappedFile, sharedAccessor, fileLength);
                 return new MappedSourceIndexSet(memoryMappedFile, sharedAccessor, indexSet);
             }
             catch
@@ -56,15 +62,18 @@ internal static class UnifiedIndexReader
 
     private static SourceIndexSet ReadIndexSet(
         MemoryMappedFile memoryMappedFile,
-        MemoryMappedViewAccessor sharedAccessor)
+        MemoryMappedViewAccessor sharedAccessor,
+        long fileLength)
     {
+        long fileCapacity = fileLength;
+
         // Read and validate header (24 bytes).
         Span<byte> headerBytes = stackalloc byte[UnifiedIndexWriter.HeaderSize];
         sharedAccessor.ReadArray(0, headerBytes);
 
         if (!headerBytes[..4].SequenceEqual(UnifiedIndexWriter.MagicBytes))
         {
-            throw new InvalidDataException("Not a v5 unified index file: bad magic bytes.");
+            throw new InvalidDataException("Not a unified index file: bad magic bytes.");
         }
 
         int version = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[4..]);
@@ -77,12 +86,44 @@ internal static class UnifiedIndexReader
 
         // int flags = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[8..]);  // Reserved.
         int sectionCount = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[12..]);
-        // long fileLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes[16..]);
+        long headerFileLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes[16..]);
 
         if (sectionCount < 0)
         {
             throw new InvalidDataException(
                 $"Invalid section count {sectionCount} in unified index header.");
+        }
+
+        // Tail-flip validation. The IDXT magic at end-of-file is the
+        // atomic-commit signal: present means the writer reached its
+        // final flush, absent means a torn write. Header.FileLength is
+        // already supposed to include the tail; cross-checking the tail
+        // confirms the writer's commit completed.
+        if (fileCapacity < UnifiedIndexWriter.HeaderSize + UnifiedIndexWriter.TailSize)
+        {
+            throw new InvalidDataException(
+                $"Unified index file is too small ({fileCapacity} bytes) to hold a header + tail; " +
+                "treat as torn write and run REINDEX.");
+        }
+        if (headerFileLength != fileCapacity)
+        {
+            throw new InvalidDataException(
+                $"Unified index header.FileLength={headerFileLength} disagrees with on-disk file size {fileCapacity}; " +
+                "treat as torn write and run REINDEX.");
+        }
+        Span<byte> tailBytes = stackalloc byte[UnifiedIndexWriter.TailSize];
+        sharedAccessor.ReadArray(fileCapacity - UnifiedIndexWriter.TailSize, tailBytes);
+        if (!tailBytes[4..].SequenceEqual(UnifiedIndexWriter.TailMagicBytes))
+        {
+            throw new InvalidDataException(
+                "Unified index file is missing the trailing IDXT magic — writer crashed mid-commit; run REINDEX.");
+        }
+        int tailSectionCount = BinaryPrimitives.ReadInt32LittleEndian(tailBytes[..4]);
+        if (tailSectionCount != sectionCount)
+        {
+            throw new InvalidDataException(
+                $"Unified index tail.SectionCount={tailSectionCount} disagrees with header.SectionCount={sectionCount}; " +
+                "treat as torn write and run REINDEX.");
         }
 
         // Verify the file is large enough to hold the section directory.
@@ -112,14 +153,15 @@ internal static class UnifiedIndexReader
                 BinaryPrimitives.ReadInt64LittleEndian(entryBuffer[10..]));
         }
 
-        // Validate that all section entries point within the file.
-        long fileCapacity = sharedAccessor.Capacity;
+        // Validate that all section entries point within the file
+        // (excluding the trailing tail bytes).
+        long sectionsCapacity = fileCapacity - UnifiedIndexWriter.TailSize;
 
         for (int index = 0; index < directory.Length; index++)
         {
             SectionDirectoryEntry entry = directory[index];
 
-            if (entry.Offset < 0 || entry.Length < 0 || entry.Offset + entry.Length > fileCapacity)
+            if (entry.Offset < 0 || entry.Length < 0 || entry.Offset + entry.Length > sectionsCapacity)
             {
                 throw new InvalidDataException(
                     $"Section {entry.Type} (table {entry.TableIndex}) has invalid bounds: "

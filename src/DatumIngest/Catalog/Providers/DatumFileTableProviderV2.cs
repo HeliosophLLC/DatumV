@@ -982,7 +982,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             return (null, null);
         }
 
-        MappedSourceIndexSet mapped = UnifiedIndexReader.Open(path);
+        MappedSourceIndexSet mapped;
+        try
+        {
+            mapped = UnifiedIndexReader.Open(path);
+        }
+        catch (InvalidDataException)
+        {
+            // Torn IDXT tail or otherwise unreadable. Treat as missing —
+            // queries fall back to scan; the next REINDEX rebuilds. Same
+            // failure-mode contract as a fingerprint mismatch (PR9.5).
+            return (null, null);
+        }
         try
         {
             if (!IsFingerprintCurrent(descriptor.FilePath, mapped.IndexSet.Fingerprint))

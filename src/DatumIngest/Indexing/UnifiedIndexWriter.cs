@@ -33,8 +33,29 @@ internal static class UnifiedIndexWriter
     /// <summary>Magic bytes identifying a unified index file: ASCII "DXIX".</summary>
     internal static ReadOnlySpan<byte> MagicBytes => "DXIX"u8;
 
-    /// <summary>Format version for the v6 unified layout.</summary>
-    internal const int FormatVersion = 6;
+    /// <summary>
+    /// Magic bytes terminating a successfully-committed unified index file: ASCII "IDXT".
+    /// Presence of this tail at end-of-file is the atomic-commit signal — a torn write
+    /// (writer crashed before tail flush) leaves the file without IDXT and the reader
+    /// rejects it as torn, falling back to "no valid index" so a REINDEX rebuilds.
+    /// </summary>
+    internal static ReadOnlySpan<byte> TailMagicBytes => "IDXT"u8;
+
+    /// <summary>Size of the trailing tail block in bytes.</summary>
+    /// <remarks>
+    /// Tail layout (8 bytes):
+    /// <list type="bullet">
+    ///   <item>4B SectionCount (i32 LE) — echo of header.SectionCount, cross-validated on read.</item>
+    ///   <item>4B IDXT magic.</item>
+    /// </list>
+    /// PR13a's whole-file-COW model keeps the header at offset 0; the tail is a pure
+    /// commit signal, not a back-pointer. Future versions may extend the tail to support
+    /// in-place delta appends.
+    /// </remarks>
+    internal const int TailSize = 8;
+
+    /// <summary>Format version for the v7 unified layout (PR13a — adds trailing IDXT tail for atomic-commit semantics).</summary>
+    internal const int FormatVersion = 7;
 
     /// <summary>Size of the fixed file header in bytes.</summary>
     internal const int HeaderSize = 24;
@@ -121,9 +142,11 @@ internal static class UnifiedIndexWriter
             actualEntries[sectionIndex] = (plan.Type, plan.TableIndex, sectionStart, sectionLength);
         }
 
-        long fileLength = output.Position;
+        long sectionsEndOffset = output.Position;
+        long fileLength = sectionsEndOffset + TailSize;
 
-        // Backpatch: file length in header.
+        // Backpatch: file length in header. Includes the trailing IDXT tail so
+        // that header.FileLength == on-disk file length when the commit lands.
         output.Position = 16; // Offset of FileLength field.
         Span<byte> fileLengthBuffer = stackalloc byte[8];
         BinaryPrimitives.WriteInt64LittleEndian(fileLengthBuffer, fileLength);
@@ -141,6 +164,17 @@ internal static class UnifiedIndexWriter
             BinaryPrimitives.WriteInt64LittleEndian(entryBuffer[10..], length);
             output.Write(entryBuffer);
         }
+
+        // Tail-flip-as-commit. All section bytes + the directory backpatch are
+        // already in the buffer when we reach this point; the IDXT tail is the
+        // last thing written. A reader that finds DXIX-but-no-IDXT knows the
+        // writer crashed mid-commit and treats the file as torn (no valid
+        // index → fall back to scan, REINDEX rebuilds).
+        output.Position = sectionsEndOffset;
+        Span<byte> tailBuffer = stackalloc byte[TailSize];
+        BinaryPrimitives.WriteInt32LittleEndian(tailBuffer[..4], plannedSections.Count);
+        TailMagicBytes.CopyTo(tailBuffer[4..]);
+        output.Write(tailBuffer);
 
         output.Flush();
     }
