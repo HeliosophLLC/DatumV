@@ -12,6 +12,7 @@ using SkiaSharp;
 /// Smoke tests for Moondream2. Self-skip when the fp16 ONNX bundle
 /// isn't present so CI machines without the artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class Moondream2ModelTests : ServiceTestBase
 {
     private static string VisionEncoderPath => Path.Combine(

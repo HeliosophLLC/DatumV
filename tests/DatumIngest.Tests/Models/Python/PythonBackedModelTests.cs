@@ -11,6 +11,7 @@ using DatumIngest.Models.Python;
 /// PATH so CI without Python doesn't fail the suite — the framework is
 /// experimentation infrastructure, not a load-bearing engine feature.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class PythonBackedModelTests : ServiceTestBase
 {
     private static readonly string ScriptsDirectory =

@@ -25,6 +25,7 @@ using DatumIngest.Pooling;
 /// each test finishes in seconds rather than minutes.
 /// </para>
 /// </remarks>
+[Trait("Category", "Gpu")]
 public sealed class LlamaModelTests : ServiceTestBase
 {
     static LlamaModelTests()

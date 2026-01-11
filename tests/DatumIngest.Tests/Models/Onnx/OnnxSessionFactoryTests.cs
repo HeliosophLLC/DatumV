@@ -11,6 +11,7 @@ using Microsoft.ML.OnnxRuntime;
 /// every generation is CPU-bound and feels slow even though the
 /// pipeline is correct. This test is the canary.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class OnnxSessionFactoryTests : ServiceTestBase
 {
     /// <summary>

@@ -13,6 +13,7 @@ using SkiaSharp;
 /// folder is absent so CI machines without the converted ONNX artefacts
 /// don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class ViTGpt2CaptionModelTests : ServiceTestBase
 {
     private static string EncoderPath => Path.Combine(

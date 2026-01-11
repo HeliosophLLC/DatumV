@@ -26,6 +26,7 @@ using SkiaSharp;
 /// lookup — exercising the model directly with arena-resident inputs.
 /// </para>
 /// </remarks>
+[Trait("Category", "Gpu")]
 public sealed class MobileNetV2ModelTests : ServiceTestBase
 {
     private static string ModelPath => Path.Combine(

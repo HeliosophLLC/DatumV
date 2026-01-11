@@ -12,6 +12,7 @@ using SkiaSharp;
 /// pipeline shape as the other SD-1.5+Hyper exports (StableDiffusionTurboModel
 /// loader). Self-skip when the files aren't present.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class AbsoluteRealityHyperModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

@@ -802,7 +802,7 @@ public class OperatorTests : ServiceTestBase
         CancellationTokenSource cancellationTokenSource = new();
         cancellationTokenSource.Cancel();
 
-        ExecutionContext context = CreateExecutionContext();
+        ExecutionContext context = CreateExecutionContext(cancellationToken: cancellationTokenSource.Token);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(orderBy, context));

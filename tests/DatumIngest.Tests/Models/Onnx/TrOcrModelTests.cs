@@ -13,6 +13,7 @@ using SkiaSharp;
 /// model folder is absent so CI machines without the converted ONNX
 /// artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class TrOcrModelTests : ServiceTestBase
 {
     private static string Fp32EncoderPath => Path.Combine(

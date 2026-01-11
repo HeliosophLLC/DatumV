@@ -10,6 +10,7 @@ using DatumIngest.Pooling;
 /// Smoke tests for the PP-OCRv4 text detector. Self-skip when the
 /// model file is absent.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class PpOcrDetectionModelTests : ServiceTestBase
 {
     private static string ModelPath => Path.Combine(

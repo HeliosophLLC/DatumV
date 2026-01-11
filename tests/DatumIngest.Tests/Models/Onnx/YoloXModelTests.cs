@@ -12,6 +12,7 @@ using SkiaSharp;
 /// Smoke tests for the YOLOX detector. Self-skip when the ONNX file is
 /// absent so CI machines without the model artefact don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class YoloXModelTests : ServiceTestBase
 {
     private static string ModelPath => Path.Combine(

@@ -13,6 +13,7 @@ using SkiaSharp;
 /// GenAI bundle isn't present so CI machines without the artefacts
 /// don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class Phi35VisionModelTests : ServiceTestBase
 {
     private static string BundleDirectory => Path.Combine(

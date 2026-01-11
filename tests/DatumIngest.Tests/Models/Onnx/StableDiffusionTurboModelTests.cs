@@ -13,6 +13,7 @@ using SkiaSharp;
 /// against the local model directory; they self-skip when the files
 /// aren't present so CI machines without the artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class StableDiffusionTurboModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

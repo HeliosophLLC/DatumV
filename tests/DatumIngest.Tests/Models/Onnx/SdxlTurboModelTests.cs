@@ -12,6 +12,7 @@ using SkiaSharp;
 /// Smoke tests for SDXL-Turbo. Self-skip when the model files aren't
 /// present so CI machines without the artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class SdxlTurboModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

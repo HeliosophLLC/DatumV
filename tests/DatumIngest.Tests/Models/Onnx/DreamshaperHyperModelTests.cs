@@ -13,6 +13,7 @@ using SkiaSharp;
 /// loader), so these tests exercise the catalog wiring and confirm the
 /// DreamShaper export loads end-to-end. Self-skip when the files aren't present.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class DreamshaperHyperModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

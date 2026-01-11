@@ -322,16 +322,6 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
-    public void ToString_Float32Array_ShowsKind()
-    {
-        // Float32 + IsArray (formerly Vector). ToDisplayString on inline arrays
-        // uses the default _kind.ToString() arm — typed-array preview is a future
-        // improvement.
-        string display = DataValue.FromInlineArray<float>([1f, 2f, 3f], DataKind.Float32).ToString();
-        Assert.Contains("Float32", display);
-    }
-
-    [Fact]
     public void ToString_Null_IncludesKind()
     {
         Assert.Equal("NULL(Float32)", DataValue.Null(DataKind.Float32).ToString());

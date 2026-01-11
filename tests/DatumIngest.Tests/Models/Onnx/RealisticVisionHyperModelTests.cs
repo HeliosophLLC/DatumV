@@ -14,6 +14,7 @@ using SkiaSharp;
 /// SD 1.5 export loads end-to-end. They self-skip when the files aren't
 /// present so CI machines without the artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class RealisticVisionHyperModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

@@ -140,8 +140,8 @@ public sealed class FoldScanTests : ServiceTestBase
         Assert.Equal(4, results[0].FieldCount);
         Assert.Equal("fare_ema", results[0].ColumnNames[3]);
         // Values: row1 ema=100 (INIT), row2 ema=0.15*40 + 0.85*100 = 6+85 = 91
-        Assert.Equal(100f, results[0]["fare_ema"].AsFloat32());
-        Assert.Equal(91f, results[1]["fare_ema"].AsFloat32());
+        Assert.Equal(100f, results[0]["fare_ema"].AsFloat64());
+        Assert.Equal(91f, results[1]["fare_ema"].AsFloat64());
     }
 
     // ─────────────── End-to-end execution ───────────────
@@ -241,11 +241,11 @@ public sealed class FoldScanTests : ServiceTestBase
 
         Assert.Equal(3, results.Count);
         // Row 1: ema = 100 (INIT), body: 0.1*100 + 0.9*100 = 100
-        Assert.Equal(100f, results[0]["ema_10"].AsFloat32(), 0.01f);
+        Assert.Equal(100f, results[0]["ema_10"].AsFloat64(), 0.01f);
         // Row 2: ema = 100, body: 0.1*110 + 0.9*100 = 101
-        Assert.Equal(101f, results[1]["ema_10"].AsFloat32(), 0.01f);
+        Assert.Equal(101f, results[1]["ema_10"].AsFloat64(), 0.01f);
         // Row 3: ema = 101, body: 0.1*105 + 0.9*101 = 101.4
-        Assert.Equal(101.4f, results[2]["ema_10"].AsFloat32(), 0.1f);
+        Assert.Equal(101.4f, results[2]["ema_10"].AsFloat64(), 0.1f);
     }
 
     [Fact]

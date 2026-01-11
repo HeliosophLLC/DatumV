@@ -17,6 +17,7 @@ using SkiaSharp;
 /// to fully exercise Mo Di's characteristic look — without it the model
 /// produces reasonable but not-particularly-Disney images.
 /// </remarks>
+[Trait("Category", "Gpu")]
 public sealed class MoDiHyperModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

@@ -13,6 +13,7 @@ using SkiaSharp;
 /// model folder isn't present so CI machines without the artefacts don't
 /// fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class Florence2ModelTests : ServiceTestBase
 {
     private static string Fp16EncoderPath => Path.Combine(

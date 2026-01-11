@@ -12,6 +12,7 @@ using SkiaSharp;
 /// pipeline shape as SD-Turbo / Realistic Vision Hyper / DreamShaper Hyper
 /// (StableDiffusionTurboModel loader). Self-skip when the files aren't present.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class EpicrealismHyperModelTests : ServiceTestBase
 {
     private static string ModelDirectory => Path.Combine(

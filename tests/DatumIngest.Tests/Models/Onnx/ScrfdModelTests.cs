@@ -12,6 +12,7 @@ using SkiaSharp;
 /// Smoke tests for the SCRFD-10G face detector. Self-skip when the ONNX
 /// file is absent so CI machines without the model artefact don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class ScrfdModelTests : ServiceTestBase
 {
     private static string ModelPath => Path.Combine(

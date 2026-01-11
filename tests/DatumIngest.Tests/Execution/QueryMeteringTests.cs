@@ -65,7 +65,7 @@ public class QueryMeteringTests : ServiceTestBase
             new FunctionCallExpression("sqrt", [new ColumnReference("x")]),
             row);
 
-        Assert.Equal(2f, result.AsFloat32(), 0.001f);
+        Assert.Equal(2f, result.AsFloat64(), 0.001f);
     }
 
     /// <summary>

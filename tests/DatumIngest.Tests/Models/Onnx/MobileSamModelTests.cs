@@ -13,6 +13,7 @@ using SkiaSharp;
 /// segmentation). Self-skips when the encoder or decoder ONNX file is
 /// absent so CI machines without the artefacts don't fail.
 /// </summary>
+[Trait("Category", "Gpu")]
 public sealed class MobileSamModelTests : ServiceTestBase
 {
     public static IEnumerable<object[]> Variants() =>
