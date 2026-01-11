@@ -1117,6 +1117,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
         }
         finally
         {
@@ -1133,6 +1134,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             DatumFileWriterV2.DropColumn(_descriptor.FilePath, columnName);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
         }
         finally
         {
@@ -1171,6 +1173,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             DatumFileWriterV2.SoftDeleteRows(_descriptor.FilePath, rowIndices);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
         }
         finally
         {
@@ -1288,6 +1291,11 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 sourceStore);
 
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: true);
+            // PR13b: UPDATE drops the cached index. Extend-on-update is
+            // PR13c — UPDATE may rewrite existing chunks, so the merge
+            // shape is different from INSERT (chunk-level delta, not
+            // append-only).
+            InvalidateSourceIndexCache();
         }
         finally
         {
@@ -1310,7 +1318,11 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _mutationLock.Wait();
         try
         {
-            RebuildIndexNoLock();
+            // Public REINDEX entry — always full rebuild (no carry-forward
+            // from the existing in-memory snapshot). Called by users who
+            // want a from-scratch sweep regardless of how the on-disk
+            // index drifted.
+            RebuildIndexNoLock(existingForExtend: null);
         }
         finally
         {
@@ -1319,35 +1331,82 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <summary>
-    /// Implementation of <see cref="RebuildIndex"/> without taking the
-    /// mutation lock. Caller must already hold <see cref="_mutationLock"/>.
-    /// Used by <see cref="DatumAppendSession.CommitAsync"/> for the
-    /// post-commit "extend the index" pass (PR13a-2's two-phase commit).
+    /// Refreshes the <c>.datum-index</c> without taking the mutation
+    /// lock. Caller must already hold <see cref="_mutationLock"/>.
     /// </summary>
+    /// <param name="existingForExtend">
+    /// When non-null and <see cref="Indexer.CanExtend"/> returns true,
+    /// the rebuild uses PR13b's chunk-splice path: the prefix's
+    /// bloom + bitmap + zone-map data is carried forward verbatim and
+    /// only the appended rows are scanned. The caller (typically
+    /// <see cref="DatumAppendSession.CommitAsync"/>) supplies the
+    /// pre-mutation in-memory index. Pass <see langword="null"/> for a
+    /// full rebuild from scratch.
+    /// </param>
     /// <remarks>
-    /// PR13a-2 v1 rebuilds the entire <c>.datum-index</c> from the
-    /// post-commit data file. True incremental extension (carry forward
-    /// existing chunks' bloom + zone-map bytes, append only the new
-    /// chunk) is the PR13b/c performance follow-up — this v1 trades
-    /// per-INSERT cost for correctness + simplicity, but eliminates
-    /// the manual <c>REINDEX</c> step end-users would otherwise need.
+    /// <para>
+    /// Two-step swap pattern:
+    /// <list type="number">
+    ///   <item>Write the new index to a <c>.tmp</c> sibling so the
+    ///     existing <see cref="_mappedIndexSet"/> can stay open during
+    ///     the merge (the extend path's bloom filters read through the
+    ///     accessor up until <c>UnifiedIndexWriter.Write</c> finishes).</item>
+    ///   <item>Once the temp file is fully written, dispose the old
+    ///     mapping, rename temp → final, reopen.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// On failure the temp file may be left orphaned; the on-disk
+    /// final file remains stale (pre-mutation fingerprint) and the
+    /// in-memory cache is invalidated so the index surfaces as Stale
+    /// per the <see cref="IndexValidity"/> contract.
+    /// </para>
     /// </remarks>
-    private void RebuildIndexNoLock()
+    private void RebuildIndexNoLock(SourceIndex? existingForExtend)
     {
-        // Drop the live mmap of the existing .datum-index before
-        // overwriting the file. Windows blocks file replacement while
-        // a memory-mapped view is open; releasing the mapping here
-        // makes the subsequent FileMode.Create succeed.
-        MappedSourceIndexSet? previous = _mappedIndexSet;
-        _mappedIndexSet = null;
-        _sourceIndex = null;
-        previous?.Dispose();
+        string finalPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
+        string tempPath = finalPath + ".tmp";
 
-        string indexPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
-        OutputDescriptor destination = new(indexPath);
         Indexer indexer = new(_pool);
-        indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
-            .GetAwaiter().GetResult();
+        bool useExtend = existingForExtend is not null && Indexer.CanExtend(existingForExtend);
+
+        try
+        {
+            if (useExtend)
+            {
+                OutputDescriptor destination = new(tempPath);
+                indexer.ExtendAsync(this, _descriptor.FilePath, destination, existingForExtend!, IndexOptions.Default)
+                    .GetAwaiter().GetResult();
+            }
+            else
+            {
+                // Full rebuild: drop the cached mmap before scanning so
+                // the scan path doesn't fight an open accessor on the
+                // about-to-be-overwritten file. (The full rebuild does
+                // not need the existing index, so dropping it here is
+                // free.)
+                InvalidateSourceIndexCache();
+                OutputDescriptor destination = new(tempPath);
+                indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
+                    .GetAwaiter().GetResult();
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup of the orphaned temp file.
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            // Ensure the cache is invalidated on failure — we can't
+            // trust it covers either pre- or post-mutation state.
+            InvalidateSourceIndexCache();
+            throw;
+        }
+
+        // Tear down the old mapping (if any) and atomically promote
+        // the freshly-written temp file. File.Move(overwrite: true) is
+        // atomic on Windows when source and destination are on the
+        // same volume.
+        InvalidateSourceIndexCache();
+        File.Move(tempPath, finalPath, overwrite: true);
 
         // Reload the freshly-built sidecar so subsequent
         // GetSourceIndex calls return live data without waiting for a
@@ -1370,6 +1429,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// fresh <c>storeId</c> via <see cref="SidecarRegistry.Register"/>
     /// instead of <see cref="SidecarRegistry.UpdateAt"/>.
     /// </summary>
+    /// <remarks>
+    /// Does NOT touch <see cref="_sourceIndex"/> / <see cref="_mappedIndexSet"/>.
+    /// Mutations that only invalidate the index (AddColumn, DropColumn,
+    /// DeleteRows, UPDATE) call <see cref="InvalidateSourceIndexCache"/>
+    /// after this. Mutations that refresh the index (AppendRows commit,
+    /// PR13b extend path) keep the existing in-memory index alive long
+    /// enough to be merged with the delta — see
+    /// <c>RebuildIndexNoLock(SourceIndex?)</c>.
+    /// </remarks>
     private void RebuildSnapshotAfterMutation(bool sidecarMayHaveGrown)
     {
         Snapshot next = OpenSnapshot(_descriptor.FilePath);
@@ -1392,14 +1460,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             }
         }
         SwapSnapshot(next);
+    }
 
-        // Invalidate the cached source index — the mutation just
-        // changed the source file's fingerprint, so any cached
-        // .datum-index sidecar is now stale. Drop our handle so
-        // GetSourceIndex returns null and queries fall back to scan.
-        // The .datum-index file on disk is left in place; a future
-        // REINDEX rebuilds it, and TryLoadSourceIndex's fingerprint
-        // check rejects it on the next provider open.
+    /// <summary>
+    /// Drops the cached <see cref="SourceIndex"/> and disposes the
+    /// memory-mapped sidecar handle. Used by mutations that don't
+    /// refresh the index (AddColumn / DropColumn / DeleteRows / UPDATE
+    /// in PR13b — UPDATE moves to the extend path in PR13c).
+    /// </summary>
+    private void InvalidateSourceIndexCache()
+    {
         MappedSourceIndexSet? staleMapped = _mappedIndexSet;
         _mappedIndexSet = null;
         _sourceIndex = null;
@@ -1553,6 +1623,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             if (_committed) throw new InvalidOperationException("CommitAsync was already called.");
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Capture the pre-mutation in-memory index BEFORE we touch
+            // the file. PR13b's chunk-splice extend path needs this to
+            // carry forward the prefix's bloom + bitmap + zone-map
+            // bytes without rescanning. RebuildSnapshotAfterMutation no
+            // longer disposes the cached mmap, so the captured
+            // reference's accessor stays alive until
+            // RebuildIndexNoLock's final InvalidateSourceIndexCache.
+            SourceIndex? existingForExtend = _provider._sourceIndex;
+
             try
             {
                 // If the session reserved IDENTITY values but never
@@ -1580,6 +1659,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     // already hold (the session has the semaphore
                     // permit). Sidecar may have grown if any of the
                     // appended rows spilled non-inline payloads.
+                    // Snapshot rebuild leaves _sourceIndex untouched —
+                    // RebuildIndexNoLock below handles the swap.
                     _provider.RebuildSnapshotAfterMutation(sidecarMayHaveGrown: _anyWrites);
                 }
 
@@ -1620,23 +1701,34 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // .datum-index to match. Eliminates the manual REINDEX step
             // users would otherwise need after every INSERT.
             //
+            // PR13b: when the existing index is extend-eligible (no
+            // sorted/B+Tree columns), the rebuild carries forward the
+            // prefix's bloom + bitmap + zone-map bytes verbatim and
+            // only scans the appended rows. Otherwise falls back to a
+            // full rescan. RebuildIndexNoLock handles the temp-file
+            // write + atomic rename so the prefix's mmap stays alive
+            // through the merge.
+            //
             // Failure-mode contract (locked in PR13's design): if this
-            // fails, the data commit stands. RebuildSnapshotAfterMutation
-            // already dropped the in-memory _sourceIndex; the on-disk
-            // .datum-index becomes Stale (per IndexValidity) and queries
-            // fall back to scan until a manual REINDEX recovers. We
-            // swallow the exception so the user's INSERT statement
-            // doesn't appear to fail when the data is actually
-            // committed.
+            // fails, the data commit stands. The cache is invalidated
+            // and the on-disk .datum-index becomes Stale (per
+            // IndexValidity) — queries fall back to scan until a
+            // manual REINDEX recovers. We swallow the exception so the
+            // user's INSERT statement doesn't appear to fail when the
+            // data is actually committed.
             //
             // Only run when an actual append happened — IDENTITY-only
-            // commits (no _anyWrites) leave row count unchanged and the
-            // existing index is still current.
+            // commits (no _anyWrites) leave row count unchanged but
+            // bump the prologue, so we still need to refresh the
+            // fingerprint via extend (existing+empty=existing with new
+            // fingerprint). For now we skip it to match PR13a-2 — the
+            // user can REINDEX if they care about IDENTITY-only commits
+            // making the index Stale.
             if (_anyWrites)
             {
                 try
                 {
-                    _provider.RebuildIndexNoLock();
+                    _provider.RebuildIndexNoLock(existingForExtend: existingForExtend);
                 }
                 catch
                 {
@@ -1644,6 +1736,14 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     // is now Stale. Surface via datum_catalog.indexes
                     // (is_valid = false) so the user can spot it.
                 }
+            }
+            else
+            {
+                // IDENTITY-only commit: prologue rewrite changes the
+                // fingerprint. Match PR13a-2 behaviour and just
+                // invalidate the in-memory cache; user REINDEXes if
+                // they want acceleration restored.
+                _provider.InvalidateSourceIndexCache();
             }
 
             return Task.CompletedTask;

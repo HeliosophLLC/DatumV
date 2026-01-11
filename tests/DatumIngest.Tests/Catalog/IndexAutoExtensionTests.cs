@@ -1,6 +1,8 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.Bitmap;
+using DatumIngest.Indexing.Bloom;
 using DatumIngest.Ingestion;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
@@ -186,6 +188,162 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
             finally { batch.Dispose(); }
         }
         Assert.True(rowsForT > 0, "auto-refreshed table 't' should surface entries in datum_catalog.indexes");
+    }
+
+    [Fact]
+    public async Task Append_ChunkCountGrows_AfterInsert()
+    {
+        // PR13b chunk-splice contract: an INSERT appends one or more
+        // new chunks past the prefix's last chunk. The total chunk
+        // count after auto-refresh must be (existing + delta), not
+        // (delta) — the latter would indicate a full rebuild that
+        // somehow lost track of pre-INSERT chunks.
+        string datumPath = await IngestAndIndex("chunk_growth.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        SourceIndex? before = provider.GetSourceIndex();
+        Assert.NotNull(before);
+        int chunkCountBefore = before.Chunks.Count;
+        long rowsBefore = before.Schema.TotalRowCount;
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[10, "ten"], [11, "eleven"]]),
+            CancellationToken.None);
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.True(after.Chunks.Count > chunkCountBefore,
+            $"chunk count should grow after append (before={chunkCountBefore}, after={after.Chunks.Count})");
+        Assert.Equal(rowsBefore + 2, after.Schema.TotalRowCount);
+    }
+
+    [Fact]
+    public async Task Append_BitmapPreservesExistingValues()
+    {
+        // PR13b carry-forward correctness: a bitmap entry for a value
+        // that existed before the INSERT must still pin the correct
+        // pre-INSERT chunk(s) post-INSERT. This exercises the merge
+        // path that copies existing chunks' compressed bitmaps
+        // verbatim into the new sidecar.
+        string datumPath = await IngestAndIndex("bitmap_preserve.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        SourceIndex? before = provider.GetSourceIndex();
+        Assert.NotNull(before);
+
+        // Find a column with a bitmap index built from the original 4
+        // rows (id 1..4 / name alice/bob/carol/dave).
+        Assert.NotNull(before.BitmapIndexes);
+        IReadOnlySet<int> chunksForBobBefore = FindChunksContainingString(before, "name", "bob");
+        Assert.NotEmpty(chunksForBobBefore);
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
+            CancellationToken.None);
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.NotNull(after.BitmapIndexes);
+
+        IReadOnlySet<int> chunksForBobAfter = FindChunksContainingString(after, "name", "bob");
+        // The chunk index numbering is stable across the merge — old
+        // chunk 0 stays chunk 0 — so 'bob' must still pin the same set.
+        Assert.Equal(chunksForBobBefore, chunksForBobAfter);
+    }
+
+    [Fact]
+    public async Task Append_BitmapFindsValuesAddedByInsert()
+    {
+        // PR13b bitmap INSERT correctness: a value that exists ONLY in
+        // newly-appended rows must be findable via the bitmap, in a
+        // chunk index past the prefix's last chunk.
+        string datumPath = await IngestAndIndex("bitmap_new_value.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        SourceIndex? before = provider.GetSourceIndex();
+        Assert.NotNull(before);
+        int chunkCountBefore = before.Chunks.Count;
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[99, "zara"]]),
+            CancellationToken.None);
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.NotNull(after.BitmapIndexes);
+
+        IReadOnlySet<int> chunksForZara = FindChunksContainingString(after, "name", "zara");
+        Assert.NotEmpty(chunksForZara);
+        // The new value can only appear in a chunk past the original
+        // chunk count — proves the splice attached the delta past the
+        // prefix instead of accidentally remapping chunk indices.
+        Assert.All(chunksForZara, c => Assert.True(c >= chunksForBefore(before),
+            $"chunk {c} for new value 'zara' must be >= existing chunk count {chunkCountBefore}"));
+
+        // Old values still resolve (carry-forward correctness).
+        IReadOnlySet<int> chunksForAlice = FindChunksContainingString(after, "name", "alice");
+        Assert.NotEmpty(chunksForAlice);
+
+        static int chunksForBefore(SourceIndex sx) => sx.Chunks.Count;
+    }
+
+    [Fact]
+    public async Task Append_BloomMembershipPreserved()
+    {
+        // PR13b bloom carry-forward: a value present in the prefix's
+        // bloom filter must still test-positive after an unrelated
+        // INSERT. Bloom is per-chunk, so we check the chunk that
+        // covered the original row.
+        string datumPath = await IngestAndIndex("bloom_preserve.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        SourceIndex? before = provider.GetSourceIndex();
+        Assert.NotNull(before);
+        Assert.NotNull(before.BloomFilters);
+
+        int chunkCountBefore = before.Chunks.Count;
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[42, "newcomer"]]),
+            CancellationToken.None);
+
+        SourceIndex? after = provider.GetSourceIndex();
+        Assert.NotNull(after);
+        Assert.NotNull(after.BloomFilters);
+
+        // Bloom for old chunk 0 must still test-positive for an old
+        // value present in that chunk. Existing 4 rows all live in
+        // chunk 0 (chunkSize >> 4).
+        Assert.True(after.BloomFilters.TryGetFilter("name", 0, out BloomFilter? bloomChunk0));
+        Arena bloomArena = new();
+        Assert.True(bloomChunk0.MayContain(DataValue.FromString("alice"), bloomArena));
+
+        // Bloom array grew with the delta chunks.
+        Assert.True(after.BloomFilters.ChunkCount > chunkCountBefore);
+    }
+
+    private static IReadOnlySet<int> FindChunksContainingString(
+        SourceIndex sx, string column, string value)
+    {
+        Assert.NotNull(sx.BitmapIndexes);
+        Assert.True(sx.BitmapIndexes.TryGetIndex(column, out BitmapColumnIndex? col));
+        return col.FindChunksContaining(DataValue.FromString(value));
     }
 
     // ──────────────────── helpers ────────────────────

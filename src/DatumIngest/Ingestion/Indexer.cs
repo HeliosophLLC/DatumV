@@ -146,6 +146,131 @@ public sealed class Indexer(Pool pool)
             Elapsed: sw.Elapsed);
     }
 
+    /// <summary>
+    /// PR13b chunk-splice extend path. Scans only rows past
+    /// <c>existing.Schema.TotalRowCount</c>, builds an index over the new
+    /// rows, merges it with <paramref name="existing"/> via
+    /// <see cref="SourceIndex.Merge"/>, and writes the merged result. Old
+    /// chunks' bloom + bitmap + zone-map data is carried forward verbatim
+    /// from the in-memory existing index — no per-row indexing work for
+    /// the prefix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Caller must ensure <paramref name="existing"/> is consistent with
+    /// the prefix of the post-mutation file (i.e. the INSERT only appended
+    /// rows, did not rewrite existing pages). The chunk-splice merge does
+    /// not carry forward sorted or B+Tree indexes — when those are
+    /// present the caller should fall back to <c>IndexAsync</c>.
+    /// </para>
+    /// <para>
+    /// The scan still walks the entire data file (the provider's
+    /// <c>ScanAsync</c> has no "start from row offset" parameter), but
+    /// rows in the prefix are skipped before any indexing work happens.
+    /// The dominant cost (bloom hashing, bitmap accumulation, zone-map
+    /// stats) is paid only for the appended rows.
+    /// </para>
+    /// </remarks>
+    public async Task<IndexResult> ExtendAsync(
+        ITableProvider provider,
+        string datumPath,
+        OutputDescriptor destination,
+        SourceIndex existing,
+        IndexOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+
+        Stopwatch sw = Stopwatch.StartNew();
+
+        SourceFingerprint fingerprint = await ComputeFingerprintAsync(datumPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        SourceIndexBuilder builder = ConfigureBuilder(options);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        string tableName = PathDetector.DeriveTableName(datumPath);
+
+        long existingRowCount = existing.Schema.TotalRowCount;
+        long rowsScanned = 0;
+        long deltaRowCount = 0;
+
+        SourceIndex deltaIndex;
+        SourceIndex merged;
+        long bytesWritten;
+
+        try
+        {
+            await foreach (RowBatch batch in provider
+                .ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                if (rowsScanned + batch.Count <= existingRowCount)
+                {
+                    // Whole batch is in the prefix — the existing index
+                    // already covers these rows. No indexing work.
+                    rowsScanned += batch.Count;
+                    pool.ReturnRowBatch(batch);
+                    continue;
+                }
+
+                int skip = (int)Math.Max(0, existingRowCount - rowsScanned);
+                for (int r = skip; r < batch.Count; r++)
+                {
+                    incremental.AddRow(batch[r], batch.Arena);
+                    deltaRowCount++;
+                }
+                rowsScanned += batch.Count;
+                pool.ReturnRowBatch(batch);
+            }
+
+            deltaIndex = incremental.Finalize();
+            merged = SourceIndex.Merge(existing, deltaIndex);
+
+            SourceIndexSet indexSet = SourceIndexSet.Create(tableName, merged);
+
+            await using Stream outputStream = await destination.OpenAsync(cancellationToken)
+                .ConfigureAwait(false);
+            // Pass spillWriter:null — sorted/B+Tree are not carried in
+            // the extend path; SourceIndex.Merge nulls those fields, and
+            // any spillWriter entries here would only cover delta rows.
+            UnifiedIndexWriter.Write(indexSet, outputStream, sortedIndexSpillWriter: null);
+            bytesWritten = outputStream.Length;
+        }
+        finally
+        {
+            incremental.Dispose();
+        }
+
+        sw.Stop();
+
+        return new IndexResult(
+            OutputPath: destination.FilePath,
+            RowCount: rowsScanned,
+            ChunkCount: merged.Chunks.Count,
+            BytesWritten: bytesWritten,
+            Schema: merged.Schema.Schema,
+            Fingerprint: fingerprint,
+            IndexedColumns: CollectIndexedColumnNames(merged),
+            BloomColumns: CollectBloomColumnNames(merged),
+            SortedColumns: CollectSortedColumnNames(merged),
+            BitmapColumns: CollectBitmapColumnNames(merged),
+            DeferredReindexColumns: incremental.DeferredReindexColumns,
+            Elapsed: sw.Elapsed);
+    }
+
+    /// <summary>
+    /// True when <paramref name="existing"/> can be carried forward by
+    /// <see cref="ExtendAsync"/> on append. Sorted (mapped) and B+Tree
+    /// indexes are not extensible by chunk splice — those callers must
+    /// fall back to a full rebuild via <c>IndexAsync</c>.
+    /// </summary>
+    public static bool CanExtend(SourceIndex existing)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        return existing.MappedSortedIndexes is null && existing.BPlusTreeIndexes is null;
+    }
+
     private static async Task<SourceFingerprint> ComputeFingerprintAsync(
         string filePath, CancellationToken cancellationToken)
     {
