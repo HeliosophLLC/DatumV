@@ -52,19 +52,24 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReopenAfterAppend_StaleIndex_IsRejected()
+    public async Task ReopenAfterAppend_IndexAutoRefreshed()
     {
         // Cross-process simulation: ingest + index, then mutate (in a
         // first catalog), then reopen the file in a second catalog.
-        // The second catalog's provider must detect the stale index
-        // by fingerprint mismatch and surface GetSourceIndex() as null.
+        // PR13a-2 wired auto-rebuild into AppendRows' commit path, so
+        // the second catalog now sees a fresh index — the PR9.5
+        // staleness rejection still protects against torn writes and
+        // mutations that bypass the commit path (AddColumn / DropColumn /
+        // DeleteRows still invalidate without auto-rebuild), exercised
+        // in the sibling tests below.
         string datumPath = await IngestAndIndex("after_append.datum");
         string indexPath = Path.ChangeExtension(datumPath, ".datum-index");
         Assert.True(File.Exists(indexPath), "index sidecar should exist after IndexAsync");
 
         Pool pool = new(new PoolBacking());
 
-        // First open: append a row, dispose.
+        // First open: append a row, dispose. The append's commit path
+        // auto-refreshes .datum-index (PR13a-2 two-phase commit).
         using (TableCatalog firstCatalog = new(pool))
         {
             ITableProvider firstProvider = firstCatalog.Add(new TableDescriptor("t", datumPath));
@@ -74,25 +79,26 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
                 CancellationToken.None);
         }
 
-        // The stale .datum-index file is still on disk.
-        Assert.True(File.Exists(indexPath),
-            "PR9.5 chooses passive invalidation — the stale sidecar stays on disk.");
+        Assert.True(File.Exists(indexPath));
 
-        // Second open: provider must detect the stale index and refuse it.
+        // Second open: provider sees the freshly-rebuilt index, not a
+        // torn / stale one.
         using TableCatalog secondCatalog = new(pool);
         ITableProvider provider = secondCatalog.Add(new TableDescriptor("t", datumPath));
 
-        Assert.Null(provider.GetSourceIndex());
+        Assert.NotNull(provider.GetSourceIndex());
+        Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
     }
 
     [Fact]
-    public async Task SameProvider_AfterAppend_GetSourceIndex_ReturnsNull()
+    public async Task SameProvider_AfterAppend_GetSourceIndex_AutoRefreshed()
     {
         // In-process simulation: open the provider (which caches the
         // index), mutate it, query GetSourceIndex from the SAME provider.
-        // The cached index must be invalidated on mutation — otherwise
-        // queries through the post-mutation provider would still use the
-        // stale index.
+        // PR13a-2 auto-rebuilds .datum-index inside the AppendRows
+        // commit path, so the post-mutation provider sees a freshly
+        // rebuilt index instead of a null (PR9.5's invalidate-on-mutate
+        // contract for AppendRows is now "rebuild on mutate").
         string datumPath = await IngestAndIndex("same_provider.datum");
 
         Pool pool = new(new PoolBacking());
@@ -106,7 +112,8 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
             MakeBatchesMatchingSchema(pool, schema, [[6, "ghost"]]),
             CancellationToken.None);
 
-        Assert.Null(provider.GetSourceIndex());
+        Assert.NotNull(provider.GetSourceIndex());
+        Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
     }
 
     [Fact]

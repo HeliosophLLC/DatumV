@@ -315,6 +315,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public SourceIndex? GetSourceIndex() => _sourceIndex;
 
     /// <inheritdoc/>
+    public IndexValidity GetIndexValidity()
+    {
+        // Live-loaded index → Valid. The constructor + RebuildIndex
+        // (PR12) only set _sourceIndex when TryLoadSourceIndex confirmed
+        // the fingerprint matches and the IDXT tail validated.
+        if (_sourceIndex is not null) return IndexValidity.Valid;
+
+        // No live index in memory. Check whether a (now-invalid) file
+        // still sits on disk so users can tell "needs REINDEX" apart
+        // from "never had one."
+        string indexPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
+        return File.Exists(indexPath) ? IndexValidity.Stale : IndexValidity.Missing;
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
@@ -1295,30 +1310,49 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _mutationLock.Wait();
         try
         {
-            // Drop the live mmap of the existing .datum-index before
-            // overwriting the file. Windows blocks file replacement
-            // while a memory-mapped view is open; releasing the mapping
-            // here makes the subsequent FileMode.Create succeed.
-            MappedSourceIndexSet? previous = _mappedIndexSet;
-            _mappedIndexSet = null;
-            _sourceIndex = null;
-            previous?.Dispose();
-
-            string indexPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
-            OutputDescriptor destination = new(indexPath);
-            Indexer indexer = new(_pool);
-            indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
-                .GetAwaiter().GetResult();
-
-            // Reload the freshly-built sidecar so subsequent
-            // GetSourceIndex calls return live data without waiting for
-            // a provider reopen.
-            (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(_descriptor);
+            RebuildIndexNoLock();
         }
         finally
         {
             _mutationLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Implementation of <see cref="RebuildIndex"/> without taking the
+    /// mutation lock. Caller must already hold <see cref="_mutationLock"/>.
+    /// Used by <see cref="DatumAppendSession.CommitAsync"/> for the
+    /// post-commit "extend the index" pass (PR13a-2's two-phase commit).
+    /// </summary>
+    /// <remarks>
+    /// PR13a-2 v1 rebuilds the entire <c>.datum-index</c> from the
+    /// post-commit data file. True incremental extension (carry forward
+    /// existing chunks' bloom + zone-map bytes, append only the new
+    /// chunk) is the PR13b/c performance follow-up — this v1 trades
+    /// per-INSERT cost for correctness + simplicity, but eliminates
+    /// the manual <c>REINDEX</c> step end-users would otherwise need.
+    /// </remarks>
+    private void RebuildIndexNoLock()
+    {
+        // Drop the live mmap of the existing .datum-index before
+        // overwriting the file. Windows blocks file replacement while
+        // a memory-mapped view is open; releasing the mapping here
+        // makes the subsequent FileMode.Create succeed.
+        MappedSourceIndexSet? previous = _mappedIndexSet;
+        _mappedIndexSet = null;
+        _sourceIndex = null;
+        previous?.Dispose();
+
+        string indexPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
+        OutputDescriptor destination = new(indexPath);
+        Indexer indexer = new(_pool);
+        indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
+            .GetAwaiter().GetResult();
+
+        // Reload the freshly-built sidecar so subsequent
+        // GetSourceIndex calls return live data without waiting for a
+        // provider reopen.
+        (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(_descriptor);
     }
 
     /// <summary>
@@ -1579,6 +1613,37 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 _writer?.Dispose();
                 _writer = null;
                 throw;
+            }
+
+            // PR13a-2 two-phase commit: now that the .datum and
+            // .datum-pkindex commits have succeeded, refresh
+            // .datum-index to match. Eliminates the manual REINDEX step
+            // users would otherwise need after every INSERT.
+            //
+            // Failure-mode contract (locked in PR13's design): if this
+            // fails, the data commit stands. RebuildSnapshotAfterMutation
+            // already dropped the in-memory _sourceIndex; the on-disk
+            // .datum-index becomes Stale (per IndexValidity) and queries
+            // fall back to scan until a manual REINDEX recovers. We
+            // swallow the exception so the user's INSERT statement
+            // doesn't appear to fail when the data is actually
+            // committed.
+            //
+            // Only run when an actual append happened — IDENTITY-only
+            // commits (no _anyWrites) leave row count unchanged and the
+            // existing index is still current.
+            if (_anyWrites)
+            {
+                try
+                {
+                    _provider.RebuildIndexNoLock();
+                }
+                catch
+                {
+                    // Best-effort. The data commit succeeded; the index
+                    // is now Stale. Surface via datum_catalog.indexes
+                    // (is_valid = false) so the user can spot it.
+                }
             }
 
             return Task.CompletedTask;

@@ -477,13 +477,31 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 
         foreach (ITableProvider provider in snapshot)
         {
+            string tableName = provider.Name;
             SourceIndex? sourceIndex = provider.GetSourceIndex();
+
+            // No live in-memory index. If the on-disk file still
+            // exists (Stale state), surface a single sentinel row
+            // with is_valid = false so users can spot tables that
+            // need REINDEX without inspecting the file system.
+            // Missing-state tables (no sidecar at all) emit nothing.
             if (sourceIndex is null)
             {
+                if (provider.GetIndexValidity() == IndexValidity.Stale)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
+                    DataValue[] staleValues = Pool.RentDataValues(_schema.Columns.Count);
+                    FillIndexRow(
+                        staleValues, tableName, columnName: "(stale)",
+                        indexType: "(stale)", entryCount: null,
+                        chunkCount: 0, totalRowCount: 0, isValid: false, batch.Arena);
+                    batch.Add(staleValues);
+                    if (batch.IsFull) { yield return batch; batch = null; }
+                }
                 continue;
             }
 
-            string tableName = provider.Name;
             int chunkCount = sourceIndex.Chunks.Count;
             long totalRowCount = sourceIndex.Schema.TotalRowCount;
 
@@ -494,7 +512,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
                     cancellationToken.ThrowIfCancellationRequested();
                     batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                     DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, entry.Key, "SORTED", entry.Value.EntryCount, chunkCount, totalRowCount, batch.Arena);
+                    FillIndexRow(values, tableName, entry.Key, "SORTED", entry.Value.EntryCount, chunkCount, totalRowCount, isValid: true, batch.Arena);
                     batch.Add(values);
                     if (batch.IsFull) { yield return batch; batch = null; }
                 }
@@ -510,7 +528,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
                         ? btree.EntryCount
                         : null;
                     DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, columnName, "BTREE", entryCount, chunkCount, totalRowCount, batch.Arena);
+                    FillIndexRow(values, tableName, columnName, "BTREE", entryCount, chunkCount, totalRowCount, isValid: true, batch.Arena);
                     batch.Add(values);
                     if (batch.IsFull) { yield return batch; batch = null; }
                 }
@@ -523,7 +541,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
                     cancellationToken.ThrowIfCancellationRequested();
                     batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                     DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, columnName, "BITMAP", entryCount: null, chunkCount, totalRowCount, batch.Arena);
+                    FillIndexRow(values, tableName, columnName, "BITMAP", entryCount: null, chunkCount, totalRowCount, isValid: true, batch.Arena);
                     batch.Add(values);
                     if (batch.IsFull) { yield return batch; batch = null; }
                 }
@@ -536,7 +554,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
                     cancellationToken.ThrowIfCancellationRequested();
                     batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                     DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, columnName, "BLOOM", entryCount: null, chunkCount, totalRowCount, batch.Arena);
+                    FillIndexRow(values, tableName, columnName, "BLOOM", entryCount: null, chunkCount, totalRowCount, isValid: true, batch.Arena);
                     batch.Add(values);
                     if (batch.IsFull) { yield return batch; batch = null; }
                 }
@@ -553,7 +571,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 
     private static void FillIndexRow(
         DataValue[] cells, string tableName, string columnName, string indexType,
-        long? entryCount, int chunkCount, long totalRowCount, Arena arena)
+        long? entryCount, int chunkCount, long totalRowCount, bool isValid, Arena arena)
     {
         cells[0] = DataValue.FromString(tableName, arena);
         cells[1] = DataValue.FromString(columnName, arena);
@@ -561,16 +579,18 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
         cells[3] = entryCount.HasValue ? DataValue.FromInt64(entryCount.Value) : DataValue.Null(DataKind.Int64);
         cells[4] = DataValue.FromInt32(chunkCount);
         cells[5] = DataValue.FromInt64(totalRowCount);
+        cells[6] = DataValue.FromBoolean(isValid);
     }
 
     private static Schema BuildSchema() => new(
     [
-        new ColumnInfo("table_name",     DataKind.String, nullable: false),
-        new ColumnInfo("column_name",    DataKind.String, nullable: false),
-        new ColumnInfo("index_type",     DataKind.String, nullable: false),
-        new ColumnInfo("entry_count",    DataKind.Int64,  nullable: true),
-        new ColumnInfo("chunk_count",    DataKind.Int32,  nullable: false),
-        new ColumnInfo("total_row_count",DataKind.Int64,  nullable: false),
+        new ColumnInfo("table_name",     DataKind.String,  nullable: false),
+        new ColumnInfo("column_name",    DataKind.String,  nullable: false),
+        new ColumnInfo("index_type",     DataKind.String,  nullable: false),
+        new ColumnInfo("entry_count",    DataKind.Int64,   nullable: true),
+        new ColumnInfo("chunk_count",    DataKind.Int32,   nullable: false),
+        new ColumnInfo("total_row_count",DataKind.Int64,   nullable: false),
+        new ColumnInfo("is_valid",       DataKind.Boolean, nullable: false),
     ]);
 }
 

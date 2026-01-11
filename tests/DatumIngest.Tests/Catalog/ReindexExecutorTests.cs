@@ -35,8 +35,15 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Reindex_AfterAppend_RestoresSourceIndex()
+    public async Task Reindex_AfterAppend_StaysValid()
     {
+        // PR13a-2 makes AppendRows auto-rebuild .datum-index in its
+        // commit path, so the post-append index is already Valid;
+        // REINDEX is now a no-op (rebuilds an already-current file).
+        // The semantic this test pinned previously — "REINDEX recovers
+        // a stale index after a mutation" — is exercised by the
+        // AfterDelete / AfterUpdate variants below, since DELETE and
+        // UPDATE still go through the invalidate-on-mutate path.
         string datumPath = await IngestAndIndex("after_append.datum");
 
         Pool pool = new(new PoolBacking());
@@ -45,22 +52,17 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
 
         Assert.NotNull(provider.GetSourceIndex());
 
-        // Mutate to force passive invalidation.
         Schema schema = provider.GetSchema();
         await catalog.AppendRowsAsync("t",
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 
-        Assert.Null(provider.GetSourceIndex());
+        // PR13a-2: post-append index is already Valid (auto-rebuilt).
+        Assert.NotNull(provider.GetSourceIndex());
 
-        // REINDEX rebuilds the .datum-index against the current contents.
+        // REINDEX still works on an already-current file.
         catalog.Plan("REINDEX t");
-
-        SourceIndex? rebuilt = provider.GetSourceIndex();
-        Assert.NotNull(rebuilt);
-
-        // The fingerprint matches the live file (otherwise the loader
-        // would have rejected it on the post-rebuild reload).
+        Assert.NotNull(provider.GetSourceIndex());
         Assert.True(File.Exists(Path.ChangeExtension(datumPath, ".datum-index")));
     }
 
@@ -129,10 +131,12 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Analyze_AfterAppend_RestoresSourceIndex()
+    public async Task Analyze_AfterAppend_StaysValid()
     {
-        // ANALYZE is an alias for REINDEX in this build — same end state:
-        // .datum-index sidecar refreshed against current data.
+        // ANALYZE is an alias for REINDEX in this build. Post-PR13a-2,
+        // AppendRows auto-rebuilds the index in its commit path, so
+        // the index is already Valid before ANALYZE runs — same shape
+        // as Reindex_AfterAppend_StaysValid.
         string datumPath = await IngestAndIndex("analyze_after_append.datum");
 
         Pool pool = new(new PoolBacking());
@@ -144,7 +148,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         await catalog.AppendRowsAsync("t",
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
-        Assert.Null(provider.GetSourceIndex());
+        Assert.NotNull(provider.GetSourceIndex());
 
         catalog.Plan("ANALYZE t");
 

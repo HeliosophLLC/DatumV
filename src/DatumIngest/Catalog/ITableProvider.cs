@@ -254,6 +254,26 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support RebuildIndex (CanRebuildIndex is false).");
 
     /// <summary>
+    /// Returns the current validity state of this table's
+    /// <c>.datum-index</c> sidecar — surfaced to users via the
+    /// <c>is_valid</c> column on <c>datum_catalog.indexes</c> so they
+    /// can see when an index needs rebuilding without poking at the
+    /// file system.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation returns <see cref="IndexValidity.Missing"/>:
+    /// providers that don't carry an acceleration sidecar (in-memory
+    /// tables, system / virtual schemas) will surface as having no
+    /// index at all. The persistent <c>.datum</c> provider overrides
+    /// to report <see cref="IndexValidity.Valid"/>,
+    /// <see cref="IndexValidity.Stale"/>, or
+    /// <see cref="IndexValidity.Missing"/> based on whether the file
+    /// exists, the fingerprint matches, and any post-mutation
+    /// invalidation has occurred.
+    /// </remarks>
+    IndexValidity GetIndexValidity() => IndexValidity.Missing;
+
+    /// <summary>
     /// Returns an on-disk PRIMARY KEY lookup if the provider maintains one,
     /// or <see langword="null"/> if the executor should fall back to the
     /// scan-based PK uniqueness check (PR10f's HashSet path).
