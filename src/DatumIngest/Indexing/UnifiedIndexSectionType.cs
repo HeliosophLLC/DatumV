@@ -22,11 +22,10 @@ internal enum UnifiedIndexSectionType : byte
     /// <summary>Per-column, per-chunk bloom filters with uniform-size bitsets for O(1) access.</summary>
     BloomFilters = 4,
 
-    /// <summary>Per-column fixed-width sorted key arrays with locators for binary-search key lookup.</summary>
-    SortedIndexes = 5,
-
-    /// <summary>Per-column B+Tree indexes as contiguous 8 KiB pages for demand-paged key lookup.</summary>
-    BTreePages = 6,
+    // SortedIndexes (5) and BTreePages (6) retired in v8 (PR13d) — per-column
+    // acceleration moved to companion `.datum-bptree-{col}` page-COW files
+    // owned by the table provider. Numeric tags 5 and 6 are reserved (do not
+    // reuse) so older inspectors fail loudly instead of silently mis-decoding.
 
     /// <summary>Per-column bitmap indexes for low-cardinality columns with compressed per-value, per-chunk bitsets.</summary>
     BitmapIndexes = 7,

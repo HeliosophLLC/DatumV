@@ -2364,7 +2364,7 @@ public sealed class QueryPlanner
             return false;
         }
 
-        if (!scan.SourceIndex.TryGetColumnIndex(sortColumn, out IColumnIndex? columnIndex))
+        if (!scan.TableProvider.TryGetColumnIndex(sortColumn, out IColumnIndex? columnIndex))
         {
             return false;
         }
@@ -2551,8 +2551,8 @@ public sealed class QueryPlanner
         // The build key column must exist in the index.
         string buildKeyColumn = buildKeyRef.QualifiedName ?? buildKeyRef.ColumnName;
 
-        return buildScan.SourceIndex.TryGetColumnIndex(buildKeyColumn, out _)
-            || buildScan.SourceIndex.TryGetColumnIndex(buildKeyRef.ColumnName, out _);
+        return buildScan.TableProvider.TryGetColumnIndex(buildKeyColumn, out _)
+            || buildScan.TableProvider.TryGetColumnIndex(buildKeyRef.ColumnName, out _);
     }
 
     /// <summary>
@@ -2621,15 +2621,17 @@ public sealed class QueryPlanner
         string leftColumnName = leftColumnRef.ColumnName;
         string rightColumnName = rightColumnRef.ColumnName;
 
-        // Both sides must have a physically-sorted column index on the join key.
-        // B+Tree indexes are excluded: they enumerate entries in key order but the
-        // underlying rows are scattered in the datum file, making a full-table
-        // merge-join scan prohibitively expensive.
-        if (!leftScan.SourceIndex.TryGetSortedColumnIndex(leftColumnName, out IColumnIndex? leftColumnIndex)
-            || !rightScan.SourceIndex.TryGetSortedColumnIndex(rightColumnName, out IColumnIndex? rightColumnIndex))
-        {
-            return false;
-        }
+        // PR13d: physically-sorted column indexes (the old SortedIndex section)
+        // were retired in v8 in favour of per-column B+Tree files whose entries
+        // enumerate in key order but point at scattered rows in the datum file.
+        // Merge join via existing-sort no longer applies; the operator
+        // infrastructure (MergeJoinOperator, IndexScanOperator) stays for
+        // future use over a sorted physical layout (e.g. a sorted segment)
+        // but the planner can't pick it without that backing.
+        return false;
+#pragma warning disable CS0162 // Unreachable code
+        IColumnIndex leftColumnIndex = null!;
+        IColumnIndex rightColumnIndex = null!;
 
         // Replace both ScanOperators with ascending IndexScanOperators.
         IndexScanOperator leftIndexScan = new(
@@ -2656,6 +2658,7 @@ public sealed class QueryPlanner
             leftColumnName, rightColumnName);
 
         return true;
+#pragma warning restore CS0162
     }
 
     /// <summary>
@@ -2804,12 +2807,12 @@ public sealed class QueryPlanner
         // individual table operator is a scan chain, not a join tree.
         ScanOperator? scan = FindScanOperatorInChain(tableOperator);
 
-        if (scan?.SourceIndex is null)
+        if (scan is null)
         {
             return null;
         }
 
-        return scan.SourceIndex.TryGetColumnIndex(columnName, out _) ? tableName : null;
+        return scan.TableProvider.TryGetColumnIndex(columnName, out _) ? tableName : null;
     }
 
     /// <summary>

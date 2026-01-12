@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.Diagnostics;
 using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
@@ -11,7 +10,7 @@ using DatumIngest.IO;
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Writes a v5 unified memory-mapped <c>.datum-index</c> file. The format places a
+/// Writes a v8 unified memory-mapped <c>.datum-index</c> file. The format places a
 /// section directory immediately after the fixed-size header so that readers can locate
 /// any section by offset without a full scan. Section offsets are backpatched after all
 /// data is written.
@@ -21,11 +20,19 @@ namespace DatumIngest.Indexing;
 /// File layout:
 /// <code>
 /// Header (24 bytes)
-///   Magic "DXIX" (4B) + Version 5 (i32) + Flags (i32) + SectionCount (i32) + FileLength (i64)
+///   Magic "DXIX" (4B) + Version 8 (i32) + Flags (i32) + SectionCount (i32) + FileLength (i64)
 /// Section Directory (SectionCount × 18 bytes)
 ///   Per entry: SectionType (1B) + TableIndex (1B) + Offset (i64) + Length (i64)
 /// [Sections — contiguous, order determined by writer]
+/// IDXT tail (8 bytes) — atomic-commit signal.
 /// </code>
+/// </para>
+/// <para>
+/// PR13d (v8) retired SortedIndexes and BTreePages section types. Per-column
+/// acceleration is now stored in companion <c>.datum-bptree-{col}</c>
+/// page-COW files alongside the data file (parallel to <c>.datum-pkindex</c>),
+/// owned by the table provider. The unified sidecar carries fingerprint,
+/// schema, chunk directory + zone maps, bloom filters, and bitmap indexes.
 /// </para>
 /// </remarks>
 internal static class UnifiedIndexWriter
@@ -42,20 +49,10 @@ internal static class UnifiedIndexWriter
     internal static ReadOnlySpan<byte> TailMagicBytes => "IDXT"u8;
 
     /// <summary>Size of the trailing tail block in bytes.</summary>
-    /// <remarks>
-    /// Tail layout (8 bytes):
-    /// <list type="bullet">
-    ///   <item>4B SectionCount (i32 LE) — echo of header.SectionCount, cross-validated on read.</item>
-    ///   <item>4B IDXT magic.</item>
-    /// </list>
-    /// PR13a's whole-file-COW model keeps the header at offset 0; the tail is a pure
-    /// commit signal, not a back-pointer. Future versions may extend the tail to support
-    /// in-place delta appends.
-    /// </remarks>
     internal const int TailSize = 8;
 
-    /// <summary>Format version for the v7 unified layout (PR13a — adds trailing IDXT tail for atomic-commit semantics).</summary>
-    internal const int FormatVersion = 7;
+    /// <summary>Format version for the v8 unified layout (PR13d — sorted/BTree sections retired, moved to per-column files).</summary>
+    internal const int FormatVersion = 8;
 
     /// <summary>Size of the fixed file header in bytes.</summary>
     internal const int HeaderSize = 24;
@@ -76,36 +73,12 @@ internal static class UnifiedIndexWriter
     /// <param name="output">Writable, seekable output stream.</param>
     public static void Write(SourceIndexSet indexSet, Stream output)
     {
-        Write(indexSet, output, sortedIndexSpillWriter: null);
-    }
-
-    /// <summary>
-    /// Writes a unified index file for the given index set, optionally streaming sorted
-    /// indexes directly from a <see cref="SortedIndexSpillWriter"/> instead of materializing
-    /// all <see cref="ValueIndexEntry"/> arrays in memory. When the spill writer is provided
-    /// and contains data, columns are categorized into flat sorted indexes (below the B+Tree
-    /// threshold) and B+Tree indexes (above the threshold). Sorted columns are materialized
-    /// one at a time to allow the two-pass v5 encoding (keys, then locators). B+Tree columns
-    /// are streamed directly into <see cref="BPlusTreeBulkLoader"/> without materialization.
-    /// </summary>
-    /// <param name="indexSet">The source index set to serialize.</param>
-    /// <param name="output">Writable, seekable output stream.</param>
-    /// <param name="sortedIndexSpillWriter">
-    /// Optional spill writer holding sorted index runs on disk. When non-null and containing
-    /// data, its entries are streamed directly into the output; otherwise the writer falls
-    /// back to <see cref="SourceIndex.BPlusTreeIndexes"/> when present.
-    /// </param>
-    internal static void Write(
-        SourceIndexSet indexSet,
-        Stream output,
-        SortedIndexSpillWriter? sortedIndexSpillWriter)
-    {
         // Build ordered table list for deterministic index assignment.
         List<KeyValuePair<string, SourceIndex>> tableList = new(indexSet.Tables);
         tableList.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
 
         // Plan sections to determine directory size before writing data.
-        List<PlannedSection> plannedSections = PlanSections(indexSet, tableList, sortedIndexSpillWriter);
+        List<PlannedSection> plannedSections = PlanSections(indexSet, tableList);
 
         int directorySize = plannedSections.Count * DirectoryEntrySize;
         long dataStartOffset = HeaderSize + directorySize;
@@ -165,11 +138,9 @@ internal static class UnifiedIndexWriter
             output.Write(entryBuffer);
         }
 
-        // Tail-flip-as-commit. All section bytes + the directory backpatch are
-        // already in the buffer when we reach this point; the IDXT tail is the
-        // last thing written. A reader that finds DXIX-but-no-IDXT knows the
-        // writer crashed mid-commit and treats the file as torn (no valid
-        // index → fall back to scan, REINDEX rebuilds).
+        // Tail-flip-as-commit. The IDXT tail is the last thing written. A reader
+        // that finds DXIX-but-no-IDXT knows the writer crashed mid-commit and
+        // treats the file as torn (no valid index → fall back to scan).
         output.Position = sectionsEndOffset;
         Span<byte> tailBuffer = stackalloc byte[TailSize];
         BinaryPrimitives.WriteInt32LittleEndian(tailBuffer[..4], plannedSections.Count);
@@ -183,8 +154,7 @@ internal static class UnifiedIndexWriter
 
     private static List<PlannedSection> PlanSections(
         SourceIndexSet indexSet,
-        List<KeyValuePair<string, SourceIndex>> tableList,
-        SortedIndexSpillWriter? sortedIndexSpillWriter)
+        List<KeyValuePair<string, SourceIndex>> tableList)
     {
         List<PlannedSection> sections = new();
 
@@ -217,40 +187,6 @@ internal static class UnifiedIndexWriter
                 sections.Add(new PlannedSection(
                     UnifiedIndexSectionType.BloomFilters, tableIndexByte,
                     w => WriteBloomFilters(w, bloomFilters)));
-            }
-
-            if (sortedIndexSpillWriter is not null && sortedIndexSpillWriter.HasSortedIndexes)
-            {
-                // Categorize columns into sorted (flat) vs B+Tree based on entry count.
-                HashSet<string>? bTreeColumns = CategorizeBPlusTreeColumns(sortedIndexSpillWriter);
-
-                bool hasSortedColumns = bTreeColumns is null
-                    || bTreeColumns.Count < CountColumnsWithEntries(sortedIndexSpillWriter);
-
-                if (hasSortedColumns)
-                {
-                    SortedIndexSpillWriter spillCapture = sortedIndexSpillWriter;
-                    Schema schema = index.Schema.Schema;
-                    sections.Add(new PlannedSection(
-                        UnifiedIndexSectionType.SortedIndexes, tableIndexByte,
-                        w => WriteStreamedSortedIndexes(w, spillCapture, schema, bTreeColumns)));
-                }
-
-                if (bTreeColumns is not null && bTreeColumns.Count > 0)
-                {
-                    SortedIndexSpillWriter spillCapture = sortedIndexSpillWriter;
-                    Schema schema = index.Schema.Schema;
-                    sections.Add(new PlannedSection(
-                        UnifiedIndexSectionType.BTreePages, tableIndexByte,
-                        w => WriteStreamedBTreePages(w, spillCapture, schema, bTreeColumns)));
-                }
-            }
-            else if (index.BPlusTreeIndexes is not null)
-            {
-                BPlusTreeIndexSet bPlusTreeIndexes = index.BPlusTreeIndexes;
-                sections.Add(new PlannedSection(
-                    UnifiedIndexSectionType.BTreePages, tableIndexByte,
-                    w => WriteBTreePages(w, bPlusTreeIndexes)));
             }
 
             if (index.BitmapIndexes is not null)
@@ -312,15 +248,6 @@ internal static class UnifiedIndexWriter
 
     /// <summary>
     /// Writes the chunk directory with fixed-width per-column zone maps.
-    /// Layout:
-    /// <code>
-    /// [ChunkCount: i32] [ColumnCount: i32]
-    /// Per-column header: [Name: length-prefixed UTF-8] [DataKind: 1B] [KeyWidth: i32]
-    /// Chunk fixed fields: ChunkCount × 32B (rowOffset, rowCount)
-    /// Per-column zone maps: ChunkCount × (2×KeyWidth + 24) per column
-    ///   encodedMin(KeyWidth) + encodedMax(KeyWidth) + nullCount(i64) + rowCount(i64) + estCardinality(i64)
-    /// Zone map string table: for string/json min/max values
-    /// </code>
     /// </summary>
     private static void WriteChunkDirectory(
         BinaryWriter writer,
@@ -439,9 +366,6 @@ internal static class UnifiedIndexWriter
 
     /// <summary>
     /// Writes a single zone map key (min or max) in fixed-width encoding.
-    /// For null/missing values, writes all-zero bytes (which sort before any real value
-    /// in the sort-preserving encoding). A separate null flag is embedded in the first byte
-    /// of the key slot: 0x00 = null/missing, 0x01 = has value, followed by the encoded key.
     /// </summary>
     private static void WriteZoneMapKey(
         BinaryWriter writer,
@@ -452,10 +376,8 @@ internal static class UnifiedIndexWriter
         List<byte[]> stringTableEntries,
         Dictionary<string, int> stringTableIndex)
     {
-        // Total slot size = 1 (null flag) + keyWidth.
         if (!value.HasValue || value.Value.IsNull)
         {
-            // Null flag + zero-filled key.
             writer.Write((byte)0x00);
             Span<byte> zeroes = stackalloc byte[keyWidth];
             zeroes.Clear();
@@ -467,7 +389,6 @@ internal static class UnifiedIndexWriter
 
         if (isStringType)
         {
-            // String zone maps store a string table reference.
             string stringValue = value.Value.AsString();
 
             byte[] utf8Bytes = Encoding.UTF8.GetBytes(stringValue);
@@ -479,7 +400,6 @@ internal static class UnifiedIndexWriter
                 stringTableIndex[stringValue] = entryIndex;
             }
 
-            // Write string table reference: offset (i32) + length (i32) = 8 bytes = keyWidth for strings.
             Span<byte> referenceBuffer = stackalloc byte[keyWidth];
             BinaryPrimitives.WriteInt32LittleEndian(referenceBuffer, entryIndex);
             BinaryPrimitives.WriteInt32LittleEndian(referenceBuffer[4..], utf8Bytes.Length);
@@ -515,14 +435,6 @@ internal static class UnifiedIndexWriter
 
     /// <summary>
     /// Writes bloom filters with uniform-size bitsets per column for O(1) chunk access.
-    /// Layout:
-    /// <code>
-    /// [ColumnCount: i32]
-    /// Per column:
-    ///   [Name: length-prefixed UTF-8] [HashCount: i32] [BitCount: i32]
-    ///   [ChunkCount: i32] [FilterByteSize: i32]
-    ///   ChunkCount × FilterByteSize bytes (contiguous, uniform-size filters)
-    /// </code>
     /// </summary>
     private static void WriteBloomFilters(BinaryWriter writer, BloomFilterSet bloomFilterSet)
     {
@@ -538,7 +450,6 @@ internal static class UnifiedIndexWriter
 
             BloomFilter[] chunkFilters = column.Value;
 
-            // Determine uniform size: the maximum filter byte size across all chunks.
             int uniformBitCount = 0;
             int uniformHashCount = 0;
             int uniformByteSize = 0;
@@ -558,7 +469,6 @@ internal static class UnifiedIndexWriter
             writer.Write(chunkFilters.Length);
             writer.Write(uniformByteSize);
 
-            // Write each chunk's filter, padding smaller ones to uniformByteSize.
             foreach (BloomFilter filter in chunkFilters)
             {
                 writer.Write(filter.Bits);
@@ -567,7 +477,6 @@ internal static class UnifiedIndexWriter
 
                 if (padding > 0)
                 {
-
                     int remaining = padding;
 
                     while (remaining > 0)
@@ -581,262 +490,10 @@ internal static class UnifiedIndexWriter
         }
     }
 
-    // ───────────────── Streamed sorted indexes (spill writer) ──────────────────
-
-    /// <summary>
-    /// Writes sorted indexes in v5 format by streaming entries from a
-    /// <see cref="SortedIndexSpillWriter"/>. Each column is materialized one at a time via
-    /// <see cref="SortedIndexSpillWriter.GetMergedEntries"/> to allow the two-pass encoding
-    /// (keys first, then locators). Columns promoted to B+Tree are excluded.
-    /// </summary>
-    private static void WriteStreamedSortedIndexes(
-        BinaryWriter writer,
-        SortedIndexSpillWriter spillWriter,
-        Schema schema,
-        IReadOnlySet<string>? excludeColumns)
-    {
-        // Count eligible columns.
-        int columnCount = 0;
-
-        foreach (string columnName in spillWriter.IndexedColumnNames)
-        {
-            if (excludeColumns is null || !excludeColumns.Contains(columnName))
-            {
-                columnCount++;
-            }
-        }
-
-        writer.Write(columnCount);
-
-        Span<byte> sortedKeyBuffer = stackalloc byte[16];
-
-        foreach (string columnName in spillWriter.IndexedColumnNames)
-        {
-            if (excludeColumns is not null && excludeColumns.Contains(columnName))
-            {
-                continue;
-            }
-
-            // Materialize this column's entries so we can do the two-pass v5 encoding.
-            ValueIndexEntry[] entries = spillWriter.GetMergedEntries(columnName);
-
-            DataKind kind = SortedIndexSpillWriter.ResolveDataKind(columnName, schema);
-            int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
-
-            writer.Write(columnName);
-            writer.Write((byte)kind);
-            writer.Write((long)entries.Length);
-
-            long directoryPosition = writer.BaseStream.Position;
-            writer.Write(0L); // keysOffset placeholder
-            writer.Write(0L); // locatorsOffset placeholder
-            writer.Write(0L); // stringTableOffset placeholder
-            writer.Write(0L); // stringTableLength placeholder
-
-            long keysOffset = writer.BaseStream.Position;
-
-            if (kind == DataKind.String)
-            {
-                List<byte[]> stringTable = new();
-                Dictionary<string, (int Offset, int Length)> stringDedup = new(StringComparer.Ordinal);
-                int currentStringOffset = 0;
-                Span<byte> referenceSlice = sortedKeyBuffer[..keyWidth];
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    string stringValue = entry.Key.AsString();
-
-                    if (!stringDedup.TryGetValue(stringValue, out (int Offset, int Length) reference))
-                    {
-                        byte[] utf8Bytes = Encoding.UTF8.GetBytes(stringValue);
-                        reference = (currentStringOffset, utf8Bytes.Length);
-                        stringDedup[stringValue] = reference;
-                        stringTable.Add(utf8Bytes);
-                        currentStringOffset += utf8Bytes.Length;
-                    }
-
-                    SortedIndexKeyEncoder.EncodeStringReference(reference.Offset, reference.Length, referenceSlice);
-                    writer.Write(referenceSlice);
-                }
-
-                long locatorsOffset = writer.BaseStream.Position;
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    writer.Write(entry.ChunkIndex);
-                    writer.Write(entry.RowOffsetInChunk);
-                }
-
-                long stringTableOffset = writer.BaseStream.Position;
-
-                foreach (byte[] utf8Bytes in stringTable)
-                {
-                    writer.Write(utf8Bytes);
-                }
-
-                long stringTableLength = writer.BaseStream.Position - stringTableOffset;
-
-                long savedPosition = writer.BaseStream.Position;
-                writer.BaseStream.Position = directoryPosition;
-                writer.Write(keysOffset);
-                writer.Write(locatorsOffset);
-                writer.Write(stringTableOffset);
-                writer.Write(stringTableLength);
-                writer.BaseStream.Position = savedPosition;
-            }
-            else
-            {
-                Span<byte> keySlice = sortedKeyBuffer[..keyWidth];
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    SortedIndexKeyEncoder.Encode(entry.Key, keySlice);
-                    writer.Write(keySlice);
-                }
-
-                long locatorsOffset = writer.BaseStream.Position;
-
-                foreach (ValueIndexEntry entry in entries)
-                {
-                    writer.Write(entry.ChunkIndex);
-                    writer.Write(entry.RowOffsetInChunk);
-                }
-
-                long savedPosition = writer.BaseStream.Position;
-                writer.BaseStream.Position = directoryPosition;
-                writer.Write(keysOffset);
-                writer.Write(locatorsOffset);
-                writer.Write(0L);
-                writer.Write(0L);
-                writer.BaseStream.Position = savedPosition;
-            }
-        }
-    }
-
-    // ─────────────── Streamed B+Tree pages (spill writer) ────────────────
-
-    /// <summary>
-    /// Writes B+Tree indexes by streaming merged entries from a
-    /// <see cref="SortedIndexSpillWriter"/> into <see cref="BPlusTreeBulkLoader"/>.
-    /// Each column's entries are consumed in a single streaming pass without materializing
-    /// the full sorted array.
-    /// </summary>
-    private static void WriteStreamedBTreePages(
-        BinaryWriter writer,
-        SortedIndexSpillWriter spillWriter,
-        Schema schema,
-        IReadOnlySet<string> columnFilter)
-    {
-        int columnCount = 0;
-
-        foreach (string columnName in spillWriter.IndexedColumnNames)
-        {
-            if (columnFilter.Contains(columnName))
-            {
-                columnCount++;
-            }
-        }
-
-        writer.Write(columnCount);
-
-        foreach (string columnName in spillWriter.IndexedColumnNames)
-        {
-            if (!columnFilter.Contains(columnName))
-            {
-                continue;
-            }
-
-            DataKind keyKind = SortedIndexSpillWriter.ResolveDataKind(columnName, schema);
-            long totalEntries = spillWriter.GetTotalEntryCount(columnName);
-
-            BPlusTreeBulkLoader.Build(
-                spillWriter.EnumerateMergedEntries(columnName),
-                columnName,
-                keyKind,
-                writer,
-                totalEntries);
-        }
-    }
-
-    // ────────────────── B+Tree column categorization ──────────────────
-
-    /// <summary>
-    /// Determines which columns from the spill writer should be written as B+Tree indexes.
-    /// Columns whose total entry count exceeds <see cref="IndexConstants.BPlusTreeAutoThreshold"/>
-    /// are promoted to B+Tree; all others remain as flat sorted indexes.
-    /// </summary>
-    /// <returns>
-    /// A set of column names that should use B+Tree, or <c>null</c> if no columns qualify.
-    /// </returns>
-    private static HashSet<string>? CategorizeBPlusTreeColumns(SortedIndexSpillWriter spillWriter)
-    {
-        HashSet<string> bTreeColumns = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string columnName in spillWriter.IndexedColumnNames)
-        {
-            if (spillWriter.GetTotalEntryCount(columnName) > IndexConstants.BPlusTreeAutoThreshold)
-            {
-                bTreeColumns.Add(columnName);
-            }
-        }
-
-        return bTreeColumns.Count > 0 ? bTreeColumns : null;
-    }
-
-    /// <summary>
-    /// Counts the number of columns in the spill writer that have at least one entry.
-    /// </summary>
-    private static int CountColumnsWithEntries(SortedIndexSpillWriter spillWriter)
-    {
-        int count = 0;
-
-        foreach (string _ in spillWriter.IndexedColumnNames)
-        {
-            count++;
-        }
-
-        return count;
-    }
-
-    // ───────────────────────── B+Tree pages ─────────────────────────
-
-    /// <summary>
-    /// Writes B+Tree indexes as contiguous 8 KiB page arrays.
-    /// Layout:
-    /// <code>
-    /// [ColumnCount: i32]
-    /// Per column:
-    ///   [SectionHeader: column name, kind, root, entry count, height, page size, page count]
-    ///   PageCount × 8192 bytes (contiguous raw pages)
-    /// </code>
-    /// </summary>
-    private static void WriteBTreePages(BinaryWriter writer, BPlusTreeIndexSet bPlusTreeIndexes)
-    {
-        IReadOnlyCollection<string> columnNames = bPlusTreeIndexes.ColumnNames;
-        writer.Write(columnNames.Count);
-
-        foreach (string columnName in columnNames)
-        {
-            if (!bPlusTreeIndexes.TryGetIndex(columnName, out BPlusTreeColumnIndex? columnIndex))
-            {
-                continue;
-            }
-
-            BPlusTreeReader reader = columnIndex.Reader;
-            BPlusTreeBulkLoader.WriteSectionHeader(writer, reader.Header);
-
-            foreach (byte[] rawPage in reader.RawPages)
-            {
-                writer.Write(rawPage);
-            }
-        }
-    }
-
     // ───────────────────────── Bitmap indexes ─────────────────────────
 
     /// <summary>
     /// Writes bitmap indexes with per-value, per-chunk compressed bitsets.
-    /// Format matches v3 for now — the reader will access these from the mmap'd view.
     /// </summary>
     private static void WriteBitmapIndexes(BinaryWriter writer, BitmapIndexSet bitmapIndexes)
     {

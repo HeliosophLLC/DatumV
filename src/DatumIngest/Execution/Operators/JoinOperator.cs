@@ -320,11 +320,11 @@ public sealed class JoinOperator : IQueryOperator
         // Try both qualified and unqualified column names against the column index.
         string? indexColumnName = buildColumnRef.QualifiedName ?? buildColumnRef.ColumnName;
 
-        if (!buildScan.SourceIndex.TryGetColumnIndex(indexColumnName, out IColumnIndex? columnIndex))
+        if (!buildScan.TableProvider.TryGetColumnIndex(indexColumnName, out IColumnIndex? columnIndex))
         {
             // Try unqualified name if qualified failed.
             if (buildColumnRef.QualifiedName is not null
-                && !buildScan.SourceIndex.TryGetColumnIndex(buildColumnRef.ColumnName, out columnIndex))
+                && !buildScan.TableProvider.TryGetColumnIndex(buildColumnRef.ColumnName, out columnIndex))
             {
                 return null;
             }
@@ -1736,8 +1736,7 @@ public sealed class JoinOperator : IQueryOperator
             {
                 bool hasBloom = probeScan.SourceIndex?.BloomFilters is BloomFilterSet bloomFilters
                     && bloomFilters.HasColumn(columnName);
-                bool hasSortedIndex = probeScan.SourceIndex is not null
-                    && probeScan.SourceIndex.TryGetColumnIndex(columnName, out _);
+                bool hasSortedIndex = probeScan.TableProvider.TryGetColumnIndex(columnName, out _);
 
                 if (!hasBloom && !hasSortedIndex)
                 {

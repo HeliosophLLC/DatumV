@@ -1,109 +1,67 @@
-using CardinalityEstimation;
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.IO;
-using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
+using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
 /// Builds a <see cref="SourceIndex"/> in a single pass over all rows from a table provider.
-/// Accumulates per-chunk column statistics (min, max, null count, cardinality) using
-/// lightweight accumulators, and produces a complete index with schema, fingerprint, and
-/// chunk directory.
+/// Produces the unified-sidecar payload — fingerprint, schema, chunk directory + zone maps,
+/// bloom filters, bitmap indexes. Per-column B+Tree acceleration lives outside this builder
+/// in companion <c>.datum-bptree-{col}</c> files written directly by
+/// <see cref="DatumIngest.Ingestion.Indexer"/>.
 /// </summary>
 public sealed class SourceIndexBuilder
 {
     private readonly int _chunkSize;
     private readonly IReadOnlySet<string>? _bloomColumns;
-    private readonly IReadOnlySet<string>? _indexColumns;
     private readonly bool _bloomAllColumns;
-    private readonly bool _indexAllColumns;
-    private readonly bool _autoIndexColumns;
     private readonly bool _computeCardinality;
 
     /// <summary>
-    /// Creates a builder with the specified chunk size and optional column-specific indexes.
+    /// Creates a builder with the specified chunk size and an explicit bloom-column set.
     /// </summary>
-    /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
-    /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for no bloom filters.</param>
-    /// <param name="indexColumns">Column names to build sorted value indexes for, or <c>null</c> for no sorted indexes.</param>
-    /// <param name="computeCardinality">
-    /// When <c>true</c> (default), maintains HyperLogLog cardinality estimates per column.
-    /// When <c>false</c>, skips HLL updates entirely — reported cardinality is 0.
-    /// </param>
     public SourceIndexBuilder(
         int chunkSize = IndexConstants.DefaultChunkSize,
         IReadOnlySet<string>? bloomColumns = null,
-        IReadOnlySet<string>? indexColumns = null,
         bool computeCardinality = true)
     {
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
-        _indexColumns = indexColumns;
         _bloomAllColumns = false;
-        _indexAllColumns = false;
-        _autoIndexColumns = false;
         _computeCardinality = computeCardinality;
     }
 
     /// <summary>
-    /// Creates a builder that discovers columns from the data and optionally indexes all of them.
+    /// Creates a builder that discovers columns from the data and optionally builds bloom
+    /// filters for every one of them.
     /// </summary>
-    /// <param name="bloomAllColumns">When <c>true</c>, builds bloom filters for every column discovered in the data.</param>
-    /// <param name="indexAllColumns">When <c>true</c>, builds sorted value indexes for every column discovered in the data.</param>
-    /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
-    /// <param name="autoIndexColumns">
-    /// When <c>true</c> and <paramref name="indexAllColumns"/> is <c>false</c>,
-    /// automatically selects compact columns for sorted indexing based on their data kind.
-    /// </param>
-    /// <param name="computeCardinality">
-    /// When <c>true</c> (default), maintains HyperLogLog cardinality estimates per column.
-    /// When <c>false</c>, skips HLL updates entirely — reported cardinality is 0.
-    /// </param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
-        bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
-        bool autoIndexColumns = false,
         bool computeCardinality = true)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
-        _indexColumns = null;
         _bloomAllColumns = bloomAllColumns;
-        _indexAllColumns = indexAllColumns;
-        _autoIndexColumns = autoIndexColumns;
         _computeCardinality = computeCardinality;
     }
 
     /// <summary>
-    /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
-    /// Each row is observed but not consumed — the caller still owns the enumeration.
-    /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.
-    /// </summary>
-    /// <summary>
-    /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
-    /// Each row is observed but not consumed — the caller still owns the enumeration.
-    /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.
+    /// Creates an incremental index builder for co-generation during output writing.
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
         return new IncrementalIndexBuilder(
             _chunkSize, fingerprint,
-            _bloomColumns, _indexColumns,
-            _bloomAllColumns, _indexAllColumns, _autoIndexColumns,
+            _bloomColumns,
+            _bloomAllColumns,
             _computeCardinality);
     }
 
     /// <summary>
-    /// Resolves the effective column set for bloom or sorted indexes. When the "all columns"
-    /// flag is set, returns a set of all column names from the discovered schema.
-    /// Otherwise returns the explicitly specified column set.
+    /// Resolves the effective column set for bloom indexes. When the "all columns" flag is
+    /// set, returns a set of all column names from the discovered schema.
     /// </summary>
     internal static IReadOnlySet<string>? ResolveEffectiveColumns(
         IReadOnlySet<string>? explicitColumns, bool allColumns, Schema schema)
@@ -124,43 +82,17 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
-    /// Resolves the effective index column set from explicit columns, all-columns mode,
-    /// or auto-index mode (in priority order).
+    /// Selects columns eligible for sorted-key acceleration based on their <see cref="DataKind"/>.
+    /// Compact types (numeric, date/time, boolean, UUID) are always included. String columns
+    /// are included tentatively. Wide types are excluded.
     /// </summary>
-    private IReadOnlySet<string>? ResolveEffectiveIndexColumns(Schema schema)
-    {
-        IReadOnlySet<string>? result;
-
-        // Explicit column list takes highest priority.
-        if (_indexColumns is not null && _indexColumns.Count > 0)
-        {
-            result = _indexColumns;
-        }
-        // Index-all overrides auto-index.
-        else if (_indexAllColumns)
-        {
-            result = ResolveEffectiveColumns(null, true, schema);
-        }
-        // Auto-index selects compact columns by data kind.
-        else if (_autoIndexColumns)
-        {
-            result = ResolveAutoIndexColumns(schema);
-        }
-        else
-        {
-            return null;
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Selects columns for automatic sorted indexing based on their <see cref="DataKind"/>.
-    /// Compact types (numeric, date/time, boolean, UUID) are always included. String
-    /// columns are included tentatively but may be dropped later if values exceed 16 characters.
-    /// Wide types (vectors, matrices, tensors, images, JSON, arrays, raw byte arrays) are excluded.
-    /// </summary>
-    internal static IReadOnlySet<string> ResolveAutoIndexColumns(Schema schema)
+    /// <remarks>
+    /// Used by <see cref="DatumIngest.Ingestion.Indexer"/> to decide which columns get a
+    /// per-column <c>.datum-bptree-{col}</c> companion file. Bitmap-eligible columns
+    /// (cardinality up to 256) are a subset of this set; the bitmap accumulator decides
+    /// dynamically whether to keep or abandon based on observed cardinality.
+    /// </remarks>
+    public static IReadOnlySet<string> ResolveAutoIndexColumns(Schema schema)
     {
         HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
 
@@ -176,9 +108,9 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
-    /// Returns whether a column of the specified kind should be automatically indexed.
+    /// Returns whether a column of the specified kind is eligible for sorted-key acceleration.
     /// </summary>
-    internal static bool IsAutoIndexableKind(DataKind kind)
+    public static bool IsAutoIndexableKind(DataKind kind)
     {
         return kind is DataKind.Float32
             or DataKind.Float64
@@ -196,20 +128,7 @@ public sealed class SourceIndexBuilder
             or DataKind.Time
             or DataKind.Duration
             or DataKind.Uuid
-            or DataKind.String; // String is tentatively included; dropped later if values exceed 16 chars.
-    }
-
-    private static Schema BuildSchemaFromRow(Row row)
-    {
-        List<ColumnInfo> columns = new();
-
-        foreach (string name in row.ColumnNames)
-        {
-            DataValue value = row[name];
-            columns.Add(new ColumnInfo(name, value.Kind, nullable: true));
-        }
-
-        return new Schema(columns);
+            or DataKind.String;
     }
 
     internal static Dictionary<string, ChunkAccumulator> CreateAccumulators(Row row, bool computeCardinality = true)
@@ -236,156 +155,8 @@ public sealed class SourceIndexBuilder
         return accumulators;
     }
 
-    private static IndexChunk FinalizeChunk(
-        long rowOffset,
-        int rowCount,
-        Dictionary<string, ChunkAccumulator> accumulators)
-    {
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (KeyValuePair<string, ChunkAccumulator> entry in accumulators)
-        {
-            stats[entry.Key] = entry.Value.ToStatistics(rowCount);
-        }
-
-        return new IndexChunk(
-            RowOffset: rowOffset,
-            RowCount: rowCount,
-            ColumnStatistics: stats);
-    }
-
-    /// <summary>
-    /// Re-scans the source data to build indexes for columns whose hint-assigned index
-    /// type failed during the primary pass (e.g. bitmap hint on a column that exceeded
-    /// the cardinality threshold, or sorted hint on a column with strings too long).
-    /// Uses auto-cascade (both bitmap + sorted accumulators) for the deferred columns, then
-    /// deduplicates at the end. Requires a re-openable provider.
-    /// </summary>
-    private async Task<BitmapIndexSet?> RebuildDeferredColumnsAsync(
-        IReadOnlyList<string> deferredColumns,
-        TableDescriptor descriptor,
-        ITableProvider provider,
-        Schema schema,
-        CancellationToken cancellationToken)
-    {
-        // Deferred rebuild covers bitmap-eligible columns only after the heap-backed
-        // sorted-index set was removed. Sorted coverage for columns that were dropped
-        // mid-scan is a follow-up: the primary spill writer is already in read-only
-        // state by the time we get here, so adding deferred entries to it requires a
-        // writer-reopen API that doesn't exist yet.
-        HashSet<string> deferredSet = new(deferredColumns, StringComparer.OrdinalIgnoreCase);
-
-        Dictionary<string, BitmapChunkAccumulator> bitmapAccumulators = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (ColumnInfo column in schema.Columns)
-        {
-            if (deferredSet.Contains(column.Name) && IsAutoIndexableKind(column.Kind))
-            {
-                bitmapAccumulators[column.Name] = new BitmapChunkAccumulator();
-            }
-        }
-
-        if (bitmapAccumulators.Count == 0)
-        {
-            return null;
-        }
-
-        foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
-        {
-            accumulator.BeginChunk(_chunkSize);
-        }
-
-        int rowsInChunk = 0;
-
-        await foreach (RowBatch batch in provider.ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
-            .ConfigureAwait(false))
-        {
-            for (int batchRow = 0; batchRow < batch.Count; batchRow++)
-            {
-                Row row = batch[batchRow];
-
-                foreach (string column in deferredColumns)
-                {
-                    if (!row.TryGetValue(column, out DataValue value))
-                    {
-                        continue;
-                    }
-
-                    if (bitmapAccumulators.TryGetValue(column, out BitmapChunkAccumulator? bitmapAccumulator)
-                        && !bitmapAccumulator.IsAbandoned)
-                    {
-                        bitmapAccumulator.Add(value, rowsInChunk);
-                    }
-                }
-
-                rowsInChunk++;
-
-                if (rowsInChunk >= _chunkSize)
-                {
-                    foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
-                    {
-                        accumulator.FinalizeChunk(rowsInChunk);
-                        accumulator.BeginChunk(_chunkSize);
-                    }
-
-                    rowsInChunk = 0;
-                }
-            }
-
-            batch.Return();
-        }
-
-        if (rowsInChunk > 0)
-        {
-            foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
-            {
-                accumulator.FinalizeChunk(rowsInChunk);
-            }
-        }
-
-        return BuildBitmapIndexSet(bitmapAccumulators);
-    }
-
-    /// <summary>
-    /// Merges two <see cref="BitmapIndexSet"/> instances into one. Returns <c>null</c> if
-    /// both inputs are <c>null</c>.
-    /// </summary>
-    private static BitmapIndexSet? MergeBitmapIndexSets(BitmapIndexSet? primary, BitmapIndexSet? deferred)
-    {
-        if (deferred is null)
-        {
-            return primary;
-        }
-
-        if (primary is null)
-        {
-            return deferred;
-        }
-
-        Dictionary<string, BitmapColumnIndex> merged = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string column in primary.ColumnNames)
-        {
-            if (primary.TryGetIndex(column, out BitmapColumnIndex? index))
-            {
-                merged[column] = index;
-            }
-        }
-
-        foreach (string column in deferred.ColumnNames)
-        {
-            if (deferred.TryGetIndex(column, out BitmapColumnIndex? index))
-            {
-                merged[column] = index;
-            }
-        }
-
-        return new BitmapIndexSet(merged);
-    }
-
     /// <summary>
     /// Creates bloom filters for the specified columns, sized for the chunk capacity.
-    /// Returns <c>null</c> if no bloom columns are specified.
     /// </summary>
     internal static Dictionary<string, BloomFilter>? CreateBloomFilters(
         IReadOnlySet<string>? bloomColumns, int expectedElements)
@@ -411,7 +182,6 @@ public sealed class SourceIndexBuilder
     internal static BloomFilterSet BuildBloomFilterSet(
         List<Dictionary<string, BloomFilter>> chunkBloomFilters, int chunkCount)
     {
-        // Collect all column names across chunks.
         HashSet<string> columnNames = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (Dictionary<string, BloomFilter> chunkFilters in chunkBloomFilters)
@@ -436,7 +206,6 @@ public sealed class SourceIndexBuilder
                 }
                 else
                 {
-                    // Create an empty filter for chunks that didn't see this column.
                     columnFilters[i] = new BloomFilter(1);
                 }
             }
@@ -469,8 +238,7 @@ public sealed class SourceIndexBuilder
 
     /// <summary>
     /// Builds a <see cref="BitmapIndexSet"/> from per-column accumulators, keeping only
-    /// columns whose cardinality stayed within the bitmap threshold (i.e. not abandoned).
-    /// Returns <c>null</c> if no columns qualify.
+    /// columns whose cardinality stayed within the bitmap threshold.
     /// </summary>
     internal static BitmapIndexSet? BuildBitmapIndexSet(
         Dictionary<string, BitmapChunkAccumulator> accumulators)

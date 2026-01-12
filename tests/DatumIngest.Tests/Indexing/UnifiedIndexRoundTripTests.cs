@@ -306,56 +306,9 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
     // Coverage for the surviving streaming path (SortedIndexSpillWriter →
     // WriteStreamedSortedIndexes → SortedIndex) lives in the builder tests.
 
-    // ────────────────────── B+Tree pages ──────────────────────
-
-    [Fact]
-    public void RoundTrip_BPlusTreeIndexes_PreservesLookup()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Int32, nullable: false)]);
-        IndexSchema indexSchema = new(schema, 1000);
-
-        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new ChunkColumnStatistics(
-                DataValue.FromInt32(1), DataValue.FromInt32(1000),
-                NullCount: 0, RowCount: 1000, EstimatedCardinality: 1000)
-        };
-
-        List<IndexChunk> chunks = [new IndexChunk(0, 1000, stats)];
-
-        // Build a B+Tree with enough entries to create at least one internal page.
-        ValueIndexEntry[] entries = new ValueIndexEntry[500];
-
-        for (int index = 0; index < 500; index++)
-        {
-            entries[index] = new ValueIndexEntry(DataValue.FromInt32(index * 2), 0, index);
-        }
-
-        (BPlusTreeSectionHeader header, byte[][] rawPages) = BuildBPlusTree(entries, "id", DataKind.Int32);
-        BPlusTreeReader bPlusTreeReader = new(header, rawPages);
-
-        Dictionary<string, BPlusTreeColumnIndex> bTreeIndexes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = new BPlusTreeColumnIndex(bPlusTreeReader)
-        };
-
-        BPlusTreeIndexSet bTreeSet = new(bTreeIndexes);
-        SourceIndex original = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null,
-            bPlusTreeIndexes: bTreeSet);
-
-        using MappedSourceIndexSet mapped = WriteAndReopen("btree", original);
-        SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-        Assert.NotNull(restored.BPlusTreeIndexes);
-        Assert.True(restored.BPlusTreeIndexes.TryGetIndex("id", out BPlusTreeColumnIndex? restoredBTree));
-
-        // Verify lookup.
-        IReadOnlyList<ValueIndexEntry> found = restoredBTree.FindExact(DataValue.FromInt32(100));
-        Assert.Single(found);
-        Assert.Equal(50, found[0].RowOffsetInChunk);
-    }
+    // PR13d (v8): per-column B+Tree indexes are no longer carried in the
+    // unified `.datum-index` sidecar. Round-trip tests for that path were
+    // retired alongside the BTreePages section.
 
     // ────────────────────── Bitmap indexes ──────────────────────
 
@@ -394,7 +347,7 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         BitmapIndexSet bitmapSet = new(bitmapIndexes);
         SourceIndex original = new(fingerprint, indexSchema, chunks,
             bloomFilters: null,
-            bPlusTreeIndexes: null, bitmapIndexes: bitmapSet);
+            bitmapIndexes: bitmapSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("bitmap", original);
         SourceIndex restored = mapped.IndexSet.Tables["test"];

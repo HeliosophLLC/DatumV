@@ -3,8 +3,6 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.BTree;
-using DatumIngest.Indexing.Sorted;
 using DatumIngest.Manifest;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -505,34 +503,10 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
             int chunkCount = sourceIndex.Chunks.Count;
             long totalRowCount = sourceIndex.Schema.TotalRowCount;
 
-            if (sourceIndex.MappedSortedIndexes is not null)
-            {
-                foreach (KeyValuePair<string, SortedIndex> entry in sourceIndex.MappedSortedIndexes)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
-                    DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, entry.Key, "SORTED", entry.Value.EntryCount, chunkCount, totalRowCount, isValid: true, batch.Arena);
-                    batch.Add(values);
-                    if (batch.IsFull) { yield return batch; batch = null; }
-                }
-            }
-
-            if (sourceIndex.BPlusTreeIndexes is not null)
-            {
-                foreach (string columnName in sourceIndex.BPlusTreeIndexes.ColumnNames)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
-                    long? entryCount = sourceIndex.BPlusTreeIndexes.TryGetIndex(columnName, out BPlusTreeColumnIndex? btree)
-                        ? btree.EntryCount
-                        : null;
-                    DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                    FillIndexRow(values, tableName, columnName, "BTREE", entryCount, chunkCount, totalRowCount, isValid: true, batch.Arena);
-                    batch.Add(values);
-                    if (batch.IsFull) { yield return batch; batch = null; }
-                }
-            }
+            // PR13d: SORTED + BTREE rows are emitted by the provider directly
+            // (per-column .datum-bptree-{col} files); they no longer live on
+            // SourceIndex. Until the provider exposes them through ITableProvider,
+            // those rows are absent from this view.
 
             if (sourceIndex.BitmapIndexes is not null)
             {

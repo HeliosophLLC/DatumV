@@ -1,19 +1,23 @@
-using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.BTree;
-using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// In-memory representation of a unified <c>.datum-index</c> file. Aggregates the
-/// fingerprint, cached schema, chunk directory, and optional acceleration structures
-/// (bloom filters, memory-mapped sorted indexes, B+Tree, bitmap). Constructed by
+/// In-memory representation of a v8 unified <c>.datum-index</c> file. Aggregates the
+/// fingerprint, cached schema, chunk directory, and bloom + bitmap acceleration
+/// structures that live inside the unified sidecar. Constructed by
 /// <see cref="SourceIndexBuilder"/> and serialized/deserialized by
 /// <see cref="UnifiedIndexWriter"/>/<see cref="UnifiedIndexReader"/>.
 /// </summary>
+/// <remarks>
+/// PR13d (v8) moved per-column B+Tree acceleration out of this in-memory
+/// type and the unified sidecar entirely. Per-column lookup now goes
+/// through <see cref="Catalog.ITableProvider.TryGetColumnIndex"/>, which
+/// resolves against companion <c>.datum-bptree-{col}</c> page-COW files
+/// owned by the provider.
+/// </remarks>
 public sealed class SourceIndex
 {
     /// <summary>Source file fingerprint for staleness detection.</summary>
@@ -32,22 +36,10 @@ public sealed class SourceIndex
     public BloomFilterSet? BloomFilters { get; }
 
     /// <summary>
-    /// Per-column B+Tree indexes for demand-paged key lookup on large datasets,
-    /// or <c>null</c> if no B+Tree indexes were built.
-    /// </summary>
-    internal BPlusTreeIndexSet? BPlusTreeIndexes { get; }
-
-    /// <summary>
     /// Per-column bitmap indexes for low-cardinality columns,
     /// or <c>null</c> if no bitmap indexes were built.
     /// </summary>
     internal BitmapIndexSet? BitmapIndexes { get; }
-
-    /// <summary>
-    /// Per-column memory-mapped sorted indexes for zero-copy key lookup,
-    /// or <c>null</c> if no mapped sorted indexes are available.
-    /// </summary>
-    internal Dictionary<string, SortedIndex>? MappedSortedIndexes { get; }
 
     /// <summary>
     /// Creates a new source index.
@@ -61,79 +53,22 @@ public sealed class SourceIndex
         IndexSchema schema,
         IReadOnlyList<IndexChunk> chunks,
         BloomFilterSet? bloomFilters = null)
-        : this(fingerprint, schema, chunks, bloomFilters, bPlusTreeIndexes: null)
+        : this(fingerprint, schema, chunks, bloomFilters, bitmapIndexes: null)
     {
     }
 
-    /// <summary>
-    /// Creates a new source index with optional B+Tree, bitmap, and mapped sorted indexes.
-    /// </summary>
     internal SourceIndex(
         SourceFingerprint fingerprint,
         IndexSchema schema,
         IReadOnlyList<IndexChunk> chunks,
         BloomFilterSet? bloomFilters,
-        BPlusTreeIndexSet? bPlusTreeIndexes,
-        BitmapIndexSet? bitmapIndexes = null,
-        Dictionary<string, SortedIndex>? mappedSortedIndexes = null)
+        BitmapIndexSet? bitmapIndexes)
     {
         Fingerprint = fingerprint;
         Schema = schema;
         Chunks = chunks;
         BloomFilters = bloomFilters;
-        BPlusTreeIndexes = bPlusTreeIndexes;
         BitmapIndexes = bitmapIndexes;
-        MappedSortedIndexes = mappedSortedIndexes;
-    }
-
-    /// <summary>
-    /// Retrieves the best available column index for the specified column,
-    /// returning whichever implementation (mapped sorted or B+Tree) is present.
-    /// This is the single entry point for operators and the query planner —
-    /// callers never need to know which concrete index type backs the column.
-    /// </summary>
-    /// <param name="columnName">Column name (case-insensitive lookup).</param>
-    /// <param name="index">The column index, or <c>null</c> if no index exists for this column.</param>
-    /// <returns><c>true</c> if an index exists for the specified column.</returns>
-    public bool TryGetColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
-    {
-        if (MappedSortedIndexes is not null && MappedSortedIndexes.TryGetValue(columnName, out SortedIndex? mappedIndex))
-        {
-            index = mappedIndex;
-            return true;
-        }
-
-        if (BPlusTreeIndexes is not null && BPlusTreeIndexes.TryGetIndex(columnName, out BPlusTreeColumnIndex? btreeIndex))
-        {
-            index = btreeIndex;
-            return true;
-        }
-
-        index = null;
-        return false;
-    }
-
-    /// <summary>
-    /// Retrieves a sorted column index for the specified column. Unlike
-    /// <see cref="TryGetColumnIndex"/>, this method never returns a B+Tree
-    /// index — use it when the caller requires data that is physically ordered
-    /// on disk (e.g. merge join). B+Tree indexes enumerate entries in key order
-    /// but the underlying rows are scattered throughout the datum file, making
-    /// full-scan sequential access prohibitively expensive.
-    /// </summary>
-    /// <param name="columnName">Column name (case-insensitive lookup).</param>
-    /// <param name="index">The sorted column index, or <c>null</c> if none exists.</param>
-    /// <returns><c>true</c> if a sorted index exists for the specified column.</returns>
-    public bool TryGetSortedColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
-    {
-        if (MappedSortedIndexes is not null && MappedSortedIndexes.TryGetValue(columnName, out SortedIndex? mappedIndex))
-        {
-            index = mappedIndex;
-            return true;
-        }
-
-        index = null;
-        return false;
     }
 
     /// <summary>
@@ -150,10 +85,6 @@ public sealed class SourceIndex
     /// <list type="bullet">
     ///   <item>Schemas must be identical (column count, names, kinds). DDL
     ///     mutations invalidate the index path before reaching this code.</item>
-    ///   <item>Sorted (mapped) and B+Tree indexes are not merged — they live
-    ///     across all rows in key order, so the carry-forward path drops
-    ///     them. Callers fall back to full rebuild when the existing index
-    ///     uses sorted/B+Tree.</item>
     ///   <item>Bloom and bitmap merge by column-name intersection — columns
     ///     that appear in only one side (e.g. a bitmap that abandoned mid-build
     ///     in one of the two passes) are dropped from the merged result.</item>
@@ -185,8 +116,6 @@ public sealed class SourceIndex
         int deltaChunkCount = delta.Chunks.Count;
         int totalChunkCount = existingChunkCount + deltaChunkCount;
 
-        // Concatenate chunks with delta's RowOffsets shifted forward by the
-        // existing total row count.
         List<IndexChunk> mergedChunks = new(totalChunkCount);
         mergedChunks.AddRange(existing.Chunks);
         foreach (IndexChunk c in delta.Chunks)
@@ -215,9 +144,7 @@ public sealed class SourceIndex
             schema: mergedSchema,
             chunks: mergedChunks,
             bloomFilters: mergedBloom,
-            bPlusTreeIndexes: null,
-            bitmapIndexes: mergedBitmap,
-            mappedSortedIndexes: null);
+            bitmapIndexes: mergedBitmap);
     }
 
     private static BloomFilterSet? MergeBlooms(
@@ -262,9 +189,6 @@ public sealed class SourceIndex
         Dictionary<string, BitmapColumnIndex> mergedColumns = new(StringComparer.OrdinalIgnoreCase);
         int totalChunks = existingChunkCount + deltaChunkCount;
 
-        // Merged chunk row counts derived from chunk metadata — the
-        // bitmap reader only ever reads rowCount[i] for a chunk it has
-        // a bitmap entry for, so any chunk in the array is fine.
         int[] rowCounts = new int[totalChunks];
         for (int i = 0; i < totalChunks; i++)
         {
@@ -275,8 +199,6 @@ public sealed class SourceIndex
         {
             if (!delta.ColumnNames.Contains(column, StringComparer.OrdinalIgnoreCase))
             {
-                // Column abandoned on one side — drop it. Conservative
-                // merge keeps only columns where both sides agree.
                 continue;
             }
 
@@ -286,11 +208,6 @@ public sealed class SourceIndex
             IReadOnlyDictionary<DataValue, byte[][]> eMaps = eCol.CompressedBitmaps;
             IReadOnlyDictionary<DataValue, byte[][]> dMaps = dCol.CompressedBitmaps;
 
-            // Union of distinct values across existing and delta. For each
-            // value, build a byte[][] of length totalChunks: existing chunks
-            // 0..existingChunkCount, then delta chunks. Slots without an
-            // entry get an empty array (the reader treats Length==0 as
-            // "value absent from chunk").
             Dictionary<DataValue, byte[][]> mergedValueBitmaps = new();
 
             foreach (KeyValuePair<DataValue, byte[][]> kvp in eMaps)

@@ -238,8 +238,6 @@ public sealed class InMemoryTableProvider : ITableProvider
         SourceFingerprint fingerprint = new(fileSize: 0, new byte[32]);
         SourceIndexBuilder builder = new(
             bloomAllColumns: true,
-            indexAllColumns: false,
-            autoIndexColumns: true,
             computeCardinality: false);
 
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);

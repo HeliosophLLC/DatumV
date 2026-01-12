@@ -120,7 +120,7 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
             using (FileStream stream = File.Create(tempFile))
             {
                 SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
-                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
+                UnifiedIndexWriter.Write(indexSet, stream);
             }
             using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
             SourceIndex restored = mapped.IndexSet.Tables["test"];
@@ -143,49 +143,10 @@ public sealed class BitmapBuildPipelineTests : ServiceTestBase
         }
     }
 
-    // ───────────────────────── Bitmap coexists with sorted ─────────────────────────
-
-    [Fact]
-    public void BuildAndSerialize_BitmapAndSortedCoexist()
-    {
-        SourceFingerprint fingerprint = new(0, new byte[32]);
-        HashSet<string> indexColumns = new(StringComparer.OrdinalIgnoreCase) { "color" };
-        SourceIndexBuilder builder = new(chunkSize: 5, indexColumns: indexColumns);
-        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
-
-        ColumnLookup lookup = new(["color"]);
-
-        for (int i = 0; i < 5; i++)
-        {
-            DataValue[] values = [DataValue.FromString(i < 3 ? "red" : "blue")];
-            incremental.AddRow(MakeRow(lookup, values), Store);
-        }
-
-        SourceIndex index = incremental.Finalize();
-
-        string tempFile = Path.GetTempFileName();
-        try
-        {
-            using (FileStream stream = File.Create(tempFile))
-            {
-                SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
-                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
-            }
-            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
-            SourceIndex restored = mapped.IndexSet.Tables["test"];
-
-            // Both types should be present.
-            Assert.NotNull(restored.BitmapIndexes);
-            Assert.NotNull(restored.MappedSortedIndexes);
-            Assert.True(restored.BitmapIndexes.TryGetIndex("color", out _));
-            Assert.True(restored.MappedSortedIndexes.ContainsKey("color"));
-
-            incremental.Dispose();
-        }
-        finally
-        {
-            File.Delete(tempFile);
-        }
-    }
+    // PR13d (v8): the bitmap-and-sorted-coexist test was retired with the
+    // SortedIndexes section. SortedIndex acceleration is no longer carried
+    // in the unified sidecar — bitmap is the only acceleration this builder
+    // produces. Coexistence with B+Tree per-column files is exercised in the
+    // provider tests once Commit 2b lands.
 
 }

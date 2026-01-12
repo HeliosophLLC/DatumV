@@ -360,7 +360,6 @@ public sealed class BitmapPruningTests : ServiceTestBase
                 rows.Length),
             chunks,
             bloomFilters: null,
-            bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
 
         Expression filter = new BinaryExpression(
@@ -594,7 +593,6 @@ public sealed class BitmapPruningTests : ServiceTestBase
             new IndexSchema(new Schema(columns), rows.Length),
             chunks,
             bloomFilters: null,
-            bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
     }
 

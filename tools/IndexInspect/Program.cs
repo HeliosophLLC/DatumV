@@ -1,8 +1,6 @@
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.Bloom;
-using DatumIngest.Indexing.BTree;
-using DatumIngest.Indexing.Sorted;
 using DatumIngest.Model;
 
 // index-inspect <index-path>
@@ -194,20 +192,9 @@ static IEnumerable<(DataValue Value, long Frequency)>? EnumerateFromIndex(
         return EnumerateFromBitmap(bitmap, mode);
     }
 
-    // B+Tree — entries sorted by key; dedupe on key transition, count for freq.
-    if (index.BPlusTreeIndexes is { } btreeSet
-        && btreeSet.TryGetIndex(columnName, out BPlusTreeColumnIndex? btree))
-    {
-        return EnumerateSortedEntries(btree.TraverseForward(), mode);
-    }
-
-    // Sorted — same shape.
-    if (index.MappedSortedIndexes is { } mappedSorted
-        && mappedSorted.TryGetValue(columnName, out SortedIndex? sorted))
-    {
-        return EnumerateSortedEntries(sorted.TraverseForward(), mode);
-    }
-
+    // PR13d: per-column B+Tree and sorted indexes moved out of the unified
+    // sidecar into companion .datum-bptree-{col} files. IndexInspect doesn't
+    // open those files yet — bloom + bitmap stays here for now.
     return null;
 }
 
@@ -230,40 +217,6 @@ static IEnumerable<(DataValue Value, long Frequency)> EnumerateFromBitmap(
     }
 }
 
-static IEnumerable<(DataValue Value, long Frequency)> EnumerateSortedEntries(
-    IEnumerable<ValueIndexEntry> entries, Mode mode)
-{
-    bool haveCurrent = false;
-    DataValue current = default;
-    long count = 0;
-
-    foreach (ValueIndexEntry entry in entries)
-    {
-        if (!haveCurrent)
-        {
-            current = entry.Key;
-            count = 1;
-            haveCurrent = true;
-            continue;
-        }
-
-        if (current.Equals(entry.Key))
-        {
-            count++;
-        }
-        else
-        {
-            yield return (current, mode == Mode.Vocab ? count : 0);
-            current = entry.Key;
-            count = 1;
-        }
-    }
-
-    if (haveCurrent)
-    {
-        yield return (current, mode == Mode.Vocab ? count : 0);
-    }
-}
 
 static void PrintTable(string tableName, SourceIndex index)
 {
@@ -314,20 +267,7 @@ static void PrintTable(string tableName, SourceIndex index)
             parts.Add($"bloom: {populated}/{bloom.ChunkCount} chunks");
         }
 
-        // Sorted (mapped).
-        if (index.MappedSortedIndexes is { } mappedSorted
-            && mappedSorted.TryGetValue(col.Name, out SortedIndex? sorted))
-        {
-            parts.Add($"sorted: {sorted.EntryCount:N0} entries");
-        }
-
-        // B+Tree.
-        if (index.BPlusTreeIndexes is { } btreeSet
-            && btreeSet.TryGetIndex(col.Name, out BPlusTreeColumnIndex? btree))
-        {
-            BPlusTreeSectionHeader header2 = btree.Reader.Header;
-            parts.Add($"btree: {btree.EntryCount:N0} entries, height={header2.TreeHeight}, pages={header2.PageCount:N0}");
-        }
+        // PR13d: sorted/B+Tree per-column indexes moved to companion files.
 
         // Bitmap.
         if (index.BitmapIndexes is { } bitmapSet

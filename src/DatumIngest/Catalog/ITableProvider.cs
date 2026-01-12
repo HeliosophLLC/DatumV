@@ -46,6 +46,33 @@ public interface ITableProvider : IDisposable
     Indexing.SourceIndex? GetSourceIndex();
 
     /// <summary>
+    /// Returns a per-column acceleration index (B+Tree-backed) for
+    /// <paramref name="columnName"/>, when the provider maintains one.
+    /// PR13d migrates B+Tree / sorted-index lookup off
+    /// <see cref="Indexing.SourceIndex"/> (which lives inside the
+    /// whole-file-COW <c>.datum-index</c> sidecar) and onto per-column
+    /// <c>.datum-bptree-{col}</c> page-COW files owned by the provider —
+    /// callers that previously called <c>SourceIndex.TryGetColumnIndex</c>
+    /// should call this instead so the lookup picks up the right backing
+    /// store regardless of whether trees still live in the unified
+    /// sidecar (transition state) or alongside it (final state).
+    /// </summary>
+    /// <param name="columnName">Column name (case-insensitive lookup).</param>
+    /// <param name="index">The column index, or <c>null</c> if no index exists for this column.</param>
+    /// <returns><c>true</c> if an index exists for the specified column.</returns>
+    /// <remarks>
+    /// Default implementation returns <c>false</c>. Providers that own
+    /// per-column B+Tree files (the persistent <c>.datum</c> provider
+    /// after PR13d) override and resolve through their per-column tree
+    /// dictionary.
+    /// </remarks>
+    bool TryGetColumnIndex(string columnName, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Indexing.IColumnIndex? index)
+    {
+        index = null;
+        return false;
+    }
+
+    /// <summary>
     /// Streams all rows from the table, optionally applying an advisory filter hint for
     /// statistics-based partition pruning. The caller is responsible for applying the
     /// filter for correctness — the stream may still contain non-matching rows.

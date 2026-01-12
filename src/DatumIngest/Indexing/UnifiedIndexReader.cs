@@ -2,20 +2,16 @@ using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using System.Text;
 using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
-using DatumIngest.Indexing.Sorted;
 using DatumIngest.Indexing.Bloom;
 using DatumIngest.IO;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Opens a v5 unified <c>.datum-index</c> file as a memory-mapped file,
+/// Opens a v8 unified <c>.datum-index</c> file as a memory-mapped file,
 /// parses the section directory, and reconstructs <see cref="SourceIndex"/> instances
-/// for each table. All data that supports mmap-backed access (sorted indexes)
-/// is exposed through <see cref="SortedIndex"/> instances that read from the
-/// shared <see cref="MemoryMappedViewAccessor"/> without heap allocation.
+/// for each table.
 /// </summary>
 internal static class UnifiedIndexReader
 {
@@ -235,28 +231,13 @@ internal static class UnifiedIndexReader
                 ? ReadBloomFilters(memoryMappedFile, sharedAccessor, bloomEntry)
                 : null;
 
-            Dictionary<string, SortedIndex>? mappedSortedIndexes = null;
-
-            if (sectionMap.TryGetValue(
-                UnifiedIndexSectionType.SortedIndexes, out SectionDirectoryEntry sortedEntry))
-            {
-                mappedSortedIndexes = ReadSortedIndexes(
-                    memoryMappedFile, sharedAccessor, sortedEntry);
-            }
-
-            BPlusTreeIndexSet? bPlusTreeIndexes = sectionMap.TryGetValue(
-                UnifiedIndexSectionType.BTreePages, out SectionDirectoryEntry bTreeEntry)
-                ? ReadBPlusTreePages(memoryMappedFile, sharedAccessor, bTreeEntry)
-                : null;
-
             BitmapIndexSet? bitmapIndexes = sectionMap.TryGetValue(
                 UnifiedIndexSectionType.BitmapIndexes, out SectionDirectoryEntry bitmapEntry)
                 ? ReadBitmapIndexes(memoryMappedFile, sharedAccessor, bitmapEntry)
                 : null;
 
             tables[tableNames[tableIndex]] = new SourceIndex(
-                fingerprint, schema, chunks, bloomFilters,
-                bPlusTreeIndexes, bitmapIndexes, mappedSortedIndexes);
+                fingerprint, schema, chunks, bloomFilters, bitmapIndexes);
         }
 
         return new SourceIndexSet(fingerprint, tables);
@@ -384,86 +365,6 @@ internal static class UnifiedIndexReader
         }
 
         return new BloomFilterSet(filters, chunkCount);
-    }
-
-    // ───────────────────────── Sorted indexes ─────────────────────────
-
-    /// <summary>
-    /// Reads sorted indexes, creating <see cref="SortedIndex"/> instances that
-    /// operate directly on the shared <see cref="MemoryMappedViewAccessor"/>.
-    /// </summary>
-    private static Dictionary<string, SortedIndex>? ReadSortedIndexes(
-        MemoryMappedFile memoryMappedFile,
-        MemoryMappedViewAccessor sharedAccessor,
-        SectionDirectoryEntry entry)
-    {
-        using MemoryMappedViewStream stream = memoryMappedFile.CreateViewStream(
-            entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
-        using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
-
-        int columnCount = reader.ReadInt32();
-
-        if (columnCount == 0)
-        {
-            return null;
-        }
-
-        Dictionary<string, SortedIndex> mappedIndexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
-
-        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
-        {
-            string columnName = reader.ReadString();
-            DataKind kind = (DataKind)reader.ReadByte();
-            long entryCount = reader.ReadInt64();
-            long keysOffset = reader.ReadInt64();
-            long locatorsOffset = reader.ReadInt64();
-            long stringTableOffset = reader.ReadInt64();
-            long stringTableLength = reader.ReadInt64();
-
-            mappedIndexes[columnName] = new SortedIndex(
-                sharedAccessor, kind, entryCount,
-                keysOffset, locatorsOffset, stringTableOffset, stringTableLength);
-
-            // Skip past this column's key, locator, and string table data so
-            // the stream is positioned at the next column's header.
-            int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
-            long dataBytes = entryCount * keyWidth
-                + entryCount * SortedIndex.LocatorWidth
-                + stringTableLength;
-            stream.Seek(dataBytes, SeekOrigin.Current);
-        }
-
-        return mappedIndexes;
-    }
-
-    // ───────────────────────── B+Tree pages ─────────────────────────
-
-    private static BPlusTreeIndexSet ReadBPlusTreePages(
-        MemoryMappedFile memoryMappedFile,
-        MemoryMappedViewAccessor sharedAccessor,
-        SectionDirectoryEntry entry)
-    {
-        using MemoryMappedViewStream stream = memoryMappedFile.CreateViewStream(
-            entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
-        using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
-
-        int columnCount = reader.ReadInt32();
-        Dictionary<string, BPlusTreeColumnIndex> indexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
-
-        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
-        {
-            BPlusTreeSectionHeader header = BPlusTreeBulkLoader.ReadSectionHeader(reader);
-
-            long pagesBaseOffset = entry.Offset + stream.Position;
-
-            // Advance past the raw page bytes so the next column header is read correctly.
-            stream.Seek((long)header.PageCount * header.PageSize, SeekOrigin.Current);
-
-            BPlusTreeReader bPlusTreeReader = new(header, sharedAccessor, pagesBaseOffset);
-            indexes[header.ColumnName] = new BPlusTreeColumnIndex(bPlusTreeReader);
-        }
-
-        return new BPlusTreeIndexSet(indexes);
     }
 
     // ───────────────────────── Bitmap indexes ─────────────────────────
