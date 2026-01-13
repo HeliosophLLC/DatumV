@@ -149,6 +149,15 @@ public sealed class Indexer(Pool pool)
 
                 index = incremental.Finalize();
 
+                // PR13e-A: drop per-column trees that are redundant against the
+                // unified sidecar's bitmap, and empty trees that ended up with
+                // zero entries (typically all-sidecar-stored String columns
+                // where the per-row insert path skips). Bitmap covers
+                // chunk-level pruning + per-row bitmask for low-cardinality
+                // columns; an additional B+Tree would just duplicate the same
+                // information at higher storage cost.
+                DropRedundantColumnTrees(columnTrees, index, datumPath);
+
                 SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
 
                 await using Stream outputStream = await destination.OpenAsync(cancellationToken)
@@ -183,6 +192,43 @@ public sealed class Indexer(Pool pool)
             {
                 build.Tree.Dispose();
             }
+        }
+    }
+
+    /// <summary>
+    /// Drops per-column tree files for columns whose unified-sidecar bitmap
+    /// already covers them, and for trees that ended up with zero entries
+    /// (e.g. all values were sidecar-stored). Mutates <paramref name="columnTrees"/>
+    /// in place so the caller's `finally` block doesn't double-dispose. Best-
+    /// effort on file delete (any failure leaves the tree on disk; next REINDEX
+    /// rebuilds it).
+    /// </summary>
+    private static void DropRedundantColumnTrees(
+        Dictionary<string, ColumnTreeBuild> columnTrees,
+        SourceIndex index,
+        string datumPath)
+    {
+        if (columnTrees.Count == 0) return;
+
+        List<string> toRemove = new();
+
+        foreach (KeyValuePair<string, ColumnTreeBuild> kvp in columnTrees)
+        {
+            bool bitmapCovers = index.BitmapIndexes is not null
+                && index.BitmapIndexes.TryGetIndex(kvp.Key, out _);
+            bool emptyTree = kvp.Value.Tree.EntryCount == 0;
+            if (bitmapCovers || emptyTree)
+            {
+                toRemove.Add(kvp.Key);
+            }
+        }
+
+        foreach (string col in toRemove)
+        {
+            columnTrees[col].Tree.Dispose();
+            columnTrees.Remove(col);
+            string treePath = DatumFileTableProviderV2.GetColumnIndexPath(datumPath, col);
+            try { File.Delete(treePath); } catch { }
         }
     }
 
@@ -308,6 +354,13 @@ public sealed class Indexer(Pool pool)
 
             deltaIndex = incremental.Finalize();
             merged = SourceIndex.Merge(existing, deltaIndex);
+
+            // PR13e-A: same redundant-tree cleanup as IndexAsync. After the
+            // merge, columns whose merged-bitmap covers them no longer need
+            // their per-column tree on disk. Note: this can delete a tree
+            // that prior INSERTs populated — that's intentional, the bitmap
+            // takes over.
+            DropRedundantColumnTrees(columnTrees, merged, datumPath);
 
             SourceIndexSet indexSet = SourceIndexSet.Create(tableName, merged);
 
