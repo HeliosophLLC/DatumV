@@ -1542,6 +1542,83 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <summary>
+    /// Phase 3a-wide append-session fast path: writes the supplied (already
+    /// merged) <paramref name="merged"/> index to the unified sidecar via the
+    /// same temp-file + atomic-rename dance as <see cref="RebuildIndexNoLock"/>,
+    /// but skips the Indexer scan entirely (the append session built the delta
+    /// in lockstep with the data writes). Caller must hold the mutation lock.
+    /// Per-column trees stay open across this call — the append session
+    /// already inserted entries into them in-place.
+    /// </summary>
+    /// <param name="merged">Pre-merged source index (existing prefix + delta from the append session).</param>
+    /// <param name="tableName">Logical table name for the SourceIndexSet wrapper.</param>
+    private void WriteUnifiedSidecarNoLock(SourceIndex merged, string tableName)
+    {
+        _sourceIndex = null;
+
+        string finalPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
+        string tempPath = finalPath + ".tmp";
+
+        try
+        {
+            SourceIndexSet indexSet = SourceIndexSet.Create(tableName, merged);
+            using (FileStream stream = new(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                UnifiedIndexWriter.Write(indexSet, stream);
+            }
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            InvalidateSourceIndexCache();
+            throw;
+        }
+
+        InvalidateSourceIndexCache();
+        File.Move(tempPath, finalPath, overwrite: true);
+
+        (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(_descriptor);
+    }
+
+    /// <summary>
+    /// Ensures every indexable column in the live schema has an open per-column
+    /// tree available for in-session inserts. Trees that don't yet exist on
+    /// disk (first append on a fresh table, or a column added after the last
+    /// index build) are <c>Create</c>d and registered. Caller must hold the
+    /// mutation lock.
+    /// </summary>
+    private void EnsureColumnTreesForIndexableColumnsNoLock()
+    {
+        Schema schema = _snapshot.Schema;
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            if (!Indexing.SourceIndexBuilder.IsAutoIndexableKind(column.Kind)) continue;
+            if (column.IsArray) continue;
+            if (_columnTrees.ContainsKey(column.Name)) continue;
+
+            string treePath = GetColumnIndexPath(_descriptor.FilePath, column.Name);
+            MutableBPlusTree tree = File.Exists(treePath)
+                ? MutableBPlusTree.Open(treePath)
+                : MutableBPlusTree.Create(treePath, column.Kind, allowDuplicates: true);
+
+            _columnTrees[column.Name] = tree;
+            _columnIndexes[column.Name] = new MutableBPlusTreeColumnIndex(tree);
+        }
+    }
+
+    /// <summary>
+    /// Returns the open per-column tree for <paramref name="columnName"/>, or
+    /// <see langword="null"/> if no tree was opened (column not indexable, or
+    /// initial open failed). Used by the append session's per-row insert path
+    /// — the same lock that gates the session ensures no concurrent read
+    /// observes torn tree state during the queued-insert flush.
+    /// </summary>
+    internal MutableBPlusTree? GetColumnTreeForAppendSession(string columnName)
+    {
+        return _columnTrees.TryGetValue(columnName, out MutableBPlusTree? tree) ? tree : null;
+    }
+
+    /// <summary>
     /// Builds a new <see cref="Snapshot"/> from the on-disk file post-
     /// mutation and atomically swaps it in. Caller must hold
     /// <see cref="_mutationLock"/>. When
@@ -1635,6 +1712,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // scan-based fallback path handles uniqueness for those tables.
         private readonly List<DataValue>? _pendingPkKeys;
         private readonly int _pkColumnIndex;
+
+        // Phase 3a-wide: per-row in-line index build. Eliminates the
+        // post-commit scan that ExtendAsync used to do — the append session
+        // already has the rows in hand, so we mirror them into an
+        // IncrementalIndexBuilder (bloom + bitmap + zone maps) and queue
+        // per-column tree entries during WriteAsync. CommitAsync flushes
+        // the queues into the provider's open trees and writes the merged
+        // sidecar atomically.
+        //
+        // Lazily initialized on first WriteAsync — schema is captured then.
+        private Indexing.IncrementalIndexBuilder? _indexBuilder;
+        private SourceIndex? _existingForMerge;
+        private Dictionary<string, List<ValueIndexEntry>>? _pendingColumnEntries;
+        private string[]? _indexableColumnNames;
+        private const int _indexBuildChunkSize = Indexing.IndexConstants.DefaultChunkSize;
 
         public DatumAppendSession(DatumFileTableProviderV2 provider)
         {
@@ -1738,10 +1830,106 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 }
             }
 
+            // Phase 3a-wide: build the unified-sidecar delta + per-column
+            // tree entry queues in lockstep with the data write. Lazy init
+            // on first batch — _indexBuilder needs a fingerprint at
+            // construction (will be swapped at Finalize), and the indexable
+            // column set is captured from the live schema once.
+            if (_indexBuilder is null)
+            {
+                EnsureIndexBuildersInitialized();
+            }
+
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Row row = batch[r];
+
+                // Capture (chunkIndex, rowOffsetInChunk) BEFORE AddRow so the
+                // values match where IncrementalIndexBuilder will place this
+                // row internally. AddRow may roll the chunk forward inside
+                // its own bookkeeping; we want the pre-add slot.
+                int chunkIndex = _indexBuilder!.CurrentChunkIndex;
+                int rowOffsetInChunk = _indexBuilder.RowsInCurrentChunk;
+
+                _indexBuilder.AddRow(row, batch.Arena);
+
+                if (_indexableColumnNames is { } cols)
+                {
+                    for (int c = 0; c < cols.Length; c++)
+                    {
+                        string columnName = cols[c];
+                        DataValue value = row[columnName];
+                        if (value.IsNull) continue;
+                        // Sidecar-bound values can't survive the source
+                        // batch's pool return (the DataValue copy points at
+                        // an offset that's about to be reused). Skip — the
+                        // column degrades to scan for those rows.
+                        if (value.IsInSidecar) continue;
+                        _pendingColumnEntries![columnName].Add(
+                            new ValueIndexEntry(value, chunkIndex, rowOffsetInChunk));
+                    }
+                }
+            }
+
             _writer ??= _provider.OpenAppendWriter();
             _writer.WriteRowBatch(batch);
             _anyWrites = true;
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Lazy initializer for the in-line index build. Captures the live
+        /// schema's indexable-column set, asks the provider to open/create
+        /// trees for them, and creates an <see cref="Indexing.IncrementalIndexBuilder"/>
+        /// rooted at a placeholder fingerprint (overridden at finalize with
+        /// the real post-commit fingerprint). Called from the first WriteAsync.
+        /// </summary>
+        private void EnsureIndexBuildersInitialized()
+        {
+            // Capture the existing in-memory index for the merge step.
+            // Same lifetime story as the original RebuildIndexNoLock(existingForExtend)
+            // path: RebuildSnapshotAfterMutation no longer disposes the
+            // cached mmap, so this reference's accessor stays alive
+            // through CommitAsync's merge.
+            _existingForMerge = _provider._sourceIndex;
+
+            Schema schema = _provider._snapshot.Schema;
+
+            // Indexable columns: kind-based eligibility, no array columns
+            // (parallel to the rules SourceIndexBuilder.CreateBitmapAccumulators
+            // and Indexer.IndexAsync use).
+            List<string> indexable = new();
+            foreach (ColumnInfo column in schema.Columns)
+            {
+                if (Indexing.SourceIndexBuilder.IsAutoIndexableKind(column.Kind) && !column.IsArray)
+                {
+                    indexable.Add(column.Name);
+                }
+            }
+            _indexableColumnNames = indexable.ToArray();
+
+            // Have the provider open/create trees for any indexable columns
+            // that don't yet have one open. After this call, every column
+            // in _indexableColumnNames has an open MutableBPlusTree we can
+            // GetColumnTreeForAppendSession() on at commit time.
+            _provider.EnsureColumnTreesForIndexableColumnsNoLock();
+
+            _pendingColumnEntries = new Dictionary<string, List<ValueIndexEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (string columnName in _indexableColumnNames)
+            {
+                _pendingColumnEntries[columnName] = new List<ValueIndexEntry>();
+            }
+
+            // Builder needs a fingerprint at construction; it's overridden
+            // at Finalize() with the real post-commit one. Bloom + bitmap
+            // for every column ("Auto" mode parity with Indexer.IndexAsync's
+            // default IndexOptions).
+            SourceIndexBuilder builder = new(
+                bloomAllColumns: true,
+                chunkSize: _indexBuildChunkSize,
+                computeCardinality: true);
+            SourceFingerprint placeholder = new(0, new byte[32]);
+            _indexBuilder = builder.CreateIncrementalBuilder(placeholder);
         }
 
         public Task CommitAsync(CancellationToken cancellationToken = default)
@@ -1823,57 +2011,91 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 throw;
             }
 
-            // PR13a-2 two-phase commit: now that the .datum and
-            // .datum-pkindex commits have succeeded, refresh
-            // .datum-index to match. Eliminates the manual REINDEX step
-            // users would otherwise need after every INSERT.
+            // Phase 3a-wide: refresh the unified .datum-index sidecar from
+            // the in-line build that ran alongside WriteAsync. The append
+            // session already has the per-row bloom / bitmap / zone-map
+            // accumulators populated and per-column tree entries queued —
+            // we don't need Indexer to re-scan the file the way the old
+            // PR13b extend path did.
             //
-            // PR13b: when the existing index is extend-eligible (no
-            // sorted/B+Tree columns), the rebuild carries forward the
-            // prefix's bloom + bitmap + zone-map bytes verbatim and
-            // only scans the appended rows. Otherwise falls back to a
-            // full rescan. RebuildIndexNoLock handles the temp-file
-            // write + atomic rename so the prefix's mmap stays alive
-            // through the merge.
+            // Failure-mode contract (locked in PR13's design): if any of
+            // the steps below fails, the data commit stands. The cache is
+            // invalidated and the on-disk .datum-index becomes Stale (per
+            // IndexValidity) — queries fall back to scan until a manual
+            // REINDEX recovers. We swallow the exception so the user's
+            // INSERT statement doesn't appear to fail when the data is
+            // actually committed.
             //
-            // Failure-mode contract (locked in PR13's design): if this
-            // fails, the data commit stands. The cache is invalidated
-            // and the on-disk .datum-index becomes Stale (per
-            // IndexValidity) — queries fall back to scan until a
-            // manual REINDEX recovers. We swallow the exception so the
-            // user's INSERT statement doesn't appear to fail when the
-            // data is actually committed.
-            //
-            // Only run when an actual append happened — IDENTITY-only
-            // commits (no _anyWrites) leave row count unchanged but
-            // bump the prologue, so we still need to refresh the
-            // fingerprint via extend (existing+empty=existing with new
-            // fingerprint). For now we skip it to match PR13a-2 — the
-            // user can REINDEX if they care about IDENTITY-only commits
-            // making the index Stale.
-            if (_anyWrites)
+            // IDENTITY-only commits (no _anyWrites) bump the prologue and
+            // therefore the fingerprint, but no rows changed; the existing
+            // index is functionally stale on fingerprint mismatch alone.
+            // Match PR13a-2 behaviour and just invalidate.
+            if (_anyWrites && _indexBuilder is not null)
             {
                 try
                 {
-                    _provider.RebuildIndexNoLock(existingForExtend: existingForExtend);
+                    FlushIndexBuildersToProvider(existingForExtend);
                 }
                 catch
                 {
-                    // Best-effort. The data commit succeeded; the index
-                    // is now Stale. Surface via datum_catalog.indexes
-                    // (is_valid = false) so the user can spot it.
+                    _provider.InvalidateSourceIndexCache();
                 }
             }
             else
             {
-                // IDENTITY-only commit: prologue rewrite changes the
-                // fingerprint. Match PR13a-2 behaviour and just
-                // invalidate the in-memory cache; user REINDEXes if
-                // they want acceleration restored.
                 _provider.InvalidateSourceIndexCache();
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Phase 3a-wide commit-time flush: drains the per-column tree entry
+        /// queues into the provider's open <see cref="MutableBPlusTree"/>s,
+        /// finalizes the in-line index build using the post-commit data-file
+        /// fingerprint, merges with <paramref name="existing"/>, and writes
+        /// the result via <see cref="DatumFileTableProviderV2.WriteUnifiedSidecarNoLock"/>.
+        /// </summary>
+        private void FlushIndexBuildersToProvider(SourceIndex? existing)
+        {
+            // Per-column tree inserts. Trees stay open across the call —
+            // the append session's mutation lock keeps concurrent readers
+            // from observing torn state through the open dictionary.
+            if (_pendingColumnEntries is not null)
+            {
+                foreach (KeyValuePair<string, List<ValueIndexEntry>> entry in _pendingColumnEntries)
+                {
+                    MutableBPlusTree? tree = _provider.GetColumnTreeForAppendSession(entry.Key);
+                    if (tree is null) continue;
+                    foreach (ValueIndexEntry e in entry.Value)
+                    {
+                        tree.Insert(e);
+                    }
+                }
+            }
+
+            // Compute the post-commit fingerprint of the .datum file.
+            // The data writer just rewrote the prologue, so the fingerprint
+            // necessarily changed; the in-line builder needs the live one
+            // so the on-disk sidecar matches.
+            SourceFingerprint freshFingerprint;
+            using (FileStream stream = new(
+                _provider._descriptor.FilePath,
+                FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 65536, useAsync: false))
+            {
+                freshFingerprint = SourceFingerprint.ComputeAsync(stream, default)
+                    .GetAwaiter().GetResult();
+            }
+
+            SourceIndex delta = _indexBuilder!.Finalize(freshFingerprint);
+
+            SourceIndex merged = existing is null
+                ? delta
+                : SourceIndex.Merge(existing, delta);
+
+            string tableName = PathDetector.DeriveTableName(_provider._descriptor.FilePath);
+            _provider.WriteUnifiedSidecarNoLock(merged, tableName);
         }
 
         public ValueTask DisposeAsync()
@@ -1892,6 +2114,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     _writer.Dispose();
                     _writer = null;
                 }
+                _indexBuilder?.Dispose();
+                _indexBuilder = null;
             }
             finally
             {

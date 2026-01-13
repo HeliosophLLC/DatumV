@@ -167,7 +167,16 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// <summary>
     /// Finalizes the index after all rows have been observed.
     /// </summary>
-    public SourceIndex Finalize()
+    public SourceIndex Finalize() => Finalize(_fingerprint);
+
+    /// <summary>
+    /// Finalizes the index using <paramref name="fingerprint"/> instead of the
+    /// one captured at construction. Used by <c>DatumAppendSession</c>'s
+    /// in-line index build (Phase 3a) — the post-commit data-file fingerprint
+    /// isn't known when the builder is created (rows haven't been written
+    /// yet), so it's swapped in here.
+    /// </summary>
+    public SourceIndex Finalize(SourceFingerprint fingerprint)
     {
         if (_rowsInCurrentChunk > 0)
         {
@@ -185,8 +194,20 @@ public sealed class IncrementalIndexBuilder : IDisposable
             : null;
 
         IndexSchema indexSchema = new(schema, _totalRowCount);
-        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, bitmapIndexSet);
+        return new SourceIndex(fingerprint, indexSchema, _chunks, bloomFilterSet, bitmapIndexSet);
     }
+
+    /// <summary>
+    /// Number of complete chunks finalized so far. Append-session callers use
+    /// this to compute (chunkIndex, rowOffsetInChunk) for per-column tree
+    /// entries written in lockstep with <see cref="AddRow"/>. Increments
+    /// inside <c>FinalizeCurrentChunk</c>; the in-progress chunk is reported
+    /// separately via <see cref="RowsInCurrentChunk"/>.
+    /// </summary>
+    public int CurrentChunkIndex => _currentChunkIndex;
+
+    /// <summary>Rows added to the current (in-progress) chunk.</summary>
+    public int RowsInCurrentChunk => _rowsInCurrentChunk;
 
     /// <inheritdoc />
     public void Dispose()
