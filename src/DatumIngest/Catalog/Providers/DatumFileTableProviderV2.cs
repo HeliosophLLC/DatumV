@@ -135,6 +135,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private int _pkColumnIndex = -1;
 
     /// <summary>
+    /// Per-column acceleration B+Tree indexes (PR13d), backed by companion
+    /// <c>.datum-bptree-{column}</c> page-COW files alongside the data file.
+    /// Opened on construction and refreshed by <see cref="RebuildIndexNoLock"/>;
+    /// closed on dispose. Read paths route through <see cref="TryGetColumnIndex"/>;
+    /// mutations (insert / delete / update) hold the mutation lock and rewrite
+    /// the relevant trees in place. Empty when no acceleration is built (e.g. a
+    /// fresh table with no rows yet, or before the first index pass).
+    /// </summary>
+    private Dictionary<string, MutableBPlusTree> _columnTrees = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, MutableBPlusTreeColumnIndex> _columnIndexes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
     /// the v2 <c>.datum</c> file, parses its footer, and (when the file
     /// declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>)
@@ -153,6 +165,96 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _manifest = TryLoadManifest(descriptor);
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
         TryOpenPrimaryKeyIndex();
+        OpenColumnIndexes();
+    }
+
+    /// <summary>
+    /// Discovers and opens every <c>.datum-bptree-{column}</c> file that lives
+    /// alongside this provider's data file and matches a column in the live
+    /// schema. Files that don't match a current column (DROPped column with
+    /// stale tree, renamed column, etc.) are left on disk but not opened —
+    /// REINDEX cleans them up.
+    /// </summary>
+    private void OpenColumnIndexes()
+    {
+        Schema schema = _snapshot.Schema;
+
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            string treePath = GetColumnIndexPath(_descriptor.FilePath, column.Name);
+
+            if (!File.Exists(treePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                MutableBPlusTree tree = MutableBPlusTree.Open(treePath);
+                _columnTrees[column.Name] = tree;
+                _columnIndexes[column.Name] = new MutableBPlusTreeColumnIndex(tree);
+            }
+            catch
+            {
+                // Silently skip a tree that won't open (torn write, version
+                // mismatch); the column degrades to scan-based access until
+                // REINDEX rebuilds it. Don't crash provider construction.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the per-column acceleration B+Tree path companion for a given
+    /// data file + column. Column name is sanitized so non-alphanumeric chars
+    /// don't collide with the path separator.
+    /// </summary>
+    internal static string GetColumnIndexPath(string datumPath, string columnName)
+    {
+        string sanitized = SanitizeColumnNameForPath(columnName);
+        return Path.ChangeExtension(datumPath, $".datum-bptree-{sanitized}");
+    }
+
+    private static string SanitizeColumnNameForPath(string columnName)
+    {
+        Span<char> buffer = stackalloc char[columnName.Length];
+        for (int i = 0; i < columnName.Length; i++)
+        {
+            char c = columnName[i];
+            buffer[i] = char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_';
+        }
+        return new string(buffer);
+    }
+
+    /// <inheritdoc />
+    public bool TryGetColumnIndex(string columnName, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Indexing.IColumnIndex? index)
+    {
+        if (_columnIndexes.TryGetValue(columnName, out MutableBPlusTreeColumnIndex? tree))
+        {
+            index = tree;
+            return true;
+        }
+        index = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Closes every per-column tree and clears the dictionary. Called from
+    /// REINDEX (before a rebuild rewrites the files) and from
+    /// <see cref="Dispose"/>. The caller must hold the mutation lock when
+    /// invoking this during a rebuild — concurrent readers that captured a
+    /// <see cref="MutableBPlusTreeColumnIndex"/> reference before the close
+    /// keep working through their stale reference for the duration of the
+    /// rebuild window; any new TryGetColumnIndex call after close returns
+    /// <c>false</c> until the next <see cref="OpenColumnIndexes"/>.
+    /// </summary>
+    private void CloseColumnIndexes()
+    {
+        foreach (MutableBPlusTree tree in _columnTrees.Values)
+        {
+            tree.Dispose();
+        }
+        _columnTrees.Clear();
+        _columnIndexes.Clear();
     }
 
     /// <summary>
@@ -680,6 +782,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _mappedIndexSet?.Dispose();
         _pkIndex?.Dispose();
         _pkIndex = null;
+        CloseColumnIndexes();
 
         // Dispose whichever snapshot is current; in-flight scans hold
         // their own refs so they remain safe until they finish.
@@ -1390,13 +1493,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // whose pruning is wrong — for INSERT, chunks past the
         // existing tail are invisible; for UPDATE, the new value's
         // bloom/bitmap entries don't exist anywhere in the old index.
-        // Setting _sourceIndex = null forces the read path back to
-        // scan during the rebuild window. The caller's
-        // existingForExtend reference (when non-null) keeps the
-        // SourceIndex object — and therefore the mmap accessor it
-        // reads through — alive for the merge step. _mappedIndexSet
-        // is disposed below once the new file is written.
         _sourceIndex = null;
+
+        // PR13d: per-column tree files are also rewritten by Indexer.
+        // Close the in-memory MutableBPlusTree handles up front so the
+        // file rename below isn't blocked by FileShare.None on the open
+        // tree files. Concurrent readers that already captured an
+        // IColumnIndex reference keep working through it (the underlying
+        // FileStream stays alive via that reference until they release).
+        CloseColumnIndexes();
 
         string finalPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-index";
         string tempPath = finalPath + ".tmp";
@@ -1420,26 +1525,20 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         }
         catch
         {
-            // Best-effort cleanup of the orphaned temp file. The
-            // pre-existing on-disk .datum-index is left in place but
-            // its fingerprint no longer matches the data file → next
-            // open sees it as Stale.
             try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
             InvalidateSourceIndexCache();
+            // Reopen any per-column trees that the failed rebuild left
+            // behind on disk so reads can still accelerate against
+            // whatever made it through.
+            OpenColumnIndexes();
             throw;
         }
 
-        // Tear down the old mapping and atomically promote the
-        // freshly-written temp file. File.Move(overwrite: true) is
-        // atomic on Windows when source and destination are on the
-        // same volume.
         InvalidateSourceIndexCache();
         File.Move(tempPath, finalPath, overwrite: true);
 
-        // Reload the freshly-built sidecar so subsequent
-        // GetSourceIndex calls return live data without waiting for a
-        // provider reopen.
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(_descriptor);
+        OpenColumnIndexes();
     }
 
     /// <summary>

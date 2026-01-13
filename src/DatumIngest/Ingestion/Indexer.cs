@@ -2,6 +2,7 @@ using System.Diagnostics;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.BTree.Mutable;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -72,52 +73,138 @@ public sealed class Indexer(Pool pool)
 
         string tableName = PathDetector.DeriveTableName(datumPath);
 
-        SourceIndex index;
-        long bytesWritten;
-        long rowCount = 0;
+        // PR13d: per-column B+Tree trees live in companion files. Wipe the
+        // previous build's trees (if any) up front so a partial-failure mid-
+        // build doesn't leave stale entries from a different column kind.
+        DeleteExistingColumnTreeFiles(datumPath);
 
+        Schema providerSchema = provider.GetSchema();
+        IReadOnlySet<string> indexableColumns = SourceIndexBuilder.ResolveAutoIndexColumns(providerSchema);
+
+        // Open one MutableBPlusTree per indexable column, keyed by column name.
+        // The dictionary maps columnName → (tree, schemaOrdinal). schemaOrdinal
+        // lets the per-row indexing path skip a name lookup once per row per
+        // column.
+        Dictionary<string, ColumnTreeBuild> columnTrees = new(StringComparer.OrdinalIgnoreCase);
         try
         {
-            await foreach (RowBatch batch in provider
-                .ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
-                .ConfigureAwait(false))
+            foreach (ColumnInfo column in providerSchema.Columns)
             {
-                incremental.AddBatch(batch);
-
-                rowCount += batch.Count;
-
-                pool.ReturnRowBatch(batch);
+                if (!indexableColumns.Contains(column.Name))
+                {
+                    continue;
+                }
+                string treePath = DatumFileTableProviderV2.GetColumnIndexPath(datumPath, column.Name);
+                MutableBPlusTree tree = MutableBPlusTree.Create(
+                    treePath, column.Kind, allowDuplicates: true);
+                columnTrees[column.Name] = new ColumnTreeBuild(tree, column.Kind);
             }
 
-            index = incremental.Finalize();
+            SourceIndex index;
+            long bytesWritten;
+            long rowCount = 0;
+            int currentChunkIndex = 0;
+            int rowsInCurrentChunk = 0;
+            int chunkSize = options.ChunkSize;
 
-            SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
+            try
+            {
+                await foreach (RowBatch batch in provider
+                    .ScanAsync(requiredColumns: null, filterHint: null, targetArena: null, cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    for (int r = 0; r < batch.Count; r++)
+                    {
+                        Row row = batch[r];
+                        incremental.AddRow(row, batch.Arena);
 
-            await using Stream outputStream = await destination.OpenAsync(cancellationToken)
-                .ConfigureAwait(false);
-            UnifiedIndexWriter.Write(indexSet, outputStream);
-            bytesWritten = outputStream.Length;
+                        // Mirror the per-column tree inserts. ChunkIndex /
+                        // RowOffsetInChunk track the same chunk boundaries the
+                        // incremental builder uses (chunkSize from options).
+                        foreach (KeyValuePair<string, ColumnTreeBuild> kvp in columnTrees)
+                        {
+                            DataValue value = row[kvp.Key];
+                            if (value.IsNull) continue;
+                            // Sidecar-backed values can't currently be keyed
+                            // through MutableBPlusTree (ValueIndexEntry holds
+                            // a DataValue copy that goes stale once the
+                            // owning RowBatch returns to the pool). Skip them
+                            // — those columns degrade to scan.
+                            if (value.IsInSidecar) continue;
+                            kvp.Value.Tree.Insert(new ValueIndexEntry(value, currentChunkIndex, rowsInCurrentChunk));
+                        }
+
+                        rowsInCurrentChunk++;
+                        rowCount++;
+
+                        if (rowsInCurrentChunk >= chunkSize)
+                        {
+                            currentChunkIndex++;
+                            rowsInCurrentChunk = 0;
+                        }
+                    }
+
+                    pool.ReturnRowBatch(batch);
+                }
+
+                index = incremental.Finalize();
+
+                SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
+
+                await using Stream outputStream = await destination.OpenAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                UnifiedIndexWriter.Write(indexSet, outputStream);
+                bytesWritten = outputStream.Length;
+            }
+            finally
+            {
+                incremental.Dispose();
+            }
+
+            sw.Stop();
+
+            return new IndexResult(
+                OutputPath: destination.FilePath,
+                RowCount: rowCount,
+                ChunkCount: index.Chunks.Count,
+                BytesWritten: bytesWritten,
+                Schema: index.Schema.Schema,
+                Fingerprint: fingerprint,
+                IndexedColumns: CollectIndexedColumnNames(index, columnTrees.Keys),
+                BloomColumns: CollectBloomColumnNames(index),
+                SortedColumns: columnTrees.Keys.ToArray(),
+                BitmapColumns: CollectBitmapColumnNames(index),
+                DeferredReindexColumns: Array.Empty<string>(),
+                Elapsed: sw.Elapsed);
         }
         finally
         {
-            incremental.Dispose();
+            foreach (ColumnTreeBuild build in columnTrees.Values)
+            {
+                build.Tree.Dispose();
+            }
         }
+    }
 
-        sw.Stop();
+    private readonly record struct ColumnTreeBuild(MutableBPlusTree Tree, DataKind KeyKind);
 
-        return new IndexResult(
-            OutputPath: destination.FilePath,
-            RowCount: rowCount,
-            ChunkCount: index.Chunks.Count,
-            BytesWritten: bytesWritten,
-            Schema: index.Schema.Schema,
-            Fingerprint: fingerprint,
-            IndexedColumns: CollectIndexedColumnNames(index),
-            BloomColumns: CollectBloomColumnNames(index),
-            SortedColumns: Array.Empty<string>(),
-            BitmapColumns: CollectBitmapColumnNames(index),
-            DeferredReindexColumns: Array.Empty<string>(),
-            Elapsed: sw.Elapsed);
+    private static void DeleteExistingColumnTreeFiles(string datumPath)
+    {
+        string directory = Path.GetDirectoryName(datumPath) ?? ".";
+        string baseName = Path.GetFileNameWithoutExtension(datumPath);
+        string prefix = baseName + ".datum-bptree-";
+
+        try
+        {
+            foreach (string path in Directory.EnumerateFiles(directory, prefix + "*"))
+            {
+                try { File.Delete(path); } catch { }
+            }
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Directory doesn't exist yet — nothing to clean.
+        }
     }
 
     /// <summary>
@@ -154,6 +241,30 @@ public sealed class Indexer(Pool pool)
         SourceIndex merged;
         long bytesWritten;
 
+        // PR13d: open existing per-column trees and append delta-row entries.
+        // The chunk index for delta rows starts at existing.Chunks.Count
+        // (matches SourceIndex.Merge's shifted chunk numbering).
+        Schema providerSchema = provider.GetSchema();
+        IReadOnlySet<string> indexableColumns = SourceIndexBuilder.ResolveAutoIndexColumns(providerSchema);
+        Dictionary<string, ColumnTreeBuild> columnTrees = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ColumnInfo column in providerSchema.Columns)
+        {
+            if (!indexableColumns.Contains(column.Name)) continue;
+            string treePath = DatumFileTableProviderV2.GetColumnIndexPath(datumPath, column.Name);
+            // If no tree exists yet (extending an index that pre-dates per-column
+            // trees), create one — the existing rows it would have covered are
+            // unrepresented but acceleration for new rows still works.
+            MutableBPlusTree tree = File.Exists(treePath)
+                ? MutableBPlusTree.Open(treePath)
+                : MutableBPlusTree.Create(treePath, column.Kind, allowDuplicates: true);
+            columnTrees[column.Name] = new ColumnTreeBuild(tree, column.Kind);
+        }
+
+        int existingChunkCount = existing.Chunks.Count;
+        int deltaChunkIndex = 0;
+        int rowsInCurrentDeltaChunk = 0;
+        int chunkSize = options.ChunkSize;
+
         try
         {
             await foreach (RowBatch batch in provider
@@ -170,8 +281,26 @@ public sealed class Indexer(Pool pool)
                 int skip = (int)Math.Max(0, existingRowCount - rowsScanned);
                 for (int r = skip; r < batch.Count; r++)
                 {
-                    incremental.AddRow(batch[r], batch.Arena);
+                    Row row = batch[r];
+                    incremental.AddRow(row, batch.Arena);
+
+                    int absoluteChunkIndex = existingChunkCount + deltaChunkIndex;
+                    foreach (KeyValuePair<string, ColumnTreeBuild> kvp in columnTrees)
+                    {
+                        DataValue value = row[kvp.Key];
+                        if (value.IsNull) continue;
+                        if (value.IsInSidecar) continue;
+                        kvp.Value.Tree.Insert(new ValueIndexEntry(value, absoluteChunkIndex, rowsInCurrentDeltaChunk));
+                    }
+
+                    rowsInCurrentDeltaChunk++;
                     deltaRowCount++;
+
+                    if (rowsInCurrentDeltaChunk >= chunkSize)
+                    {
+                        deltaChunkIndex++;
+                        rowsInCurrentDeltaChunk = 0;
+                    }
                 }
                 rowsScanned += batch.Count;
                 pool.ReturnRowBatch(batch);
@@ -190,6 +319,10 @@ public sealed class Indexer(Pool pool)
         finally
         {
             incremental.Dispose();
+            foreach (ColumnTreeBuild build in columnTrees.Values)
+            {
+                build.Tree.Dispose();
+            }
         }
 
         sw.Stop();
@@ -201,9 +334,9 @@ public sealed class Indexer(Pool pool)
             BytesWritten: bytesWritten,
             Schema: merged.Schema.Schema,
             Fingerprint: fingerprint,
-            IndexedColumns: CollectIndexedColumnNames(merged),
+            IndexedColumns: CollectIndexedColumnNames(merged, columnTrees.Keys),
             BloomColumns: CollectBloomColumnNames(merged),
-            SortedColumns: Array.Empty<string>(),
+            SortedColumns: columnTrees.Keys.ToArray(),
             BitmapColumns: CollectBitmapColumnNames(merged),
             DeferredReindexColumns: Array.Empty<string>(),
             Elapsed: sw.Elapsed);
@@ -265,6 +398,15 @@ public sealed class Indexer(Pool pool)
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
         foreach (string name in CollectBloomColumnNames(index)) names.Add(name);
         foreach (string name in CollectBitmapColumnNames(index)) names.Add(name);
+        return names.ToArray();
+    }
+
+    private static IReadOnlyList<string> CollectIndexedColumnNames(SourceIndex index, IEnumerable<string> columnTreeColumns)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in CollectBloomColumnNames(index)) names.Add(name);
+        foreach (string name in CollectBitmapColumnNames(index)) names.Add(name);
+        foreach (string name in columnTreeColumns) names.Add(name);
         return names.ToArray();
     }
 
