@@ -102,7 +102,13 @@ public abstract class FeatureManifest
 }
 
 /// <summary>
-/// Feature manifest for numeric columns (<see cref="DataKind.Float32"/>, <see cref="DataKind.UInt8"/>).
+/// Feature manifest for numeric scalar columns. Covers all integer kinds
+/// (<see cref="DataKind.Int8"/>..<see cref="DataKind.Int128"/>,
+/// <see cref="DataKind.UInt8"/>..<see cref="DataKind.UInt128"/>) and all float kinds
+/// (<see cref="DataKind.Float16"/>, <see cref="DataKind.Float32"/>, <see cref="DataKind.Float64"/>),
+/// plus <see cref="DataKind.Duration"/> with values expressed in seconds.
+/// Int128/UInt128 statistics are computed via a <see cref="double"/> intermediate and
+/// lose precision past 2^53; <see cref="DataKind.Decimal"/> is not yet routed here.
 /// Includes descriptive statistics and histogram.
 /// </summary>
 public sealed class NumericFeatureManifest : FeatureManifest
@@ -316,7 +322,10 @@ public sealed class BinaryFeatureManifest : FeatureManifest
 }
 
 /// <summary>
-/// Feature manifest for temporal columns (<see cref="DataKind.Date"/>, <see cref="DataKind.DateTime"/>).
+/// Feature manifest for temporal columns
+/// (<see cref="DataKind.Date"/>, <see cref="DataKind.DateTime"/>, <see cref="DataKind.Time"/>).
+/// <see cref="Earliest"/>/<see cref="Latest"/> are ISO 8601 strings — date for Date,
+/// <c>HH:mm:ss.FFFFFFF</c> for Time, and full ISO timestamp for DateTime.
 /// </summary>
 public sealed class TemporalFeatureManifest : FeatureManifest
 {

@@ -135,6 +135,106 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_Float16Column_ProducesNumericFeatureManifest()
+    {
+        ColumnLookup columnLookup = new (["weight"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat16((Half)1.5f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat16((Half)2.5f)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromFloat16((Half)3.5f)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["weight"] = DataKind.Float16 };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Float16, feature.Kind);
+        Assert.Equal(1.5, feature.Min, 1e-3);
+        Assert.Equal(3.5, feature.Max, 1e-3);
+        Assert.Equal(2.5, feature.Mean, 1e-3);
+    }
+
+    [Fact]
+    public void Build_Int128Column_ProducesNumericFeatureManifest()
+    {
+        ColumnLookup columnLookup = new (["big"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromInt128((Int128)10)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromInt128((Int128)20)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromInt128((Int128)30)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["big"] = DataKind.Int128 };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Int128, feature.Kind);
+        Assert.Equal(10.0, feature.Min);
+        Assert.Equal(30.0, feature.Max);
+    }
+
+    [Fact]
+    public void Build_UInt128Column_ProducesNumericFeatureManifest()
+    {
+        ColumnLookup columnLookup = new (["big"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromUInt128((UInt128)100)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromUInt128((UInt128)200)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["big"] = DataKind.UInt128 };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.UInt128, feature.Kind);
+        Assert.Equal(100.0, feature.Min);
+        Assert.Equal(200.0, feature.Max);
+    }
+
+    [Fact]
+    public void Build_TimeColumn_ProducesTemporalFeatureManifest()
+    {
+        ColumnLookup columnLookup = new (["clock"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromTime(new TimeOnly(8, 30, 0))), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromTime(new TimeOnly(17, 45, 12))), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["clock"] = DataKind.Time };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+
+        TemporalFeatureManifest feature = Assert.IsType<TemporalFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Time, feature.Kind);
+        Assert.StartsWith("08:30:00", feature.Earliest);
+        Assert.StartsWith("17:45:12", feature.Latest);
+    }
+
+    [Fact]
+    public void Build_DurationColumn_ProducesNumericFeatureManifestInSeconds()
+    {
+        ColumnLookup columnLookup = new (["latency"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDuration(TimeSpan.FromSeconds(1))), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDuration(TimeSpan.FromSeconds(5))), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDuration(TimeSpan.FromSeconds(9))), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["latency"] = DataKind.Duration };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Duration, feature.Kind);
+        Assert.Equal(1.0, feature.Min);
+        Assert.Equal(9.0, feature.Max);
+        Assert.Equal(5.0, feature.Mean, 1e-10);
+    }
+
+    [Fact]
     public void Build_MultipleColumns_ProducesCorrectTypes()
     {
         ColumnLookup columnLookup = new (["id", "name", "score"]);

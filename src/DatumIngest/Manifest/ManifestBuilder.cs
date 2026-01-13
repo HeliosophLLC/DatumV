@@ -184,14 +184,19 @@ public static class ManifestBuilder
 
         return kind switch
         {
-            DataKind.Float32 or DataKind.UInt8
-                or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-                or DataKind.Int32 or DataKind.UInt32
-                or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64
+            // Int128/UInt128 are routed through Numeric for v1; the double intermediate
+            // loses precision past 2^53 but Min/Max/Mean/etc. remain useful for planner
+            // and ML-feature consumers. Dedicated 128-bit accumulator is a follow-up.
+            // Duration is routed here too — NumericAccumulator extracts TotalSeconds, so
+            // Min/Max/Mean values in the manifest are seconds.
+            DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+                or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
+                or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+                or DataKind.Duration
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Date or DataKind.DateTime or DataKind.Time => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
             _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK)
         };
