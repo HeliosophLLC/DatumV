@@ -523,32 +523,6 @@ public sealed class UnifiedIndexRoundTripTests : ServiceTestBase
         return new SourceIndex(fingerprint, indexSchema, chunks);
     }
 
-    /// <summary>
-    /// Builds a B+Tree from sorted entries and returns the header and raw pages.
-    /// Uses the same pattern as <c>BPlusTreeRoundTripTests.BuildTree</c>.
-    /// </summary>
-    private static (BPlusTreeSectionHeader Header, byte[][] Pages) BuildBPlusTree(
-        ValueIndexEntry[] entries, string columnName, DataKind keyKind)
-    {
-        using MemoryStream stream = new();
-        using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-
-        BPlusTreeSectionHeader? header = BPlusTreeBulkLoader.Build(
-            entries, columnName, keyKind, writer);
-
-        Assert.NotNull(header);
-
-        stream.Position = 0;
-        using BinaryReader binaryReader = new(stream, Encoding.UTF8, leaveOpen: true);
-        BPlusTreeSectionHeader readHeader = BPlusTreeBulkLoader.ReadSectionHeader(binaryReader);
-
-        byte[][] pages = new byte[readHeader.PageCount][];
-
-        for (uint pageIndex = 0; pageIndex < readHeader.PageCount; pageIndex++)
-        {
-            pages[pageIndex] = binaryReader.ReadBytes(BPlusTreeConstants.PageSize);
-        }
-
-        return (readHeader, pages);
-    }
+    // PR13d (v8): BuildBPlusTree helper retired alongside the BTreePages
+    // section. Per-column tree round-trip coverage lives in MutableBPlusTreeTests.
 }

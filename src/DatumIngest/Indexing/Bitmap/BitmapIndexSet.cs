@@ -1,13 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Indexing.Sorted;
-using DatumIngest.Indexing.BTree;
 
 namespace DatumIngest.Indexing.Bitmap;
 
 /// <summary>
 /// Collection of <see cref="BitmapColumnIndex"/> instances keyed by column name.
-/// Analogous to <see cref="SortedIndex"/> and <see cref="BPlusTreeIndexSet"/>
-/// but for bitmap-backed indexes that provide per-value, per-chunk bitsets.
+/// Provides per-value, per-chunk bitsets for low-cardinality columns inside the
+/// unified <c>.datum-index</c> sidecar.
 /// </summary>
 internal sealed class BitmapIndexSet
 {

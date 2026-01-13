@@ -11,9 +11,7 @@ namespace DatumIngest.Execution.Operators;
 /// <summary>
 /// Sort-merge join operator that joins two index-ordered input streams using a
 /// two-pointer algorithm. Each input is backed by an <see cref="IndexScanOperator"/>
-/// traversing either a <see cref="Indexing.Sorted.SortedIndex"/> (memory-mapped) or a
-/// <see cref="Indexing.BTree.BPlusTreeColumnIndex"/> (B+Tree leaf chain), both of
-/// which yield entries in ascending key order. Requires O(k) memory where k is the
+/// traversing an <see cref="Indexing.IColumnIndex"/> in ascending key order. Requires O(k) memory where k is the
 /// maximum number of right-side duplicates for a single key value — no hash table
 /// is constructed.
 /// <para>

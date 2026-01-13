@@ -7,10 +7,9 @@ using DatumIngest.Model;
 namespace DatumIngest.Indexing.BTree.Mutable;
 
 /// <summary>
-/// Encodes and decodes mutable B+Tree pages. Distinct from <see cref="BPlusTreePageCodec"/>
-/// because mutable pages: (1) leaves are uncompressed (splits stay simple),
-/// (2) leaves carry a payload-length field rather than uncompressed/compressed sizes,
-/// (3) free pages encode a next-free-page-id link inline.
+/// Encodes and decodes mutable B+Tree pages. Pages are 8192 bytes with the layout below;
+/// leaves are uncompressed (splits stay simple), leaves carry a payload-length field, and
+/// free pages encode a next-free-page-id link inline.
 /// </summary>
 /// <remarks>
 /// <para>Leaf page layout (8192 bytes):</para>

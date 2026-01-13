@@ -24,7 +24,7 @@ internal sealed class MappedSourceIndexSet : IDisposable
 
     /// <summary>
     /// The shared read-only view accessor covering the entire mapped file.
-    /// Used by mapped types (e.g. <see cref="SortedIndex"/>) to read data on demand.
+    /// Used by mmap-backed accessors (e.g. <see cref="Bloom.BloomFilter"/>) to read data on demand.
     /// </summary>
     internal MemoryMappedViewAccessor SharedAccessor => _sharedAccessor;
 
