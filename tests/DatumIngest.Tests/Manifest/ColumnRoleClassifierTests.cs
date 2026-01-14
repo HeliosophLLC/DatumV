@@ -79,8 +79,11 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     [Fact]
     public void Classify_TrivialVocabularyInteger_ReturnsCategorical()
     {
+        // Trivial Int8 vocabulary (5 codes packed into a narrow range) — the
+        // typical shape of a category code column.
         NumericFeatureManifest manifest = MakeNumericManifest(
-            DataKind.Int8, estimatedDistinctCount: 5, nullRatio: 0.0);
+            DataKind.Int8, estimatedDistinctCount: 5, nullRatio: 0.0,
+            min: 1, max: 5);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
 
@@ -90,8 +93,13 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     [Fact]
     public void Classify_StrongRepetitionInteger_ReturnsCategorical()
     {
+        // 500 store codes scattered across [1, 1500] — non-contiguous (escapes the
+        // contiguous-integer-measure path) and range/NDV = 3 (escapes the sparse-
+        // integer-measure path), leaving strong repetition (distinctRatio = 0.05)
+        // as the dominant signal.
         NumericFeatureManifest manifest = MakeNumericManifest(
-            DataKind.Int32, estimatedDistinctCount: 500, nullRatio: 0.0);
+            DataKind.Int32, estimatedDistinctCount: 500, nullRatio: 0.0,
+            min: 1, max: 1500);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
 
@@ -103,6 +111,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     {
         NumericFeatureManifest manifest = MakeNumericManifest(
             DataKind.Int32, estimatedDistinctCount: 500, nullRatio: 0.0,
+            min: 1, max: 1500,
             topKValues: [new FrequencyEntry("1", 600), new FrequencyEntry("2", 500), new FrequencyEntry("3", 200)]);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 2000);
@@ -182,6 +191,78 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000000);
 
         Assert.Equal(ColumnRole.ForeignKey, role);
+    }
+
+    // ─────────────── Measure (sparse range) ───────────────
+
+    /// <summary>
+    /// Image-dimension pattern: low NDV (only ~50 distinct widths) but the values
+    /// span a wide range (e.g. 200..1024). This is not a vocabulary — it's a
+    /// numeric measurement sampled from a continuous domain. Was previously
+    /// mis-classified as Categorical because NDV ≤ TrivialVocabularySize.
+    /// </summary>
+    [Fact]
+    public void Classify_LowNdvWideRangeInteger_ReturnsMeasure()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int32, estimatedDistinctCount: 50, nullRatio: 0.0,
+            min: 200, max: 1024);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 120000);
+
+        Assert.Equal(ColumnRole.Measure, role);
+    }
+
+    /// <summary>
+    /// File-byte-length pattern: high NDV (~50K distinct sizes) across a very
+    /// wide range (50KB..10MB), with the minimum well above autoincrement-like
+    /// floor values. Was previously mis-classified as ForeignKey because
+    /// NDV &gt; ForeignKeyMinDistinctCount.
+    /// </summary>
+    [Fact]
+    public void Classify_HighNdvWideRangeMeasurement_ReturnsMeasure()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int64, estimatedDistinctCount: 50000, nullRatio: 0.0,
+            min: 51200, max: 10_485_760);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 120000);
+
+        Assert.Equal(ColumnRole.Measure, role);
+    }
+
+    /// <summary>
+    /// Sparse autoincrement-style ID: high NDV across a wide range, but min ≈ 1
+    /// is the giveaway that values come from a 1-based ID sequence. Stays
+    /// ForeignKey — the wide-range-measurement heuristic must not catch this.
+    /// </summary>
+    [Fact]
+    public void Classify_HighNdvWideRangeAutoIncrementId_ReturnsForeignKey()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int32, estimatedDistinctCount: 5000, nullRatio: 0.0,
+            min: 1, max: 206209);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000000);
+
+        Assert.Equal(ColumnRole.ForeignKey, role);
+    }
+
+    /// <summary>
+    /// File-channels pattern: tiny vocabulary (1, 3, 4) with a narrow range.
+    /// Regression check that the sparse-measurement heuristic does not steal
+    /// genuine small-vocabulary categoricals.
+    /// </summary>
+    [Fact]
+    public void Classify_LowNdvNarrowRangeInteger_StaysCategorical()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.UInt8, estimatedDistinctCount: 3, nullRatio: 0.0,
+            min: 1, max: 4);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 120000);
+
+        Assert.Equal(ColumnRole.Categorical, role);
     }
 
     // ─────────────── Measure ───────────────

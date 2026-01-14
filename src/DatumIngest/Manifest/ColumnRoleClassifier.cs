@@ -61,6 +61,39 @@ public static class ColumnRoleClassifier
     private const double ContiguousRangeCoverage = 0.9;
 
     /// <summary>
+    /// Minimum observed range (max − min) for the sparse-integer-measurement heuristic
+    /// to engage. Below this, narrow-domain integers stay in the categorical / contiguous
+    /// paths above (day-of-week, month, channel-count etc.).
+    /// </summary>
+    private const double SparseMeasureMinRange = 100.0;
+
+    /// <summary>
+    /// Minimum range-to-NDV ratio for an integer column to be classified as a sparse
+    /// numeric measurement. Values sampled from a continuous physical domain (image
+    /// dimensions, file sizes, encoded fixed-point measurements) typically span a range
+    /// many times their distinct count; densely-packed FK ID sequences do not.
+    /// </summary>
+    private const double SparseMeasureRangeToDistinctRatio = 4.0;
+
+    /// <summary>
+    /// Minimum count of distinct values for the sparse-measurement heuristic. Below this,
+    /// the column has too little signal to distinguish a measurement from a low-cardinality
+    /// vocabulary that happens to span a wide range.
+    /// </summary>
+    private const long SparseMeasureMinDistinctCount = 5;
+
+    /// <summary>
+    /// Lower bound on <c>Min</c> required to classify a high-NDV integer column as a sparse
+    /// measurement. Autoincrement-style ID columns typically start at 0 or 1; a
+    /// <c>Min</c> meaningfully above that floor is the only purely-statistical signal we
+    /// have to distinguish a wide-range measurement (file_byte_length: min ≈ 50KB) from a
+    /// sparse ID column (instacart product_id: min = 1, max = 206209). Only applied when
+    /// NDV is above the FK threshold; low-NDV cases are unambiguous (a 50-distinct column
+    /// over a 1000-wide range is never a vocabulary).
+    /// </summary>
+    private const double SparseMeasureMinValueFloor = 100.0;
+
+    /// <summary>
     /// Classifies a column's semantic role from its manifest statistics.
     /// </summary>
     /// <param name="manifest">The feature manifest for the column.</param>
@@ -142,6 +175,16 @@ public static class ColumnRoleClassifier
         // Columns covering every integer in [min, max] are bounded numeric measures
         // (e.g. days_since_prior_order 0–30, age 0–99), not categorical dimensions.
         if (IsContiguousIntegerMeasure(manifest))
+        {
+            return ColumnRole.Measure;
+        }
+
+        // Sparse numeric measurement: range substantially wider than NDV → Measure.
+        // Catches image-dimension columns (file_width: ~50 distinct in [200, 1024])
+        // and file-size columns (file_byte_length: ~50K distinct in [50KB, 10MB]).
+        // High-NDV cases require Min above an autoincrement-floor to avoid stealing
+        // sparse 1-based ID sequences from the FK bucket.
+        if (IsSparseIntegerMeasure(manifest))
         {
             return ColumnRole.Measure;
         }
@@ -309,6 +352,59 @@ public static class ColumnRoleClassifier
         double coverage = ndv / rangeSpan;
 
         return coverage >= ContiguousRangeCoverage;
+    }
+
+    /// <summary>
+    /// Detects integer columns whose observed range is substantially wider than their
+    /// distinct count, indicating values sampled from a continuous physical domain rather
+    /// than drawn from a small categorical vocabulary or a packed ID sequence.
+    /// </summary>
+    /// <remarks>
+    /// Two regimes:
+    /// <list type="bullet">
+    /// <item><description>
+    /// Low-NDV (NDV ≤ <see cref="ForeignKeyMinDistinctCount"/>): a column with only a few
+    /// dozen distinct values that span a wide range is unambiguously a measurement —
+    /// image widths/heights are the canonical case (e.g. ~50 distinct values in [200, 1024]).
+    /// </description></item>
+    /// <item><description>
+    /// High-NDV: the heuristic additionally requires <c>Min</c> ≥
+    /// <see cref="SparseMeasureMinValueFloor"/> to distinguish wide-range measurements
+    /// (file_byte_length: ~50K distinct values in [50KB, 10MB]) from sparse autoincrement
+    /// ID sequences (e.g. 5K distinct product IDs in [1, 206209]).
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsSparseIntegerMeasure(FeatureManifest manifest)
+    {
+        if (manifest is not NumericFeatureManifest { IntegerValued: true } numeric)
+        {
+            return false;
+        }
+
+        long ndv = manifest.EstimatedDistinctCount;
+        if (ndv < SparseMeasureMinDistinctCount)
+        {
+            return false;
+        }
+
+        double range = numeric.Max - numeric.Min;
+        if (range < SparseMeasureMinRange)
+        {
+            return false;
+        }
+
+        if (range / ndv < SparseMeasureRangeToDistinctRatio)
+        {
+            return false;
+        }
+
+        if (ndv > ForeignKeyMinDistinctCount && numeric.Min < SparseMeasureMinValueFloor)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool IsIntegerKind(DataKind kind)
