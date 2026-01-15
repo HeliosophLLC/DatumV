@@ -292,17 +292,79 @@ public sealed class InsertValuesTests : IAsyncLifetime
     }
 
     [Fact]
-    public void InsertValues_NonLiteralExpression_RejectedUntilSelect()
+    public async Task InsertValues_ComputedScalar_OnePlusTwo_Succeeds()
     {
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
-        // 1 + 2 is a binary expression, not a literal — VALUES path
-        // accepts literals only in PR10c.
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("INSERT INTO t VALUES (1 + 2)"));
-        Assert.Contains("literal", ex.Message);
+        // VALUES routes through the expression evaluator, so binary /
+        // function-call expressions evaluate the same way they would in a
+        // SELECT projection.
+        catalog.Plan("INSERT INTO t VALUES (1 + 2)");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+        List<int> rows = await ScanIntColumn(catalog["t"], "id");
+        Assert.Equal([3], rows);
+    }
+
+    [Fact]
+    public void InsertValues_ColumnReferenceInExpression_Throws()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32)");
+
+        // VALUES expressions evaluate against an empty row — column
+        // references can't bind to anything and must fail loudly. Use
+        // INSERT … SELECT when the value comes from another table.
+        Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t VALUES (some_col)"));
+    }
+
+    [Fact]
+    public async Task InsertValues_ArrayLiteral_StringArray_Succeeds()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, tags String[])");
+
+        catalog.Plan("INSERT INTO t (id, tags) VALUES (1, ['a', 'b', 'c'])");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Single(rows);
+        DataValue tags = rows[0][1];
+        Assert.True(tags.IsArray);
+        Assert.Equal(DataKind.String, tags.Kind);
+    }
+
+    [Fact]
+    public async Task InsertValues_ArrayLiteral_Int32Array_Succeeds()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[])");
+
+        catalog.Plan("INSERT INTO t (id, scores) VALUES (7, [10, 20, 30])");
+
+        Assert.Equal(1, catalog["t"].GetRowCount());
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        DataValue scores = rows[0][1];
+        Assert.True(scores.IsArray);
+        Assert.Equal(DataKind.Int32, scores.Kind);
+    }
+
+    [Fact]
+    public void InsertValues_ArrayKindMismatch_Throws()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, scores Int32[])");
+
+        // Array-of-String into Int32[] target: kinds don't match.
+        Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t (id, scores) VALUES (1, ['a','b'])"));
     }
 
     // INSERT SELECT (the PR10c'-NotYetSupported case) — covered in

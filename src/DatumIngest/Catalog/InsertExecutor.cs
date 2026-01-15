@@ -1,4 +1,5 @@
 using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -19,9 +20,12 @@ namespace DatumIngest.Catalog;
 /// PR10c' adds <c>INSERT … SELECT</c>: the source query is planned via
 /// <see cref="TableCatalog.PlanQuery"/>, batches stream through the
 /// shared column plan + per-value coercion, and rows commit through an
-/// <see cref="IAppendSession"/>. VALUES still rejects non-literal
-/// expressions; users who need expressions can write
-/// <c>INSERT INTO t SELECT 1 + 2, 'foo'</c>.
+/// <see cref="IAppendSession"/>. PR10c'' lifts the literal-only restriction
+/// on VALUES — each VALUES expression is evaluated through
+/// <see cref="ExpressionEvaluator"/> against an empty row, so binary
+/// expressions, function calls, and array literals (<c>['a','b','c']</c>
+/// → <c>array(...)</c>) work uniformly. Column references in VALUES still
+/// fail because there's no source row to bind against.
 /// </remarks>
 internal static class InsertExecutor
 {
@@ -54,7 +58,7 @@ internal static class InsertExecutor
         switch (insert.Source)
         {
             case InsertValuesSource values:
-                ApplyValues(catalog.Pool, provider, targetSchema, insert.ColumnNames, values);
+                ApplyValues(catalog, provider, targetSchema, insert.ColumnNames, values);
                 break;
 
             case InsertQuerySource queryRow:
@@ -68,15 +72,15 @@ internal static class InsertExecutor
     }
 
     private static void ApplyValues(
-        Pool pool,
+        TableCatalog catalog,
         ITableProvider provider,
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
         InsertValuesSource values) =>
-        ApplyValuesAsync(pool, provider, targetSchema, columnList, values).GetAwaiter().GetResult();
+        ApplyValuesAsync(catalog, provider, targetSchema, columnList, values).GetAwaiter().GetResult();
 
     private static async Task ApplyValuesAsync(
-        Pool pool,
+        TableCatalog catalog,
         ITableProvider provider,
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
@@ -114,7 +118,17 @@ internal static class InsertExecutor
         // batch beats per-row session writes.
         Arena arena = new();
         ColumnLookup lookup = BuildTargetLookup(targetSchema);
-        RowBatch batch = pool.RentRowBatch(lookup, capacity: values.Rows.Count, arena: arena);
+        RowBatch batch = catalog.Pool.RentRowBatch(lookup, capacity: values.Rows.Count, arena: arena);
+
+        // Tableless evaluator: VALUES expressions can use binary operators,
+        // function calls, and array / struct literals; they cannot reference
+        // columns (no source row). Same arena for source and target so array
+        // payloads materialised by array(...) land directly in the batch's
+        // arena and ConvertSourceValue can pass them through without copy.
+        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena);
+        ColumnLookup emptyLookup = new(Array.Empty<string>());
+        Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
+        EvaluationFrame frame = new(emptyRow, arena, arena);
 
         for (int rowIndex = 0; rowIndex < values.Rows.Count; rowIndex++)
         {
@@ -126,7 +140,7 @@ internal static class InsertExecutor
                     $"{sourceRow.Count} value(s), but the column list expects {plan.SourceColumnCount}.");
             }
 
-            DataValue[] targetRow = pool.RentDataValues(targetSchema.Columns.Count);
+            DataValue[] targetRow = catalog.Pool.RentDataValues(targetSchema.Columns.Count);
             for (int targetIndex = 0; targetIndex < targetSchema.Columns.Count; targetIndex++)
             {
                 ColumnInfo target = targetSchema.Columns[targetIndex];
@@ -134,8 +148,10 @@ internal static class InsertExecutor
 
                 if (sourceIndex >= 0)
                 {
-                    object? literal = ExtractLiteral(sourceRow[sourceIndex], target.Name);
-                    targetRow[targetIndex] = LiteralCoercion.Coerce(literal, target, arena, target.Name);
+                    ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
+                        sourceRow[sourceIndex], frame, CancellationToken.None).ConfigureAwait(false);
+                    targetRow[targetIndex] = ConvertValueRefToTarget(
+                        evaluated, target, arena, target.Name);
                 }
                 else
                 {
@@ -267,6 +283,152 @@ internal static class InsertExecutor
     /// Image, Audio, ByteArray, …) are intentionally deferred to a
     /// future PR.
     /// </summary>
+    /// <summary>
+    /// Converts a <see cref="ValueRef"/> (the output of
+    /// <see cref="ExpressionEvaluator.EvaluateAsValueRefAsync"/>) into a target-shaped
+    /// <see cref="DataValue"/> for the INSERT VALUES path. Handles array literals
+    /// natively — when the source array's element kind doesn't match the target
+    /// (e.g. <c>[10, 20, 30]</c> narrows to <c>Int8[]</c> but the column is
+    /// <c>Int32[]</c>), elements are widened individually through
+    /// <see cref="LiteralCoercion"/>. Cross-arena copies are not needed because
+    /// VALUES uses a single arena for evaluation and writing.
+    /// </summary>
+    private static DataValue ConvertValueRefToTarget(
+        ValueRef source, ColumnInfo target, Arena targetArena, string columnName)
+    {
+        if (source.IsNull)
+        {
+            if (!target.Nullable)
+            {
+                throw new InvalidOperationException(
+                    $"Column '{columnName}' is NOT NULL but the supplied value is NULL.");
+            }
+            return target.IsArray ? DataValue.NullArrayOf(target.Kind) : DataValue.Null(target.Kind);
+        }
+
+        // Typed-array target: shape must match (source.IsArray == true).
+        if (target.IsArray)
+        {
+            if (!source.IsArray)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': target is {target.Kind}[] but the " +
+                    $"supplied value is scalar {source.Kind}.");
+            }
+
+            ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
+
+            // Same element kind: hand the array directly to ToDataValue, which
+            // materialises payload bytes into the target arena.
+            if (source.Kind == target.Kind)
+            {
+                return source.ToDataValue(targetArena);
+            }
+
+            // Different element kind: per-element coerce via LiteralCoercion,
+            // then assemble a new typed array from the coerced DataValues.
+            return CoerceArrayElements(elements, target, targetArena, columnName);
+        }
+
+        // Scalar target. Reject array-source / struct-source up front.
+        if (source.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"INSERT for column '{columnName}': target is scalar {target.Kind} but the " +
+                "supplied value is an array.");
+        }
+        if (source.Kind == DataKind.Struct)
+        {
+            throw new InvalidOperationException(
+                $"INSERT for column '{columnName}': struct values are not yet supported. " +
+                "Struct-typed manifest support lands with the Value Type Registry.");
+        }
+
+        // Non-array, non-struct: extract a CLR scalar via the ValueRef
+        // accessors (which handle both inline and materialized payloads
+        // — long strings live in the materialized side) and run through
+        // LiteralCoercion, the same lossless coercion path VALUES used
+        // to use for plain literals.
+        return LiteralCoercion.Coerce(
+            ExtractScalarFromValueRef(source, columnName), target, targetArena, columnName);
+    }
+
+    /// <summary>
+    /// Extracts a CLR scalar from a non-null, non-array, non-struct
+    /// <see cref="ValueRef"/>. <see cref="DataKind.String"/> reads from the
+    /// materialized side (handles strings of any length); fixed-width kinds
+    /// read from the inline carrier.
+    /// </summary>
+    private static object ExtractScalarFromValueRef(ValueRef source, string columnName)
+    {
+        return source.Kind switch
+        {
+            DataKind.String => source.AsString(),
+            DataKind.Boolean => source.AsBoolean(),
+            DataKind.Uuid => source.AsUuid(),
+            DataKind.Int8 => source.AsInt8(),
+            DataKind.Int16 => source.AsInt16(),
+            DataKind.Int32 => source.AsInt32(),
+            DataKind.Int64 => source.AsInt64(),
+            DataKind.UInt8 => source.AsUInt8(),
+            DataKind.UInt16 => source.AsUInt16(),
+            DataKind.UInt32 => source.AsUInt32(),
+            DataKind.UInt64 => source.AsUInt64(),
+            DataKind.Float16 => source.AsFloat16(),
+            DataKind.Float32 => source.AsFloat32(),
+            DataKind.Float64 => source.AsFloat64(),
+            DataKind.Decimal => source.AsDecimal(),
+            DataKind.Date => source.AsDate(),
+            DataKind.DateTime => source.AsDateTime(),
+            DataKind.Time => source.AsTime(),
+            DataKind.Duration => source.AsDuration(),
+            _ => throw new InvalidOperationException(
+                $"INSERT for target column '{columnName}': source kind {source.Kind} is " +
+                "not yet supported."),
+        };
+    }
+
+    /// <summary>
+    /// Builds a typed array <see cref="DataValue"/> from per-element source
+    /// <see cref="ValueRef"/>s, coercing each element to the target column's
+    /// element kind via <see cref="LiteralCoercion"/>. Used when the source
+    /// array's element kind differs from the target's — most commonly because
+    /// integer literals like <c>10</c> narrow to <c>Int8</c> at parse time.
+    /// </summary>
+    private static DataValue CoerceArrayElements(
+        ReadOnlySpan<ValueRef> sourceElements,
+        ColumnInfo target,
+        Arena targetArena,
+        string columnName)
+    {
+        // LiteralCoercion gates IsArray off the column descriptor; build a
+        // scalar-shaped clone so per-element coercion routes through the
+        // normal scalar arms.
+        ColumnInfo elementTarget = new(target.Name, target.Kind, nullable: false);
+
+        DataValue[] coerced = new DataValue[sourceElements.Length];
+        for (int i = 0; i < sourceElements.Length; i++)
+        {
+            ValueRef element = sourceElements[i];
+            if (element.IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': null element at index {i}; " +
+                    "per-element nulls inside arrays are not yet supported.");
+            }
+            if (element.IsArray)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': nested arrays are not supported.");
+            }
+
+            object scalar = ExtractScalarFromValueRef(element, columnName);
+            coerced[i] = LiteralCoercion.Coerce(scalar, elementTarget, targetArena, columnName);
+        }
+
+        return DataValue.FromTypedArray(target.Kind, coerced, targetArena, targetArena);
+    }
+
     private static DataValue ConvertSourceValue(
         DataValue source,
         IValueStore sourceStore,
@@ -277,6 +439,47 @@ internal static class InsertExecutor
         if (source.IsNull)
         {
             return LiteralCoercion.Coerce(null, target, targetArena, columnName);
+        }
+
+        // Typed-array source for typed-array target: shapes must match.
+        // VALUES paths use a single arena (sourceStore == targetArena), so
+        // the array DataValue's offsets are valid in the batch and can be
+        // passed through directly. INSERT … SELECT cross-arena array copy
+        // is a future enhancement — caller's arena equality is the gate.
+        if (target.IsArray)
+        {
+            if (!source.IsArray || source.Kind != target.Kind)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': target is {target.Kind}[] but the " +
+                    $"supplied value is {source.Kind}{(source.IsArray ? "[]" : "")}.");
+            }
+            if (!ReferenceEquals(sourceStore, targetArena))
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': cross-arena typed-array copy is not " +
+                    "yet supported. INSERT … SELECT of array columns from another table will " +
+                    "land in a later PR.");
+            }
+            return source;
+        }
+
+        // Reject array-to-scalar shape mismatches.
+        if (source.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"INSERT for column '{columnName}': target is scalar {target.Kind} but the " +
+                "supplied value is an array.");
+        }
+
+        // Struct values surface from struct literals or struct-returning
+        // functions. Per-field coercion to a struct target needs the Value
+        // Type Registry (see PR16d). Reject explicitly.
+        if (source.Kind == DataKind.Struct)
+        {
+            throw new InvalidOperationException(
+                $"INSERT for column '{columnName}': struct values are not yet supported. " +
+                "Struct-typed manifest support lands with the Value Type Registry.");
         }
 
         object scalar = source.Kind switch
@@ -295,9 +498,8 @@ internal static class InsertExecutor
             DataKind.Float32 => source.AsFloat32(),
             DataKind.Float64 => source.AsFloat64(),
             _ => throw new InvalidOperationException(
-                $"INSERT … SELECT for target column '{columnName}': source kind " +
-                $"{source.Kind} is not yet supported. Composite kinds (Struct, " +
-                "typed arrays, Image / Audio / ByteArray) will land in a later PR."),
+                $"INSERT for target column '{columnName}': source kind {source.Kind} is " +
+                "not yet supported."),
         };
 
         return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
