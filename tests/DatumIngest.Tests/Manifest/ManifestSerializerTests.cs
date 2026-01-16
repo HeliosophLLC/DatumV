@@ -131,6 +131,77 @@ public sealed class ManifestSerializerTests : ServiceTestBase
         Assert.True(bytes.Length > 0);
     }
 
+    // ─────────────── Schema versioning (PR14d) ───────────────
+
+    [Fact]
+    public void Serialize_IncludesSchemaVersion()
+    {
+        QueryResultsManifest manifest = BuildNumericManifest();
+        string json = ManifestSerializer.Serialize("test", manifest);
+
+        Assert.Contains("\"schemaVersion\":", json);
+    }
+
+    [Fact]
+    public void Deserialize_RoundTripsSchemaVersion()
+    {
+        QueryResultsManifest manifest = BuildNumericManifest();
+        string json = ManifestSerializer.Serialize("test", manifest);
+
+        SourceManifest? round = ManifestSerializer.Deserialize(json);
+
+        Assert.NotNull(round);
+        Assert.Equal(ManifestSchemaVersion.Current, round!.SchemaVersion);
+    }
+
+    [Fact]
+    public void Deserialize_LegacyManifestWithoutVersion_DefaultsToV1()
+    {
+        // Old serialized form: a SourceManifest written before PR14d added
+        // schemaVersion. Deserialization must default to v1 for forward
+        // compatibility with files written by older binaries.
+        const string legacy = """
+        {
+          "tables": {
+            "t": {
+              "rowCount": 0,
+              "generatedAtUtc": "2026-01-01T00:00:00Z",
+              "features": []
+            }
+          }
+        }
+        """;
+
+        SourceManifest? round = ManifestSerializer.Deserialize(legacy);
+
+        Assert.NotNull(round);
+        Assert.Equal(1, round!.SchemaVersion);
+    }
+
+    [Fact]
+    public void Deserialize_FutureSchemaVersion_Throws()
+    {
+        // A manifest written by a future binary (schema version one above
+        // the current cap) must be rejected with a helpful message rather
+        // than silently mis-parsed.
+        string future = $$"""
+        {
+          "schemaVersion": {{ManifestSchemaVersion.Current + 1}},
+          "tables": {
+            "t": {
+              "rowCount": 0,
+              "generatedAtUtc": "2026-01-01T00:00:00Z",
+              "features": []
+            }
+          }
+        }
+        """;
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            ManifestSerializer.Deserialize(future));
+        Assert.Contains("schema", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Serialize_TopKValues_IncludesFrequencies()
     {

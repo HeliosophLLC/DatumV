@@ -49,11 +49,41 @@ public static class ManifestSerializer
     }
 
     /// <summary>
-    /// Deserializes a source manifest from a JSON string.
+    /// Deserializes a source manifest from a JSON string. Rejects files whose
+    /// <see cref="SourceManifest.SchemaVersion"/> exceeds
+    /// <see cref="ManifestSchemaVersion.Current"/> with a clear message —
+    /// such files are written by a newer binary that knows
+    /// <see cref="FeatureManifest"/> subtypes this binary doesn't.
     /// </summary>
     public static SourceManifest? Deserialize(string json)
     {
-        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.SourceManifest);
+        SourceManifest? manifest = JsonSerializer.Deserialize(
+            json, ManifestJsonContext.Default.SourceManifest);
+
+        if (manifest is null) return null;
+
+        // Source-gen deserialization doesn't run init-only field initializers
+        // when the JSON key is missing — it just leaves the field at its
+        // default-T value. Normalize 0 to 1 so manifests written by binaries
+        // that predate PR14d (no schemaVersion key) still load.
+        if (manifest.SchemaVersion <= 0)
+        {
+            manifest = new SourceManifest
+            {
+                SchemaVersion = 1,
+                Tables = manifest.Tables,
+            };
+        }
+
+        if (manifest.SchemaVersion > ManifestSchemaVersion.Current)
+        {
+            throw new InvalidOperationException(
+                $"Manifest schema version {manifest.SchemaVersion} is newer than this " +
+                $"binary supports (max: {ManifestSchemaVersion.Current}). The manifest was " +
+                "written by a newer build; regenerate it via ANALYZE or upgrade the engine.");
+        }
+
+        return manifest;
     }
 
     /// <summary>
