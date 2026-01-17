@@ -623,6 +623,11 @@ public sealed class InMemoryTableProvider : ITableProvider
             DataKind.Duration => value.AsDuration(),
             DataKind.Uuid => value.AsUuid(),
             DataKind.String => value.AsString(arena),
+            // Blob kinds — extract bytes; the schema's declared kind drives
+            // re-materialisation in MaterializeCell so a `byte[]` from an
+            // Image column round-trips as Image (not as UInt8[]).
+            DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
+                => value.AsByteSpan(arena).ToArray(),
             _ => throw new NotSupportedException(
                 $"InMemoryTableProvider.AppendRowsAsync does not yet support DataKind.{value.Kind}" +
                 (value.IsArray ? " (array)" : "") + ". Extend ConvertDataValueToCell with a stable extraction path."),
@@ -796,6 +801,10 @@ public sealed class InMemoryTableProvider : ITableProvider
             TimeOnly time => DataValue.FromTime(time),
             TimeSpan ts => DataValue.FromDuration(ts),
             Guid g => DataValue.FromUuid(g),
+            byte[] bytes when expectedKind == DataKind.Image => DataValue.FromImage(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Audio => DataValue.FromAudio(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Video => DataValue.FromVideo(bytes, arena),
+            byte[] bytes when expectedKind == DataKind.Json => DataValue.FromJson(bytes, arena),
             byte[] bytes => DataValue.FromByteArray(bytes, arena),
             _ => throw new ArgumentException(
                 $"InMemoryTableProvider cannot materialize cell of type {cell.GetType().FullName}. " +

@@ -246,6 +246,108 @@ public sealed class InsertSelectTests : IAsyncLifetime
         Assert.Equal([(2, "b"), (3, "c")], rows);
     }
 
+    // ──────────────────── Blob columns (Image / Audio / Video / Json) ────────────────────
+
+    [Fact]
+    public async Task InsertSelect_ImageColumn_RoundTripsBytes()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int32, img Image)");
+
+        // Populate src directly via the append session — there is no SQL
+        // function today that produces an Image literal from inline bytes,
+        // so the test bootstraps via the provider API.
+        byte[] imageBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02, 0x03];
+        ITableProvider srcProvider = catalog["src"];
+        await using (IAppendSession s = srcProvider.BeginAppend())
+        {
+            Arena srcArena = new();
+            RowBatch srcBatch = pool.RentRowBatch(new ColumnLookup(["id", "img"]), capacity: 1, arena: srcArena);
+            DataValue[] row = pool.RentDataValues(2);
+            row[0] = DataValue.FromInt32(1);
+            row[1] = DataValue.FromImage(imageBytes, srcArena);
+            srcBatch.Add(row);
+            await s.WriteAsync(srcBatch);
+            await s.CommitAsync();
+        }
+
+        // INSERT SELECT — this is the use case: dst now holds a copy of the image.
+        catalog.Plan("INSERT INTO dst SELECT id, img FROM src");
+
+        Assert.Equal(1, catalog["dst"].GetRowCount());
+        await foreach (RowBatch batch in catalog["dst"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Row row = batch[0];
+            Assert.Equal(1, row[0].AsInt32());
+            Assert.Equal(DataKind.Image, row[1].Kind);
+            ReadOnlySpan<byte> readBack = row[1].AsByteSpan(batch.Arena);
+            Assert.True(readBack.SequenceEqual(imageBytes));
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task InsertValues_JsonExpression_StoresCanonicalCbor()
+    {
+        // Exercises the INSERT VALUES blob branch: json_parse('{"x":1}')
+        // produces a DataKind.Json value at evaluation time which then
+        // routes through ConvertValueRefToTarget's blob arm into the
+        // target arena. Image/Audio/Video share the same arm — JSON is
+        // the only one with a literal-producing scalar function in the
+        // standard library.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE j (id Int32, data Json)");
+
+        catalog.Plan("INSERT INTO j VALUES (1, json_parse('{\"x\":1}'))");
+
+        Assert.Equal(1, catalog["j"].GetRowCount());
+        await foreach (RowBatch batch in catalog["j"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Row row = batch[0];
+            Assert.Equal(DataKind.Json, row[1].Kind);
+            // Stored bytes are canonical CBOR; just confirm the value
+            // is non-empty and well-formed enough to read.
+            Assert.False(row[1].IsNull);
+            Assert.True(row[1].AsByteSpan(batch.Arena).Length > 0);
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task InsertSelect_BlobIntoMismatchedKind_Throws()
+    {
+        // Image source → String target should error clearly; no implicit
+        // blob coercion.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int32, blob String)");
+
+        ITableProvider srcProvider = catalog["src"];
+        await using (IAppendSession s = srcProvider.BeginAppend())
+        {
+            Arena srcArena = new();
+            RowBatch srcBatch = pool.RentRowBatch(new ColumnLookup(["id", "img"]), capacity: 1, arena: srcArena);
+            DataValue[] row = pool.RentDataValues(2);
+            row[0] = DataValue.FromInt32(1);
+            row[1] = DataValue.FromImage([0x01, 0x02, 0x03], srcArena);
+            srcBatch.Add(row);
+            await s.WriteAsync(srcBatch);
+            await s.CommitAsync();
+        }
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO dst SELECT id, img FROM src"));
+        Assert.Contains("Image", ex.Message);
+        Assert.Contains("do not coerce", ex.Message);
+    }
+
     // ──────────────────── Persistent target ────────────────────
 
     [Fact]

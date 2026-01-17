@@ -1,3 +1,4 @@
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
@@ -245,7 +246,7 @@ internal static class InsertExecutor
                         int sourceIndex = plan.SourceIndexForTarget[targetIndex];
 
                         targetRow[targetIndex] = sourceIndex >= 0
-                            ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, target, targetArena, target.Name)
+                            ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, catalog.SidecarRegistry, target, targetArena, target.Name)
                             : ResolveOmittedFill(plan, targetIndex, target, targetArena, session!);
                     }
 
@@ -344,11 +345,27 @@ internal static class InsertExecutor
                 "Struct-typed manifest support lands with the Value Type Registry.");
         }
 
-        // Non-array, non-struct: extract a CLR scalar via the ValueRef
-        // accessors (which handle both inline and materialized payloads
-        // — long strings live in the materialized side) and run through
-        // LiteralCoercion, the same lossless coercion path VALUES used
-        // to use for plain literals.
+        // Blob-kind sources (Image / Audio / Video / Json). ValueRef.ToDataValue
+        // already handles materialising managed bytes / SKBitmap / CBOR slices
+        // into the target arena — let it do the byte copy. Reject only on kind
+        // mismatch; no implicit blob coercion.
+        if (source.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
+        {
+            if (target.Kind != source.Kind)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': target is {target.Kind} but the " +
+                    $"supplied value is {source.Kind}; blob kinds (Image/Audio/Video/Json) " +
+                    "do not coerce across kinds.");
+            }
+            return source.ToDataValue(targetArena);
+        }
+
+        // Non-array, non-struct, non-blob: extract a CLR scalar via the
+        // ValueRef accessors (which handle both inline and materialized
+        // payloads — long strings live in the materialized side) and run
+        // through LiteralCoercion, the same lossless coercion path VALUES
+        // used to use for plain literals.
         return LiteralCoercion.Coerce(
             ExtractScalarFromValueRef(source, columnName), target, targetArena, columnName);
     }
@@ -432,6 +449,7 @@ internal static class InsertExecutor
     private static DataValue ConvertSourceValue(
         DataValue source,
         IValueStore sourceStore,
+        SidecarRegistry sidecarRegistry,
         ColumnInfo target,
         Arena targetArena,
         string columnName)
@@ -470,6 +488,36 @@ internal static class InsertExecutor
             throw new InvalidOperationException(
                 $"INSERT for column '{columnName}': target is scalar {target.Kind} but the " +
                 "supplied value is an array.");
+        }
+
+        // Blob-kind sources (Image / Audio / Video / Json) carry byte payloads
+        // addressed by (p0, p1) into the source store — possibly in a sidecar.
+        // Re-emitting them in the target arena is the same byte-copy in either
+        // direction; reject only on a kind mismatch (no implicit Image→Audio
+        // coercion). Same-arena pass-through skips the copy.
+        if (source.IsBlobKind)
+        {
+            if (target.Kind != source.Kind)
+            {
+                throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': target is {target.Kind} but the " +
+                    $"supplied value is {source.Kind}; blob kinds (Image/Audio/Video/Json) " +
+                    "do not coerce across kinds.");
+            }
+            if (ReferenceEquals(sourceStore, targetArena) && !source.IsInSidecar)
+            {
+                return source;
+            }
+            ReadOnlySpan<byte> bytes = source.AsByteSpan(sourceStore, sidecarRegistry);
+            return source.Kind switch
+            {
+                DataKind.Image => DataValue.FromImage(bytes.ToArray(), targetArena),
+                DataKind.Audio => DataValue.FromAudio(bytes.ToArray(), targetArena),
+                DataKind.Video => DataValue.FromVideo(bytes.ToArray(), targetArena),
+                DataKind.Json => DataValue.FromJson(bytes, targetArena),
+                _ => throw new InvalidOperationException(
+                    $"INSERT for column '{columnName}': unhandled blob kind {source.Kind}."),
+            };
         }
 
         // Struct values surface from struct literals or struct-returning
