@@ -379,7 +379,7 @@ public sealed class DatumFileV2MultiFileReadTests : IAsyncLifetime
         {
             using (BinaryWriter footerWriter = new(footerScratch, System.Text.Encoding.UTF8, leaveOpen: true))
             {
-                newFooter.Serialize(footerWriter);
+                newFooter.Serialize(footerWriter, hasTypeTable: false);
             }
             footerScratch.Position = 0;
             footerScratch.CopyTo(fs);

@@ -82,10 +82,11 @@ public readonly record struct HeaderV2(
         }
 
         ushort version = BinaryPrimitives.ReadUInt16LittleEndian(source[4..6]);
-        if (version != DatumFormatV2.FormatVersion)
+        if (version < DatumFormatV2.MinReadableFormatVersion || version > DatumFormatV2.FormatVersion)
         {
             throw new InvalidDataException(
-                $"Unsupported .datum format version {version} (expected {DatumFormatV2.FormatVersion}).");
+                $"Unsupported .datum format version {version} (reader accepts " +
+                $"{DatumFormatV2.MinReadableFormatVersion}..{DatumFormatV2.FormatVersion}).");
         }
 
         DatumFileFlagsV2 flags = (DatumFileFlagsV2)BinaryPrimitives.ReadUInt16LittleEndian(source[6..8]);

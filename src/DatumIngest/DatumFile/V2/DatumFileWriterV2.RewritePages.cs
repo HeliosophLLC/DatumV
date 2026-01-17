@@ -263,7 +263,11 @@ public sealed partial class DatumFileWriterV2
                 IdentityNextValue: oldProlog.IdentityNextValue,
                 PrimaryKeyColumnIndices: oldProlog.PrimaryKeyColumnIndices);
 
-            FooterV2 newFooter = new(newProlog, newColumnFooters, footer.HasVolumeZoneMaps);
+            // Preserve the file's type table verbatim — RewritePages
+            // touches page data only, so on-disk struct type-ids stay
+            // valid and the descriptor blobs in the sidecar are still
+            // referenced by the unchanged offsets.
+            FooterV2 newFooter = new(newProlog, newColumnFooters, footer.HasVolumeZoneMaps, footer.TypeTable);
 
             // Serialize footer body, append, then write the tail.
             stream.Position = stream.Length;
@@ -271,7 +275,7 @@ public sealed partial class DatumFileWriterV2
             using (MemoryStream footerScratch = new())
             using (BinaryWriter footerWriter = new(footerScratch, System.Text.Encoding.UTF8, leaveOpen: true))
             {
-                newFooter.Serialize(footerWriter);
+                newFooter.Serialize(footerWriter, hasTypeTable: (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0);
                 footerWriter.Flush();
                 footerScratch.Position = 0;
                 footerScratch.CopyTo(stream);

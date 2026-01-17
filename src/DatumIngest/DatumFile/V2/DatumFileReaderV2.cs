@@ -177,11 +177,12 @@ public sealed class DatumFileReaderV2 : IDisposable
         stream.ReadExactly(footerBuffer);
 
         bool hasVolumeZoneMaps = (header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0;
+        bool hasTypeTable = (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0;
         FooterV2 footer;
         using (MemoryStream ms = new(footerBuffer, writable: false))
         using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps);
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable);
         }
 
         // Header's ColumnCount is informational in v4 — the prologue's
@@ -365,13 +366,15 @@ public sealed class DatumFileReaderV2 : IDisposable
         int pageIndex,
         byte sidecarStoreId = 0,
         DatumIngest.DatumFile.Sidecar.IBlobSource? sidecarSource = null,
-        DatumIngest.Model.IValueStore? eagerStore = null)
+        DatumIngest.Model.IValueStore? eagerStore = null,
+        ushort columnRuntimeStructTypeId = 0)
     {
         ColumnFooterV2 column = Footer.Columns[columnIndex];
         PageDescriptorV2 descriptor = column.Pages[pageIndex];
         ReadOnlyMemory<byte> bytes = ReadPageBytes(columnIndex, pageIndex);
         return PageDecoderFactoryV2.Create(
-            column.Descriptor, bytes, descriptor.RowCount, sidecarStoreId, sidecarSource, eagerStore);
+            column.Descriptor, bytes, descriptor.RowCount, sidecarStoreId, sidecarSource, eagerStore,
+            columnRuntimeStructTypeId);
     }
 
     /// <summary>

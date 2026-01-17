@@ -68,13 +68,25 @@ public readonly struct EvaluationFrame
     public TypeRegistry? Types { get; }
 
     /// <summary>
+    /// Optional per-query <see cref="TypeIdTranslationTable"/> for translating a
+    /// file's on-disk struct type-ids into <see cref="Types"/> ids. Sidecar-arm
+    /// readers (<see cref="DataValue.AsStructArray"/>) consult this to resolve
+    /// per-element TypeIds in <c>Array&lt;Struct&gt;</c> slot bytes. Threaded
+    /// from <see cref="ExecutionContext.TypeIdTranslations"/>; absent outside
+    /// the query pipeline.
+    /// </summary>
+    public TypeIdTranslationTable? TypeIdTranslations { get; }
+
+    /// <summary>
     /// Creates an evaluation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g. predicates
     /// that produce only inline boolean results and don't allocate strings). Pass
     /// <paramref name="sidecarRegistry"/> when the query touches sidecar-bound tables
     /// so accessors like <c>AsImage</c> can resolve sidecar-backed values. Pass
     /// <paramref name="types"/> when struct-consuming scalar functions need to
-    /// resolve field names via the per-query <see cref="TypeRegistry"/>.
+    /// resolve field names via the per-query <see cref="TypeRegistry"/>. Pass
+    /// <paramref name="typeIdTranslations"/> when struct values may originate
+    /// from <c>.datum</c> files whose on-disk type-ids need translation.
     /// </summary>
     public EvaluationFrame(
         Row row,
@@ -82,7 +94,8 @@ public readonly struct EvaluationFrame
         IValueStore target,
         Row? outerRow = null,
         SidecarRegistry? sidecarRegistry = null,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        TypeIdTranslationTable? typeIdTranslations = null)
     {
         Row = row;
         Source = source;
@@ -90,12 +103,15 @@ public readonly struct EvaluationFrame
         OuterRow = outerRow;
         SidecarRegistry = sidecarRegistry;
         Types = types;
+        TypeIdTranslations = typeIdTranslations;
     }
 
     /// <summary>
     /// Returns a new frame with a different <see cref="Row"/>, preserving the arenas,
-    /// outer-row context, sidecar registry, and type registry. Used when the evaluator
-    /// descends into a derived row (e.g. a lambda body's augmented row).
+    /// outer-row context, sidecar registry, type registry, and translation table.
+    /// Used when the evaluator descends into a derived row (e.g. a lambda body's
+    /// augmented row).
     /// </summary>
-    public EvaluationFrame WithRow(Row row) => new(row, Source, Target, OuterRow, SidecarRegistry, Types);
+    public EvaluationFrame WithRow(Row row) =>
+        new(row, Source, Target, OuterRow, SidecarRegistry, Types, TypeIdTranslations);
 }

@@ -284,7 +284,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 for (int chunkRowIdx = 0; chunkRowIdx < chunkSize; chunkRowIdx++)
                 {
                     Row row = sourceBatch[chunkStart + chunkRowIdx];
-                    EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry, context.Types);
+                    EvaluationFrame frame = new(row, sourceBatch.Arena, sourceBatch.Arena, context.OuterRow, context.SidecarRegistry, context.Types, context.TypeIdTranslations);
 
                     ValueRef[] rowInputs = new ValueRef[_inputExpressions.Count];
                     for (int argIdx = 0; argIdx < _inputExpressions.Count; argIdx++)

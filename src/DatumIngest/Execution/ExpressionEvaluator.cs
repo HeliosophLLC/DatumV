@@ -911,7 +911,7 @@ public sealed class ExpressionEvaluator
     /// </summary>
     private static ValueRef StructArrayToValueRef(DataValue value, EvaluationFrame frame)
     {
-        DataValue[] elements = value.AsStructArray(frame.Source, frame.SidecarRegistry);
+        DataValue[] elements = value.AsStructArray(frame.Source, frame.SidecarRegistry, frame.TypeIdTranslations);
         ValueRef[] refs = new ValueRef[elements.Length];
         for (int i = 0; i < elements.Length; i++)
         {
@@ -2012,8 +2012,11 @@ public sealed class ExpressionEvaluator
             {
                 // Each element is already a self-describing Struct DataValue with
                 // its own TypeId stamped in the slot — just pick one. No registry
-                // hop, no FromStruct rewrap, no f0..fN regression risk.
-                DataValue[] elements = source.AsStructArray(frame.Source, frame.SidecarRegistry);
+                // hop, no FromStruct rewrap, no f0..fN regression risk. The
+                // translator turns on-disk TypeIds (from sidecar slots) into
+                // runtime ids; in-memory paths pass through unchanged.
+                DataValue[] elements = source.AsStructArray(
+                    frame.Source, frame.SidecarRegistry, frame.TypeIdTranslations);
                 if (position < 0 || position >= elements.Length)
                 {
                     // Borrow TypeId from any existing element so the null still

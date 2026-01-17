@@ -24,13 +24,14 @@ internal static class PageDecoderFactoryV2
         int rowCount,
         byte sidecarStoreId,
         IBlobSource? sidecarSource = null,
-        IValueStore? eagerStore = null) =>
+        IValueStore? eagerStore = null,
+        ushort columnRuntimeStructTypeId = 0) =>
         column.Encoder switch
         {
             EncoderKind.FixedWidth => new FixedWidthPageDecoderV2(column, pageBytes, rowCount),
             EncoderKind.BitPackedBoolean => new BitPackedBooleanPageDecoderV2(column, pageBytes, rowCount),
             EncoderKind.VariableSlot => new VariableSlotPageDecoderV2(
-                column, pageBytes, rowCount, sidecarStoreId, sidecarSource, eagerStore),
+                column, pageBytes, rowCount, sidecarStoreId, sidecarSource, eagerStore, columnRuntimeStructTypeId),
             _ => throw new InvalidDataException(
                 $"Unknown EncoderKind {column.Encoder} for column '{column.Name}'."),
         };

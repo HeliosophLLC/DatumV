@@ -36,4 +36,23 @@ public interface IDatumFileTableProvider
     /// on the same <see cref="SidecarStoreId"/>.
     /// </summary>
     SidecarRegistry? SidecarRegistry { get; set; }
+
+    /// <summary>
+    /// Loads the file's struct type table (v5+) into the calling
+    /// <paramref name="context"/>'s <c>Types</c> registry, builds the
+    /// on-disk → runtime translation map, and registers it on the
+    /// context's <c>TypeIdTranslations</c> table keyed by the provider's
+    /// <see cref="SidecarStoreId"/>. No-op when the file carries no
+    /// type table (v4 file, or v5 file with no Struct columns).
+    /// Idempotent — safe to call once per scan; the translator just
+    /// overwrites itself if invoked twice.
+    /// </summary>
+    /// <remarks>
+    /// Called by <see cref="Execution.Operators.ScanOperator"/> immediately
+    /// before driving <see cref="ITableProvider.ScanAsync"/>, so any
+    /// per-element TypeIds the scan reads from sidecar slot bytes resolve
+    /// through the right translator for this query. The default
+    /// implementation throws so format-aware providers must opt in.
+    /// </remarks>
+    void EnsureTypeTableLoaded(DatumIngest.Execution.ExecutionContext context);
 }

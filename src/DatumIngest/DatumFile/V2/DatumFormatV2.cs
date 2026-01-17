@@ -28,14 +28,28 @@ public static class DatumFormatV2
     public static ReadOnlySpan<byte> TailMagic => "FMTD"u8;
 
     /// <summary>
-    /// Format version. v4 adds the footer prologue (generation,
+    /// Format version. v4 added the footer prologue (generation,
     /// writerId, baseGeneration, tombstone granularity, file table,
     /// chapter tombstone offset table), the <c>fileId</c> field on
     /// <see cref="PageDescriptorV2"/>, and the
-    /// <see cref="ColumnFlagsV2.Tombstoned"/> bit. Reader rejects any
-    /// other version with <see cref="InvalidDataException"/>.
+    /// <see cref="ColumnFlagsV2.Tombstoned"/> bit. v5 adds the
+    /// per-file struct type table (descriptor blobs in the sidecar +
+    /// directory in the footer) and the per-Struct-column
+    /// <c>StructTypeId</c> field gated by
+    /// <see cref="ColumnFlagsV2.HasStructTypeId"/>. Writer always emits
+    /// the latest version; reader accepts any version up to and
+    /// including <see cref="FormatVersion"/>, treating absent fields as
+    /// "no struct type info" (Struct columns deserialize as untyped,
+    /// matching pre-v5 behaviour).
     /// </summary>
-    public const ushort FormatVersion = 4;
+    public const ushort FormatVersion = 5;
+
+    /// <summary>
+    /// Oldest format version this reader accepts. v4 files contain no
+    /// type table and decode Struct columns through the untyped path —
+    /// callers see <c>f0..fN</c> field names, same as before v5.
+    /// </summary>
+    public const ushort MinReadableFormatVersion = 4;
 
     /// <summary>
     /// Pinned tombstone granularity for v4. Value <c>1</c> means
@@ -260,4 +274,15 @@ public enum DatumFileFlagsV2 : ushort
     /// in PR5).
     /// </summary>
     HasTombstones = 0x08,
+
+    /// <summary>
+    /// File carries a per-file struct type table (v5+). When set, the
+    /// footer ends with a <c>(typeTableEntryCount, entries[])</c> block
+    /// that maps on-disk struct type-ids to descriptor blobs in the
+    /// sidecar; readers load it into the per-query <see cref="Model.TypeRegistry"/>
+    /// at file open and register the on-disk → runtime translation on
+    /// the <see cref="DatumFile.Sidecar.SidecarRegistry"/>. Clear in v4
+    /// files and in v5 files with no Struct columns.
+    /// </summary>
+    HasTypeTable = 0x10,
 }

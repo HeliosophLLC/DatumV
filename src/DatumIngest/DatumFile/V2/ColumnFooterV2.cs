@@ -28,11 +28,19 @@ namespace DatumIngest.DatumFile.V2;
 /// chapter level is sufficient and emitting volume maps just bloats the
 /// footer.
 /// </param>
+/// <param name="StructTypeId">
+/// On-disk struct type-id for Struct columns (v5+) — the homogeneous
+/// shape every value in this column carries. Indexes into the file
+/// footer's type table; the reader translates to a runtime type-id at
+/// open. <see langword="null"/> for non-struct columns and for files
+/// written in v4.
+/// </param>
 public sealed record ColumnFooterV2(
     ColumnDescriptorV2 Descriptor,
     IReadOnlyList<PageDescriptorV2> Pages,
     IReadOnlyList<DatumZoneMap> ChapterZoneMaps,
-    IReadOnlyList<DatumZoneMap>? VolumeZoneMaps)
+    IReadOnlyList<DatumZoneMap>? VolumeZoneMaps,
+    ushort? StructTypeId = null)
 {
     /// <summary>
     /// Serializes this column footer block. Layout:
@@ -61,6 +69,7 @@ public sealed record ColumnFooterV2(
         if (Descriptor.IsArray) flags |= ColumnFlagsV2.IsArray;
         if (Descriptor.FixedShape is not null) flags |= ColumnFlagsV2.HasFixedShape;
         if (Descriptor.IsTombstoned) flags |= ColumnFlagsV2.Tombstoned;
+        if (StructTypeId is not null) flags |= ColumnFlagsV2.HasStructTypeId;
         writer.Write((byte)flags);
 
         if (Descriptor.FixedShape is not null)
@@ -95,6 +104,15 @@ public sealed record ColumnFooterV2(
                     volume.Serialize(writer);
                 }
             }
+        }
+
+        // StructTypeId — gated by HasStructTypeId so v4-style column
+        // footers without struct types stay byte-identical to their
+        // pre-v5 layout. Always last in the column block to keep
+        // forward additions append-only inside the column footer.
+        if (StructTypeId is { } typeId)
+        {
+            writer.Write(typeId);
         }
     }
 
@@ -151,7 +169,16 @@ public sealed record ColumnFooterV2(
             }
         }
 
-        return new ColumnFooterV2(descriptor, pages, chapters, volumes);
+        // StructTypeId arrives last so v4 readers naturally stop at the
+        // pre-v5 EOF. The flag bit gates the read; absent flag (v4 file
+        // or v5 non-Struct column) means no field to deserialize.
+        ushort? structTypeId = null;
+        if ((flags & ColumnFlagsV2.HasStructTypeId) != 0)
+        {
+            structTypeId = reader.ReadUInt16();
+        }
+
+        return new ColumnFooterV2(descriptor, pages, chapters, volumes, structTypeId);
     }
 }
 
@@ -178,4 +205,11 @@ internal enum ColumnFlagsV2 : byte
     /// the soft-drop API ships in PR4.
     /// </summary>
     Tombstoned = 0x08,
+
+    /// <summary>
+    /// Column footer carries an on-disk struct type-id (v5+). Gates the
+    /// trailing <see cref="ColumnFooterV2.StructTypeId"/> field; clear in
+    /// v4 files and in non-Struct columns.
+    /// </summary>
+    HasStructTypeId = 0x10,
 }

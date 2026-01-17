@@ -407,6 +407,70 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <inheritdoc/>
     public SidecarRegistry? SidecarRegistry { get; set; }
 
+    /// <summary>
+    /// Per-column footer-index → runtime struct TypeId, computed in
+    /// <see cref="EnsureTypeTableLoaded"/> from the most recently calling
+    /// query's TypeRegistry. Consumed by <see cref="ScanAsync"/> when
+    /// opening page decoders so non-array Struct columns can stamp the
+    /// runtime id on every value <see cref="VariableSlotPageDecoderV2.DecodeStructEagerly"/>
+    /// emits. Single-query semantics: concurrent queries against the same
+    /// provider would race and a follow-up PR is needed for that — track
+    /// in plans/typeof-sidecar-typedescritor.md.
+    /// </summary>
+    private IReadOnlyDictionary<int, ushort>? _columnRuntimeStructTypeIds;
+
+    /// <inheritdoc/>
+    public void EnsureTypeTableLoaded(DatumIngest.Execution.ExecutionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        Snapshot s = AcquireSnapshot();
+        try
+        {
+            IReadOnlyList<TypeTableEntryV5> entries = s.Reader.Footer.TypeTable;
+            if (entries.Count == 0)
+            {
+                _columnRuntimeStructTypeIds = null;
+                return;
+            }
+
+            IBlobSource? sidecar = s.Sidecar;
+            if (sidecar is null)
+            {
+                throw new InvalidDataException(
+                    $"Table '{_descriptor.Name}' declares a type table with {entries.Count} entries " +
+                    "but has no sidecar to read descriptor blobs from. The file is corrupt or " +
+                    "missing its companion .datum-blob.");
+            }
+
+            Dictionary<ushort, ushort> onDiskToRuntime = new(entries.Count);
+            foreach (TypeTableEntryV5 entry in entries)
+            {
+                ReadOnlySpan<byte> blob = sidecar.Read(entry.SidecarOffset, entry.DescriptorLength);
+                int runtimeId = TypeDescriptorSerializer.DeserializeAndIntern(blob, context.Types);
+                onDiskToRuntime[entry.OnDiskTypeId] = checked((ushort)runtimeId);
+            }
+
+            context.TypeIdTranslations.Register(SidecarStoreId, onDiskToRuntime);
+
+            // Per-column resolution: walk the column footers, find Struct
+            // columns with a StructTypeId, translate to the just-registered
+            // runtime id. Cached so ScanAsync's decoder-open loop can pluck
+            // them out without re-translating per page.
+            Dictionary<int, ushort> columnRuntimeIds = new();
+            for (int i = 0; i < s.Reader.Footer.Columns.Count; i++)
+            {
+                ColumnFooterV2 column = s.Reader.Footer.Columns[i];
+                if (column.StructTypeId is { } onDisk
+                    && onDiskToRuntime.TryGetValue(onDisk, out ushort runtimeStructId))
+                {
+                    columnRuntimeIds[i] = runtimeStructId;
+                }
+            }
+            _columnRuntimeStructTypeIds = columnRuntimeIds;
+        }
+        finally { ReleaseSnapshot(s); }
+    }
+
     /// <inheritdoc/>
     public string Name => _descriptor.Name;
 
@@ -546,12 +610,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
                 for (int i = 0; i < projectedCount; i++)
                 {
+                    int footerIndex = schemaIndices[i];
+                    ushort columnRuntimeStructTypeId = 0;
+                    if (_columnRuntimeStructTypeIds is { } map
+                        && map.TryGetValue(footerIndex, out ushort id))
+                    {
+                        columnRuntimeStructTypeId = id;
+                    }
+
                     decoders[i] = s.Reader.OpenPageDecoder(
-                        columnIndex: schemaIndices[i],
+                        columnIndex: footerIndex,
                         pageIndex: pageIndex,
                         sidecarStoreId: SidecarStoreId,
                         sidecarSource: s.Sidecar,
-                        eagerStore: batch.Arena);
+                        eagerStore: batch.Arena,
+                        columnRuntimeStructTypeId: columnRuntimeStructTypeId);
                 }
 
                 for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)

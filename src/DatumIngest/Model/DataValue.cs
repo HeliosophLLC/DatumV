@@ -1145,7 +1145,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// shape information. The current shape preserves it: every element is a
     /// real Struct DataValue with its own <see cref="TypeId"/>.
     /// </remarks>
-    public DataValue[] AsStructArray(IValueStore store, SidecarRegistry? registry = null)
+    public DataValue[] AsStructArray(
+        IValueStore store,
+        SidecarRegistry? registry = null,
+        TypeIdTranslationTable? typeIdTranslations = null)
     {
         ThrowIfNotReferenceArray(DataKind.Struct);
 
@@ -1155,6 +1158,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
             DataValue[] result = new DataValue[elementCount];
+            byte storeId = SidecarStoreId;
             for (int i = 0; i < elementCount; i++)
             {
                 ArraySlot.Read(
@@ -1165,12 +1169,16 @@ public readonly struct DataValue : IEquatable<DataValue>
                     out _);
                 ReadOnlySpan<byte> structBytes = src.Read(elementOffset, elementLength);
                 DataValue[] fields = DeserializeStructFields(structBytes, store);
-                // The sidecar's struct bytes are wire-format; re-store the field
+                // Translate the slot's on-disk TypeId to the runtime registry id
+                // for this query. When no translator is registered (in-memory
+                // values, pre-v5 files) the id passes through unchanged. The
+                // sidecar's struct bytes are wire-format; re-store the field
                 // array into the in-memory arena so the synthesised Struct
-                // DataValue has the standard arena-backed layout. Reference-
-                // typed fields were already written into `store` by the
-                // deserialiser.
-                result[i] = FromStruct(fields, store, elementTypeId);
+                // DataValue has the standard arena-backed layout.
+                ushort runtimeTypeId = typeIdTranslations is null
+                    ? elementTypeId
+                    : typeIdTranslations.Translate(storeId, elementTypeId);
+                result[i] = FromStruct(fields, store, runtimeTypeId);
             }
             return result;
         }

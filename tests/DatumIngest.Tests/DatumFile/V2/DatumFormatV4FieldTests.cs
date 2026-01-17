@@ -52,7 +52,10 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
         Assert.True(headerBytes[..4].SequenceEqual("DTMF"u8),
             "magic should be 'DTMF'");
         ushort version = BinaryPrimitives.ReadUInt16LittleEndian(headerBytes[4..6]);
-        Assert.Equal(4, version);
+        // The writer always stamps the latest version. Reader-side compat
+        // (accepting v4) is exercised in TypeTablePersistenceTests; here
+        // we just assert the writer is at the current version.
+        Assert.Equal(DatumFormatV2.FormatVersion, version);
     }
 
     [Fact]
@@ -150,7 +153,8 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
             () => DatumFileReaderV2.Open(path));
         Assert.Contains("version 3", ex.Message);
-        Assert.Contains("expected 4", ex.Message);
+        // v5 reader accepts a range; v3 falls below the floor.
+        Assert.Contains("reader accepts", ex.Message);
     }
 
     [Fact]

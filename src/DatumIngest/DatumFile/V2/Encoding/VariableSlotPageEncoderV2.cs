@@ -48,9 +48,13 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     private readonly byte[] _inlineLengths;
     private readonly byte[] _slots;
     private readonly PageZoneMapBuilderV2 _zoneMap = new();
+    private readonly ITypeIdAllocator? _typeIdAllocator;
     private int _rowCount;
 
-    public VariableSlotPageEncoderV2(ColumnDescriptorV2 column, int pageSize)
+    public VariableSlotPageEncoderV2(
+        ColumnDescriptorV2 column,
+        int pageSize,
+        ITypeIdAllocator? typeIdAllocator = null)
     {
         if (column.Encoder != EncoderKind.VariableSlot)
         {
@@ -66,6 +70,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         _inlineBitmap = new byte[DatumNullBitmap.ByteCount(pageSize)];
         _inlineLengths = new byte[pageSize];
         _slots = new byte[checked(pageSize * DatumFormatV2.VariableSlotBytes)];
+        _typeIdAllocator = typeIdAllocator;
     }
 
     public bool IsFull => _rowCount >= _pageSize;
@@ -116,7 +121,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                     "was supplied. The encoder needs the store to read element bytes before sidecaring them.");
             }
 
-            (long blockOffset, long blockLength) = EncodeReferenceArrayToSidecar(value, store, sidecar);
+            (long blockOffset, long blockLength) = EncodeReferenceArrayToSidecar(value, store, sidecar, _typeIdAllocator);
             EncodePointerSlot(slot, blockOffset, blockLength, codec: SidecarBlobCodec.Raw);
             _zoneMap.Record(value, store);
         }
@@ -383,13 +388,14 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     private static (long offset, long length) EncodeReferenceArrayToSidecar(
         DataValue value,
         IValueStore store,
-        IBlobSink sidecar)
+        IBlobSink sidecar,
+        ITypeIdAllocator? typeIdAllocator)
     {
         return value.Kind switch
         {
             DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), sidecar),
             DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), sidecar),
-            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar),
+            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
         };
@@ -431,24 +437,29 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     private static (long offset, long length) EncodeStructArrayToSidecar(
         DataValue[] elements,
         IValueStore store,
-        IBlobSink sidecar)
+        IBlobSink sidecar,
+        ITypeIdAllocator? typeIdAllocator)
     {
         byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
         for (int i = 0; i < elements.Length; i++)
         {
             // Each element is a self-describing Struct DataValue carrying its own
-            // TypeId. Pull the field array out via AsStruct, serialise to the
-            // existing wire format (uint16 fieldCount + N records), and stamp the
-            // element's TypeId into the slot's reserved bytes so reads
-            // reconstruct each row's TypeId without any container-side metadata.
+            // runtime TypeId. Translate to a stable on-disk id via the allocator
+            // (when provided) so the slot bytes survive being read in a different
+            // query whose TypeRegistry uses different runtime ids; without an
+            // allocator the runtime id passes through unchanged (in-memory uses,
+            // legacy tests, paths that don't yet plumb the writer's registry).
             DataValue[] fields = elements[i].AsStruct(store);
             byte[] structBytes = SerializeStructFieldArray(fields, store);
             (long elementOffset, long elementLength) = sidecar.Append(structBytes);
+            ushort onDiskTypeId = typeIdAllocator is null
+                ? elements[i].TypeId
+                : typeIdAllocator.AllocateOrLookup(elements[i].TypeId);
             ArraySlot.Write(
                 slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength,
-                elements[i].TypeId);
+                onDiskTypeId);
         }
         return sidecar.Append(slotBlock);
     }

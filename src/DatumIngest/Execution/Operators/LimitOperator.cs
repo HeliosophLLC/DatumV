@@ -295,7 +295,8 @@ public sealed class LimitOperator : IQueryOperator
             context.Store,
             outerRow: context.OuterRow,
             sidecarRegistry: context.SidecarRegistry,
-            types: context.Types);
+            types: context.Types,
+            typeIdTranslations: context.TypeIdTranslations);
         DatumIngest.Model.DataValue value = await evaluator
             .EvaluateAsync(expression, frame, context.CancellationToken)
             .ConfigureAwait(false);

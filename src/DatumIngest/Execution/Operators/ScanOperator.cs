@@ -213,6 +213,16 @@ public sealed class ScanOperator : IQueryOperator
         ExecutionTracer.Write($"SCAN start  table={TableProvider.Name}  hasIndex={sourceIndex is not null}  filterHint={_filterHint is not null}  tableRowCount={TableRowCount}");
         ExecutionTracer.Write($"SCAN path  table={TableProvider.Name}  indexPruning={HasIndexPruning}");
 
+        // Datum-format providers may carry a per-file struct type table that
+        // needs to be deserialized into this query's TypeRegistry and
+        // registered on TypeIdTranslations so per-element TypeIds in any
+        // Array<Struct> values yielded below resolve to the right runtime
+        // shapes. No-op for providers that don't carry a type table.
+        if (TableProvider is Catalog.Providers.IDatumFileTableProvider datumProvider)
+        {
+            datumProvider.EnsureTypeTableLoaded(context);
+        }
+
         if (HasIndexPruning)
         {
             await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(

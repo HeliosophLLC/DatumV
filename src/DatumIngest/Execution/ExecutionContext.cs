@@ -110,6 +110,17 @@ public sealed class ExecutionContext
     /// </summary>
     public TypeRegistry Types { get; }
 
+    /// <summary>
+    /// Per-query translator table from a file's on-disk struct type-ids to the
+    /// ids in this query's <see cref="Types"/>. Populated by the source
+    /// operator at file open from the footer's type table; consulted by the
+    /// sidecar slot-decoding paths so <c>Array&lt;Struct&gt;</c> elements
+    /// reading from a given <c>storeId</c> resolve to the correct runtime
+    /// shape. Empty by default — files with no struct types and pre-v5
+    /// files don't need translation.
+    /// </summary>
+    public TypeIdTranslationTable TypeIdTranslations { get; } = new();
+
     /// <summary>Cancellation token for cooperative cancellation.</summary>
     public CancellationToken CancellationToken { get; }
 

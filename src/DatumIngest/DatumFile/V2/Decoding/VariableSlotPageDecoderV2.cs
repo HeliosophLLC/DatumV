@@ -31,6 +31,7 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
     private readonly byte _sidecarStoreId;
     private readonly IBlobSource? _sidecarSource;
     private readonly IValueStore? _eagerStore;
+    private readonly ushort _columnRuntimeStructTypeId;
 
     public VariableSlotPageDecoderV2(
         ColumnDescriptorV2 column,
@@ -38,10 +39,12 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         int rowCount,
         byte sidecarStoreId,
         IBlobSource? sidecarSource = null,
-        IValueStore? eagerStore = null)
+        IValueStore? eagerStore = null,
+        ushort columnRuntimeStructTypeId = 0)
     {
         _sidecarSource = sidecarSource;
         _eagerStore = eagerStore;
+        _columnRuntimeStructTypeId = columnRuntimeStructTypeId;
 
         if (column.Encoder != EncoderKind.VariableSlot)
         {
@@ -203,10 +206,16 @@ internal sealed class VariableSlotPageDecoderV2 : IPageDecoderV2
         {
             fields[i] = DataValueReader.ReadDataValue(br, _eagerStore);
         }
-        // PR3 will wire the file's per-column TypeId in here. Until then this
-        // decoder is the last legitimate FromUntypedStruct site in production —
-        // every other path stamps a real TypeId.
-        return DataValue.FromUntypedStruct(fields, _eagerStore);
+        // Stamp the column's runtime struct TypeId — translated from the
+        // file's on-disk id at scan-init via EnsureTypeTableLoaded. Falls
+        // back to FromUntypedStruct when the column has no registered type
+        // (v4 file with no type table, or v5 file whose type table didn't
+        // include this column for some reason).
+        if (_columnRuntimeStructTypeId == 0)
+        {
+            return DataValue.FromUntypedStruct(fields, _eagerStore);
+        }
+        return DataValue.FromStruct(fields, _eagerStore, _columnRuntimeStructTypeId);
     }
 
 }

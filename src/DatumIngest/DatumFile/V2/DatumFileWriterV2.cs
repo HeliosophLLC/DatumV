@@ -259,7 +259,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 
         for (int i = 0; i < _columns.Length; i++)
         {
-            _encoders[i] = PageEncoderFactoryV2.Create(_columns[i], _pageSize);
+            _encoders[i] = PageEncoderFactoryV2.Create(_columns[i], _pageSize, _allocator);
             _pageDirectory[i] = new List<PageDescriptorV2>();
             _hierarchies[i] = new ZoneMapHierarchyBuilderV2();
         }
@@ -321,8 +321,24 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             Row row = batch[rowIndex];
             for (int colIndex = 0; colIndex < _columns.Length; colIndex++)
             {
+                DataValue value = row[colIndex];
+
+                // Capture the homogeneous shape for non-array Struct columns.
+                // Array<Struct> columns carry per-element TypeIds in slot
+                // bytes — the encoder's allocator path picks those up; no
+                // column-level capture needed. Skip nulls and the
+                // legacy-no-registry path so writes that don't carry types
+                // stay byte-identical to v4.
+                if (_typeRegistry is not null
+                    && !value.IsNull
+                    && _columns[colIndex].Kind == DataKind.Struct
+                    && !_columns[colIndex].IsArray)
+                {
+                    CaptureStructColumnTypeId(colIndex, value.TypeId);
+                }
+
                 IPageEncoderV2 encoder = _encoders![colIndex];
-                encoder.Append(row[colIndex], store, _sidecar);
+                encoder.Append(value, store, _sidecar);
                 if (encoder.IsFull)
                 {
                     FlushPage(colIndex);
@@ -372,7 +388,11 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         // page directory carries each page's absolute file offset, so the
         // reader doesn't depend on layout.
 
-        // Compose column footers + zone-map hierarchies.
+        // Compose column footers + zone-map hierarchies. ResolveColumn
+        // StructTypeIdForFooter taps the per-column homogeneous-shape
+        // capture from WriteRowBatch and runs each runtime TypeId through
+        // the on-disk allocator — so the column footer stores stable ids
+        // that match the entries we'll flush in EmitTypeTable below.
         bool emitVolumes = _totalRowsWritten > DatumFormatV2.VolumeEmitRowThreshold;
         var columnFooters = new ColumnFooterV2[_columns.Length];
         for (int colIndex = 0; colIndex < _columns.Length; colIndex++)
@@ -384,8 +404,17 @@ public sealed partial class DatumFileWriterV2 : IDisposable
                 _columns[colIndex],
                 _pageDirectory![colIndex],
                 chapters,
-                volumes);
+                volumes,
+                StructTypeId: ResolveColumnStructTypeIdForFooter(colIndex));
         }
+
+        // Emit the per-file TypeTable. Order matters: this must run after
+        // ResolveColumnStructTypeIdForFooter (which can register late
+        // column-level TypeIds with the allocator) but before footer
+        // serialization (so the entries are part of the same on-disk
+        // commit). EmitTypeTable also performs the sidecar appends for
+        // the descriptor blobs themselves.
+        IReadOnlyList<TypeTableEntryV5> typeTable = EmitTypeTable();
 
         DatumFileFlagsV2 flags = DatumFileFlagsV2.None;
         if (emitVolumes) flags |= DatumFileFlagsV2.HasVolumeZoneMaps;
@@ -396,6 +425,13 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         if (_existingSidecarReferences || HasAnySidecarReferences())
         {
             flags |= DatumFileFlagsV2.HasSidecarReferences;
+        }
+        // HasTypeTable signals readers to parse the trailing type-table
+        // block. Set only when EmitTypeTable produced entries — files
+        // that never saw a struct stay v4-shaped and skip the read path.
+        if (typeTable.Count > 0)
+        {
+            flags |= DatumFileFlagsV2.HasTypeTable;
         }
         // HasExternalPages: clear in PR4 — cross-file pages ship in PR7.
 
@@ -433,14 +469,14 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             IdentityNextValue: _identityNextValue,
             PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>());
 
-        FooterV2 footer = new(prologue, columnFooters, emitVolumes);
+        FooterV2 footer = new(prologue, columnFooters, emitVolumes, typeTable);
 
         // Write the footer body, capture offset and length.
         long footerOffset = _stream.Position;
         using (MemoryStream footerScratch = new())
         using (BinaryWriter footerWriter = new(footerScratch, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer.Serialize(footerWriter);
+            footer.Serialize(footerWriter, hasTypeTable: (flags & DatumFileFlagsV2.HasTypeTable) != 0);
             footerWriter.Flush();
             footerScratch.Position = 0;
             footerScratch.CopyTo(_stream);
@@ -1461,11 +1497,12 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         stream.ReadExactly(footerBuffer);
 
         bool hasVolumeZoneMaps = (header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0;
+        bool hasTypeTable = (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0;
         FooterV2 footer;
         using (MemoryStream ms = new(footerBuffer, writable: false))
         using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps);
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable);
         }
         return (header, footer);
     }

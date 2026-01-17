@@ -41,6 +41,13 @@ public sealed class TypeRegistry
     public int InternScalarType(DataKind kind, bool nullable = false)
         => Intern(new TypeDescriptor(kind, IsArray: false, nullable, Fields: null, ElementTypeId: null));
 
+    /// <summary>
+    /// Interns a fully-formed <see cref="TypeDescriptor"/> directly. Used by
+    /// the file-format reader, which deserializes descriptors recursively
+    /// out of the on-disk type table and needs to register them as-is.
+    /// </summary>
+    public int InternDescriptor(TypeDescriptor descriptor) => Intern(descriptor);
+
     // ── ColumnInfo convenience ─────────────────────────────────────────────
 
     /// <summary>
