@@ -176,10 +176,19 @@ public sealed class StatisticsCollector
             accumulators.Add(new SpaceSavingAccumulator(_topK, kind));
         }
 
+        // Decimal columns use a dedicated accumulator that stays in decimal
+        // arithmetic for full 28-digit precision; NumericAccumulator would
+        // collapse to double via TryToDouble and lose precision past 2^53.
+        // Histogram + Quantile aren't wired for decimal yet (their internals
+        // are double-based) — diagnostic-only stats, deferred to a follow-up.
+        if (!isArrayValue && kind == DataKind.Decimal)
+        {
+            accumulators.Add(new DecimalAccumulator());
+        }
         // IsNumericScalar returns true for UInt8/Float32/etc. — but a typed-array
         // value (UInt8 + IsArray, Float32 + IsArray) is not a scalar and must not
         // get numeric stats. Gate on the IsArray flag explicitly.
-        if (!isArrayValue && DataValueComparer.IsNumericScalar(kind))
+        else if (!isArrayValue && DataValueComparer.IsNumericScalar(kind))
         {
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());

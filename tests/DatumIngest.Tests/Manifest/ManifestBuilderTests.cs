@@ -214,6 +214,69 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_DecimalColumn_ProducesDecimalFeatureManifest()
+    {
+        ColumnLookup columnLookup = new (["amount"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(1.50m)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(2.25m)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(3.00m)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["amount"] = DataKind.Decimal };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        DecimalFeatureManifest feature = Assert.IsType<DecimalFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Decimal, feature.Kind);
+        Assert.Equal(1.50m, feature.Min);
+        Assert.Equal(3.00m, feature.Max);
+        Assert.Equal(2.25m, feature.Mean);
+        Assert.False(feature.IntegerValued);
+    }
+
+    [Fact]
+    public void Build_DecimalColumn_PreservesFullPrecisionPast2Pow53()
+    {
+        // The whole point of Decimal is precision past double's 2^53 mantissa.
+        // 18014398509481985 = 2^54 + 1 — would round to 2^54 if widened to double.
+        ColumnLookup columnLookup = new (["big"]);
+        StatisticsCollector collector = new();
+        decimal preciseValue = 18014398509481985m;
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(preciseValue)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["big"] = DataKind.Decimal };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 1);
+
+        DecimalFeatureManifest feature = Assert.IsType<DecimalFeatureManifest>(manifest.Features[0]);
+        // Bitwise-exact preservation — the failure mode this test pins is
+        // "decimal accidentally routed through NumericAccumulator's double path".
+        Assert.Equal(preciseValue, feature.Min);
+        Assert.Equal(preciseValue, feature.Max);
+        Assert.True(feature.IntegerValued);
+    }
+
+    [Fact]
+    public void Build_DecimalColumn_AllIntegers_FlagsIntegerValued()
+    {
+        ColumnLookup columnLookup = new (["qty"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(1m)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(2m)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromDecimal(3m)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["qty"] = DataKind.Decimal };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        DecimalFeatureManifest feature = Assert.IsType<DecimalFeatureManifest>(manifest.Features[0]);
+        Assert.True(feature.IntegerValued);
+    }
+
+    [Fact]
     public void Build_DurationColumn_ProducesNumericFeatureManifestInSeconds()
     {
         ColumnLookup columnLookup = new (["latency"]);

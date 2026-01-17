@@ -20,5 +20,12 @@ public static class ManifestSchemaVersion
     /// older are loadable; older files default to v1 (the implicit pre-versioning
     /// value) so manifests written by binaries that predate PR14d still round-trip.
     /// </summary>
-    public const int Current = 1;
+    /// <remarks>
+    /// Version 2 (PR14c, 2026-05-09) added <c>DecimalFeatureManifest</c>. v1
+    /// readers don't know the <c>"decimal"</c> discriminator and would fail
+    /// with an opaque <see cref="System.Text.Json.JsonException"/>; the
+    /// version check surfaces the mismatch with a clear "regenerate via
+    /// ANALYZE" message instead.
+    /// </remarks>
+    public const int Current = 2;
 }

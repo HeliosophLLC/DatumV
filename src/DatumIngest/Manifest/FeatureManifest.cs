@@ -23,6 +23,7 @@ public sealed record FrequencyEntry(string Value, long Frequency);
 [JsonDerivedType(typeof(BinaryFeatureManifest), "binary")]
 [JsonDerivedType(typeof(TemporalFeatureManifest), "temporal")]
 [JsonDerivedType(typeof(BooleanFeatureManifest), "boolean")]
+[JsonDerivedType(typeof(DecimalFeatureManifest), "decimal")]
 public abstract class FeatureManifest
 {
     /// <summary>Gets the column name.</summary>
@@ -368,4 +369,50 @@ public sealed class BooleanFeatureManifest : FeatureManifest
     /// A value of 0.0 means all false; 1.0 means all true.
     /// </summary>
     public required double TrueRatio { get; init; }
+}
+
+/// <summary>
+/// Feature manifest for <see cref="DataKind.Decimal"/> columns. Carries all
+/// numeric statistics in <see cref="decimal"/> precision rather than
+/// <see cref="double"/>, preserving Decimal's full 28-digit range — the whole
+/// point of the kind.
+/// </summary>
+/// <remarks>
+/// Higher-order moments (skewness, kurtosis), histogram, and quantile data
+/// are intentionally absent from v1: those statistics are diagnostic and
+/// would require either a hybrid double / decimal implementation or
+/// additional decimal arithmetic for cubic / quartic terms. Add them when a
+/// real workload demands them. The planner's primary inputs (Min, Max,
+/// Mean, Variance, StandardDeviation, ZeroCount, IntegerValued) are all
+/// present.
+/// </remarks>
+public sealed class DecimalFeatureManifest : FeatureManifest
+{
+    /// <summary>Gets the minimum value in full decimal precision.</summary>
+    public required decimal Min { get; init; }
+
+    /// <summary>Gets the maximum value in full decimal precision.</summary>
+    public required decimal Max { get; init; }
+
+    /// <summary>Gets the arithmetic mean in full decimal precision.</summary>
+    public required decimal Mean { get; init; }
+
+    /// <summary>Gets the population variance.</summary>
+    public required decimal Variance { get; init; }
+
+    /// <summary>Gets the population standard deviation.</summary>
+    public required decimal StandardDeviation { get; init; }
+
+    /// <summary>Gets the number of values exactly equal to zero.</summary>
+    public required long ZeroCount { get; init; }
+
+    /// <summary>Gets the ratio of zero values to total count.</summary>
+    public required decimal ZeroRatio { get; init; }
+
+    /// <summary>
+    /// True when every observed value was a whole number (no fractional part).
+    /// Distinguishes Decimal columns storing pure integers (e.g. quantities)
+    /// from those storing fractional measurements (e.g. monetary amounts).
+    /// </summary>
+    public required bool IntegerValued { get; init; }
 }

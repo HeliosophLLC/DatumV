@@ -194,6 +194,7 @@ public static class ManifestBuilder
                 or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
                 or DataKind.Duration
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Decimal => BuildDecimalManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime or DataKind.Time => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
@@ -253,6 +254,38 @@ public static class ManifestBuilder
                 ? numericResult.NonzeroVariance : null,
             NonzeroStandardDeviation = numericResult.ZeroRatio > 0.1 && numericResult.NonzeroCount > 0
                 ? numericResult.NonzeroStandardDeviation : null
+        };
+    }
+
+    private static DecimalFeatureManifest BuildDecimalManifest(
+        string name, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
+    {
+        DecimalNumericResult result = GetResultValue<DecimalNumericResult>(stats, "decimal_numeric")
+            ?? DecimalNumericResult.Empty;
+
+        return new DecimalFeatureManifest
+        {
+            Name = name,
+            Kind = DataKind.Decimal,
+            Count = count,
+            NullCount = nullCount,
+            ValidCount = count,
+            NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
+            MissingRuns = missingRuns,
+            EstimatedDistinctCount = distinctCount,
+            TopKValues = topK,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate,
+            Min = result.Min,
+            Max = result.Max,
+            Mean = result.Mean,
+            Variance = result.Variance,
+            StandardDeviation = result.StandardDeviation,
+            ZeroCount = result.ZeroCount,
+            ZeroRatio = result.ZeroRatio,
+            IntegerValued = result.IntegerValued,
         };
     }
 
