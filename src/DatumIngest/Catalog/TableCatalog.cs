@@ -234,6 +234,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
         {
+            // Skip files the catalog already registered from its persisted
+            // table list — otherwise CREATE TABLE'd tables get re-added by
+            // directory enumeration and Add() throws on the duplicate name.
+            string derivedName = PathDetector.DeriveTableName(file);
+            if (catalog.HasTable(derivedName)) continue;
             catalog.AddFile(file);
         }
         return catalog;
