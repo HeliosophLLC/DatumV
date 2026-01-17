@@ -14,6 +14,7 @@ using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
+using DatumIngest.Statistics;
 
 namespace DatumIngest.Catalog.Providers;
 
@@ -44,7 +45,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 {
     private readonly TableDescriptor _descriptor;
     private readonly Pool _pool;
-    private readonly QueryResultsManifest? _manifest;
+    /// <summary>
+    /// Cached <c>.datum-manifest</c> contents, loaded at construction and
+    /// refreshed by <see cref="RebuildManifest"/>. <see cref="GetManifest"/>
+    /// composes this with the live <see cref="_sourceIndex"/> on every call.
+    /// </summary>
+    private QueryResultsManifest? _manifest;
     /// <summary>
     /// Lazily-loaded <c>.datum-index</c> sidecar mapping, captured at
     /// provider construction. Becomes stale after any mutation
@@ -1464,6 +1470,102 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             _mutationLock.Release();
         }
+    }
+
+    /// <inheritdoc/>
+    public bool CanRebuildManifest => true;
+
+    /// <inheritdoc/>
+    public void RebuildManifest()
+    {
+        _mutationLock.Wait();
+        try
+        {
+            RebuildManifestNoLock();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the <c>.datum-manifest</c> sidecar by streaming the
+    /// table's rows through a fresh <see cref="StatisticsCollector"/>,
+    /// rebuilding the per-column <see cref="QueryResultsManifest"/>, and
+    /// atomically replacing the on-disk file. Caller must already hold
+    /// <see cref="_mutationLock"/>. After this returns,
+    /// <see cref="GetManifest"/> reflects the freshly-built cached half.
+    /// </summary>
+    private void RebuildManifestNoLock()
+    {
+        Schema schema = _snapshot.Schema;
+
+        // Empty schema (table created but never populated): write an empty
+        // manifest so subsequent reads don't see stale cached fields.
+        StatisticsCollector collector = new();
+        long rowCount = 0;
+
+        IAsyncEnumerator<RowBatch> enumerator = ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None).GetAsyncEnumerator();
+        try
+        {
+            while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
+            {
+                RowBatch batch = enumerator.Current;
+                try
+                {
+                    collector.Collect(batch);
+                    rowCount += batch.Count;
+                }
+                finally
+                {
+                    batch.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            enumerator.DisposeAsync().GetAwaiter().GetResult();
+        }
+
+        Dictionary<string, ColumnInfo> columnInfos = new(schema.Columns.Count);
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            columnInfos[column.Name] = column;
+        }
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(
+            collector.GetStatistics(), columnInfos, rowCount);
+
+        // Atomically replace the .datum-manifest file. Write to .tmp then
+        // rename so a concurrent reader either sees the old file or the
+        // fully-written new one, never a torn write.
+        string finalPath = PathDetector.GetSidecarBasePath(_descriptor.FilePath) + ".datum-manifest";
+        string tempPath = finalPath + ".tmp";
+        try
+        {
+            ManifestSerializer.WriteToFileAsync(_descriptor.Name, manifest, tempPath)
+                .GetAwaiter().GetResult();
+            if (File.Exists(finalPath))
+            {
+                File.Replace(tempPath, finalPath, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(tempPath, finalPath);
+            }
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            throw;
+        }
+
+        _manifest = manifest;
     }
 
     /// <summary>

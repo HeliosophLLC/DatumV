@@ -281,6 +281,31 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support RebuildIndex (CanRebuildIndex is false).");
 
     /// <summary>
+    /// True when this provider supports refreshing the cached half of its
+    /// <c>.datum-manifest</c> sidecar (top-K, quantiles, histogram, entropy,
+    /// kind-specific summaries) via <see cref="RebuildManifest"/>. Default
+    /// <see langword="false"/>; only the persistent <c>.datum</c> file
+    /// provider opts in.
+    /// </summary>
+    bool CanRebuildManifest => false;
+
+    /// <summary>
+    /// Refreshes the cached half of the <c>.datum-manifest</c> sidecar by
+    /// scanning the current data and rebuilding all per-column statistics.
+    /// After the call returns, <see cref="GetManifest"/> reflects the
+    /// fresh cached values composed with the live overlay, and the
+    /// <see cref="Manifest.FeatureManifest.CachedStatsValid"/> flag is
+    /// <see langword="true"/> for every column.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Providers override and opt in via <see cref="CanRebuildManifest"/>.
+    /// </remarks>
+    void RebuildManifest() =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support RebuildManifest (CanRebuildManifest is false).");
+
+    /// <summary>
     /// Returns the current validity state of this table's
     /// <c>.datum-index</c> sidecar — surfaced to users via the
     /// <c>is_valid</c> column on <c>datum_catalog.indexes</c> so they

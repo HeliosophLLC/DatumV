@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Ingestion;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Pooling;
 using DatumIngest.Serialization;
@@ -165,6 +166,66 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan("ANALYZE t"));
         Assert.Contains("does not support ANALYZE", ex.Message);
+    }
+
+    // ──────────────────── PR14i — manifest refresh ────────────────────
+
+    [Fact]
+    public async Task Analyze_OnFileWithoutManifest_CreatesOne()
+    {
+        // The CSV-ingest path used by IngestAndIndex doesn't write a
+        // .datum-manifest sidecar. ANALYZE should create one on demand by
+        // scanning the rows.
+        string datumPath = await IngestAndIndex("analyze_creates_manifest.datum");
+        string manifestPath = Path.ChangeExtension(datumPath, ".datum-manifest");
+        Assert.False(File.Exists(manifestPath));
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+
+        Assert.True(File.Exists(manifestPath));
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.NotNull(after);
+        Assert.NotEmpty(after!.Features);
+    }
+
+    [Fact]
+    public async Task Analyze_FreshlyIngestedFile_PopulatesNumericMean()
+    {
+        string datumPath = await IngestAndIndex("analyze_mean.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.NotNull(after);
+
+        // The "id" column has values {1, 2, 3, 4} → mean = 2.5.
+        FeatureManifest idFeature = after!.Features.First(f => f.Name == "id");
+        NumericFeatureManifest numeric = Assert.IsType<NumericFeatureManifest>(idFeature);
+        Assert.Equal(2.5, numeric.Mean, 1e-10);
+    }
+
+    [Fact]
+    public async Task Analyze_StatsValidFlag_IsTrueAfterRefresh()
+    {
+        string datumPath = await IngestAndIndex("analyze_valid_flag.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.NotNull(after);
+        Assert.All(after!.Features, f => Assert.True(f.CachedStatsValid));
     }
 
     [Fact]
