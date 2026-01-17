@@ -195,6 +195,8 @@ public static class ManifestBuilder
                 or DataKind.Duration
                 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Decimal => BuildDecimalManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Uuid => BuildUuidManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Json => BuildJsonManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime or DataKind.Time => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
@@ -289,6 +291,60 @@ public static class ManifestBuilder
         };
     }
 
+    private static UuidFeatureManifest BuildUuidManifest(
+        string name, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
+    {
+        UuidStatsResult result = GetResultValue<UuidStatsResult>(stats, "uuid_stats")
+            ?? UuidStatsResult.Empty;
+
+        return new UuidFeatureManifest
+        {
+            Name = name,
+            Kind = DataKind.Uuid,
+            Count = count,
+            NullCount = nullCount,
+            ValidCount = count,
+            NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
+            MissingRuns = missingRuns,
+            EstimatedDistinctCount = distinctCount,
+            TopKValues = topK,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate,
+            VersionCounts = result.VersionCounts,
+            EmbeddedTimestampEarliest = result.EmbeddedTimestampEarliest?.ToString("O"),
+            EmbeddedTimestampLatest = result.EmbeddedTimestampLatest?.ToString("O"),
+        };
+    }
+
+    private static JsonFeatureManifest BuildJsonManifest(
+        string name, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
+    {
+        JsonStatsResult result = GetResultValue<JsonStatsResult>(stats, "json_stats")
+            ?? JsonStatsResult.Empty;
+
+        return new JsonFeatureManifest
+        {
+            Name = name,
+            Kind = DataKind.Json,
+            Count = count,
+            NullCount = nullCount,
+            ValidCount = count,
+            NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
+            MissingRuns = missingRuns,
+            EstimatedDistinctCount = distinctCount,
+            TopKValues = topK,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate,
+            RootTypeCounts = result.RootTypeCounts,
+            TopLevelFieldCounts = result.TopLevelFieldCounts,
+            MaxDepth = result.MaxDepth,
+        };
+    }
+
     private static StringFeatureManifest BuildStringManifest(
         string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
@@ -358,7 +414,10 @@ public static class ManifestBuilder
         {
             Name = name,
             Kind = kind,
-            IsArray = true,
+            // DataKind.Image is its own scalar kind (a single encoded blob per
+            // value), not a typed array. The IsArray flag means "Kind+IsArray
+            // typed-array column" — image columns never satisfy that.
+            IsArray = false,
             Count = count,
             NullCount = nullCount,
             ValidCount = count,

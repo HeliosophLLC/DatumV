@@ -24,6 +24,8 @@ public sealed record FrequencyEntry(string Value, long Frequency);
 [JsonDerivedType(typeof(TemporalFeatureManifest), "temporal")]
 [JsonDerivedType(typeof(BooleanFeatureManifest), "boolean")]
 [JsonDerivedType(typeof(DecimalFeatureManifest), "decimal")]
+[JsonDerivedType(typeof(UuidFeatureManifest), "uuid")]
+[JsonDerivedType(typeof(JsonFeatureManifest), "json")]
 public abstract class FeatureManifest
 {
     /// <summary>Gets the column name.</summary>
@@ -415,4 +417,72 @@ public sealed class DecimalFeatureManifest : FeatureManifest
     /// from those storing fractional measurements (e.g. monetary amounts).
     /// </summary>
     public required bool IntegerValued { get; init; }
+}
+
+/// <summary>
+/// Feature manifest for <see cref="DataKind.Uuid"/> columns. Surfaces RFC
+/// 9562 version distribution and (for v7 UUIDs only) embedded-timestamp range
+/// — the only kind-specific signals beyond cardinality / null counts that an
+/// analyst typically wants from a UUID column.
+/// </summary>
+public sealed class UuidFeatureManifest : FeatureManifest
+{
+    /// <summary>
+    /// Counts of UUIDs per RFC 9562 version field. Keys are the integer
+    /// version (1-8 for the named versions; 0 for the nil UUID and any
+    /// unrecognised value).
+    /// </summary>
+    public required IReadOnlyDictionary<int, long> VersionCounts { get; init; }
+
+    /// <summary>
+    /// Earliest embedded timestamp across all v7 UUIDs (which carry 48 bits
+    /// of unix-milliseconds in their leading bytes), as an ISO 8601 string.
+    /// <see langword="null"/> when no v7 UUIDs were observed.
+    /// v1 / v6 timestamps are not extracted yet.
+    /// </summary>
+    public string? EmbeddedTimestampEarliest { get; init; }
+
+    /// <summary>
+    /// Latest embedded timestamp across all v7 UUIDs.
+    /// <see langword="null"/> when no v7 UUIDs were observed.
+    /// </summary>
+    public string? EmbeddedTimestampLatest { get; init; }
+}
+
+/// <summary>
+/// Feature manifest for <see cref="DataKind.Json"/> columns. JSON payloads
+/// in DatumIngest are stored as canonical CBOR (RFC 7049 §3.9); this manifest
+/// exposes a shallow shape summary derived from a single CBOR pass per value.
+/// </summary>
+/// <remarks>
+/// V1 scope (Q5 Option A in the PR14 plan): root-type histogram + top-level
+/// field set + maximum nesting depth. Recursive schema inference (per-key-path
+/// type frequencies across the entire tree) is deferred — that's a separate
+/// "schema discovery" feature that the current manifest's scalar shape doesn't
+/// need to bake in.
+/// </remarks>
+public sealed class JsonFeatureManifest : FeatureManifest
+{
+    /// <summary>
+    /// Counts of values per CBOR root type. Keys are
+    /// <c>"object"</c> / <c>"array"</c> / <c>"string"</c> / <c>"number"</c>
+    /// / <c>"boolean"</c> / <c>"null"</c> / <c>"other"</c>; absent keys
+    /// indicate zero values of that root type.
+    /// </summary>
+    public required IReadOnlyDictionary<string, long> RootTypeCounts { get; init; }
+
+    /// <summary>
+    /// For object-rooted values, the count of values where each top-level
+    /// key was present. A key with frequency <c>= ObjectRootCount</c> is
+    /// present in every object; lower frequencies indicate optional fields.
+    /// Empty when no object-rooted values were observed.
+    /// </summary>
+    public required IReadOnlyDictionary<string, long> TopLevelFieldCounts { get; init; }
+
+    /// <summary>
+    /// Maximum nesting depth observed. <c>1</c> for scalar-rooted values
+    /// (string / number / boolean / null), <c>2</c> for an object containing
+    /// only scalars, and so on.
+    /// </summary>
+    public required int MaxDepth { get; init; }
 }

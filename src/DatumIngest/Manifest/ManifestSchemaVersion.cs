@@ -21,11 +21,13 @@ public static class ManifestSchemaVersion
     /// value) so manifests written by binaries that predate PR14d still round-trip.
     /// </summary>
     /// <remarks>
-    /// Version 2 (PR14c, 2026-05-09) added <c>DecimalFeatureManifest</c>. v1
-    /// readers don't know the <c>"decimal"</c> discriminator and would fail
-    /// with an opaque <see cref="System.Text.Json.JsonException"/>; the
-    /// version check surfaces the mismatch with a clear "regenerate via
-    /// ANALYZE" message instead.
+    /// Version 2 (PR14c, 2026-05-09) added <c>DecimalFeatureManifest</c>.
+    /// Version 3 (PR14e, 2026-05-09) added <c>UuidFeatureManifest</c> and
+    /// <c>JsonFeatureManifest</c>. Older readers don't know the new
+    /// discriminators and would fail with an opaque
+    /// <see cref="System.Text.Json.JsonException"/>; the version check
+    /// surfaces the mismatch with a clear "regenerate via ANALYZE" message
+    /// instead.
     /// </remarks>
-    public const int Current = 2;
+    public const int Current = 3;
 }

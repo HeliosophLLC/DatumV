@@ -124,6 +124,8 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(TemporalFeatureManifest))]
 [JsonSerializable(typeof(BooleanFeatureManifest))]
 [JsonSerializable(typeof(DecimalFeatureManifest))]
+[JsonSerializable(typeof(UuidFeatureManifest))]
+[JsonSerializable(typeof(JsonFeatureManifest))]
 [JsonSerializable(typeof(FrequencyEntry))]
 [JsonSerializable(typeof(HistogramData))]
 [JsonSerializable(typeof(NumericSummaryData))]

@@ -277,6 +277,73 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_UuidColumn_ProducesUuidFeatureManifest_VersionCounts()
+    {
+        ColumnLookup columnLookup = new (["id"]);
+        StatisticsCollector collector = new();
+
+        // Two v4 (random) and one v7 (timestamp) UUID. v4 has its version
+        // nibble = 4; v7 = 7.
+        Guid v4a = Guid.Parse("00000000-0000-4000-8000-000000000001");
+        Guid v4b = Guid.Parse("00000000-0000-4000-8000-000000000002");
+        Guid v7  = Guid.Parse("01900000-0000-7000-8000-000000000003");
+
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromUuid(v4a)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromUuid(v4b)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromUuid(v7)),  _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Uuid };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        UuidFeatureManifest feature = Assert.IsType<UuidFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(2L, feature.VersionCounts[4]);
+        Assert.Equal(1L, feature.VersionCounts[7]);
+        Assert.NotNull(feature.EmbeddedTimestampEarliest);
+        Assert.NotNull(feature.EmbeddedTimestampLatest);
+    }
+
+    [Fact]
+    public void Build_JsonColumn_ProducesJsonFeatureManifest_RootTypesAndTopLevelFields()
+    {
+        ColumnLookup columnLookup = new (["doc"]);
+        StatisticsCollector collector = new();
+
+        // Three values: two object-rooted with overlapping keys, one
+        // scalar-rooted (number). Top-level field counts should reflect
+        // the two objects.
+        DataValue obj1 = MakeJsonValue("""{"id":1,"name":"alice"}""");
+        DataValue obj2 = MakeJsonValue("""{"id":2,"tags":["a","b"]}""");
+        DataValue scalar = MakeJsonValue("""42""");
+
+        collector.AddRow(MakeRow(columnLookup, obj1), _arena);
+        collector.AddRow(MakeRow(columnLookup, obj2), _arena);
+        collector.AddRow(MakeRow(columnLookup, scalar), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["doc"] = DataKind.Json };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        JsonFeatureManifest feature = Assert.IsType<JsonFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(2L, feature.RootTypeCounts["object"]);
+        Assert.Equal(1L, feature.RootTypeCounts["number"]);
+        Assert.Equal(2L, feature.TopLevelFieldCounts["id"]);     // both objects
+        Assert.Equal(1L, feature.TopLevelFieldCounts["name"]);   // only obj1
+        Assert.Equal(1L, feature.TopLevelFieldCounts["tags"]);   // only obj2
+        Assert.True(feature.MaxDepth >= 2);                      // {tags: [...]} → depth ≥ 3
+    }
+
+    private DataValue MakeJsonValue(string json)
+    {
+        // Encode JSON text to canonical CBOR (the wire form for DataKind.Json),
+        // then store via DataValue.FromJson.
+        byte[] cbor = DatumIngest.Functions.Json.CborJsonCodec.EncodeFromJsonText(json);
+        return DataValue.FromJson(cbor, _arena);
+    }
+
+    [Fact]
     public void Build_DurationColumn_ProducesNumericFeatureManifestInSeconds()
     {
         ColumnLookup columnLookup = new (["latency"]);
