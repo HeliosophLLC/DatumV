@@ -51,6 +51,19 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// composes this with the live <see cref="_sourceIndex"/> on every call.
     /// </summary>
     private QueryResultsManifest? _manifest;
+
+    /// <summary>
+    /// True when the cached manifest's expensive fields (top-K, quantiles,
+    /// histogram, entropy, kind-specific summaries) have drifted from the
+    /// live data because a mutation has happened since the last
+    /// <c>ANALYZE</c>. The live overlay (PR14h) keeps Count / NullCount /
+    /// EstimatedDistinctCount fresh through every snapshot rebuild, but
+    /// the cached half ages until <c>ANALYZE</c> rescans.
+    /// <see cref="GetManifest"/> propagates this as
+    /// <see cref="FeatureManifest.CachedStatsValid"/>=<see langword="false"/>
+    /// on every column. Cleared by <see cref="RebuildManifestNoLock"/>.
+    /// </summary>
+    private bool _cachedStatsStale;
     /// <summary>
     /// Lazily-loaded <c>.datum-index</c> sidecar mapping, captured at
     /// provider construction. Becomes stale after any mutation
@@ -429,8 +442,17 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         QueryResultsManifest? cached = _manifest;
         SourceIndex? index = _sourceIndex;
         if (cached is null) return null;
-        if (index is null) return cached;
-        return LiveManifestOverlay.Compose(cached, index);
+
+        QueryResultsManifest result = index is null
+            ? cached
+            : LiveManifestOverlay.Compose(cached, index);
+
+        if (_cachedStatsStale)
+        {
+            result = LiveManifestOverlay.WithCachedStatsValid(result, cachedStatsValid: false);
+        }
+
+        return result;
     }
 
     /// <inheritdoc/>
@@ -1566,6 +1588,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         }
 
         _manifest = manifest;
+        _cachedStatsStale = false;
     }
 
     /// <summary>
@@ -1780,6 +1803,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             }
         }
         SwapSnapshot(next);
+
+        // PR14j: every mutation drifts the cached half of the manifest
+        // (top-K, quantiles, histogram, entropy, kind-specific summaries)
+        // away from the live data. Surface that to consumers via
+        // CachedStatsValid=false until ANALYZE rescans.
+        _cachedStatsStale = true;
     }
 
     /// <summary>

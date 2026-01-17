@@ -228,6 +228,80 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         Assert.All(after!.Features, f => Assert.True(f.CachedStatsValid));
     }
 
+    // ──────────────────── PR14j — mutation staleness ────────────────────
+
+    [Fact]
+    public async Task Mutation_FlipsCachedStatsValidToFalse()
+    {
+        // After a mutation, every column's CachedStatsValid should report
+        // false until ANALYZE re-runs. This is the consumer-facing signal
+        // that planner / language-server should discount the cached
+        // expensive fields (top-K, quantiles, histogram, entropy).
+        string datumPath = await IngestAndIndex("staleness_after_insert.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+        QueryResultsManifest? before = provider.GetManifest();
+        Assert.NotNull(before);
+        Assert.All(before!.Features, f => Assert.True(f.CachedStatsValid));
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
+            CancellationToken.None);
+
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.NotNull(after);
+        Assert.All(after!.Features, f => Assert.False(f.CachedStatsValid));
+    }
+
+    [Fact]
+    public async Task Analyze_AfterMutation_RestoresCachedStatsValid()
+    {
+        string datumPath = await IngestAndIndex("staleness_restored_by_analyze.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+
+        Schema schema = provider.GetSchema();
+        await catalog.AppendRowsAsync("t",
+            MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
+            CancellationToken.None);
+
+        // After mutation: stale.
+        QueryResultsManifest? mid = provider.GetManifest();
+        Assert.All(mid!.Features, f => Assert.False(f.CachedStatsValid));
+
+        // After ANALYZE: fresh again.
+        catalog.Plan("ANALYZE t");
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.All(after!.Features, f => Assert.True(f.CachedStatsValid));
+    }
+
+    [Fact]
+    public async Task Update_FlipsCachedStatsValidToFalse()
+    {
+        string datumPath = await IngestAndIndex("staleness_after_update.datum");
+
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
+
+        catalog.Plan("ANALYZE t");
+
+        catalog.Plan("UPDATE t SET name = 'updated' WHERE id = 1");
+
+        QueryResultsManifest? after = provider.GetManifest();
+        Assert.NotNull(after);
+        Assert.All(after!.Features, f => Assert.False(f.CachedStatsValid));
+    }
+
     [Fact]
     public async Task Reindex_AfterUpdate_StaysValid()
     {

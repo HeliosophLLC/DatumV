@@ -58,7 +58,7 @@ public static class LiveManifestOverlay
             // count. Every column should agree, so we don't sum across them —
             // taking the first is enough.
             freshRowCount ??= live.Count + live.NullCount;
-            overlaid.Add(CloneWithLiveStats(feature, live));
+            overlaid.Add(CloneFeature(feature, live, feature.CachedStatsValid));
         }
 
         return new QueryResultsManifest
@@ -76,16 +76,72 @@ public static class LiveManifestOverlay
     }
 
     /// <summary>
-    /// Builds a fresh subclass instance with the cached field set, but with
-    /// <paramref name="live"/>'s base-class fields swapped in. The
-    /// <see cref="FeatureManifest.CachedStatsValid"/> flag is preserved from
-    /// the cached input — overlay says nothing about whether the cached half is
-    /// fresh; that's owned by the mutation-staleness signal (PR14j).
+    /// Returns a manifest where every feature has its
+    /// <see cref="FeatureManifest.CachedStatsValid"/> flag forced to
+    /// <paramref name="cachedStatsValid"/>. Used by the mutation-staleness
+    /// signal (PR14j): a provider that observes a mutation flips this to
+    /// <see langword="false"/> on the manifest it returns until ANALYZE
+    /// runs and refreshes the cached half.
     /// </summary>
-    private static FeatureManifest CloneWithLiveStats(FeatureManifest cached, LiveColumnStats live)
+    public static QueryResultsManifest WithCachedStatsValid(
+        QueryResultsManifest manifest, bool cachedStatsValid)
     {
-        long total = live.Count + live.NullCount;
-        double? nullRatio = total > 0 ? (double?)live.NullCount / total : null;
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        bool anyChanges = false;
+        FeatureManifest[] updated = new FeatureManifest[manifest.Features.Count];
+        for (int i = 0; i < updated.Length; i++)
+        {
+            FeatureManifest feature = manifest.Features[i];
+            if (feature.CachedStatsValid == cachedStatsValid)
+            {
+                updated[i] = feature;
+            }
+            else
+            {
+                updated[i] = CloneFeature(feature, live: null, cachedStatsValid);
+                anyChanges = true;
+            }
+        }
+
+        if (!anyChanges) return manifest;
+
+        return new QueryResultsManifest
+        {
+            RowCount = manifest.RowCount,
+            GeneratedAtUtc = manifest.GeneratedAtUtc,
+            Features = updated,
+            Interactions = manifest.Interactions,
+            Insights = manifest.Insights,
+            RecommendedQuery = manifest.RecommendedQuery,
+            FullSuggestedQuery = manifest.FullSuggestedQuery,
+            QueryAnnotations = manifest.QueryAnnotations,
+            IndexHints = manifest.IndexHints,
+        };
+    }
+
+    /// <summary>
+    /// Builds a fresh subclass instance with the cached field set, swapping
+    /// <paramref name="live"/>'s base-class fields when present and forcing
+    /// <see cref="FeatureManifest.CachedStatsValid"/> to
+    /// <paramref name="cachedStatsValid"/>.
+    /// </summary>
+    private static FeatureManifest CloneFeature(
+        FeatureManifest cached, LiveColumnStats? live, bool cachedStatsValid)
+    {
+        long count = live?.Count ?? cached.Count;
+        long nullCount = live?.NullCount ?? cached.NullCount;
+        long distinct = live?.EstimatedDistinctCount ?? cached.EstimatedDistinctCount;
+        double? nullRatio;
+        if (live is not null)
+        {
+            long total = live.Count + live.NullCount;
+            nullRatio = total > 0 ? (double?)live.NullCount / total : null;
+        }
+        else
+        {
+            nullRatio = cached.NullRatio;
+        }
 
         return cached switch
         {
@@ -94,10 +150,10 @@ public static class LiveManifestOverlay
                 Name = n.Name,
                 Kind = n.Kind,
                 IsArray = n.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = n.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = n.DominantValueRatio,
@@ -106,7 +162,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = n.EntropyApproximate,
                 Role = n.Role,
                 SchemaInference = n.SchemaInference,
-                CachedStatsValid = n.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 Min = n.Min,
                 Max = n.Max,
                 Mean = n.Mean,
@@ -131,10 +187,10 @@ public static class LiveManifestOverlay
                 Name = s.Name,
                 Kind = s.Kind,
                 IsArray = s.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = s.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = s.DominantValueRatio,
@@ -143,7 +199,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = s.EntropyApproximate,
                 Role = s.Role,
                 SchemaInference = s.SchemaInference,
-                CachedStatsValid = s.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 MinLength = s.MinLength,
                 MaxLength = s.MaxLength,
                 CharacterClass = s.CharacterClass,
@@ -153,10 +209,10 @@ public static class LiveManifestOverlay
                 Name = b.Name,
                 Kind = b.Kind,
                 IsArray = b.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = b.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = b.DominantValueRatio,
@@ -165,7 +221,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = b.EntropyApproximate,
                 Role = b.Role,
                 SchemaInference = b.SchemaInference,
-                CachedStatsValid = b.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 TrueRatio = b.TrueRatio,
             },
             TemporalFeatureManifest t => new TemporalFeatureManifest
@@ -173,10 +229,10 @@ public static class LiveManifestOverlay
                 Name = t.Name,
                 Kind = t.Kind,
                 IsArray = t.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = t.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = t.DominantValueRatio,
@@ -185,7 +241,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = t.EntropyApproximate,
                 Role = t.Role,
                 SchemaInference = t.SchemaInference,
-                CachedStatsValid = t.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 Earliest = t.Earliest,
                 Latest = t.Latest,
             },
@@ -194,10 +250,10 @@ public static class LiveManifestOverlay
                 Name = a.Name,
                 Kind = a.Kind,
                 IsArray = a.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = a.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = a.DominantValueRatio,
@@ -206,7 +262,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = a.EntropyApproximate,
                 Role = a.Role,
                 SchemaInference = a.SchemaInference,
-                CachedStatsValid = a.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 MinLength = a.MinLength,
                 MaxLength = a.MaxLength,
                 ElementStats = a.ElementStats,
@@ -222,10 +278,10 @@ public static class LiveManifestOverlay
                 Name = i.Name,
                 Kind = i.Kind,
                 IsArray = i.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = i.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = i.DominantValueRatio,
@@ -234,7 +290,7 @@ public static class LiveManifestOverlay
                 EntropyApproximate = i.EntropyApproximate,
                 Role = i.Role,
                 SchemaInference = i.SchemaInference,
-                CachedStatsValid = i.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 MinWidth = i.MinWidth,
                 MaxWidth = i.MaxWidth,
                 MinHeight = i.MinHeight,
@@ -255,10 +311,10 @@ public static class LiveManifestOverlay
                 Name = bin.Name,
                 Kind = bin.Kind,
                 IsArray = bin.IsArray,
-                Count = live.Count,
-                NullCount = live.NullCount,
-                ValidCount = live.Count,
-                EstimatedDistinctCount = live.EstimatedDistinctCount,
+                Count = count,
+                NullCount = nullCount,
+                ValidCount = count,
+                EstimatedDistinctCount = distinct,
                 TopKValues = bin.TopKValues,
                 NullRatio = nullRatio,
                 DominantValueRatio = bin.DominantValueRatio,
@@ -267,9 +323,13 @@ public static class LiveManifestOverlay
                 EntropyApproximate = bin.EntropyApproximate,
                 Role = bin.Role,
                 SchemaInference = bin.SchemaInference,
-                CachedStatsValid = bin.CachedStatsValid,
+                CachedStatsValid = cachedStatsValid,
                 SizeStats = bin.SizeStats,
             },
+            // Unknown subclass: best-effort passthrough. The base class's
+            // CachedStatsValid is `init`-only and can't be patched in place,
+            // so callers that hit this arm get whatever flag was on the
+            // input. Future subclasses must add an explicit case above.
             _ => cached,
         };
     }
