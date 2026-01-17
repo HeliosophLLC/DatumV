@@ -270,8 +270,13 @@ public sealed class InMemoryTableProvider : ITableProvider
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
+        // typeIdTranslations is unused — in-memory rows already carry runtime
+        // TypeIds (no on-disk → runtime gap to bridge). Parameter exists to
+        // satisfy the ITableProvider contract.
+        _ = typeIdTranslations;
         ObjectDisposedException.ThrowIf(Disposed, this);
 
         // filterHint is advisory for zone-map pruning. An in-memory table has no

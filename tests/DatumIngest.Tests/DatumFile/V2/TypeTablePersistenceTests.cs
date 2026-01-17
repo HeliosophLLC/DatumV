@@ -173,6 +173,47 @@ public sealed class TypeTablePersistenceTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public void Concurrency_TwoRegistriesPickIndependentRuntimeIds()
+    {
+        // Pin the race fix. Before PR3-followup, the provider cached a
+        // per-column runtime TypeId in a single field; concurrent queries
+        // with distinct registries would overwrite each other and the
+        // late writer's ids would leak into the early reader's batches.
+        // Now that translation happens via the per-call typeIdTranslations
+        // argument, two registries can independently resolve the same
+        // file and never see each other's runtime ids.
+        string datumPath = Path.Combine(_tempDir, "concurrency.datum");
+        WriteFlatStructFile(datumPath);
+
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
+
+        // Pre-seed registry A so its first interned id is guaranteed
+        // distinct from registry B's. Without the pre-seed both registries
+        // intern the file's shape into id=1, which would mask a translator
+        // that returned the on-disk id verbatim.
+        TypeRegistry registryA = new();
+        registryA.InternScalarType(DataKind.Boolean);
+        registryA.InternScalarType(DataKind.UInt8);
+
+        TypeRegistry registryB = new();
+
+        Dictionary<ushort, ushort> mapA = LoadTypeTable(reader, datumPath, registryA);
+        Dictionary<ushort, ushort> mapB = LoadTypeTable(reader, datumPath, registryB);
+
+        ushort onDiskColumnId = reader.Footer.Columns[0].StructTypeId!.Value;
+        ushort runtimeIdA = mapA[onDiskColumnId];
+        ushort runtimeIdB = mapB[onDiskColumnId];
+
+        Assert.NotEqual(runtimeIdA, runtimeIdB);
+        Assert.NotNull(registryA.GetDescriptor(runtimeIdA));
+        Assert.NotNull(registryB.GetDescriptor(runtimeIdB));
+        // Cross-registry resolution must fail loud — runtime ids are not
+        // portable across registries even when the underlying shape matches.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => registryB.GetDescriptor(runtimeIdA));
+    }
+
     /// <summary>
     /// Builds a single-column Struct table, writes it through the writer
     /// pipeline. Layout: Struct{x: Int32, y: String}. Returns the runtime

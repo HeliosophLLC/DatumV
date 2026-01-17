@@ -8,7 +8,12 @@ namespace DatumIngest.DevWeb;
 
 internal static class WebCellFormatter
 {
-    public static JsonCell Format(DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
+    public static JsonCell Format(
+        DataValue value,
+        Arena arena,
+        SidecarRegistry registry,
+        TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         if (value.IsNull)
         {
@@ -83,12 +88,12 @@ internal static class WebCellFormatter
         // a one-line {f0: ..., f1: ...} blob.
         if (ShouldRouteToJson(value))
         {
-            object? tree = BuildJsonNode(value, arena, registry, types);
+            object? tree = BuildJsonNode(value, arena, registry, types, translations);
             string text = JsonSerializer.Serialize(tree, JsonOpts);
             return new JsonCell("json", Text: text);
         }
 
-        return new JsonCell("text", Text: FormatText(value, arena, registry, types));
+        return new JsonCell("text", Text: FormatText(value, arena, registry, types, translations));
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -125,13 +130,14 @@ internal static class WebCellFormatter
     /// <see cref="TypeRegistry"/>; missing names fall back to <c>fN</c>.
     /// </summary>
     private static object? BuildJsonNode(
-        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types,
+        TypeIdTranslationTable? translations)
     {
         if (value.IsNull) return null;
 
         if (value.IsArray)
         {
-            return BuildJsonArrayNode(value, arena, registry, types);
+            return BuildJsonArrayNode(value, arena, registry, types, translations);
         }
 
         if (value.Kind == DataKind.Struct)
@@ -147,7 +153,7 @@ internal static class WebCellFormatter
                 // Disambiguate clashes (rare — duplicate field name in a struct
                 // shape). Avoids a Dictionary key collision throwing mid-render.
                 if (obj.ContainsKey(name)) name = $"{name}_{i}";
-                obj[name] = BuildJsonNode(fieldValues[i], arena, registry, types);
+                obj[name] = BuildJsonNode(fieldValues[i], arena, registry, types, translations);
             }
             return obj;
         }
@@ -191,17 +197,20 @@ internal static class WebCellFormatter
     }
 
     private static List<object?> BuildJsonArrayNode(
-        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types,
+        TypeIdTranslationTable? translations)
     {
         // Struct arrays: each element is a self-describing Struct DataValue —
-        // recurse into BuildJsonNode for each.
+        // recurse into BuildJsonNode for each. The translator turns sidecar-
+        // resident on-disk TypeIds back into runtime registry ids before the
+        // recursion looks up field names.
         if (value.Kind == DataKind.Struct)
         {
-            DataValue[] elements = value.AsStructArray(arena, registry);
+            DataValue[] elements = value.AsStructArray(arena, registry, translations);
             List<object?> arr = new(elements.Length);
             for (int i = 0; i < elements.Length; i++)
             {
-                arr.Add(BuildJsonNode(elements[i], arena, registry, types));
+                arr.Add(BuildJsonNode(elements[i], arena, registry, types, translations));
             }
             return arr;
         }
@@ -289,13 +298,14 @@ internal static class WebCellFormatter
     };
 
     private static string FormatText(
-        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         if (value.IsNull) return "NULL";
 
         if (value.IsArray)
         {
-            return FormatArray(value, arena, registry, types);
+            return FormatArray(value, arena, registry, types, translations);
         }
 
         if (value.Kind == DataKind.Struct)
@@ -308,7 +318,7 @@ internal static class WebCellFormatter
                 string name = typeDesc?.Fields is { } tFields && i < tFields.Count
                     ? tFields[i].Name
                     : $"f{i}";
-                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
+                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types, translations)}";
             }
             return "{" + string.Join(", ", parts) + "}";
         }
@@ -338,19 +348,21 @@ internal static class WebCellFormatter
     }
 
     private static string FormatArray(
-        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null)
+        DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         if (value.Kind == DataKind.Struct)
         {
             // Each element is a self-describing Struct DataValue carrying its own
-            // TypeId. No container-side ElementTypeId hop — read each row's
-            // TypeId directly off the slot.
-            DataValue[] elements = value.AsStructArray(arena, registry);
+            // TypeId. The translator turns sidecar-resident on-disk ids back
+            // into runtime registry ids so field-name lookup hits the right
+            // descriptor.
+            DataValue[] elements = value.AsStructArray(arena, registry, translations);
             string[] parts = new string[elements.Length];
             for (int i = 0; i < elements.Length; i++)
             {
                 DataValue[] fields = elements[i].AsStruct(arena);
-                parts[i] = FormatStructFromFields(fields, arena, registry, types, elements[i].TypeId);
+                parts[i] = FormatStructFromFields(fields, arena, registry, types, elements[i].TypeId, translations);
             }
             return "[" + string.Join(", ", parts) + "]";
         }
@@ -385,7 +397,8 @@ internal static class WebCellFormatter
 
     private static string FormatStructFromFields(
         DataValue[] fieldValues, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
-        ushort elementTypeId = 0)
+        ushort elementTypeId = 0,
+        TypeIdTranslationTable? translations = null)
     {
         TypeDescriptor? typeDesc = elementTypeId != 0 ? types?.GetDescriptor(elementTypeId) : null;
         string[] parts = new string[fieldValues.Length];
@@ -394,7 +407,7 @@ internal static class WebCellFormatter
             string name = typeDesc?.Fields is { } tFields && i < tFields.Count
                 ? tFields[i].Name
                 : $"f{i}";
-            parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types)}";
+            parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types, translations)}";
         }
         return "{" + string.Join(", ", parts) + "}";
     }

@@ -60,6 +60,15 @@ public sealed class RowBatch : IDisposable
     public TypeRegistry? Types { get; internal set; }
 
     /// <summary>
+    /// The per-query on-disk → runtime <see cref="TypeIdTranslationTable"/>. Set
+    /// alongside <see cref="Types"/> by <see cref="Execution.ExecutionContext.RentRowBatch(ColumnLookup)"/>;
+    /// formatters that consume sidecar-resident <c>Array&lt;Struct&gt;</c> values
+    /// pass it to <see cref="DataValue.AsStructArray"/> so per-element on-disk
+    /// TypeIds resolve through the right translator.
+    /// </summary>
+    public TypeIdTranslationTable? TypeIdTranslations { get; internal set; }
+
+    /// <summary>
     /// Clears all fields and returns the backing row and arena as out parameters for reuse.
     /// Rows are not returned to any pool; their lifecycle is managed separately by operators.
     /// The batch must not be used after calling this method.

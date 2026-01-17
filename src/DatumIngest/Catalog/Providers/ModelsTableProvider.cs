@@ -79,7 +79,8 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 

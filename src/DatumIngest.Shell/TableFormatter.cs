@@ -139,7 +139,8 @@ internal static class TableFormatter
         Arena arena,
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? structFields = null,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         // Byte arrays render as a hex preview regardless of how the column was
         // declared — the IsArray-aware branch below would format them as a
@@ -151,12 +152,12 @@ internal static class TableFormatter
 
         if (value.IsArray)
         {
-            return FormatArrayValue(value, arena, registry, structFields, types);
+            return FormatArrayValue(value, arena, registry, structFields, types, translations);
         }
 
         if (value.Kind == DataKind.Struct)
         {
-            return FormatStructValue(value, arena, registry, structFields, types);
+            return FormatStructValue(value, arena, registry, structFields, types, translations);
         }
 
         return value.Kind switch
@@ -235,7 +236,8 @@ internal static class TableFormatter
         Arena arena,
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? fields,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         DataValue[] fieldValues = value.AsStruct(arena);
         // Fall back to the registry-resident TypeDescriptor when the caller
@@ -256,7 +258,7 @@ internal static class TableFormatter
                 fields is not null && index < fields.Count ? fields[index].Fields : null;
             string formatted = fieldValue.IsNull
                 ? "NULL"
-                : FormatValue(fieldValue, arena, registry, nestedFields, types);
+                : FormatValue(fieldValue, arena, registry, nestedFields, types, translations);
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";
@@ -275,15 +277,17 @@ internal static class TableFormatter
         Arena arena,
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? structFields,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        TypeIdTranslationTable? translations = null)
     {
         if (value.Kind == DataKind.Struct)
         {
             // Each element is a self-describing Struct DataValue carrying its own
             // TypeId in the slot's reserved bytes. Pull fields per element via
-            // AsStruct and format with the element's own TypeId — no container-
-            // side ElementTypeId hop needed.
-            DataValue[] elements = value.AsStructArray(arena, registry);
+            // AsStruct and format with the element's own TypeId — passing the
+            // translator so sidecar-resident slots translate their on-disk ids
+            // into the formatter's runtime registry.
+            DataValue[] elements = value.AsStructArray(arena, registry, translations);
             return FormatArrayElements(
                 elements.Length,
                 index => FormatStructFromFieldArray(
@@ -292,7 +296,8 @@ internal static class TableFormatter
                     registry,
                     structFields,
                     types,
-                    elements[index].TypeId));
+                    elements[index].TypeId,
+                    translations));
         }
 
         if (value.Kind == DataKind.String)
@@ -358,7 +363,8 @@ internal static class TableFormatter
         SidecarRegistry? registry,
         IReadOnlyList<ColumnInfo>? fields,
         TypeRegistry? types = null,
-        ushort elementTypeId = 0)
+        ushort elementTypeId = 0,
+        TypeIdTranslationTable? translations = null)
     {
         TypeDescriptor? typeDesc = types is not null && elementTypeId != 0
             ? types.GetDescriptor(elementTypeId)
@@ -371,7 +377,7 @@ internal static class TableFormatter
                     ? tdFields[i].Name
                     : $"f{i}";
             IReadOnlyList<ColumnInfo>? nested = fields is not null && i < fields.Count ? fields[i].Fields : null;
-            string formatted = fv.IsNull ? "NULL" : FormatValue(fv, arena, registry, nested, types);
+            string formatted = fv.IsNull ? "NULL" : FormatValue(fv, arena, registry, nested, types, translations);
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";

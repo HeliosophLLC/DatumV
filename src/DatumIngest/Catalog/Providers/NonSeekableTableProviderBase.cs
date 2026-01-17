@@ -58,5 +58,6 @@ public abstract class NonSeekableTableProviderBase : ITableProvider
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null);
 }

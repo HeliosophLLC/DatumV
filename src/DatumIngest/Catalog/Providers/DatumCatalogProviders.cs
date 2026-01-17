@@ -44,7 +44,8 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         _ = requiredColumns;
@@ -189,7 +190,8 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         _ = requiredColumns;
@@ -297,7 +299,8 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         _ = requiredColumns;
@@ -464,7 +467,8 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         _ = requiredColumns;
@@ -607,7 +611,8 @@ internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProvide
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         _ = requiredColumns;

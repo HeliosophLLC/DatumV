@@ -95,12 +95,21 @@ public interface ITableProvider : IDisposable
     /// <c>null</c> to keep the legacy per-batch-arena behaviour.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="typeIdTranslations">
+    /// Optional per-query translator from on-disk struct type-ids to the calling
+    /// query's <see cref="Model.TypeRegistry"/> ids. Format-aware providers
+    /// (<see cref="Providers.IDatumFileTableProvider"/>) thread this through the
+    /// page-decoder open so per-row Struct values stamp the right runtime id
+    /// without needing a per-provider mutable cache. Other providers should
+    /// ignore the parameter.
+    /// </param>
     /// <returns>An async enumerable of row batches from the data source.</returns>
     IAsyncEnumerable<RowBatch> ScanAsync(
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null);
 
     /// <summary>
     /// Opens a caller-owned session for repeated seeks into this table. The session holds

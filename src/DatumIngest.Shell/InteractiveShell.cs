@@ -387,7 +387,7 @@ internal sealed class InteractiveShell
                         DataValue value = row[c];
                         cells[c] = value.IsNull
                             ? "NULL"
-                            : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields, batch.Types);
+                            : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields, batch.Types, batch.TypeIdTranslations);
                     }
                     bufferedRows.Add(cells);
                 }
@@ -508,7 +508,7 @@ internal sealed class InteractiveShell
                             DataValue value = row[c];
                             cells[c] = value.IsNull
                                 ? "NULL"
-                                : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields, batch.Types);
+                                : TableFormatter.FormatValue(value, arena, registry, schema.Columns[c].Fields, batch.Types, batch.TypeIdTranslations);
                         }
                         page.Add(cells);
                         i++;
@@ -577,7 +577,7 @@ internal sealed class InteractiveShell
                 recordIndex++;
 
                 DumpImageCellsIfEnabled(row, schema, arena, registry, recordIndex - 1);
-                RenderExpandedRow(row, schema, arena, registry, batch.Types, recordIndex, nameWidth);
+                RenderExpandedRow(row, schema, arena, registry, batch.Types, batch.TypeIdTranslations, recordIndex, nameWidth);
 
                 batchOffset++;
                 if (batchOffset >= batch.Count)
@@ -605,7 +605,7 @@ internal sealed class InteractiveShell
 
     private static void RenderExpandedRow(
         Row row, Schema schema, Arena arena, SidecarRegistry registry, TypeRegistry? types,
-        long recordIndex, int nameWidth)
+        TypeIdTranslationTable? translations, long recordIndex, int nameWidth)
     {
         AnsiConsole.MarkupLine($"[grey]── Record {recordIndex} {new string('─', Math.Max(8, 60 - nameWidth))}[/]");
 
@@ -639,7 +639,7 @@ internal sealed class InteractiveShell
             {
                 string text = value.IsNull
                     ? "NULL"
-                    : TableFormatter.FormatValue(value, arena, registry, column.Fields, types);
+                    : TableFormatter.FormatValue(value, arena, registry, column.Fields, types, translations);
                 Console.Out.WriteLine($"{label} | {text}");
             }
         }

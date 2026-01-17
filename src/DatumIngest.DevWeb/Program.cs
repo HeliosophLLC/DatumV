@@ -464,7 +464,7 @@ static async Task<IResult> ExecuteQuery(
                 List<JsonCell> cells = new(columnCount);
                 for (int c = 0; c < columnCount; c++)
                 {
-                    cells.Add(WebCellFormatter.Format(row[c], arena, registry, batch.Types));
+                    cells.Add(WebCellFormatter.Format(row[c], arena, registry, batch.Types, batch.TypeIdTranslations));
                 }
                 rows.Add(cells);
             }
@@ -680,7 +680,7 @@ static async Task ExecuteBatchAsync(
                     JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
                     for (int c = 0; c < batch.ColumnLookup.Count; c++)
                     {
-                        cells[c] = WebCellFormatter.Format(row[c], arena, registry, batch.Types);
+                        cells[c] = WebCellFormatter.Format(row[c], arena, registry, batch.Types, batch.TypeIdTranslations);
                     }
                     writeEvent(new RowEvent("row", rowEvent.CellId, cells));
                     cellRowCount++;

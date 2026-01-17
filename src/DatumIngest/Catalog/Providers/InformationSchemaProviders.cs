@@ -52,7 +52,8 @@ internal sealed class InformationSchemaTablesProvider : NonSeekableTableProvider
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 
@@ -149,7 +150,8 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 
@@ -244,7 +246,8 @@ internal sealed class InformationSchemaSchemataProvider : NonSeekableTableProvid
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
         Arena? targetArena,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 

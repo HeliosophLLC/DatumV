@@ -173,6 +173,7 @@ public sealed class ExecutionContext
     {
         RowBatch batch = Pool.RentRowBatch(columnLookup, BatchSize, Store);
         batch.Types = Types;
+        batch.TypeIdTranslations = TypeIdTranslations;
         return batch;
     }
 
@@ -188,6 +189,7 @@ public sealed class ExecutionContext
     {
         RowBatch batch = Pool.RentRowBatch(columnLookup, capacity, Store);
         batch.Types = Types;
+        batch.TypeIdTranslations = TypeIdTranslations;
         return batch;
     }
 

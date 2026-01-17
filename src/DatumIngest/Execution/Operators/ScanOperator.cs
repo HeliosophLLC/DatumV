@@ -234,7 +234,8 @@ public sealed class ScanOperator : IQueryOperator
         else
         {
             await foreach (RowBatch batch in TableProvider.ScanAsync(
-                _requiredColumns, _filterHint, context.Store, cancellationToken).ConfigureAwait(false))
+                _requiredColumns, _filterHint, context.Store, cancellationToken,
+                context.TypeIdTranslations).ConfigureAwait(false))
             {
                 yield return batch;
             }
