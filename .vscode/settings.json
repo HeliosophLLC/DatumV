@@ -4,5 +4,6 @@
         "**/bin/**": true,
         "**/obj/**": true,
         "**/traces/**": true
-    }
+    },
+    "dotnet.unitTests.runSettingsPath": "tests/DatumIngest.Tests/DatumIngest.Tests.runsettings"
 }
