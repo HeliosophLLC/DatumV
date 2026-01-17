@@ -201,10 +201,13 @@ public sealed class StatisticsCollector
             accumulators.Add(new StringLengthAccumulator());
         }
 
-        // Array stats accumulator currently keys on Float32 + IsArray (the former
-        // Vector kind). Other typed-array kinds will dispatch through here when
-        // their element-stat paths land.
-        if (kind == DataKind.Float32 && isArrayValue)
+        // Array stats accumulator covers any non-byte-array typed numeric array —
+        // Float16/32/64 and the signed/unsigned integer family up to 64-bit.
+        // UInt8+IsArray is intentionally a byte blob (BinarySizeAccumulator path,
+        // gated separately above); Decimal/Int128/UInt128 arrays are not yet
+        // supported (precision / no array payload). See ArrayStatsAccumulator
+        // class doc for the exact element-kind matrix.
+        if (isArrayValue && !isByteArray && IsArrayElementKindSupported(kind))
         {
             accumulators.Add(new ArrayStatsAccumulator());
         }
@@ -243,4 +246,9 @@ public sealed class StatisticsCollector
 
         return accumulators;
     }
+
+    private static bool IsArrayElementKindSupported(DataKind kind) =>
+        kind is DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+            or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64;
 }

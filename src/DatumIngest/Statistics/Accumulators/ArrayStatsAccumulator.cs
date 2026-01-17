@@ -1,16 +1,33 @@
 namespace DatumIngest.Statistics.Accumulators;
 
+using System.Numerics;
 using DatumIngest.Model;
 
 /// <summary>
-/// Accumulates aggregate element-wise statistics for typed-array columns. Today
-/// dispatches only on <see cref="DataKind.Float32"/> + <see cref="DataValue.IsArray"/>
-/// (the former Vector kind); the Welford / L2-norm machinery is element-kind-generic
-/// so other numeric arrays (Float64, Int*) can plug in as their dispatch lands.
-/// Tracks per-array element-count ranges (min/max length) and runs Welford's
-/// algorithm across all scalar elements of every value, producing an overall
-/// <see cref="NumericSummary"/>.
+/// Accumulates aggregate element-wise statistics for typed-array columns. Dispatches
+/// on the value's <see cref="DataKind"/> + <see cref="DataValue.IsArray"/> flag and
+/// runs Welford's algorithm across all scalar elements via the generic
+/// <see cref="INumber{TSelf}"/> path; element values are widened to <see cref="double"/>
+/// for the running mean/variance and L2-norm so a single accumulator covers every
+/// supported element kind.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Supported element kinds: Float16 / Float32 / Float64 and the signed/unsigned
+/// integer family (Int8 — Int64, UInt16 — UInt64). UInt8+IsArray is intentionally
+/// excluded — that storage shape is the byte-blob path and is handled by
+/// <see cref="BinarySizeAccumulator"/>; even though byte arrays are technically
+/// numeric, treating them as binary blobs matches the SQL idiom and avoids the
+/// nonsense of "the mean byte value of an image is 127.4."
+/// </para>
+/// <para>
+/// Excluded element kinds: <see cref="DataKind.Decimal"/> (would lose precision
+/// when widening to double — a dedicated decimal-array accumulator is a follow-up),
+/// <see cref="DataKind.Int128"/> / <see cref="DataKind.UInt128"/> (no array
+/// payload support today), and <see cref="DataKind.Boolean"/> (boolean arrays
+/// are unusual; if a use case lands, count true/false in a dedicated path).
+/// </para>
+/// </remarks>
 public sealed class ArrayStatsAccumulator : IStatisticAccumulator
 {
     private long _count;
@@ -34,46 +51,84 @@ public sealed class ArrayStatsAccumulator : IStatisticAccumulator
     /// <inheritdoc />
     public void Add(DataValue value, IValueStore store)
     {
-        if (value.IsNull)
+        if (value.IsNull || !value.IsArray)
         {
             return;
         }
 
-        ReadOnlySpan<float> elements;
-        int elementCount;
-
-        // Float32 + IsArray (formerly DataKind.Vector). Other element kinds
-        // are demand-pulled — StatisticsCollector only opts this accumulator
-        // in for the Float32+IsArray combination today.
-        if (value.Kind == DataKind.Float32 && value.IsArray)
-        {
-            elements = value.AsArraySpan<float>(store);
-            elementCount = elements.Length;
-        }
-        else
+        // Byte arrays (UInt8+IsArray) are routed to BinarySizeAccumulator —
+        // the StatisticsCollector gate excludes them before this accumulator
+        // ever sees them. Defensive guard here keeps the behaviour explicit
+        // if the gating shifts in the future.
+        if (value.IsByteArrayKind)
         {
             return;
         }
 
+        // Dispatch reads the appropriate typed span and runs Welford + L2-norm
+        // through the INumber<T> generic helper; double-widening happens once
+        // per element via Convert.ToDouble (a no-op for Float64, a cheap
+        // conversion for narrower kinds). Decimal/Int128/UInt128/Boolean are
+        // not in the supported set — see class doc.
+        switch (value.Kind)
+        {
+            case DataKind.Float16:
+                AccumulateElements(value.AsArraySpan<Half>(store));
+                break;
+            case DataKind.Float32:
+                AccumulateElements(value.AsArraySpan<float>(store));
+                break;
+            case DataKind.Float64:
+                AccumulateElements(value.AsArraySpan<double>(store));
+                break;
+            case DataKind.Int8:
+                AccumulateElements(value.AsArraySpan<sbyte>(store));
+                break;
+            case DataKind.Int16:
+                AccumulateElements(value.AsArraySpan<short>(store));
+                break;
+            case DataKind.Int32:
+                AccumulateElements(value.AsArraySpan<int>(store));
+                break;
+            case DataKind.Int64:
+                AccumulateElements(value.AsArraySpan<long>(store));
+                break;
+            case DataKind.UInt16:
+                AccumulateElements(value.AsArraySpan<ushort>(store));
+                break;
+            case DataKind.UInt32:
+                AccumulateElements(value.AsArraySpan<uint>(store));
+                break;
+            case DataKind.UInt64:
+                AccumulateElements(value.AsArraySpan<ulong>(store));
+                break;
+            default:
+                return;
+        }
+    }
+
+    private void AccumulateElements<T>(ReadOnlySpan<T> elements)
+        where T : unmanaged, INumber<T>
+    {
         _count++;
 
-        if (elementCount < _minElementCount)
-        {
-            _minElementCount = elementCount;
-        }
+        int elementCount = elements.Length;
+        if (elementCount < _minElementCount) _minElementCount = elementCount;
+        if (elementCount > _maxElementCount) _maxElementCount = elementCount;
 
-        if (elementCount > _maxElementCount)
-        {
-            _maxElementCount = elementCount;
-        }
-
-        // Welford's across all elements + sum-of-squares for L2 norm
         bool allZero = true;
         double sumOfSquares = 0.0;
 
         for (int i = 0; i < elements.Length; i++)
         {
-            double v = elements[i];
+            // double.CreateChecked widens T → double for any INumber<T>; on
+            // Float64 it's a no-op, on Float16/integers it's a fast conversion.
+            // Throws on overflow, which can't happen here — every supported
+            // element kind fits in double's range (Float16/32/64 directly,
+            // integers up to UInt64 max ≈ 1.8e19 fits in double's 53-bit
+            // mantissa range with rounding past 2^53 — same caveat the scalar
+            // NumericAccumulator already accepts).
+            double v = double.CreateChecked(elements[i]);
             _elementCount++;
             sumOfSquares += v * v;
 
@@ -86,15 +141,8 @@ public sealed class ArrayStatsAccumulator : IStatisticAccumulator
                 allZero = false;
             }
 
-            if (v < _elementMin)
-            {
-                _elementMin = v;
-            }
-
-            if (v > _elementMax)
-            {
-                _elementMax = v;
-            }
+            if (v < _elementMin) _elementMin = v;
+            if (v > _elementMax) _elementMax = v;
 
             double delta = v - _elementMean;
             _elementMean += delta / _elementCount;
@@ -102,26 +150,13 @@ public sealed class ArrayStatsAccumulator : IStatisticAccumulator
             _elementM2 += delta * delta2;
         }
 
-        // L2 norm for this array
         double norm = Math.Sqrt(sumOfSquares);
 
-        if (norm < _normMin)
-        {
-            _normMin = norm;
-        }
-
-        if (norm > _normMax)
-        {
-            _normMax = norm;
-        }
-
-        // Incremental mean of norms
+        if (norm < _normMin) _normMin = norm;
+        if (norm > _normMax) _normMax = norm;
         _normMean += (norm - _normMean) / _count;
 
-        if (allZero)
-        {
-            _zeroArrayCount++;
-        }
+        if (allZero) _zeroArrayCount++;
     }
 
     /// <inheritdoc />
@@ -167,7 +202,8 @@ public sealed record NumericSummary(
 }
 
 /// <summary>
-/// Contains typed-array (Float32 + IsArray, formerly Vector) statistics.
+/// Contains typed-array statistics for any supported numeric element kind.
+/// See <see cref="ArrayStatsAccumulator"/> for the element-kind support matrix.
 /// </summary>
 /// <param name="ValueCount">Number of array values observed.</param>
 /// <param name="MinElementCount">Fewest elements in any single array.</param>

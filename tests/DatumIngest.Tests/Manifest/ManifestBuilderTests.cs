@@ -96,6 +96,112 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     }
 
     [Fact]
+    public void Build_Int32ArrayColumn_ProducesArrayFeatureManifestWithElementStats()
+    {
+        ColumnLookup columnLookup = new(["counts"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<int>([1, 2, 3], DataKind.Int32, _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<int>([4, 5], DataKind.Int32, _arena)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, ColumnInfo> columns = new()
+        {
+            ["counts"] = new ColumnInfo("counts", DataKind.Int32, nullable: true) { IsArray = true },
+        };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, columns, 2);
+
+        ArrayFeatureManifest feature = Assert.IsType<ArrayFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Int32, feature.Kind);
+        Assert.True(feature.IsArray);
+        Assert.Equal(2, feature.MinLength);
+        Assert.Equal(3, feature.MaxLength);
+        Assert.Equal(5, feature.ElementStats.Count);
+        Assert.Equal(1.0, feature.ElementStats.Min);
+        Assert.Equal(5.0, feature.ElementStats.Max);
+        Assert.Equal(3.0, feature.ElementStats.Mean, 1e-10);
+        Assert.Equal(Math.Sqrt(14.0), feature.NormMin, 1e-10);
+        Assert.Equal(Math.Sqrt(41.0), feature.NormMax, 1e-10);
+    }
+
+    [Fact]
+    public void Build_Float64ArrayColumn_ProducesArrayFeatureManifest()
+    {
+        ColumnLookup columnLookup = new(["weights"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<double>([1.5, 2.5, 3.5], DataKind.Float64, _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<double>([0.0, 0.0], DataKind.Float64, _arena)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, ColumnInfo> columns = new()
+        {
+            ["weights"] = new ColumnInfo("weights", DataKind.Float64, nullable: true) { IsArray = true },
+        };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, columns, 2);
+
+        ArrayFeatureManifest feature = Assert.IsType<ArrayFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Float64, feature.Kind);
+        Assert.Equal(5, feature.ElementStats.Count);
+        Assert.Equal(0.0, feature.ElementStats.Min);
+        Assert.Equal(3.5, feature.ElementStats.Max);
+        Assert.Equal(2, feature.ZeroElementCount);
+        // Second array is all-zero, so ZeroArrayCount should pick it up.
+        Assert.Equal(1, feature.ZeroArrayCount);
+        Assert.Equal(0.0, feature.NormMin);   // [0,0] has zero norm
+    }
+
+    [Fact]
+    public void Build_Float16ArrayColumn_ProducesArrayFeatureManifest()
+    {
+        ColumnLookup columnLookup = new(["embedding16"]);
+        StatisticsCollector collector = new();
+        Half[] values1 = [(Half)1.0f, (Half)2.0f, (Half)3.0f];
+        Half[] values2 = [(Half)4.0f, (Half)5.0f];
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<Half>(values1, DataKind.Float16, _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromArenaArray<Half>(values2, DataKind.Float16, _arena)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, ColumnInfo> columns = new()
+        {
+            ["embedding16"] = new ColumnInfo("embedding16", DataKind.Float16, nullable: true) { IsArray = true },
+        };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, columns, 2);
+
+        ArrayFeatureManifest feature = Assert.IsType<ArrayFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(DataKind.Float16, feature.Kind);
+        Assert.Equal(5, feature.ElementStats.Count);
+        Assert.Equal(1.0, feature.ElementStats.Min, 1e-3);
+        Assert.Equal(5.0, feature.ElementStats.Max, 1e-3);
+        Assert.Equal(3.0, feature.ElementStats.Mean, 1e-3);
+    }
+
+    [Fact]
+    public void Build_UInt8ArrayColumn_StaysOnBinaryPath_NotArrayPath()
+    {
+        // UInt8+IsArray is the byte-blob path — must produce BinaryFeatureManifest,
+        // not ArrayFeatureManifest. Guard against the typed-array dispatch
+        // accidentally swallowing byte arrays after PR14f's broader gate.
+        ColumnLookup columnLookup = new(["blob"]);
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromByteArray([1, 2, 3, 4], _arena)), _arena);
+        collector.AddRow(MakeRow(columnLookup, DataValue.FromByteArray([5, 6], _arena)), _arena);
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, ColumnInfo> columns = new()
+        {
+            ["blob"] = new ColumnInfo("blob", DataKind.UInt8, nullable: true) { IsArray = true },
+        };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, columns, 2);
+
+        Assert.IsType<BinaryFeatureManifest>(manifest.Features[0]);
+        // No array_stats result should have been produced for this column.
+        Assert.False(stats["blob"].Results.ContainsKey("array_stats"));
+    }
+
+    [Fact]
     public void Build_BinaryColumn_ProducesBinaryFeatureManifest()
     {
         ColumnLookup columnLookup = new (["raw"]);
