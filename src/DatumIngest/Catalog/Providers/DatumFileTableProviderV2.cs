@@ -411,7 +411,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
-    public QueryResultsManifest? GetManifest() => _manifest;
+    /// <remarks>
+    /// PR14h: when both a cached <c>.datum-manifest</c> and a live
+    /// <c>.datum-index</c> are available, returns a composed manifest where
+    /// per-column live fields (Count / NullCount / NullRatio / EstimatedDistinctCount)
+    /// are recomputed from the index's per-chunk statistics on every call.
+    /// Without an index the cached manifest is returned verbatim.
+    /// </remarks>
+    public QueryResultsManifest? GetManifest()
+    {
+        QueryResultsManifest? cached = _manifest;
+        SourceIndex? index = _sourceIndex;
+        if (cached is null) return null;
+        if (index is null) return cached;
+        return LiveManifestOverlay.Compose(cached, index);
+    }
 
     /// <inheritdoc/>
     public SourceIndex? GetSourceIndex() => _sourceIndex;

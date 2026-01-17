@@ -99,6 +99,25 @@ public abstract class FeatureManifest
     /// original text exactly. See <see cref="SchemaInferenceReason.KeptAsStringLeadingZeros"/>.
     /// </remarks>
     public SchemaInferenceDecision? SchemaInference { get; init; }
+
+    /// <summary>
+    /// Gets whether the cached half of this manifest (top-K beyond the bitmap distinct
+    /// set, t-digest quantiles, histogram buckets, entropy, kind-specific summaries
+    /// like Mean / StdDev / FileSizeStats) is current as of the table's last mutation.
+    /// </summary>
+    /// <remarks>
+    /// The hybrid manifest design (PR14h) splits each <see cref="FeatureManifest"/>
+    /// into a "live" half — <see cref="Count"/>, <see cref="NullCount"/>,
+    /// <see cref="NullRatio"/>, <see cref="EstimatedDistinctCount"/> — derived
+    /// fresh from the per-column index on every snapshot rebuild, and a "cached"
+    /// half persisted in <c>.datum-manifest</c> and refreshed on demand by
+    /// <c>ANALYZE</c>. Mutations (INSERT / UPDATE / DELETE) flip this flag to
+    /// <see langword="false"/>; <c>ANALYZE</c> sets it back to <see langword="true"/>.
+    /// Consumers reading the cached fields (planner, language server hover, ML
+    /// pipelines) should weight them lower or display a "may be outdated" hint
+    /// when this flag is <see langword="false"/>.
+    /// </remarks>
+    public bool CachedStatsValid { get; init; } = true;
 }
 
 /// <summary>

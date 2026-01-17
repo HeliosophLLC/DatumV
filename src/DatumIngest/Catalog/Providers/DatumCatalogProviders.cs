@@ -378,6 +378,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
         cells[24] = text is not null ? DataValue.FromInt32(text.MinLength)    : DataValue.Null(DataKind.Int32);
         cells[25] = text is not null ? DataValue.FromInt32(text.MaxLength)    : DataValue.Null(DataKind.Int32);
         cells[26] = boolean is not null ? DataValue.FromFloat64(boolean.TrueRatio) : DataValue.Null(DataKind.Float64);
+        cells[27] = DataValue.FromBoolean(feature.CachedStatsValid);
     }
 
     private static (string? Min, string? Max) ExtractMinMax(FeatureManifest feature) => feature switch
@@ -423,6 +424,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
         new ColumnInfo("min_length",           DataKind.Int32,   nullable: true),
         new ColumnInfo("max_length",           DataKind.Int32,   nullable: true),
         new ColumnInfo("true_ratio",           DataKind.Float64, nullable: true),
+        new ColumnInfo("cached_stats_valid",   DataKind.Boolean, nullable: false),
     ]);
 }
 
