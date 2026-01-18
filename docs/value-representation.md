@@ -20,7 +20,7 @@ values cross between them.
 | Storage | Inline payload OR arena offset OR sidecar offset | Inline payload OR managed payload (`string`, `byte[]`, `ValueRef[]`) |
 | Where it lives | `Row`, `RowBatch`, `.datum` files, scan outputs, operator I/O | Expression evaluator, scalar function bodies, model `IModel.InferBatchAsync` |
 | Lifetime | Bound to its arena (or to a sidecar registry) | GC-managed |
-| Field names | Never carried — names live in `ColumnInfo.Fields` | Same — never carried; positional throughout |
+| Field names | Carried via 16-bit TypeId into per-query `TypeRegistry` (struct values); positional access stays the fast path | Same — TypeId rides on the inline tag; payload is positional `ValueRef[]` |
 
 ## `DataValue`: the row-layer currency
 
@@ -175,8 +175,8 @@ public DataValue ToDataValue(IValueStore targetStore)
         string s when _inline.Kind == DataKind.String =>
             DataValue.FromString(s, targetStore),
         ValueRef[] fields when _inline.Kind == DataKind.Struct =>
-            DataValue.FromStruct((short)fields.Length,
-                MaterialiseEach(fields, targetStore), targetStore),
+            DataValue.FromStruct(MaterialiseEach(fields, targetStore),
+                targetStore, _inline.TypeId),
         ValueRef[] elements when _inline.IsArray =>
             BuildTypedArray(_inline.Kind, elements, targetStore),
         // ...
@@ -266,13 +266,18 @@ code, easy to write, easy to test, no arena bug-class to worry about.
 
 ## Architectural invariants worth knowing
 
-- **Names never appear in values.** Field names live exclusively in
-  `ColumnInfo.Fields` at the schema layer. Both `DataValue` (struct
-  field array) and `ValueRef` (`ValueRef[]` payload) are positional.
-  `models.classify(image).label` resolves at plan time: the planner
-  reads the model's declared output schema, finds `label` at position N,
-  and emits a positional struct-field-access node. The runtime never
-  sees the name.
+- **Names live in the type registry, accessed via TypeId.** Each struct
+  value carries a 16-bit TypeId (in `DataValue._charCount`, on the
+  inline tag of a `ValueRef`) that indexes into the per-query
+  `TypeRegistry` on `ExecutionContext.Types`. The registry maps id →
+  `TypeDescriptor`, which carries field names, kinds, and nested
+  type-ids. Plan-time-resolved positional access stays the hot path:
+  `models.classify(image).label` rewrites to a positional struct-field
+  access, and the runtime never consults the registry. Consumers that
+  can't resolve shape statically — formatters, output writers,
+  polymorphic UDFs, `typeof()` introspection — read names off the
+  registry. Structurally-equal shapes intern to the same id, so
+  `value.TypeId == other.TypeId` is a fast structural-equality check.
 - **`DataValue` is always coupled to its store.** A `DataValue` carrying
   arena offsets is meaningful only with the right `Arena` in hand.
   Cross-arena reads are bugs; the stabilise step bridges them when a

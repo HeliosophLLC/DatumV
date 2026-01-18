@@ -160,6 +160,15 @@ internal static class TableFormatter
             return FormatStructValue(value, arena, registry, structFields, types, translations);
         }
 
+        // Type values render as a structural description ("Struct{a: String}",
+        // "Array<Float32>", etc.) when the registry can resolve the carried
+        // TypeId. Without registry context the fallback is the kind name —
+        // matches FormatType's contract.
+        if (value.Kind == DataKind.Type)
+        {
+            return value.IsNull ? "NULL" : value.FormatType(types);
+        }
+
         return value.Kind switch
         {
             DataKind.Boolean => value.AsBoolean() ? "true" : "false",

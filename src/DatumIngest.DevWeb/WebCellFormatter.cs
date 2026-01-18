@@ -343,6 +343,11 @@ internal static class WebCellFormatter
             DataKind.Duration => value.AsDuration().ToString(),
             DataKind.Uuid => value.AsUuid().ToString(),
             DataKind.String => value.IsInline ? value.AsString() : value.AsString(arena, registry),
+            // Type values: render the structural description so cells like
+            // typeof({a: 'test'}) show as "Struct{a: String}" instead of the
+            // bare kind name. FormatType degrades to the kind name when the
+            // registry can't resolve the carried TypeId.
+            DataKind.Type => value.FormatType(types),
             _ => value.ToString(),
         };
     }
