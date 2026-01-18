@@ -31,18 +31,31 @@ import {
 
   // ===== Storage keys & helpers =====
   // Two-tier persistence:
-  //   localStorage holds small JSON state — workspace registry, theme, and
-  //     per-workspace { tabs: [{ id, name, sql, lastRunAt, sqlOfLastRun }],
+  //   localStorage holds small JSON state — theme + the single shared
+  //     state blob: { tabs: [{ id, name, sql, lastRunAt, sqlOfLastRun }],
   //     groups: [{ id, tabIds, activeTabId }], focusedGroupId, deletedTabIds,
   //     activeTabId (top-level mirror, kept for backward compat) }.
   //     Read synchronously on boot.
-  //   IndexedDB holds result payloads only, keyed by "<workspace>::<tabId>".
-  //     Lazy-loaded on tab activation so the boot path stays sync.
+  //   IndexedDB holds result payloads only, keyed by tabId. Lazy-loaded on
+  //     tab activation so the boot path stays sync.
   const STORE = {
     theme: 'datum.devweb.theme',
-    workspaces: 'datum.devweb.workspaces',
-    workspace: (name) => `datum.devweb.workspace.${name}`,
+    state: 'datum.devweb.state',
   };
+
+  // One-time migration: copy `datum.devweb.workspace.default` → `datum.devweb.state`
+  // so users who had their tabs/groups in the legacy default-workspace key
+  // don't lose them when this build deletes multi-workspace support.
+  (() => {
+    const LEGACY_DEFAULT_KEY = 'datum.devweb.workspace.default';
+    const LEGACY_REGISTRY_KEY = 'datum.devweb.workspaces';
+    if (localStorage.getItem(STORE.state) === null) {
+      const legacy = localStorage.getItem(LEGACY_DEFAULT_KEY);
+      if (legacy !== null) localStorage.setItem(STORE.state, legacy);
+    }
+    localStorage.removeItem(LEGACY_DEFAULT_KEY);
+    localStorage.removeItem(LEGACY_REGISTRY_KEY);
+  })();
 
   function readJson(key, fallback) {
     try {
@@ -63,48 +76,17 @@ import {
 
   // Theme — see ./theme.ts
 
-  // ===== Workspaces =====
-  // A workspace is { tabs: [Tab], groups: [Group], focusedGroupId,
-  //                  deletedTabIds }.
-  // A group is { id, tabIds: [string], activeTabId }. The flat `tabs` array
-  // is the source of truth for tab content; `groups` is the *view layer*
-  // describing how those tabs are partitioned across editor panes. Step 2
-  // of the multi-group rollout: there is exactly one group and its tabIds
-  // mirrors `tabs.map(t => t.id)`. `state.workspace.activeTabId` is wired
-  // as a getter/setter on the workspace that delegates to the focused
-  // group, so the dozens of existing call sites continue to work
-  // unchanged. Step 3 will let groups hold disjoint tab subsets.
+  // ===== State =====
+  // The single shared state blob. `tabs` is the content store; `groups` is
+  // the view layer describing how tabs are partitioned across editor panes.
+  // `state.activeTabId` is wired as a getter/setter that delegates to the
+  // focused group, so existing call sites can read/write it directly.
+  //
   // A tab in localStorage is { id, name, sql, lastRunAt, sqlOfLastRun }.
   // The runtime tab object also carries `lastResult`:
   //   undefined → not yet hydrated from IDB; fetch on activation
   //   null      → no saved result (never run, or freshly created)
   //   object    → the result payload, cached in memory
-  // Workspace identity comes from location.hash (no hash → "default").
-  function workspaceName() {
-    const h = (location.hash || '').replace(/^#/, '').trim();
-    return validName(h) ? h : 'default';
-  }
-  function validName(name) {
-    return typeof name === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(name);
-  }
-  function listWorkspaces() {
-    const list = readJson(STORE.workspaces, []);
-    return Array.isArray(list) ? list : [];
-  }
-  function registerWorkspace(name) {
-    const list = listWorkspaces();
-    if (!list.includes(name)) {
-      list.push(name);
-      writeJson(STORE.workspaces, list);
-    }
-  }
-  function unregisterWorkspace(name) {
-    const list = listWorkspaces().filter(n => n !== name);
-    writeJson(STORE.workspaces, list);
-    localStorage.removeItem(STORE.workspace(name));
-    IDB.deleteWorkspaceResults(name).catch(err =>
-      console.warn(`Couldn't clear IDB results for "${name}":`, err));
-  }
   function freshTab(n) {
     return {
       id: uuid(),
@@ -136,21 +118,19 @@ import {
 
   // The group whose pane is currently focused — target for Run, keyboard
   // shortcuts, and "active tab" reads. Falls back to the first group so
-  // a corrupt focusedGroupId can't strand the workspace.
-  function focusedGroup(ws) {
-    ws = ws || state.workspace;
-    if (!ws || !Array.isArray(ws.groups) || ws.groups.length === 0) return null;
-    return ws.groups.find(g => g.id === ws.focusedGroupId) || ws.groups[0];
+  // a corrupt focusedGroupId can't strand the state.
+  function focusedGroup(s) {
+    s = s || state;
+    if (!s || !Array.isArray(s.groups) || s.groups.length === 0) return null;
+    return s.groups.find(g => g.id === s.focusedGroupId) || s.groups[0];
   }
 
-  // Install `activeTabId` as an accessor on the workspace that proxies the
-  // focused group's value. Lets all existing `state.workspace.activeTabId`
-  // reads/writes keep working without per-site edits during the multi-group
-  // rollout. `enumerable: false` keeps it out of JSON.stringify so any
-  // accidental serialization of the workspace doesn't double-write the
-  // field (`persistWorkspace` constructs the snapshot explicitly anyway).
-  function defineWorkspaceAccessors(ws) {
-    Object.defineProperty(ws, 'activeTabId', {
+  // Install `activeTabId` as an accessor on `state` that proxies the focused
+  // group's value. `enumerable: false` keeps it out of JSON.stringify so any
+  // accidental serialization doesn't double-write the field (persistState
+  // constructs the snapshot explicitly anyway).
+  function defineStateAccessors(s) {
+    Object.defineProperty(s, 'activeTabId', {
       get() { const g = focusedGroup(this); return g ? g.activeTabId : undefined; },
       set(v) { const g = focusedGroup(this); if (g) g.activeTabId = v; },
       configurable: true,
@@ -162,7 +142,7 @@ import {
   // tab lives in exactly one group's tabIds; the workspace `tabs[]` array
   // is the content store and `groups[].tabIds` partition it across panes.
   function groupOfTab(tabId) {
-    return state.workspace.groups.find(g => g.tabIds.includes(tabId)) || null;
+    return state.groups.find(g => g.tabIds.includes(tabId)) || null;
   }
 
   // Lookup a group's DOM root by id.
@@ -176,7 +156,7 @@ import {
   // this list is 0 or 1 entries long, but coding it as a loop keeps the
   // call sites uniform.
   function getDisplayingGroups(tabId) {
-    return state.workspace.groups.filter(g => g.activeTabId === tabId);
+    return state.groups.filter(g => g.activeTabId === tabId);
   }
 
   // Append a brand-new tab to the focused group's tabIds. Used by newTab,
@@ -191,7 +171,7 @@ import {
   // came from so callers can decide whether to dissolve, fall back the
   // group's activeTabId, etc.
   function removeTabIdFromItsGroup(tabId) {
-    for (const g of state.workspace.groups) {
+    for (const g of state.groups) {
       const idx = g.tabIds.indexOf(tabId);
       if (idx >= 0) {
         g.tabIds.splice(idx, 1);
@@ -208,9 +188,9 @@ import {
   // group container at the end so the splitter / orient-toggle button /
   // ratio adjust to the new group count.
   function dissolveGroup(groupId) {
-    const idx = state.workspace.groups.findIndex(g => g.id === groupId);
+    const idx = state.groups.findIndex(g => g.id === groupId);
     if (idx < 0) return;
-    state.workspace.groups.splice(idx, 1);
+    state.groups.splice(idx, 1);
     const editor = monacoEditorsByGroup.get(groupId);
     if (editor) {
       editor.setModel(null);
@@ -220,185 +200,179 @@ import {
     fallbackTextareasByGroup.delete(groupId);
     const groupEl = document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
     if (groupEl) groupEl.remove();
-    if (state.workspace.focusedGroupId === groupId) {
-      state.workspace.focusedGroupId = state.workspace.groups[0]?.id;
+    if (state.focusedGroupId === groupId) {
+      state.focusedGroupId = state.groups[0]?.id;
     }
     reconcileGroupDom();
   }
 
-  // Migrate a parsed-from-disk workspace shape in place. Old snapshots
+  // The single shared state singleton. Run state lives on each tab
+  // (tab.running / tab.abortController / ...) so multiple tabs can have
+  // queries in flight concurrently. The server currently serialises queries
+  // via a SemaphoreSlim, so requests queue server-side — but each tab
+  // tracks its own state and the UI accurately reflects "running" per tab.
+  // Populated synchronously by loadInitialState() during boot.
+  const state = {
+    tabs: [],
+    groups: [],
+    focusedGroupId: null,
+    deletedTabIds: [],
+  };
+  defineStateAccessors(state);
+
+  // Normalise a parsed-from-disk state shape in place. Old snapshots
   // (top-level `activeTabId`, no `groups`) get a synthetic single group
-  // containing every tab id; new snapshots are accepted as-is. Either way
-  // the accessor for `activeTabId` is installed before returning.
-  function migrateWorkspaceShape(ws) {
-    const persistedActive = ws.activeTabId;
-    // Default per-group orientation: workspaces saved before this field
-    // existed inherit whatever was in the global localStorage key, so a
-    // user who'd been working in side-by-side mode keeps that on reload.
+  // containing every tab id; new snapshots are accepted as-is.
+  function normaliseStateShape(s) {
+    const persistedActive = s.activeTabId;
     const fallbackOrientation =
       localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
         ? 'horizontal' : 'vertical';
-    if (!Array.isArray(ws.groups) || ws.groups.length === 0) {
-      const tabIds = ws.tabs.map(t => t.id);
+    if (!Array.isArray(s.groups) || s.groups.length === 0) {
+      const tabIds = s.tabs.map(t => t.id);
       const fallbackActive = tabIds.includes(persistedActive) ? persistedActive : tabIds[0];
-      ws.groups = [{
+      s.groups = [{
         id: 'g1', tabIds, activeTabId: fallbackActive,
         editorOrientation: fallbackOrientation,
       }];
-      ws.focusedGroupId = 'g1';
+      s.focusedGroupId = 'g1';
     } else {
       // Normalise each group's tabIds to only valid ids, then make sure
       // every tab is claimed by some group. Orphans can show up after a
-      // cross-window merge save: persistWorkspace writes `tabsToWrite`
+      // cross-window merge save: persistState writes `tabsToWrite`
       // including disk-only tabs, but `groupsToWrite` mirrors only
       // in-memory groups, so the union has tabs that no group references.
       const claimed = new Set();
-      for (const g of ws.groups) {
-        g.tabIds = Array.isArray(g.tabIds) ? g.tabIds.filter(id => ws.tabs.some(t => t.id === id)) : [];
+      for (const g of s.groups) {
+        g.tabIds = Array.isArray(g.tabIds) ? g.tabIds.filter(id => s.tabs.some(t => t.id === id)) : [];
         for (const id of g.tabIds) claimed.add(id);
         if (!g.tabIds.includes(g.activeTabId)) g.activeTabId = g.tabIds[0];
         if (g.editorOrientation !== 'horizontal' && g.editorOrientation !== 'vertical') {
           g.editorOrientation = fallbackOrientation;
         }
       }
-      if (!ws.groups.find(g => g.id === ws.focusedGroupId)) {
-        ws.focusedGroupId = ws.groups[0].id;
+      if (!s.groups.find(g => g.id === s.focusedGroupId)) {
+        s.focusedGroupId = s.groups[0].id;
       }
-      const focused = ws.groups.find(g => g.id === ws.focusedGroupId) || ws.groups[0];
-      for (const t of ws.tabs) {
+      const focused = s.groups.find(g => g.id === s.focusedGroupId) || s.groups[0];
+      for (const t of s.tabs) {
         if (!claimed.has(t.id)) {
           focused.tabIds.push(t.id);
           if (!focused.activeTabId) focused.activeTabId = t.id;
         }
       }
     }
-    defineWorkspaceAccessors(ws);
   }
 
-  function loadWorkspace(name) {
-    const ws = readJson(STORE.workspace(name), null);
-    if (ws && Array.isArray(ws.tabs) && ws.tabs.length > 0) {
-      // Drop any tabs that overlap with the tombstone list. A bug in
-      // earlier persistWorkspace versions could write tabs[] and
-      // deletedTabIds[] with overlapping ids (a stale window saving its
-      // older state alongside a fresher window's tombstones); those
-      // snapshots manifest as "closed tabs reappear after reload."
-      // Filtering here heals already-corrupted snapshots.
+  // Hydrate `state` from localStorage. If nothing's saved (or every saved
+  // tab is tombstoned), seed a fresh single-tab single-group state.
+  function loadInitialState() {
+    const raw = readJson(STORE.state, null);
+    if (raw && Array.isArray(raw.tabs) && raw.tabs.length > 0) {
+      // Heal already-corrupted snapshots: drop any tabs that overlap with
+      // the tombstone list. Earlier persistState versions could write
+      // tabs[] and deletedTabIds[] with overlapping ids (a stale window
+      // saving its older state alongside a fresher window's tombstones).
       const persistedTombs = new Set(
-        Array.isArray(ws.deletedTabIds) ? ws.deletedTabIds : []);
+        Array.isArray(raw.deletedTabIds) ? raw.deletedTabIds : []);
       if (persistedTombs.size > 0) {
-        ws.tabs = ws.tabs.filter(t => !persistedTombs.has(t && t.id));
+        raw.tabs = raw.tabs.filter(t => !persistedTombs.has(t && t.id));
       }
-      if (ws.tabs.length === 0) {
-        // Tombstones ate everything — fall through to the fresh-workspace
-        // branch below by making the outer guard fail on next iteration.
-        return loadFreshWorkspace();
+      if (raw.tabs.length > 0) {
+        // Ensure each tab has the expected shape (forward-compat). Tabs
+        // hydrated from localStorage have `lastResult` left undefined so
+        // the renderer knows to fetch from IDB on first activation.
+        state.tabs = raw.tabs.map(t => {
+          const hasRun = (t.lastRunAt || 0) > 0;
+          return {
+            id: t.id || uuid(),
+            name: t.name || 'Untitled',
+            sql: t.sql || '',
+            lastResult: hasRun ? undefined : null,
+            lastRunAt: t.lastRunAt || 0,
+            sqlOfLastRun: t.sqlOfLastRun || '',
+            pinned: t.pinned === true,
+            maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
+            trace: t.trace === true,
+            running: false,
+            abortController: null,
+            runStartedAt: 0,
+            runningRes: null,
+            liveTickHandle: null,
+          };
+        });
+        state.groups = Array.isArray(raw.groups) ? raw.groups : [];
+        state.focusedGroupId = raw.focusedGroupId || null;
+        state.deletedTabIds = Array.isArray(raw.deletedTabIds) ? raw.deletedTabIds.slice() : [];
+        // Project persisted activeTabId onto whichever group will end up
+        // focused — normaliseStateShape uses it as a hint when synthesising
+        // groups for older snapshots. Set as a non-accessor property
+        // temporarily; normaliseStateShape's group assignment handles the rest.
+        if (raw.activeTabId) {
+          for (const g of (state.groups || [])) {
+            if (g.tabIds && g.tabIds.includes(raw.activeTabId)) g.activeTabId = raw.activeTabId;
+          }
+        }
+        normaliseStateShape(state);
+        return;
       }
-      // Ensure each tab has the expected shape (forward-compat). Tabs hydrated
-      // from localStorage have `lastResult` left undefined so the renderer
-      // knows to fetch from IDB on first activation. Older saves that included
-      // a `lastResult` field are ignored — IDB is the source of truth now.
-      ws.tabs = ws.tabs.map(t => {
-        const hasRun = (t.lastRunAt || 0) > 0;
-        return {
-          id: t.id || uuid(),
-          name: t.name || 'Untitled',
-          sql: t.sql || '',
-          lastResult: hasRun ? undefined : null,
-          lastRunAt: t.lastRunAt || 0,
-          sqlOfLastRun: t.sqlOfLastRun || '',
-          pinned: t.pinned === true,
-          maxRows: typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
-          trace: t.trace === true,
-          // Run-state fields are runtime-only; they always start fresh on
-          // workspace load even if a session crashed mid-run.
-          running: false,
-          abortController: null,
-          runStartedAt: 0,
-          runningRes: null,
-          liveTickHandle: null,
-        };
-      });
-      if (!ws.tabs.find(t => t.id === ws.activeTabId)) {
-        ws.activeTabId = ws.tabs[0].id;
-      }
-      // Tombstones for tabs intentionally closed in any window. Used by
-      // persistWorkspace to avoid resurrecting a deleted tab during a
-      // multi-window merge. Stored as a bare string[] of ids; we cap the
-      // length on save to keep the snapshot small.
-      ws.deletedTabIds = Array.isArray(ws.deletedTabIds) ? ws.deletedTabIds.slice() : [];
-      // Synthesise (or normalise) groups + focusedGroupId, then install
-      // the activeTabId accessor that delegates to the focused group.
-      migrateWorkspaceShape(ws);
-      return ws;
     }
-    return loadFreshWorkspace();
+    seedFreshState();
   }
 
-  // Fresh-workspace seed used both by first-time load and by recovery
-  // from a snapshot whose tabs were entirely tombstoned.
-  function loadFreshWorkspace() {
+  // Fresh-state seed used both by first-time load and by recovery from a
+  // snapshot whose tabs were entirely tombstoned.
+  function seedFreshState() {
     const tab = freshTab(1);
     const orient =
       localStorage.getItem(EDITOR_ORIENTATION_STORE) === 'horizontal'
         ? 'horizontal' : 'vertical';
-    const fresh = {
-      tabs: [tab],
-      groups: [{
-        id: 'g1', tabIds: [tab.id], activeTabId: tab.id,
-        editorOrientation: orient,
-      }],
-      focusedGroupId: 'g1',
-      deletedTabIds: [],
-    };
-    defineWorkspaceAccessors(fresh);
-    return fresh;
+    state.tabs = [tab];
+    state.groups = [{
+      id: 'g1', tabIds: [tab.id], activeTabId: tab.id,
+      editorOrientation: orient,
+    }];
+    state.focusedGroupId = 'g1';
+    state.deletedTabIds = [];
   }
+
   // One-time guard so we don't spam the user with a modal if every save
   // is failing (quota exhaustion tends to fail repeatedly until something
   // is freed). The console.warn still fires every time.
   let persistFailureNotified = false;
 
-  // Persist current workspace metadata. Result payloads live in IDB and are
-  // not part of this snapshot — keeps the localStorage write small and fast.
+  // Persist state metadata. Result payloads live in IDB and are not part
+  // of this snapshot — keeps the localStorage write small and fast.
   //
   // Merge-on-save: read whatever is currently on disk and union it with our
   // in-memory tab list, indexed by id. This keeps a second window's tabs
   // alive when this window saves, instead of clobbering them. Tabs explicitly
   // closed in this window go onto a tombstone list so the merge doesn't
   // resurrect them from another window's older snapshot.
-  function persistWorkspace() {
-    const name = workspaceName();
-    const onDisk = readJson(STORE.workspace(name), null);
+  function persistState() {
+    const onDisk = readJson(STORE.state, null);
 
     // Build the FULL tombstone union *first* — local + disk — so a
     // stale window's in-memory tab list can't resurrect tabs that
-    // another window has already tombstoned. (Earlier we only filtered
-    // disk tabs against tombstones; in-memory tabs were trusted, which
-    // meant a stale window happily wrote its old tabs back over a fresh
-    // disk state and the next load saw "deleted" tabs reappear.)
-    const tombSet = new Set(state.workspace.deletedTabIds || []);
+    // another window has already tombstoned.
+    const tombSet = new Set(state.deletedTabIds || []);
     if (onDisk && Array.isArray(onDisk.deletedTabIds)) {
       for (const id of onDisk.deletedTabIds) tombSet.add(id);
     }
 
     // In-memory tabs that are tombstoned in EITHER window get dropped.
-    // This both fixes the resurrection bug and keeps state.workspace.tabs
-    // consistent for the rest of this function (the inMemoryById index
-    // below is built after the filter). Group tabIds get the same scrub
-    // so the next render doesn't reference a now-deleted tab.
-    const before = state.workspace.tabs.length;
-    state.workspace.tabs = state.workspace.tabs.filter(t => !tombSet.has(t.id));
-    if (state.workspace.tabs.length !== before && Array.isArray(state.workspace.groups)) {
-      const validIds = new Set(state.workspace.tabs.map(t => t.id));
-      for (const g of state.workspace.groups) {
+    const before = state.tabs.length;
+    state.tabs = state.tabs.filter(t => !tombSet.has(t.id));
+    if (state.tabs.length !== before && Array.isArray(state.groups)) {
+      const validIds = new Set(state.tabs.map(t => t.id));
+      for (const g of state.groups) {
         g.tabIds = (g.tabIds || []).filter(id => validIds.has(id));
         if (!g.tabIds.includes(g.activeTabId)) g.activeTabId = g.tabIds[0];
       }
     }
-    const inMemoryById = new Map(state.workspace.tabs.map(t => [t.id, t]));
+    const inMemoryById = new Map(state.tabs.map(t => [t.id, t]));
 
-    const tabsToWrite = state.workspace.tabs.map(t => ({
+    const tabsToWrite = state.tabs.map(t => ({
       id: t.id,
       name: t.name,
       sql: t.sql,
@@ -413,8 +387,8 @@ import {
     if (onDisk && Array.isArray(onDisk.tabs)) {
       for (const t of onDisk.tabs) {
         if (!t || !t.id) continue;
-        if (inMemoryById.has(t.id)) continue;   // we have a fresher view
-        if (tombSet.has(t.id)) continue;         // tombstoned anywhere
+        if (inMemoryById.has(t.id)) continue;
+        if (tombSet.has(t.id)) continue;
         tabsToWrite.push({
           id: t.id,
           name: t.name || 'Untitled',
@@ -428,58 +402,38 @@ import {
       }
     }
 
-    // Cap tombstones FIFO so the snapshot can't grow without bound. 500 is
-    // far more than any real session would close.
+    // Cap tombstones FIFO so the snapshot can't grow without bound.
     const tombArr = [...tombSet];
     const cappedTombs = tombArr.length > 500 ? tombArr.slice(tombArr.length - 500) : tombArr;
-    state.workspace.deletedTabIds = cappedTombs;
+    state.deletedTabIds = cappedTombs;
 
-    // Snapshot the group layout. Each group records only its id, tab-id
-    // ordering, and which tab is active there — group memberships are
-    // partition info, not tab content. The top-level `activeTabId` field
-    // is also written so an older code revision (without group support)
-    // can still load the workspace.
-    const groupsToWrite = (state.workspace.groups || []).map(g => ({
+    const groupsToWrite = (state.groups || []).map(g => ({
       id: g.id,
       tabIds: Array.isArray(g.tabIds) ? g.tabIds.slice() : [],
       activeTabId: g.activeTabId,
       editorOrientation: g.editorOrientation,
     }));
     const snapshot = {
-      activeTabId: state.workspace.activeTabId,
+      activeTabId: state.activeTabId,
       tabs: tabsToWrite,
       groups: groupsToWrite,
-      focusedGroupId: state.workspace.focusedGroupId,
+      focusedGroupId: state.focusedGroupId,
       deletedTabIds: cappedTombs,
     };
-    const ok = writeJson(STORE.workspace(name), snapshot);
+    const ok = writeJson(STORE.state, snapshot);
     if (!ok) {
-      // Most likely cause is localStorage quota exhaustion (a few large SQL
-      // pastes can do it). Loud-fail to the console every time so it shows
-      // up in dev tools, and pop a one-time modal so the user knows their
-      // tabs aren't being saved before they restart and lose work.
-      console.warn('[DatumIngest] Failed to persist workspace — localStorage write returned false. ' +
+      console.warn('[DatumIngest] Failed to persist state — localStorage write returned false. ' +
                    'Likely quota exceeded; tab changes are not being saved.');
       if (!persistFailureNotified) {
         persistFailureNotified = true;
         try {
           alertModal('Tabs are not being saved',
-            'localStorage rejected the workspace snapshot — usually because the per-origin storage quota is full. ' +
+            'localStorage rejected the state snapshot — usually because the per-origin storage quota is full. ' +
             'New tabs and edits will be lost on reload until space is freed (close large tabs or clear site data).');
         } catch { /* alertModal may not be ready during early boot */ }
       }
     }
   }
-
-  // ===== State =====
-  // Run state lives on each tab (tab.running / tab.abortController / ...)
-  // so multiple tabs can have queries in flight concurrently. The server
-  // currently serialises queries via a SemaphoreSlim, so requests from
-  // multiple tabs queue server-side — but each tab tracks its own state
-  // and the UI accurately reflects "running" per tab.
-  const state = {
-    workspace: null,            // { tabs, groups, focusedGroupId, deletedTabIds }
-  };
 
   // Debounce save so rapid keystrokes don't flog localStorage. Kept
   // short (75ms) so the unsaved-edit window is small — important
@@ -494,11 +448,11 @@ import {
   }
   function flushPendingSave() {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    persistWorkspace();
+    persistState();
   }
 
   function activeTab() {
-    return state.workspace.tabs.find(t => t.id === state.workspace.activeTabId);
+    return state.tabs.find(t => t.id === state.activeTabId);
   }
 
   // ===== Group lookup helpers =====
@@ -512,7 +466,7 @@ import {
   function focusedGroupEl() {
     // Workspace may not be loaded yet during early boot; fall back to
     // the seed group baked into the HTML so helpers don't blow up.
-    const id = state.workspace ? state.workspace.focusedGroupId : DEFAULT_GROUP_ID;
+    const id = state.focusedGroupId || DEFAULT_GROUP_ID;
     return document.querySelector(`.editor-group[data-group-id="${id}"]`)
         || document.querySelector('.editor-group');
   }
@@ -530,7 +484,7 @@ import {
 
   // ===== Tabs =====
   function renderTabStrip() {
-    for (const g of state.workspace.groups) renderTabStripForGroup(g);
+    for (const g of state.groups) renderTabStripForGroup(g);
   }
 
   // Render one group's tab strip from its own `tabIds` (NOT the global
@@ -543,7 +497,7 @@ import {
     const strip = tabStripEl(groupEl);
     strip.innerHTML = '';
     for (const tabId of group.tabIds) {
-      const t = state.workspace.tabs.find(x => x.id === tabId);
+      const t = state.tabs.find(x => x.id === tabId);
       if (!t) continue;
       const div = document.createElement('div');
       div.className = 'tab' + (t.id === group.activeTabId ? ' active' : '')
@@ -694,7 +648,7 @@ import {
   // blur; cancel on Escape. The new name is trimmed; an empty result keeps
   // the previous name so the tab is never anonymous in the strip.
   function beginRenameTab(id, nameEl) {
-    const tab = state.workspace.tabs.find(t => t.id === id);
+    const tab = state.tabs.find(t => t.id === id);
     if (!tab) return;
     const input = document.createElement('input');
     input.type = 'text';
@@ -711,7 +665,7 @@ import {
       const trimmed = (newName ?? '').trim();
       if (trimmed && trimmed !== tab.name) {
         tab.name = trimmed;
-        persistWorkspace();
+        persistState();
       }
       renderTabStrip();
     };
@@ -725,11 +679,11 @@ import {
   }
 
   function togglePinTab(id) {
-    const tab = state.workspace.tabs.find(t => t.id === id);
+    const tab = state.tabs.find(t => t.id === id);
     if (!tab) return;
     tab.pinned = !tab.pinned;
     renderTabStrip();
-    persistWorkspace();
+    persistState();
   }
 
   // Custom context menu — single shared element, repositioned on each open.
@@ -737,7 +691,7 @@ import {
   let tabContextMenu = null;
   function showTabContextMenu(x, y, tabId) {
     closeTabContextMenu();
-    const tab = state.workspace.tabs.find(t => t.id === tabId);
+    const tab = state.tabs.find(t => t.id === tabId);
     if (!tab) return;
 
     const menu = document.createElement('div');
@@ -794,40 +748,40 @@ import {
     window.removeEventListener('resize', closeTabContextMenu, true);
   }
 
-  function newTab() { newTabInGroup(state.workspace.focusedGroupId); }
+  function newTab() { newTabInGroup(state.focusedGroupId); }
 
   // Create a new tab and add it to the specified group. Each group's "+"
   // button calls this with its own group id, so + in pane B creates the
   // tab in pane B regardless of which group is currently focused.
   function newTabInGroup(groupId) {
-    const group = state.workspace.groups.find(g => g.id === groupId);
+    const group = state.groups.find(g => g.id === groupId);
     if (!group) return;
-    const n = state.workspace.tabs.length + 1;
+    const n = state.tabs.length + 1;
     const t = freshTab(n);
-    state.workspace.tabs.push(t);
+    state.tabs.push(t);
     group.tabIds.push(t.id);
-    state.workspace.focusedGroupId = group.id;
+    state.focusedGroupId = group.id;
     group.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
-    persistWorkspace();
+    persistState();
   }
 
   function activateTab(id) {
     const group = groupOfTab(id);
     if (!group) return;
-    const alreadyActive = group.id === state.workspace.focusedGroupId
+    const alreadyActive = group.id === state.focusedGroupId
                        && group.activeTabId === id;
     if (alreadyActive) return;
-    state.workspace.focusedGroupId = group.id;
+    state.focusedGroupId = group.id;
     group.activeTabId = id;
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
-    persistWorkspace();
+    persistState();
   }
 
   // Reorder OR move-across-groups: pull `draggedId` out of its group's
@@ -852,7 +806,7 @@ import {
       if (!before) toIdx += 1;
       tabIds.splice(toIdx, 0, draggedId);
       renderTabStrip();
-      persistWorkspace();
+      persistState();
       return;
     }
 
@@ -869,7 +823,7 @@ import {
     // Drop activates the moved tab in dst, and focus follows the drop —
     // the user just told us "I want this tab here", so make it current.
     dstGroup.activeTabId = draggedId;
-    state.workspace.focusedGroupId = dstGroup.id;
+    state.focusedGroupId = dstGroup.id;
 
     // Recover src: if the active tab moved away, fall back to the first
     // remaining; if src is now empty, dissolve it (always allowed in
@@ -885,7 +839,7 @@ import {
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
-    persistWorkspace();
+    persistState();
   }
 
   function clearDropIndicators() {
@@ -896,7 +850,7 @@ import {
   }
 
   async function closeTab(id) {
-    const tab = state.workspace.tabs.find(t => t.id === id);
+    const tab = state.tabs.find(t => t.id === id);
     if (!tab) return;
     // Pinned tabs are protected — unpin first to close.
     if (tab.pinned) return;
@@ -910,22 +864,22 @@ import {
       monacoModels.delete(id);
     }
     // Drop the saved result for this tab from IDB. Best-effort.
-    IDB.deleteResult(workspaceName(), id).catch(err =>
+    IDB.deleteResult(id).catch(err =>
       console.warn(`Couldn't delete IDB result for tab ${id}:`, err));
     const containingGroup = groupOfTab(id);
-    state.workspace.tabs = state.workspace.tabs.filter(t => t.id !== id);
-    // Record a tombstone so the multi-window merge in persistWorkspace
+    state.tabs = state.tabs.filter(t => t.id !== id);
+    // Record a tombstone so the multi-window merge in persistState
     // doesn't resurrect this tab from a stale on-disk snapshot.
-    if (!Array.isArray(state.workspace.deletedTabIds)) state.workspace.deletedTabIds = [];
-    state.workspace.deletedTabIds.push(id);
+    if (!Array.isArray(state.deletedTabIds)) state.deletedTabIds = [];
+    state.deletedTabIds.push(id);
     if (containingGroup) {
       containingGroup.tabIds = containingGroup.tabIds.filter(tid => tid !== id);
       if (containingGroup.tabIds.length === 0) {
-        if (state.workspace.groups.length === 1) {
+        if (state.groups.length === 1) {
           // Last tab in the only group → seed a fresh tab so the user
           // never lands in an empty workspace.
           const fresh = freshTab(1);
-          state.workspace.tabs.push(fresh);
+          state.tabs.push(fresh);
           containingGroup.tabIds.push(fresh.id);
           containingGroup.activeTabId = fresh.id;
         } else {
@@ -941,7 +895,7 @@ import {
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
-    persistWorkspace();
+    persistState();
   }
 
   // ===== Editor =====
@@ -960,10 +914,10 @@ import {
   // (step 3b+) the Run button, keyboard shortcuts, and selection capture
   // continue to target whichever pane the user last interacted with.
   function focusedMonacoEditor() {
-    return monacoEditorsByGroup.get(state.workspace.focusedGroupId) || null;
+    return monacoEditorsByGroup.get(state.focusedGroupId) || null;
   }
   function focusedFallbackTextarea() {
-    return fallbackTextareasByGroup.get(state.workspace.focusedGroupId) || null;
+    return fallbackTextareasByGroup.get(state.focusedGroupId) || null;
   }
 
   function getOrCreateModel(tab) {
@@ -973,7 +927,7 @@ import {
       model = monaco.editor.createModel(tab.sql || '', 'sql');
       // Per-model listener so cross-tab switches don't pile up listeners.
       model.onDidChangeContent(() => {
-        const t = state.workspace.tabs.find(x => monacoModels.get(x.id) === model);
+        const t = state.tabs.find(x => monacoModels.get(x.id) === model);
         if (!t) return;
         t.sql = model.getValue();
         renderTabStrip();         // dirty marker may flip
@@ -985,7 +939,7 @@ import {
   }
 
   function swapEditorToActiveTab() {
-    for (const g of state.workspace.groups) swapEditorForGroup(g);
+    for (const g of state.groups) swapEditorForGroup(g);
   }
 
   // Attach the model for `group.activeTabId` to whichever editor (Monaco
@@ -993,12 +947,12 @@ import {
   // belongs to the focused group, so split-pane swaps don't yank the
   // caret away from where the user is typing.
   function swapEditorForGroup(group) {
-    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    const tab = state.tabs.find(t => t.id === group.activeTabId);
     if (!tab) return;
     const editor = monacoEditorsByGroup.get(group.id);
     if (editor) {
       editor.setModel(getOrCreateModel(tab));
-      if (group.id === state.workspace.focusedGroupId) editor.focus();
+      if (group.id === state.focusedGroupId) editor.focus();
       return;
     }
     const fb = fallbackTextareasByGroup.get(group.id);
@@ -1037,9 +991,9 @@ import {
     ta.addEventListener('input', () => {
       // Edits go to whichever tab is active in *this* group — not the
       // focused group, in case the user is typing into a non-focused pane.
-      const group = state.workspace.groups.find(g => g.id === groupId);
+      const group = state.groups.find(g => g.id === groupId);
       if (!group) return;
-      const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+      const tab = state.tabs.find(t => t.id === group.activeTabId);
       if (!tab) return;
       tab.sql = ta.value;
       renderTabStrip();
@@ -1102,8 +1056,8 @@ import {
     // keyboard-focus, which can desync from the user's intent if they
     // clicked the pane's chrome rather than its editor host.
     editor.onDidFocusEditorWidget(() => {
-      if (state.workspace.focusedGroupId !== groupId) {
-        state.workspace.focusedGroupId = groupId;
+      if (state.focusedGroupId !== groupId) {
+        state.focusedGroupId = groupId;
         syncToolbarToActiveTab();
       }
     });
@@ -1131,7 +1085,7 @@ import {
     require(['vs/editor/editor.main'], () => {
       // Boot a Monaco editor inside every existing group, then wire
       // language services once (providers are registered globally).
-      for (const g of state.workspace.groups) bootMonacoForGroup(g.id);
+      for (const g of state.groups) bootMonacoForGroup(g.id);
       registerLanguageProviders();
       swapEditorToActiveTab();
     }, (err) => {
@@ -1410,13 +1364,13 @@ import {
   // pane doesn't disturb the other. IDB reads are independent so we
   // run them concurrently.
   function renderResultsForActiveTab() {
-    return Promise.all(state.workspace.groups.map(g => renderResultsForGroup(g)));
+    return Promise.all(state.groups.map(g => renderResultsForGroup(g)));
   }
 
   async function renderResultsForGroup(group) {
     const groupEl = groupElementById(group.id);
     if (!groupEl) return;
-    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    const tab = state.tabs.find(t => t.id === group.activeTabId);
     const results = resultsPaneEl(groupEl);
     const elapsed = elapsedEl(groupEl);
     // Revoke only THIS group's previous URLs. With two panes rendering
@@ -1461,15 +1415,13 @@ import {
       loading.textContent = 'Loading saved result…';
       results.appendChild(loading);
       const captureTabId = tab.id;
-      const captureWs = workspaceName();
       const captureGroupId = group.id;
       const stillActive = () => {
-        if (workspaceName() !== captureWs) return false;
-        const liveGroup = state.workspace.groups.find(g => g.id === captureGroupId);
+        const liveGroup = state.groups.find(g => g.id === captureGroupId);
         return !!liveGroup && liveGroup.activeTabId === captureTabId;
       };
       try {
-        const r = await IDB.loadResult(captureWs, captureTabId);
+        const r = await IDB.loadResult(captureTabId);
         if (!stillActive()) return;                          // user moved on
         tab.lastResult = r;                                   // cache, even if null
       } catch (err) {
@@ -1540,7 +1492,7 @@ import {
   // label, maxRows, trace — so the two panes stay independent. The
   // header status only reflects the focused group.
   function syncToolbarToActiveTab() {
-    for (const g of state.workspace.groups) syncToolbarForGroup(g);
+    for (const g of state.groups) syncToolbarForGroup(g);
     const status = document.getElementById('status');
     const tab = activeTab();
     status.textContent = (tab && tab.running) ? 'running… (Esc to cancel)' : '';
@@ -1553,7 +1505,7 @@ import {
   function syncToolbarForGroup(group) {
     const groupEl = groupElementById(group.id);
     if (!groupEl) return;
-    const tab = state.workspace.tabs.find(t => t.id === group.activeTabId);
+    const tab = state.tabs.find(t => t.id === group.activeTabId);
     const runBtn = runBtnEl(groupEl);
     const maxRowsInput = maxRowsInputEl(groupEl);
     const traceToggle = traceToggleEl(groupEl);
@@ -2116,7 +2068,7 @@ import {
     if (!isPartial) tab.sqlOfLastRun = tab.sql;
 
     renderTabStrip();
-    persistWorkspace();
+    persistState();
 
     // If the user is still looking at this tab in any group, paint the
     // final result. If they switched away, the renderer will pick it up
@@ -2129,7 +2081,7 @@ import {
     // be running and need to keep its Cancel state).
     syncToolbarToActiveTab();
 
-    IDB.saveResult(workspaceName(), tab.id, finalRes).catch(err =>
+    IDB.saveResult(tab.id, finalRes).catch(err =>
       console.warn(`Couldn't save result for tab ${tab.id}:`, err));
 
     if (!finalRes.error) refreshSidebarForSql(sql);
@@ -2146,97 +2098,25 @@ import {
     if (status) status.textContent = 'cancelling…';
   }
 
-  // ===== Workspace switcher =====
-  function rebuildWsSelect() {
-    const sel = document.getElementById('ws-select');
-    const all = listWorkspaces();
-    sel.innerHTML = '';
-    for (const name of all) {
-      const opt = document.createElement('option');
-      opt.value = name; opt.textContent = name;
-      sel.appendChild(opt);
-    }
-    sel.value = workspaceName();
-  }
-
-  async function newWorkspace() {
-    const name = await promptModal('New workspace', 'Name (letters, digits, _ or -; up to 40 chars):');
-    if (name === null) return;
-    if (!validName(name)) {
-      await alertModal('Invalid name', 'Workspace names must match [a-zA-Z0-9_-]{1,40}.');
-      return;
-    }
-    if (listWorkspaces().includes(name)) {
-      // Already exists — just switch.
-      location.hash = name === 'default' ? '' : name;
-      return;
-    }
-    registerWorkspace(name);
-    location.hash = name === 'default' ? '' : name;
-  }
-
-  async function deleteWorkspace() {
-    const name = workspaceName();
-    if (name === 'default') {
-      await alertModal('Cannot delete', 'The "default" workspace cannot be deleted.');
-      return;
-    }
-    const ok = await confirmModal('Delete workspace?',
-      `This permanently removes "${name}" and all its tabs from this browser. Continue?`);
-    if (!ok) return;
-    unregisterWorkspace(name);
-    location.hash = '';
-  }
-
-  function onHashChange() {
-    persistWorkspace();
-    const name = workspaceName();
-    registerWorkspace(name);
-    // Workspace switch invalidates every group's editor — the new
-    // workspace may have a different group layout entirely. Tear them
-    // down before swapping state so reconcileGroupDom rebuilds cleanly.
-    for (const editor of monacoEditorsByGroup.values()) {
-      editor.setModel(null);
-      editor.dispose();
-    }
-    monacoEditorsByGroup.clear();
-    fallbackTextareasByGroup.clear();
-    for (const m of monacoModels.values()) m.dispose();
-    monacoModels.clear();
-    state.workspace = loadWorkspace(name);
-    rebuildWsSelect();
-    reconcileGroupDom();
-    applyGroupContainerOrientation(
-      localStorage.getItem(GROUP_ORIENTATION_STORE) === 'stack'
-        ? 'stack' : 'side-by-side');
-    for (const g of state.workspace.groups) applyEditorOrientationForGroup(g);
-    updateSplitButtonIcon();
-    renderTabStrip();
-    swapEditorToActiveTab();
-    renderResultsForActiveTab();
-    syncToolbarToActiveTab();
-  }
-
-  // Cross-window live sync. The browser's `storage` event fires on every
-  // *other* same-origin window/tab when localStorage changes here, so this
-  // is how Window A learns about Window B's saves without a reload.
+  // ===== Cross-window sync =====
+  // The browser's `storage` event fires on every *other* same-origin
+  // window/tab when localStorage changes here, so this is how Window A
+  // learns about Window B's saves without a reload.
   //
-  // Three keys are interesting:
-  //   STORE.workspace(<currentName>) — our workspace was just rewritten by
-  //     another window. Merge in any new tabs and apply remote tombstones.
-  //   STORE.workspaces — the workspace registry changed (another window
-  //     created or deleted a workspace). Refresh the dropdown.
+  // Two keys are interesting:
+  //   STORE.state — our state was just rewritten by another window. Merge
+  //     in any new tabs and apply remote tombstones.
   //   STORE.theme — the user toggled theme in another window. Mirror it.
   //
   // We deliberately don't try to reconcile *content edits* on tabs that
   // exist in both windows — picking up a remote edit mid-typing would
   // stomp the local user's keystrokes. In-memory always wins for tabs we
   // already have; only adds and remote-tombstone removals propagate.
-  function applyRemoteWorkspaceSnapshot(onDisk) {
+  function applyRemoteSnapshot(onDisk) {
     if (!onDisk || !Array.isArray(onDisk.tabs)) return;
 
-    const inMemoryById = new Map(state.workspace.tabs.map(t => [t.id, t]));
-    const localTombs = new Set(state.workspace.deletedTabIds || []);
+    const inMemoryById = new Map(state.tabs.map(t => [t.id, t]));
+    const localTombs = new Set(state.deletedTabIds || []);
     const diskTombs = new Set(Array.isArray(onDisk.deletedTabIds) ? onDisk.deletedTabIds : []);
 
     let tabsChanged = false;
@@ -2245,9 +2125,9 @@ import {
     // Apply remote tombstones first — drop tabs another window deleted.
     for (const id of diskTombs) {
       if (localTombs.has(id)) continue;       // already gone here
-      const idx = state.workspace.tabs.findIndex(t => t.id === id);
+      const idx = state.tabs.findIndex(t => t.id === id);
       if (idx === -1) continue;               // we never saw it
-      state.workspace.tabs.splice(idx, 1);
+      state.tabs.splice(idx, 1);
       removeTabIdFromItsGroup(id);
       tabsChanged = true;
       if (monacoModels.has(id)) {
@@ -2255,7 +2135,7 @@ import {
         monacoModels.delete(id);
       }
       // IDB result was deleted by the closing window already.
-      if (id === state.workspace.activeTabId) activeMissing = true;
+      if (id === state.activeTabId) activeMissing = true;
     }
 
     // Add tabs we don't have. Skip anything we tombstoned locally — our
@@ -2268,7 +2148,7 @@ import {
       if (inMemoryById.has(t.id)) continue;
       if (localTombs.has(t.id)) continue;
       if (diskTombs.has(t.id)) continue;
-      state.workspace.tabs.push({
+      state.tabs.push({
         id: t.id,
         name: t.name || 'Untitled',
         sql: t.sql || '',
@@ -2289,21 +2169,21 @@ import {
     }
 
     // Carry forward remote tombstones into local state so our next save
-    // doesn't drop them. Cap FIFO at 500 to match persistWorkspace.
+    // doesn't drop them. Cap FIFO at 500 to match persistState.
     if (diskTombs.size > 0) {
       const merged = new Set([...localTombs, ...diskTombs]);
       const arr = [...merged];
-      state.workspace.deletedTabIds = arr.length > 500 ? arr.slice(arr.length - 500) : arr;
+      state.deletedTabIds = arr.length > 500 ? arr.slice(arr.length - 500) : arr;
     }
 
     // If our active tab got tombstoned remotely, fall back to the first
     // surviving tab in the focused group. If that group is now empty we
-    // seed it with a fresh tab so the workspace is never tabless.
+    // seed it with a fresh tab so the editor is never tabless.
     if (activeMissing) {
       const g = focusedGroup();
       if (g && g.tabIds.length === 0) {
         const fresh = freshTab(1);
-        state.workspace.tabs.push(fresh);
+        state.tabs.push(fresh);
         g.tabIds.push(fresh.id);
       }
       if (g) g.activeTabId = g.tabIds[0];
@@ -2321,26 +2201,17 @@ import {
       // cross-window changes here.
       if (!e.key) return;
 
-      // Workspace registry changed — refresh the dropdown so newly created
-      // workspaces from other windows show up immediately.
-      if (e.key === STORE.workspaces) {
-        rebuildWsSelect();
-        return;
-      }
-
-      // Theme toggled in another window — mirror it.
       if (e.key === STORE.theme && e.newValue) {
         applyTheme(e.newValue);
         return;
       }
 
-      // Our current workspace was rewritten somewhere else.
-      if (e.key === STORE.workspace(workspaceName())) {
-        if (!e.newValue) return;               // workspace deleted elsewhere; let beforeunload sort it out
+      if (e.key === STORE.state) {
+        if (!e.newValue) return;
         let snapshot;
         try { snapshot = JSON.parse(e.newValue); }
         catch { return; }
-        applyRemoteWorkspaceSnapshot(snapshot);
+        applyRemoteSnapshot(snapshot);
       }
     });
   }
@@ -2875,20 +2746,20 @@ import {
   // Opens a fresh tab, names it from the supplied label, fills in the SQL,
   // and switches to it.
   function openSqlInNewTab(name, sql) {
-    const t = freshTab(state.workspace.tabs.length + 1);
+    const t = freshTab(state.tabs.length + 1);
     t.name = name.length > 32 ? name.slice(0, 31) + '…' : name;
     t.sql = sql;
     // Seed sqlOfLastRun so the tab opens clean — the dirty marker only
     // appears once the user actually edits the seeded text.
     t.sqlOfLastRun = sql;
-    state.workspace.tabs.push(t);
+    state.tabs.push(t);
     addTabIdToFocusedGroup(t.id);
-    state.workspace.activeTabId = t.id;
+    state.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
-    persistWorkspace();
+    persistState();
   }
 
   // ───── Resize ─────
@@ -3070,7 +2941,7 @@ import {
     if (!group) return;
     group.editorOrientation = group.editorOrientation === 'horizontal' ? 'vertical' : 'horizontal';
     applyEditorOrientationForGroup(group);
-    persistWorkspace();
+    persistState();
   }
 
   // ===== Group splitter + container orientation =====
@@ -3262,17 +3133,17 @@ import {
   // Wire one group's toolbar buttons + inputs. Idempotent — guarded by a
   // dataset flag so reconcileGroupDom can call it on every reconciliation
   // pass without piling up duplicate handlers. The handlers re-resolve
-  // the live group by id from `state.workspace` rather than closing over
+  // the live group by id from `state` rather than closing over
   // the group object, so they keep working after a workspace switch
   // reuses the same DOM node for a fresh workspace's group.
   function wireGroupToolbar(groupEl, group) {
     if (groupEl.dataset.toolbarWired === '1') return;
     groupEl.dataset.toolbarWired = '1';
     const groupId = group.id;
-    const liveGroup = () => state.workspace.groups.find(g => g.id === groupId);
+    const liveGroup = () => state.groups.find(g => g.id === groupId);
     const liveTab = () => {
       const g = liveGroup();
-      return g ? state.workspace.tabs.find(t => t.id === g.activeTabId) : null;
+      return g ? state.tabs.find(t => t.id === g.activeTabId) : null;
     };
 
     // Each handler focuses its group as a side effect, so clicks on the
@@ -3281,7 +3152,7 @@ import {
     runBtnEl(groupEl).addEventListener('click', () => {
       const g = liveGroup();
       if (!g) return;
-      state.workspace.focusedGroupId = g.id;
+      state.focusedGroupId = g.id;
       const tab = liveTab();
       if (tab && tab.running) cancelActiveTabRun();
       else run();
@@ -3289,7 +3160,7 @@ import {
     maxRowsInputEl(groupEl).addEventListener('input', (e) => {
       const g = liveGroup();
       if (!g) return;
-      state.workspace.focusedGroupId = g.id;
+      state.focusedGroupId = g.id;
       const tab = liveTab();
       if (!tab) return;
       const v = parseInt(e.target.value, 10);
@@ -3299,7 +3170,7 @@ import {
     traceToggleEl(groupEl).addEventListener('change', (e) => {
       const g = liveGroup();
       if (!g) return;
-      state.workspace.focusedGroupId = g.id;
+      state.focusedGroupId = g.id;
       const tab = liveTab();
       if (!tab) return;
       tab.trace = e.target.checked === true;
@@ -3313,8 +3184,8 @@ import {
     // the wrong tab. Form inputs are skipped — stealing focus from them
     // would block typing into max-rows / trace controls.
     groupEl.addEventListener('pointerdown', (e) => {
-      if (state.workspace.focusedGroupId !== groupId && liveGroup()) {
-        state.workspace.focusedGroupId = groupId;
+      if (state.focusedGroupId !== groupId && liveGroup()) {
+        state.focusedGroupId = groupId;
         // Status bar / header icons reflect the focused group's tab.
         syncToolbarToActiveTab();
       }
@@ -3330,7 +3201,7 @@ import {
     });
   }
 
-  // Ensure #group-container's children mirror state.workspace.groups in
+  // Ensure #group-container's children mirror state.groups in
   // order. Adds any missing .editor-group nodes, removes any orphaned
   // ones, and (idempotently) wires every group's toolbar + resize handle.
   // Also stands up an editor (Monaco if loaded, else the textarea
@@ -3339,12 +3210,12 @@ import {
   function reconcileGroupDom() {
     const container = document.getElementById('group-container');
     if (!container) return;
-    const validIds = new Set(state.workspace.groups.map(g => g.id));
+    const validIds = new Set(state.groups.map(g => g.id));
     for (const el of Array.from(container.querySelectorAll(':scope > .editor-group'))) {
       if (!validIds.has(el.dataset.groupId)) el.remove();
     }
     let prevEl = null;
-    for (const g of state.workspace.groups) {
+    for (const g of state.groups) {
       let el = groupElementById(g.id);
       if (!el) {
         el = createEditorGroupElement(g.id);
@@ -3372,7 +3243,7 @@ import {
     // splitter so they're discoverable on hover and stay close to the
     // visual "seam" between panes.
     let splitter = document.getElementById('group-resize');
-    if (state.workspace.groups.length >= 2) {
+    if (state.groups.length >= 2) {
       if (!splitter) {
         splitter = buildGroupResizeElement();
       }
@@ -3398,7 +3269,7 @@ import {
   // (we never want a group to exist with zero tabs). For step 3b only one
   // additional group is allowed; clicking again merges back.
   function splitFocusedGroup() {
-    if (state.workspace.groups.length >= 2) {
+    if (state.groups.length >= 2) {
       mergeAllGroupsIntoFocused();
       return;
     }
@@ -3408,14 +3279,14 @@ import {
     const moveIdx = source.tabIds.indexOf(tabIdToMove);
     if (moveIdx >= 0) source.tabIds.splice(moveIdx, 1);
     if (source.tabIds.length === 0) {
-      const fresh = freshTab(state.workspace.tabs.length + 1);
-      state.workspace.tabs.push(fresh);
+      const fresh = freshTab(state.tabs.length + 1);
+      state.tabs.push(fresh);
       source.tabIds.push(fresh.id);
     }
     source.activeTabId = source.tabIds[0];
 
     const newGroupId = 'g' + Date.now().toString(36);
-    state.workspace.groups.push({
+    state.groups.push({
       id: newGroupId,
       tabIds: [tabIdToMove],
       activeTabId: tabIdToMove,
@@ -3423,7 +3294,7 @@ import {
       // newly-spawned pane "feels like" the one it came from.
       editorOrientation: source.editorOrientation || 'vertical',
     });
-    state.workspace.focusedGroupId = newGroupId;
+    state.focusedGroupId = newGroupId;
 
     // reconcileGroupDom creates the new group's DOM and stands up its
     // editor (Monaco if loaded, else fallback) in one shot.
@@ -3434,7 +3305,7 @@ import {
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
     updateSplitButtonIcon();
-    persistWorkspace();
+    persistState();
   }
 
   // Inverse of splitFocusedGroup: pull every other group's tabs into the
@@ -3442,10 +3313,10 @@ import {
   // for the merged tab strip; the focused group's active tab stays
   // active.
   function mergeAllGroupsIntoFocused() {
-    if (state.workspace.groups.length < 2) return;
+    if (state.groups.length < 2) return;
     const focused = focusedGroup();
     if (!focused) return;
-    for (const g of state.workspace.groups.slice()) {
+    for (const g of state.groups.slice()) {
       if (g === focused) continue;
       for (const tabId of g.tabIds) {
         if (!focused.tabIds.includes(tabId)) focused.tabIds.push(tabId);
@@ -3458,7 +3329,7 @@ import {
     renderResultsForActiveTab();
     syncToolbarToActiveTab();
     updateSplitButtonIcon();
-    persistWorkspace();
+    persistState();
   }
 
   // Add/remove a `.focused` class on each .editor-group element so CSS
@@ -3466,11 +3337,11 @@ import {
   // currently target. Only meaningful when there's more than one group;
   // single-pane mode looks the same as before.
   function refreshFocusedGroupHighlight() {
-    const showHighlight = state.workspace.groups.length > 1;
-    for (const g of state.workspace.groups) {
+    const showHighlight = state.groups.length > 1;
+    for (const g of state.groups) {
       const el = groupElementById(g.id);
       if (!el) continue;
-      el.classList.toggle('focused', showHighlight && g.id === state.workspace.focusedGroupId);
+      el.classList.toggle('focused', showHighlight && g.id === state.focusedGroupId);
     }
   }
 
@@ -3479,7 +3350,7 @@ import {
   function updateSplitButtonIcon() {
     const btn = document.getElementById('split-toggle');
     if (!btn) return;
-    const isSplit = state.workspace.groups.length >= 2;
+    const isSplit = state.groups.length >= 2;
     btn.title = isSplit
       ? 'Merge panes back into one'
       : 'Split editor into two side-by-side panes';
@@ -3493,31 +3364,20 @@ import {
     applyTheme(loadTheme());
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
-    const name = workspaceName();
-    registerWorkspace(name);
-    state.workspace = loadWorkspace(name);
-
-    rebuildWsSelect();
-    document.getElementById('ws-select').addEventListener('change', (e) => {
-      const target = e.target.value;
-      location.hash = target === 'default' ? '' : target;
-    });
-    document.getElementById('ws-new').addEventListener('click', newWorkspace);
-    document.getElementById('ws-delete').addEventListener('click', deleteWorkspace);
-    window.addEventListener('hashchange', onHashChange);
+    loadInitialState();
     setupCrossWindowSync();
 
-    // Reconcile DOM with the workspace's groups before any rendering —
-    // this both wires the existing first-group toolbar handlers and
-    // stamps out additional .editor-group nodes for any groups loaded
-    // from a previously-saved split. Orientation is applied after the
-    // groups exist so the focused group's wrapper picks up the .horizontal
+    // Reconcile DOM with the loaded groups before any rendering — this
+    // both wires the existing first-group toolbar handlers and stamps
+    // out additional .editor-group nodes for any groups loaded from a
+    // previously-saved split. Orientation is applied after the groups
+    // exist so the focused group's wrapper picks up the .horizontal
     // class before Monaco measures.
     reconcileGroupDom();
     applyGroupContainerOrientation(
       localStorage.getItem(GROUP_ORIENTATION_STORE) === 'stack'
         ? 'stack' : 'side-by-side');
-    for (const g of state.workspace.groups) applyEditorOrientationForGroup(g);
+    for (const g of state.groups) applyEditorOrientationForGroup(g);
     updateSplitButtonIcon();
 
     renderTabStrip();

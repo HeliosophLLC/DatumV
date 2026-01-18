@@ -52,7 +52,6 @@
     background: var(--panel-2);
   }
   header .title { font-weight: 600; }
-  header .ws-control { display: flex; align-items: center; gap: 4px; }
   header select, header input[type="text"], header button.icon {
     background: var(--panel); color: var(--fg);
     border: 1px solid var(--border); border-radius: 4px;
@@ -819,12 +818,6 @@
 <body>
   <header>
     <span class="title">DatumIngest</span>
-    <div class="ws-control">
-      <span class="tip" style="color: var(--muted); font-size: 12px;">workspace</span>
-      <select id="ws-select" title="Switch workspace"></select>
-      <button class="icon" id="ws-new" title="New workspace">+</button>
-      <button class="icon" id="ws-delete" title="Delete this workspace">ðŸ—‘</button>
-    </div>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
     <button class="icon" id="split-toggle" title="Split editor into two side-by-side panes" aria-label="Split editor">
