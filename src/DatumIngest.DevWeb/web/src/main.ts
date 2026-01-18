@@ -14,11 +14,8 @@ import {
   buildModifyTemplateFromProcedureRow,
   buildBuiltinExecuteTemplate,
 } from './parser-util.js';
-import {
-  renderJsonNode,
-  renderJsonObject,
-  renderJsonArray,
-} from './json-render.js';
+// json-render functions are consumed by results.tsx; main.ts no longer
+// needs them.
 import * as IDB from './idb.js';
 import { loadTheme, applyTheme, toggleTheme } from './theme.js';
 import {
@@ -27,7 +24,8 @@ import {
   promptModal,
   openImageLightbox,
 } from './modal.js';
-import { ref, snapshot } from 'valtio';
+import { mountResultsPane, unmountResultsPane } from './react-mount.js';
+import { runQuery, cancelActiveTabRun, setRunHooks } from './run.js';
 import {
   state,
   type Tab,
@@ -87,6 +85,7 @@ import {
       monacoEditorsByGroup.delete(groupId);
     }
     fallbackTextareasByGroup.delete(groupId);
+    unmountResultsPane(groupId);
     const groupEl = document.querySelector(`.editor-group[data-group-id="${groupId}"]`);
     if (groupEl) groupEl.remove();
     if (state.focusedGroupId === groupId) {
@@ -404,7 +403,7 @@ import {
     group.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     persistState();
   }
@@ -419,7 +418,7 @@ import {
     group.activeTabId = id;
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     persistState();
   }
@@ -477,7 +476,7 @@ import {
 
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     persistState();
   }
@@ -533,7 +532,7 @@ import {
     }
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     persistState();
   }
@@ -625,7 +624,7 @@ import {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        run();
+        runQuery(getEditorSelection());
       }
     });
     ta.addEventListener('input', () => {
@@ -1003,129 +1002,6 @@ import {
   // shows results for its own activeTabId, so switching tabs in one
   // pane doesn't disturb the other. IDB reads are independent so we
   // run them concurrently.
-  function renderResultsForActiveTab() {
-    return Promise.all(state.groups.map(g => renderResultsForGroup(g)));
-  }
-
-  async function renderResultsForGroup(group) {
-    const groupEl = groupElementById(group.id);
-    if (!groupEl) return;
-    const tab = state.tabs.find(t => t.id === group.activeTabId);
-    const results = resultsPaneEl(groupEl);
-    const elapsed = elapsedEl(groupEl);
-    // Revoke only THIS group's previous URLs. With two panes rendering
-    // concurrently, a global revoke would kill the other group's
-    // just-created URLs.
-    revokeMediaObjectUrlsForGroup(group.id);
-    results.innerHTML = '';
-    elapsed.textContent = '';
-    if (!tab) return;
-
-    // The mediaUrlCollector swap below keeps blob-URL ownership pinned to
-    // this group across the synchronous render call chain (renderResult →
-    // renderCell → dataB64ToBlobUrl). We wrap each render entry-point
-    // because awaiting IDB in this function would otherwise let a sibling
-    // group's render clobber the collector before our sync work runs.
-    let groupUrls = mediaObjectUrlsByGroup.get(group.id);
-    if (!groupUrls) {
-      groupUrls = [];
-      mediaObjectUrlsByGroup.set(group.id, groupUrls);
-    }
-    const renderWithCollector = (fn) => {
-      const prev = mediaUrlCollector;
-      mediaUrlCollector = groupUrls;
-      try { fn(); } finally { mediaUrlCollector = prev; }
-    };
-
-    // If THIS tab has an in-flight query, render the streaming view from
-    // the per-tab accumulator (rebuild chunks / partial rows so the user
-    // can see progress on switch-back). The live ticker resumes painting
-    // on its next 250ms tick once the tab is the active tab in this group.
-    if (tab.running && tab.runningRes) {
-      renderWithCollector(() => renderRunningTab(tab, results));
-      return;
-    }
-
-    // tab.lastResult is undefined when hydrated from localStorage and not yet
-    // fetched from IDB. Show a placeholder while we resolve it; guard against
-    // the user switching tabs in this group before the read returns.
-    if (tab.lastResult === undefined) {
-      const loading = document.createElement('div');
-      loading.className = 'meta';
-      loading.textContent = 'Loading saved result…';
-      results.appendChild(loading);
-      const captureTabId = tab.id;
-      const captureGroupId = group.id;
-      const stillActive = () => {
-        const liveGroup = state.groups.find(g => g.id === captureGroupId);
-        return !!liveGroup && liveGroup.activeTabId === captureTabId;
-      };
-      try {
-        const r = await IDB.loadResult(captureTabId);
-        if (!stillActive()) return;                          // user moved on
-        tab.lastResult = r;                                   // cache, even if null
-      } catch (err) {
-        if (!stillActive()) return;
-        tab.lastResult = null;
-        results.innerHTML = '';
-        const errDiv = document.createElement('div');
-        errDiv.className = 'error';
-        errDiv.textContent = `Couldn't load saved result: ${err.message}`;
-        results.appendChild(errDiv);
-        return;
-      }
-      results.innerHTML = '';
-    }
-
-    if (!tab.lastResult) {
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = tab.lastRunAt
-        ? '(saved result not found — re-run to see it)'
-        : 'No results yet. Press Run.';
-      results.appendChild(meta);
-      return;
-    }
-    renderWithCollector(() => renderResult(tab.lastResult, results));
-    const r = tab.lastResult;
-    if (!r.error) {
-      const rowText = `${r.rowCount} ${r.rowCount === 1 ? 'row' : 'rows'}`;
-      const timeText = typeof r.elapsedMs === 'number' ? `${(r.elapsedMs / 1000).toFixed(2)} s` : '';
-      elapsed.textContent = timeText ? `${rowText} · ${timeText}` : rowText;
-    }
-  }
-
-  // Renders the partial state of a query that's still in flight on this
-  // tab — invoked when the user switches back to a running tab. Rebuilds
-  // any streaming chunks from the accumulator and lists how many rows
-  // have arrived. The live ticker on the `.elapsed` slot paints the elapsed time
-  // from its next 250ms tick.
-  function renderRunningTab(tab, container) {
-    const res = tab.runningRes;
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = `Running… (Esc to cancel) · ${res.rowCount.toLocaleString()} ${res.rowCount === 1 ? 'row' : 'rows'} so far`;
-    container.appendChild(meta);
-
-    if (res.chunks && res.chunks.length > 0) {
-      // Rebuild the live token-stream pane from the accumulated chunks.
-      // The live append path in run() will continue from this point —
-      // checking `streamPane` truthy in the chunk handler now hits the
-      // newly-attached element.
-      const header = document.createElement('div');
-      header.className = 'meta stream-header';
-      const model = res.chunks[0].model;
-      header.textContent = `streaming from models.${model}`;
-      container.appendChild(header);
-      const pre = document.createElement('pre');
-      pre.className = 'streaming-output';
-      for (const c of res.chunks) {
-        pre.appendChild(document.createTextNode(c.text));
-      }
-      pre.scrollTop = pre.scrollHeight;
-      container.appendChild(pre);
-    }
-  }
 
   // Refresh every group's toolbar to match its own active tab. Each
   // group's toolbar reflects ITS active tab's settings — Run button
@@ -1167,271 +1043,6 @@ import {
     traceToggle.checked = tab.trace === true;
   }
 
-  /// Renders one result set (one row-producing statement's output) as a
-  /// section: optional "Result N" label when there's more than one,
-  /// truncation warning, and the actual data table. Pulled out of
-  /// renderResult so multi-statement scripts can stamp out one section
-  /// per `schema` event.
-  function renderResultSet(set, container, label) {
-    if (label !== null && label !== undefined) {
-      const heading = document.createElement('div');
-      heading.className = 'meta result-set-label';
-      const rowCount = set.rowCount ?? (set.rows ? set.rows.length : 0);
-      heading.textContent =
-        `Result ${label} · ${rowCount.toLocaleString()} ${rowCount === 1 ? 'row' : 'rows'}`;
-      container.appendChild(heading);
-    }
-
-    if (set.truncated) {
-      const w = document.createElement('div');
-      w.className = 'warn';
-      w.textContent = `⚠ Truncated at ${set.rowCount} rows (raise the max rows control to see more).`;
-      container.appendChild(w);
-    }
-
-    if (!set.schema || set.schema.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'meta';
-      empty.textContent = '(no columns)';
-      container.appendChild(empty);
-      return;
-    }
-
-    const table = document.createElement('table');
-    table.className = 'results';
-    const thead = document.createElement('thead');
-    const headRow = document.createElement('tr');
-    for (const col of set.schema) {
-      const th = document.createElement('th');
-      th.appendChild(document.createTextNode(col.name));
-      const k = document.createElement('span');
-      k.className = 'kind';
-      k.textContent = col.isArray ? `Array<${col.kind}>` : col.kind;
-      th.appendChild(k);
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    for (const row of set.rows) {
-      const tr = document.createElement('tr');
-      for (const cell of row) tr.appendChild(renderCell(cell));
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    container.appendChild(table);
-  }
-
-  function renderResult(res, container) {
-    if (res.error) {
-      const err = document.createElement('div');
-      err.className = 'error';
-      err.textContent = res.error + (res.detail ? '\n\n' + res.detail : '');
-      container.appendChild(err);
-      return;
-    }
-
-    // One entry per row-producing statement. Each renders as its own
-    // table so multi-statement scripts don't conflate schemas. The "Result N"
-    // heading only appears when there's more than one — single-statement
-    // runs render exactly as they did before.
-    const sets = res.resultSets ?? [];
-    sets.forEach((set, index) => {
-      renderResultSet(set, container, sets.length > 1 ? index + 1 : null);
-    });
-    if (sets.length === 0 && !res.error) {
-      const empty = document.createElement('div');
-      empty.className = 'meta';
-      empty.textContent = '(no rows)';
-      container.appendChild(empty);
-    }
-
-    // Engine trace, when the user enabled the toggle and the engine emitted
-    // anything. Collapsed by default; the summary shows the line count so
-    // users can decide whether to expand.
-    if (typeof res.trace === 'string' && res.trace.length > 0) {
-      const lineCount = res.trace.split('\n').filter(l => l.length > 0).length;
-      const details = document.createElement('details');
-      details.className = 'trace';
-      const summary = document.createElement('summary');
-      summary.textContent = `Execution trace (${lineCount.toLocaleString()} ${lineCount === 1 ? 'line' : 'lines'})`;
-      details.appendChild(summary);
-      const pre = document.createElement('pre');
-      pre.textContent = res.trace;
-      details.appendChild(pre);
-      container.appendChild(details);
-    }
-  }
-
-  // Object URLs created for the currently-rendered media cells. Tracked so
-  // we can revoke them on the next render — without revocation the browser
-  // would hold the underlying blobs alive indefinitely (a few MB per image
-  // adds up across runs).
-  // Per-group URL tracking. With two panes rendering concurrently, a
-  // single global list led group B's render to revoke group A's
-  // freshly-created blob URLs out from under group A's <img> elements,
-  // leaving them blank while the byte-count caption survived. Each
-  // group now owns its own URL list.
-  const mediaObjectUrlsByGroup = new Map();
-  // The collector array dataB64ToBlobUrl pushes into. Callers that
-  // render media cells set this to the right group's list immediately
-  // before the synchronous rendering call and restore it after. Using
-  // a module-level flag works only because the cell-rendering call
-  // chain (renderResult → renderCell → dataB64ToBlobUrl) is fully
-  // synchronous; no await separates the assignment from the use.
-  let mediaUrlCollector = null;
-  function revokeMediaObjectUrlsForGroup(groupId) {
-    const list = mediaObjectUrlsByGroup.get(groupId);
-    if (!list) return;
-    for (const u of list) URL.revokeObjectURL(u);
-    mediaObjectUrlsByGroup.set(groupId, []);
-  }
-
-  // Decode base64 → Blob → object URL. Used in place of `data:` URLs for
-  // image / audio / video cells: blob URLs aren't subject to Chromium's
-  // ~2 MB URL-length limit, so right-click "Open image in new tab" works
-  // reliably regardless of the image's encoded size.
-  function dataB64ToBlobUrl(b64, mime) {
-    const bin = atob(b64);
-    const len = bin.length;
-    const arr = new Uint8Array(len);
-    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([arr], { type: mime }));
-    if (mediaUrlCollector) mediaUrlCollector.push(url);
-    return url;
-  }
-
-  // Hover-revealed copy button. `getText` is a thunk so JSON cells can copy
-  // their pretty-printed display text (which the renderer computes once
-  // and stores on the <pre>) without us having to capture it eagerly.
-  // Skipped for media cells — copying base64 image bytes isn't useful and
-  // would clobber the clipboard with megabytes of text.
-  const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6">'
-    + '<rect x="9" y="9" width="11" height="11" rx="1.5"></rect>'
-    + '<path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
-  const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">'
-    + '<polyline points="5 12 10 17 19 7"></polyline></svg>';
-
-  function addCopyButton(td, getText) {
-    const btn = document.createElement('button');
-    btn.className = 'cell-copy';
-    btn.type = 'button';
-    btn.title = 'Copy';
-    btn.setAttribute('aria-label', 'Copy cell value');
-    btn.innerHTML = COPY_ICON_SVG;
-    btn.addEventListener('click', async (e) => {
-      // Don't bubble into the cell — image cells handle clicks for the
-      // lightbox, and we don't want a stray copy click to also expand.
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(getText());
-        btn.classList.add('copied');
-        btn.innerHTML = CHECK_ICON_SVG;
-        setTimeout(() => {
-          btn.classList.remove('copied');
-          btn.innerHTML = COPY_ICON_SVG;
-        }, 900);
-      } catch (err) {
-        console.warn('[DatumIngest] clipboard.writeText failed:', err);
-      }
-    });
-    td.appendChild(btn);
-  }
-
-  // renderJsonNode/Object/Array — see ./json-render.ts
-
-  function renderCell(cell) {
-    const td = document.createElement('td');
-    if (cell.kind === 'null') {
-      td.classList.add('null');
-      td.textContent = 'NULL';
-      addCopyButton(td, () => 'NULL');
-      return td;
-    }
-    // Array<Image> cell: emit one <img> per element in a flex grid. Each
-    // thumbnail is independently clickable for the lightbox. Items are
-    // {mime, dataB64} pairs; we currently only construct image arrays
-    // server-side, but the loop tolerates other mimes by skipping them.
-    if (cell.kind === 'media_array' && Array.isArray(cell.items)) {
-      const grid = document.createElement('div');
-      grid.className = 'media-array';
-      for (const item of cell.items) {
-        if (!item || !item.mime || !item.mime.startsWith('image/')) continue;
-        const url = dataB64ToBlobUrl(item.dataB64, item.mime);
-        const img = document.createElement('img');
-        img.src = url; img.alt = '';
-        img.title = 'Click to expand';
-        img.addEventListener('click', () => openImageLightbox(url));
-        grid.appendChild(img);
-      }
-      td.appendChild(grid);
-      const note = document.createElement('div');
-      note.className = 'blob';
-      note.textContent = `${cell.items.length} ${cell.items.length === 1 ? 'image' : 'images'}`;
-      td.appendChild(note);
-      return td;
-    }
-    if (cell.kind === 'media' && cell.mime) {
-      // Prefer blob URLs over `data:` URLs: Chrome disables "Open image in
-      // new tab" for data URLs longer than ~2 MB (so a large image renders
-      // fine inline but loses the context-menu option), while blob URLs
-      // navigate cleanly at any size.
-      const url = dataB64ToBlobUrl(cell.dataB64, cell.mime);
-      let media;
-      if (cell.mime.startsWith('image/')) {
-        media = document.createElement('img');
-        media.src = url; media.alt = '';
-        media.title = 'Click to expand';
-        media.addEventListener('click', () => openImageLightbox(url));
-      } else if (cell.mime.startsWith('audio/')) {
-        media = document.createElement('audio'); media.controls = true; media.src = url;
-      } else if (cell.mime.startsWith('video/')) {
-        media = document.createElement('video'); media.controls = true; media.src = url;
-      } else {
-        media = document.createElement('span'); media.textContent = `<${cell.mime}>`;
-      }
-      td.appendChild(media);
-      const note = document.createElement('div');
-      note.className = 'blob';
-      const bytes = Math.floor((cell.dataB64.length * 3) / 4);
-      note.textContent = `${cell.mime} · ${bytes.toLocaleString()} bytes`;
-      td.appendChild(note);
-      return td;
-    }
-    if (cell.kind === 'json') {
-      // Server already decoded CBOR → JSON text. Render as a collapsible
-      // tree so deep structures stay inspectable without taking over the
-      // cell. If the text doesn't parse (shouldn't happen — the server
-      // only emits this kind on successful decode), fall back to a flat
-      // pretty-printed pre.
-      const text = cell.text ?? '';
-      let parsed;
-      try { parsed = JSON.parse(text); }
-      catch {
-        const pre = document.createElement('pre');
-        pre.className = 'json';
-        pre.textContent = text;
-        td.appendChild(pre);
-        addCopyButton(td, () => pre.textContent);
-        return td;
-      }
-      const wrap = document.createElement('div');
-      wrap.className = 'json-tree';
-      wrap.appendChild(renderJsonNode(parsed));
-      td.appendChild(wrap);
-      // Copy returns the canonical pretty-printed form so users get the
-      // same text whether the tree is expanded or collapsed.
-      addCopyButton(td, () => JSON.stringify(parsed, null, 2));
-      return td;
-    }
-    const pre = document.createElement('pre');
-    pre.textContent = cell.text ?? '';
-    td.appendChild(pre);
-    addCopyButton(td, () => pre.textContent);
-    return td;
-  }
-
   // ===== Run =====
   // Read the current editor selection. Monaco returns "" for an empty
   // selection (caret only). The textarea fallback uses selectionStart/End.
@@ -1451,296 +1062,6 @@ import {
       }
     }
     return '';
-  }
-
-  // run() launches a query for the currently-active tab. Each tab keeps
-  // its own running state on the tab object (tab.running, tab.runningRes,
-  // tab.abortController, tab.liveTickHandle) so multiple tabs can have
-  // queries in flight at once. The server queues them via its query lock
-  // today, but the UX correctly reflects "running per tab" regardless.
-  async function run() {
-    const tab = activeTab();
-    if (!tab) return;
-    if (tab.running) return;  // already running on THIS tab — Cancel button handles abort
-
-    // If text is highlighted, run just that fragment; otherwise run the
-    // whole tab. Trim AFTER picking so leading/trailing whitespace in a
-    // selection doesn't make us silently fall back to the full tab.
-    const selection = getEditorSelection();
-    const isPartial = selection.trim().length > 0;
-    const sql = (isPartial ? selection : tab.sql).trim();
-    if (!sql) return;
-
-    // Tab-scoped run state. The closure captures `tab` so handlers below
-    // operate on this specific tab even if the user switches away.
-    tab.running = true;
-    // ref() so valtio doesn't proxy the AbortController — fetch's signal
-    // getter would otherwise hand a proxied AbortSignal to the browser
-    // and trigger "Illegal invocation".
-    tab.abortController = ref(new AbortController());
-    tab.runStartedAt = performance.now();
-    tab.runIsPartial = isPartial;
-    tab.runningRes = {
-      // One entry per `schema` event = one per row-producing statement.
-      // Each entry owns its own schema, rows, and truncation state so
-      // multi-statement scripts render one table per statement instead
-      // of fighting over a single shared one.
-      resultSets: [],
-      // Aggregate row count across all sets — surfaced in the running
-      // toolbar status as "N rows so far".
-      rowCount: 0,
-      elapsedMs: 0,
-      trace: null,
-      error: null,
-      sessionId: null,
-      chunks: [],
-    };
-
-    // The DOM nodes for this tab's streaming output. Re-attached when the
-    // user switches back to this tab while it's still running (rebuild
-    // from tab.runningRes). Tracked here so subsequent chunk events can
-    // append directly without rebuilding from scratch.
-    let streamPane = null;
-    let streamHeaderModel = null;
-
-    // Helpers: where is the running tab being displayed right now? At most
-    // one group at a time has it as activeTabId. The DOM bindings below
-    // resolve fresh each call so a tab moved between groups (step 4+) or
-    // a tab toggled out and back in updates the right pane.
-    function displayingGroupForRunningTab() {
-      return getDisplayingGroups(tab.id)[0] || null;
-    }
-    function liveResultsPane() {
-      const g = displayingGroupForRunningTab();
-      return g ? resultsPaneEl(groupElementById(g.id)) : null;
-    }
-    function liveElapsedSlot() {
-      const g = displayingGroupForRunningTab();
-      return g ? elapsedEl(groupElementById(g.id)) : null;
-    }
-
-    // Reflect the new running state on whichever views are visible.
-    syncToolbarToActiveTab();
-    renderTabStrip();
-    {
-      const results = liveResultsPane();
-      if (results) results.innerHTML = '<div class="meta">Running… (Esc to cancel)</div>';
-    }
-
-    // Live tick on the toolbar's elapsed slot. Only paints while the tab
-    // is the active one in some group — switching tabs leaves the
-    // visible elapsed slot showing the new active tab's static stats,
-    // not a clobbered live value from a backgrounded run.
-    function paintLiveStats() {
-      const slot = liveElapsedSlot();
-      if (!slot) return;
-      const seconds = (performance.now() - tab.runStartedAt) / 1000;
-      const rows = tab.runningRes.rowCount;
-      const rowText = `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}`;
-      slot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
-    }
-    paintLiveStats();
-    tab.liveTickHandle = setInterval(paintLiveStats, 250);
-
-    try {
-      const response = await fetch('/api/query/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sql,
-          // Per-tab settings — each tab remembers its own row cap and
-          // trace toggle so switching tabs doesn't change the next run's
-          // shape.
-          maxRows: tab.maxRows || 200,
-          trace: tab.trace === true,
-        }),
-        signal: tab.abortController.signal,
-      });
-
-      if (!response.ok) {
-        try {
-          const errBody = await response.json();
-          tab.runningRes.error = errBody.error || `HTTP ${response.status}`;
-        } catch {
-          tab.runningRes.error = `HTTP ${response.status}`;
-        }
-      } else {
-        // Clear the placeholder if the tab is being displayed somewhere
-        // — events render in place from here.
-        {
-          const results = liveResultsPane();
-          if (results) results.innerHTML = '';
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop();
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            let event;
-            try { event = JSON.parse(line); } catch { continue; }
-            handleStreamEvent(event);
-          }
-        }
-        if (buf.trim()) {
-          try { handleStreamEvent(JSON.parse(buf)); } catch { /* ignore */ }
-        }
-      }
-    } catch (err) {
-      if (err && err.name === 'AbortError') {
-        if (!tab.runningRes.error) tab.runningRes.error = 'cancelled';
-      } else {
-        tab.runningRes.error = `Network error: ${err.message}`;
-      }
-    } finally {
-      clearInterval(tab.liveTickHandle);
-      tab.liveTickHandle = null;
-      tab.running = false;
-      tab.abortController = null;
-    }
-
-    function handleStreamEvent(event) {
-      const res = tab.runningRes;
-      // Whether the user is currently looking at this tab in some group;
-      // gates direct DOM appends. Tabs that aren't displayed anywhere
-      // accumulate into res only.
-      const results = liveResultsPane();
-      const isActive = !!results;
-
-      switch (event.type) {
-        case 'session':
-          res.sessionId = event.id;
-          break;
-        case 'cell_started':
-          break;
-        case 'schema':
-          // Each schema event opens a new result set. Rows that follow
-          // attach to the most-recent set.
-          res.resultSets.push({
-            schema: event.columns,
-            rows: [],
-            rowCount: 0,
-            truncated: false,
-          });
-          break;
-        case 'chunk':
-          res.chunks.push({ model: event.model, text: event.text });
-          if (isActive) {
-            // After a tab switch-back, our closure's streamPane may be
-            // stale (the DOM was wiped) — but renderRunningTab already
-            // rebuilt the pane from res.chunks. Re-grab it from the DOM
-            // before appending so we don't end up with two duplicate
-            // streaming panes one above the other.
-            if (!streamPane || !streamPane.isConnected) {
-              streamPane = results.querySelector('pre.streaming-output');
-            }
-            if (!streamPane) {
-              streamHeaderModel = event.model;
-              const header = document.createElement('div');
-              header.className = 'meta stream-header';
-              header.textContent = `streaming from models.${event.model}`;
-              results.appendChild(header);
-              streamPane = document.createElement('pre');
-              streamPane.className = 'streaming-output';
-              results.appendChild(streamPane);
-            }
-            streamPane.appendChild(document.createTextNode(event.text));
-            streamPane.scrollTop = streamPane.scrollHeight;
-          } else {
-            // Will get rebuilt from res.chunks if/when user switches back.
-            streamPane = null;
-            streamHeaderModel = null;
-          }
-          break;
-        case 'row':
-          // Attach to the current result set (the most-recent schema's).
-          // If a row arrives before any schema (defensive — shouldn't
-          // happen on the wire), open a placeholder set to anchor it.
-          {
-            let cur = res.resultSets[res.resultSets.length - 1];
-            if (!cur) {
-              cur = { schema: null, rows: [], rowCount: 0, truncated: false };
-              res.resultSets.push(cur);
-            }
-            cur.rows.push(event.cells);
-            cur.rowCount = cur.rows.length;
-            res.rowCount += 1;
-          }
-          break;
-        case 'truncated':
-          {
-            const cur = res.resultSets[res.resultSets.length - 1];
-            if (cur) {
-              cur.truncated = true;
-              cur.rowCount = event.rowCount;
-            }
-          }
-          break;
-        case 'trace':
-          res.trace = event.text;
-          break;
-        case 'cell_completed':
-          break;
-        case 'complete':
-          res.elapsedMs = event.elapsedMs;
-          break;
-        case 'error':
-          res.error = event.message;
-          if (event.detail) res.detail = event.detail;
-          break;
-        default:
-          break;
-      }
-    }
-
-    const finalRes = tab.runningRes;
-    const wallMs = performance.now() - tab.runStartedAt;
-    if (typeof finalRes.elapsedMs !== 'number' || !finalRes.elapsedMs) {
-      finalRes.elapsedMs = wallMs;
-    }
-    tab.runningRes = null;
-    tab.lastResult = finalRes;
-    tab.lastRunAt = Date.now();
-    if (!isPartial) tab.sqlOfLastRun = tab.sql;
-
-    renderTabStrip();
-    persistState();
-
-    // If the user is still looking at this tab in any group, paint the
-    // final result. If they switched away, the renderer will pick it up
-    // next time they come back; meanwhile leave the toolbar / elapsed
-    // slots showing whatever's now active per pane.
-    if (getDisplayingGroups(tab.id).length > 0) {
-      renderResultsForActiveTab();
-    }
-    // Run-button state changes regardless (e.g. another tab might still
-    // be running and need to keep its Cancel state).
-    syncToolbarToActiveTab();
-
-    // snapshot() unwraps the valtio proxy into a plain object so
-    // IndexedDB's structuredClone-based put() doesn't choke on Proxy.
-    IDB.saveResult(tab.id, snapshot(finalRes)).catch(err =>
-      console.warn(`Couldn't save result for tab ${tab.id}:`, err));
-
-    if (!finalRes.error) refreshSidebarForSql(sql);
-  }
-
-  // Cancels the in-flight query for the active tab, if any. Pulled out so
-  // the Esc key handler and the Run button's Cancel mode share one entry
-  // point.
-  function cancelActiveTabRun() {
-    const tab = activeTab();
-    if (!tab || !tab.running || !tab.abortController) return;
-    tab.abortController.abort();
-    const status = document.getElementById('status');
-    if (status) status.textContent = 'cancelling…';
   }
 
   // ===== Cross-window sync =====
@@ -1833,7 +1154,7 @@ import {
       }
       if (g) g.activeTabId = g.tabIds[0];
       swapEditorToActiveTab();
-      renderResultsForActiveTab();
+      // results pane re-renders via valtio subscription
       syncToolbarToActiveTab();
     }
 
@@ -2400,7 +1721,7 @@ import {
     state.activeTabId = t.id;
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     persistState();
   }
@@ -2798,7 +2119,7 @@ import {
       state.focusedGroupId = g.id;
       const tab = liveTab();
       if (tab && tab.running) cancelActiveTabRun();
-      else run();
+      else runQuery(getEditorSelection());
     });
     maxRowsInputEl(groupEl).addEventListener('input', (e) => {
       const g = liveGroup();
@@ -2855,11 +2176,15 @@ import {
     if (!container) return;
     const validIds = new Set(state.groups.map(g => g.id));
     for (const el of Array.from(container.querySelectorAll(':scope > .editor-group'))) {
-      if (!validIds.has(el.dataset.groupId)) el.remove();
+      if (!validIds.has(el.dataset.groupId)) {
+        unmountResultsPane(el.dataset.groupId);
+        el.remove();
+      }
     }
     let prevEl = null;
     for (const g of state.groups) {
       let el = groupElementById(g.id);
+      const isNew = !el;
       if (!el) {
         el = createEditorGroupElement(g.id);
         if (prevEl) prevEl.after(el);
@@ -2877,6 +2202,14 @@ import {
         if (window.monaco) bootMonacoForGroup(g.id);
         else bootFallbackForGroup(g.id);
       }
+      // React results pane: idempotent — mountResultsPane no-ops if a
+      // root is already attached for this group. Called for every group
+      // every reconcile so the seed group baked into the HTML (which
+      // hits this branch with isNew=false) still gets mounted on first
+      // boot.
+      void isNew;
+      const paneEl = el.querySelector('.results-pane');
+      if (paneEl) mountResultsPane(paneEl, g.id);
       prevEl = el;
     }
 
@@ -2945,7 +2278,7 @@ import {
 
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     updateSplitButtonIcon();
     persistState();
@@ -2969,7 +2302,7 @@ import {
     }
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
     updateSplitButtonIcon();
     persistState();
@@ -3007,6 +2340,14 @@ import {
     applyTheme(loadTheme());
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
+    // run.ts mutates state and IDB but doesn't own toolbar / tab-strip
+    // / sidebar renderers — wire those callbacks here.
+    setRunHooks({
+      renderTabStrip,
+      syncToolbar: syncToolbarToActiveTab,
+      refreshSidebarForSql,
+    });
+
     loadInitialState();
     setupCrossWindowSync();
 
@@ -3025,7 +2366,7 @@ import {
 
     renderTabStrip();
     swapEditorToActiveTab();
-    renderResultsForActiveTab();
+    // results pane re-renders via valtio subscription
     syncToolbarToActiveTab();
 
     initCatalogSidebar();
@@ -3065,7 +2406,7 @@ import {
       }
       e.preventDefault();
       e.stopPropagation();
-      run();
+      runQuery(getEditorSelection());
     }, /*capture=*/true);
 
     // Three save triggers ensure pending edits reach localStorage even

@@ -11,6 +11,7 @@
 
 import { proxy } from 'valtio';
 import { alertModal } from './modal.js';
+import type { QueryResult } from './result-types.js';
 
 // ===== Storage keys =====
 
@@ -27,7 +28,7 @@ export interface Tab {
   // undefined → not yet hydrated from IDB; fetch on activation
   // null      → no saved result (never run, or freshly created)
   // object    → the result payload, cached in memory
-  lastResult: unknown;
+  lastResult: QueryResult | null | undefined;
   lastRunAt: number;
   sqlOfLastRun: string;
   pinned: boolean;
@@ -37,7 +38,11 @@ export interface Tab {
   running: boolean;
   abortController: AbortController | null;
   runStartedAt: number;
-  runningRes: unknown;
+  runningRes: QueryResult | null;
+  // Whether the run was launched from a partial editor selection rather
+  // than the whole tab. Affects whether sqlOfLastRun gets overwritten on
+  // completion.
+  runIsPartial?: boolean;
   liveTickHandle: number | null;
 }
 
