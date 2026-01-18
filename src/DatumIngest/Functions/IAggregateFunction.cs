@@ -3,6 +3,44 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions;
 
 /// <summary>
+/// How a SQL aggregate uses the <c>WITHIN GROUP (ORDER BY …)</c> clause.
+/// Two SQL-standard semantics are encoded; aggregates that don't model
+/// either declare <see cref="NotSupported"/> and the planner rejects
+/// the syntax.
+/// </summary>
+public enum WithinGroupSemantics
+{
+    /// <summary>
+    /// The clause specifies sort order only. The aggregate's data
+    /// arguments come from inside the parens. Examples:
+    /// <c>STRING_AGG(expr, sep) WITHIN GROUP (ORDER BY x)</c>,
+    /// <c>ARRAY_AGG(expr) WITHIN GROUP (ORDER BY x)</c>. The planner
+    /// uses the ORDER BY to sort rows before accumulation; arguments
+    /// are not modified.
+    /// </summary>
+    SortModifier,
+
+    /// <summary>
+    /// The clause supplies the <em>data</em> being aggregated.
+    /// Arguments inside the parens are configuration (or empty).
+    /// Examples: <c>MODE() WITHIN GROUP (ORDER BY col)</c>,
+    /// <c>PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary)</c>.
+    /// The planner prepends the ORDER BY expressions to the
+    /// argument list before validation, so the aggregate sees its
+    /// data column at <c>arguments[0]</c>.
+    /// </summary>
+    OrderedSet,
+
+    /// <summary>
+    /// The aggregate doesn't accept <c>WITHIN GROUP</c>. Using the
+    /// clause raises a plan-time error. Default for regular
+    /// aggregates like <c>SUM</c> / <c>AVG</c> / <c>COUNT</c> if they
+    /// opt in (or stick with the interface default).
+    /// </summary>
+    NotSupported,
+}
+
+/// <summary>
 /// Interface for aggregate SQL functions that accumulate values across
 /// multiple rows and produce a single result per group.
 /// </summary>
@@ -49,6 +87,20 @@ public interface IAggregateFunction
     /// The cost weight of a single invocation of this function, measured in Query Units (QU).
     /// </summary>
     int QueryUnitCost => 1;
+
+    /// <summary>
+    /// How this aggregate consumes <c>WITHIN GROUP (ORDER BY …)</c>.
+    /// Default <see cref="WithinGroupSemantics.NotSupported"/> matches
+    /// PostgreSQL strictness — most aggregates (<c>SUM</c> / <c>AVG</c> /
+    /// <c>COUNT</c> / <c>MIN</c> / <c>MAX</c> / etc.) reject the clause,
+    /// and surfacing a clear error is more LLM-friendly than silently
+    /// accepting the syntax. Aggregates that take an ordered set as
+    /// data (<c>MODE</c>, <c>PERCENTILE_CONT</c>, <c>PERCENTILE_DISC</c>)
+    /// declare <see cref="WithinGroupSemantics.OrderedSet"/>; aggregates
+    /// that support sort-only modification (<c>STRING_AGG</c>,
+    /// <c>ARRAY_AGG</c>) declare <see cref="WithinGroupSemantics.SortModifier"/>.
+    /// </summary>
+    WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.NotSupported;
 }
 
 /// <summary>

@@ -424,6 +424,9 @@ public enum SqlToken
     /// <summary>The | (pipe) symbol used in certain expressions.</summary>
     Pipe,
 
+    /// <summary>The || (double-pipe) string-concatenation operator. Sugar for <c>concat(...)</c>.</summary>
+    DoublePipe,
+
     /// <summary>The + (plus) arithmetic operator.</summary>
     Plus,
 

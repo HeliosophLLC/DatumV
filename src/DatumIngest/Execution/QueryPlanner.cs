@@ -3617,8 +3617,41 @@ public sealed class QueryPlanner
                         ? Array.Empty<Expression>()
                         : func.Arguments;
 
+                    // Apply WITHIN GROUP semantics declared by the
+                    // aggregate. Ordered-set aggregates take the
+                    // WITHIN GROUP expressions as their data — prepend
+                    // them to args so the accumulator sees the data
+                    // column at arguments[0]. Sort-modifier aggregates
+                    // leave args alone; the row sort is applied by
+                    // the GroupByOperator using the OrderBy field.
+                    // NotSupported aggregates with WITHIN GROUP raise
+                    // a clear plan-time error.
+                    IReadOnlyList<OrderByItem>? orderBy = func.OrderBy;
+                    if (func.WithinGroupOrderBy is not null)
+                    {
+                        switch (aggregateFunction.WithinGroupSemantics)
+                        {
+                            case WithinGroupSemantics.OrderedSet:
+                                arguments = [
+                                    .. func.WithinGroupOrderBy.Select(o => o.Expression),
+                                    .. arguments,
+                                ];
+                                orderBy = func.WithinGroupOrderBy;
+                                break;
+                            case WithinGroupSemantics.SortModifier:
+                                orderBy = func.WithinGroupOrderBy;
+                                break;
+                            case WithinGroupSemantics.NotSupported:
+                            default:
+                                throw new InvalidOperationException(
+                                    $"Aggregate '{aggregateFunction.Name}' does not accept " +
+                                    "WITHIN GROUP (ORDER BY …). Use the inline ORDER BY form " +
+                                    "inside the parens, or remove the clause.");
+                        }
+                    }
+
                     aggregateColumns.Add(new AggregateColumn(
-                        aggregateFunction, arguments, outputName, isCountStar, func.Distinct, func.OrderBy));
+                        aggregateFunction, arguments, outputName, isCountStar, func.Distinct, orderBy));
                 }
 
                 return new ColumnReference(null, outputName);
@@ -3668,7 +3701,7 @@ public sealed class QueryPlanner
         }
 
         return changed
-            ? new FunctionCallExpression(func.FunctionName, rewrittenArgs, func.OrderBy, func.Distinct)
+            ? new FunctionCallExpression(func.FunctionName, rewrittenArgs, func.OrderBy, func.Distinct, func.Span, func.WithinGroupOrderBy)
             : func;
     }
 
@@ -4461,7 +4494,8 @@ public sealed class QueryPlanner
                 funcExpr.Arguments.Select(a => RewritePrevCalls(a, prevColumnNames)).ToList(),
                 funcExpr.OrderBy,
                 funcExpr.Distinct,
-                funcExpr.Span),
+                funcExpr.Span,
+                funcExpr.WithinGroupOrderBy),
             IsNullExpression isNull => new IsNullExpression(
                 RewritePrevCalls(isNull.Expression, prevColumnNames),
                 isNull.Negated),

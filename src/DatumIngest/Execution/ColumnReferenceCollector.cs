@@ -91,6 +91,25 @@ public static class ColumnReferenceCollector
                 {
                     Walk(argument, references);
                 }
+                // Aggregates with `ORDER BY x` (inline) or
+                // `WITHIN GROUP (ORDER BY x)` reference columns that
+                // aren't in the projection but are still needed at
+                // accumulation time. Walk both order-by lists so
+                // projection pushdown keeps the referenced columns.
+                if (function.OrderBy is not null)
+                {
+                    foreach (OrderByItem item in function.OrderBy)
+                    {
+                        Walk(item.Expression, references);
+                    }
+                }
+                if (function.WithinGroupOrderBy is not null)
+                {
+                    foreach (OrderByItem item in function.WithinGroupOrderBy)
+                    {
+                        Walk(item.Expression, references);
+                    }
+                }
                 break;
 
             case WindowFunctionCallExpression window:

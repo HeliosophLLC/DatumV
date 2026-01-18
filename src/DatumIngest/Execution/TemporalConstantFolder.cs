@@ -342,7 +342,7 @@ public static class TemporalConstantFolder
             arguments[i] = FoldExpression(function.Arguments[i], batchClock, stmtClock);
         }
 
-        return new FunctionCallExpression(function.FunctionName, arguments, function.OrderBy, function.Distinct, function.Span);
+        return new FunctionCallExpression(function.FunctionName, arguments, function.OrderBy, function.Distinct, function.Span, function.WithinGroupOrderBy);
     }
 
     private static InExpression FoldInExpression(InExpression inExpr, DateTimeOffset batchClock, DateTimeOffset stmtClock)

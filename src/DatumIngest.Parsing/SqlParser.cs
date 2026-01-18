@@ -603,10 +603,11 @@ public static class SqlParser
         select withinGroup is not null
             ? (Expression)new FunctionCallExpression(
                 qualifiedName,
-                [.. withinGroup.Select(item => item.Expression), .. args],
-                OrderBy: withinGroup,
+                args,
+                OrderBy: null,
                 Distinct: distinct.HasValue,
-                Span: ToSpan(name))
+                Span: ToSpan(name),
+                WithinGroupOrderBy: withinGroup)
             : windowSpec is not null
                 ? (Expression)new WindowFunctionCallExpression(qualifiedName, args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
                 : (Expression)new FunctionCallExpression(qualifiedName, args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
@@ -868,13 +869,36 @@ public static class SqlParser
             Power,
             (op, left, right) => new BinaryExpression(left, op, right));
 
-    /// <summary>Addition and subtraction.</summary>
+    /// <summary>
+    /// Builder delegate for the additive level — accepts left and right operand
+    /// expressions and returns the combined node. Used to mix <c>+</c>/<c>-</c>
+    /// (which produce <see cref="BinaryExpression"/>) with <c>||</c> (which
+    /// desugars to a <c>concat(...)</c> function call) at the same precedence.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression, Expression>> AdditiveOp =
+        Token.EqualTo(SqlToken.Plus).Select(_ =>
+            (Func<Expression, Expression, Expression>)((l, r) =>
+                new BinaryExpression(l, BinaryOperator.Add, r)))
+        .Or(Token.EqualTo(SqlToken.Minus).Select(_ =>
+            (Func<Expression, Expression, Expression>)((l, r) =>
+                new BinaryExpression(l, BinaryOperator.Subtract, r))))
+        // `a || b` is sugar for `concat_strict(a, b)` — the SQL-92 string-
+        // concatenation operator with strict null propagation. Same precedence
+        // as +/- and left-associative, so `a || b || c` chains as
+        // `concat_strict(concat_strict(a,b), c)`. concat_strict (not concat)
+        // is the desugar target because the standard `||` returns NULL when
+        // any operand is NULL; `concat()` itself is the PostgreSQL-style
+        // null-skipping variant and is invoked explicitly by name.
+        .Or(Token.EqualTo(SqlToken.DoublePipe).Select(_ =>
+            (Func<Expression, Expression, Expression>)((l, r) =>
+                new FunctionCallExpression("concat_strict", [l, r]))));
+
+    /// <summary>Addition, subtraction, and string concatenation (||).</summary>
     private static readonly TokenListParser<SqlToken, Expression> Additive =
         SP.Chain(
-            Token.EqualTo(SqlToken.Plus).Select(_ => BinaryOperator.Add)
-                .Or(Token.EqualTo(SqlToken.Minus).Select(_ => BinaryOperator.Subtract)),
+            AdditiveOp,
             Multiplicative,
-            (op, left, right) => new BinaryExpression(left, op, right));
+            (build, left, right) => build(left, right));
 
     /// <summary>
     /// AT TIME ZONE level — sits between Additive and the comparison predicates so that
@@ -1113,7 +1137,8 @@ public static class SqlParser
                 func.Arguments.Select(a => SubstituteBinding(a, bindingName, replacement)).ToList(),
                 func.OrderBy,
                 func.Distinct,
-                func.Span),
+                func.Span,
+                func.WithinGroupOrderBy),
 
             CastExpression cast => new CastExpression(
                 SubstituteBinding(cast.Expression, bindingName, replacement),

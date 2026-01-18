@@ -28,6 +28,9 @@ public sealed class StringAggregateFunction : IAggregateFunction
     public int QueryUnitCost => 2;
 
     /// <inheritdoc/>
+    public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.SortModifier;
+
+    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

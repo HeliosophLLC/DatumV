@@ -27,6 +27,9 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
     public int QueryUnitCost => 2;
 
     /// <inheritdoc/>
+    public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.OrderedSet;
+
+    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

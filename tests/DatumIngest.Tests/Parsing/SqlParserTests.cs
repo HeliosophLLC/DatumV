@@ -1946,10 +1946,14 @@ public class SqlParserTests : ServiceTestBase
 
     /// <summary>
     /// <c>MODE() WITHIN GROUP (ORDER BY col)</c> parses as a FunctionCallExpression
-    /// with the ORDER BY column promoted into the argument list and OrderBy set.
+    /// with the WITHIN GROUP order-by items kept on
+    /// <see cref="FunctionCallExpression.WithinGroupOrderBy"/>; the argument
+    /// list stays empty (the planner reads
+    /// <see cref="DatumIngest.Functions.WithinGroupSemantics"/> on
+    /// <c>MODE</c> and prepends the data column at planning time).
     /// </summary>
     [Fact]
-    public void ModeWithinGroup_AscendingOrder_ParsesArgumentAndOrderBy()
+    public void ModeWithinGroup_AscendingOrder_PopulatesWithinGroupOrderBy()
     {
         SelectStatement result = Parse(
             "SELECT MODE() WITHIN GROUP (ORDER BY order_hour) FROM orders");
@@ -1958,15 +1962,14 @@ public class SqlParserTests : ServiceTestBase
             Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
 
         Assert.Equal("MODE", func.FunctionName);
-        Assert.Single(func.Arguments);
-        ColumnReference arg = Assert.IsType<ColumnReference>(func.Arguments[0]);
-        Assert.Equal("order_hour", arg.ColumnName);
+        Assert.Empty(func.Arguments);
+        Assert.Null(func.OrderBy);
 
-        Assert.NotNull(func.OrderBy);
-        Assert.Single(func.OrderBy);
-        ColumnReference orderCol = Assert.IsType<ColumnReference>(func.OrderBy[0].Expression);
+        Assert.NotNull(func.WithinGroupOrderBy);
+        Assert.Single(func.WithinGroupOrderBy);
+        ColumnReference orderCol = Assert.IsType<ColumnReference>(func.WithinGroupOrderBy[0].Expression);
         Assert.Equal("order_hour", orderCol.ColumnName);
-        Assert.Equal(SortDirection.Ascending, func.OrderBy[0].Direction);
+        Assert.Equal(SortDirection.Ascending, func.WithinGroupOrderBy[0].Direction);
     }
 
     /// <summary>
@@ -1981,8 +1984,8 @@ public class SqlParserTests : ServiceTestBase
         FunctionCallExpression func =
             Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
 
-        Assert.NotNull(func.OrderBy);
-        Assert.Equal(SortDirection.Descending, func.OrderBy[0].Direction);
+        Assert.NotNull(func.WithinGroupOrderBy);
+        Assert.Equal(SortDirection.Descending, func.WithinGroupOrderBy[0].Direction);
     }
 
     /// <summary>
@@ -2004,11 +2007,16 @@ public class SqlParserTests : ServiceTestBase
     }
 
     /// <summary>
-    /// PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY col) places the ORDER BY expression
-    /// first and the fraction second in the argument list, matching the two-arg API contract.
+    /// <c>PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY col)</c> keeps the
+    /// fraction in the argument list and the ORDER BY column on
+    /// <see cref="FunctionCallExpression.WithinGroupOrderBy"/>. The planner
+    /// inspects <see cref="DatumIngest.Functions.WithinGroupSemantics.OrderedSet"/>
+    /// on PERCENTILE_DISC and prepends the data column to args before
+    /// dispatch, producing the two-arg contract <c>(expression, fraction)</c>
+    /// the accumulator expects.
     /// </summary>
     [Fact]
-    public void PercentileDiscWithinGroup_ArgumentOrderIsExpressionThenFraction()
+    public void PercentileDiscWithinGroup_ParsesArgsAndWithinGroupSeparately()
     {
         SelectStatement result = Parse(
             "SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary) FROM employees");
@@ -2017,13 +2025,17 @@ public class SqlParserTests : ServiceTestBase
             Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
         Assert.Equal("PERCENTILE_DISC", func.FunctionName);
 
-        // arg[0] must be the ORDER BY expression (salary), arg[1] the fraction (0.5).
-        Assert.Equal(2, func.Arguments.Count);
-        ColumnReference expr = Assert.IsType<ColumnReference>(func.Arguments[0]);
-        Assert.Equal("salary", expr.ColumnName);
-        LiteralExpression fraction = Assert.IsType<LiteralExpression>(func.Arguments[1]);
-        // 0.5 is exactly representable as float, so the parser narrows it.
+        // Inner args = the fraction only.
+        Assert.Single(func.Arguments);
+        LiteralExpression fraction = Assert.IsType<LiteralExpression>(func.Arguments[0]);
         Assert.Equal(0.5f, fraction.Value);
+
+        // WITHIN GROUP carries the data column.
+        Assert.Null(func.OrderBy);
+        Assert.NotNull(func.WithinGroupOrderBy);
+        Assert.Single(func.WithinGroupOrderBy);
+        ColumnReference expr = Assert.IsType<ColumnReference>(func.WithinGroupOrderBy[0].Expression);
+        Assert.Equal("salary", expr.ColumnName);
     }
 
     // ───────────────────── Struct literal ─────────────────────
@@ -2508,5 +2520,65 @@ public class SqlParserTests : ServiceTestBase
             "CREATE PROCEDURE Test() AS BEGIN DECLARE @x String = 'hi' END");
 
         Assert.IsType<CreateProcedureStatement>(stmt);
+    }
+
+    // ───────────────────── Concat operator (||) ─────────────────────
+
+    [Fact]
+    public void ConcatOperator_DesugarsToConcatFunctionCall()
+    {
+        SelectStatement result = Parse("SELECT 'a' || 'b' FROM t");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(
+            result.Columns[0].Expression);
+        Assert.Equal("concat_strict", call.FunctionName);
+        Assert.Equal(2, call.Arguments.Count);
+        Assert.Equal("a", Assert.IsType<LiteralExpression>(call.Arguments[0]).Value);
+        Assert.Equal("b", Assert.IsType<LiteralExpression>(call.Arguments[1]).Value);
+    }
+
+    [Fact]
+    public void ConcatOperator_LeftAssociative_ChainsAsNestedConcat()
+    {
+        SelectStatement result = Parse("SELECT 'a' || 'b' || 'c' FROM t");
+
+        // Left-associative: ((a || b) || c) → concat(concat('a','b'), 'c').
+        // The variadic concat() flattens at evaluation time.
+        FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(
+            result.Columns[0].Expression);
+        Assert.Equal("concat_strict", outer.FunctionName);
+        FunctionCallExpression inner = Assert.IsType<FunctionCallExpression>(outer.Arguments[0]);
+        Assert.Equal("concat_strict", inner.FunctionName);
+        Assert.Equal("a", Assert.IsType<LiteralExpression>(inner.Arguments[0]).Value);
+        Assert.Equal("b", Assert.IsType<LiteralExpression>(inner.Arguments[1]).Value);
+        Assert.Equal("c", Assert.IsType<LiteralExpression>(outer.Arguments[1]).Value);
+    }
+
+    [Fact]
+    public void ConcatOperator_AcceptsColumnReferences()
+    {
+        SelectStatement result = Parse("SELECT first_name || ' ' || last_name FROM users");
+
+        FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(
+            result.Columns[0].Expression);
+        Assert.Equal("concat_strict", outer.FunctionName);
+        FunctionCallExpression inner = Assert.IsType<FunctionCallExpression>(outer.Arguments[0]);
+        Assert.Equal("first_name",
+            Assert.IsType<ColumnReference>(inner.Arguments[0]).ColumnName);
+        Assert.Equal("last_name",
+            Assert.IsType<ColumnReference>(outer.Arguments[1]).ColumnName);
+    }
+
+    [Fact]
+    public void ConcatOperator_BindsAtAdditiveLevel_LowerThanComparison()
+    {
+        // 'a' || 'b' = 'ab' parses as ('a' || 'b') = 'ab' — same as +/-,
+        // higher precedence than comparison.
+        SelectStatement result = Parse("SELECT 1 FROM t WHERE 'a' || 'b' = 'ab'");
+
+        BinaryExpression eq = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Equal, eq.Operator);
+        FunctionCallExpression concat = Assert.IsType<FunctionCallExpression>(eq.Left);
+        Assert.Equal("concat_strict", concat.FunctionName);
     }
 }

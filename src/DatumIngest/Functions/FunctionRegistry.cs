@@ -356,6 +356,7 @@ public sealed class FunctionRegistry
         // Stage 4: concat. Stage 5: upper / lower. Stage 6: cast / try_cast /
         // typeof. Anything beyond is added back when a demo demands it.
         registry.RegisterScalar<Scalar.ConcatFunction>();
+        registry.RegisterScalar<Scalar.ConcatStrictFunction>();
         registry.RegisterScalar<Scalar.ConcatWsFunction>();
         registry.RegisterScalar<Scalar.UpperFunction>();
         registry.RegisterScalar<Scalar.LowerFunction>();
@@ -365,6 +366,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.CanCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
         registry.RegisterScalar<Scalar.AssertNotNullFunction>();
+        registry.RegisterScalar<Scalar.CoalesceFunction>();
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
         registry.RegisterScalar<Scalar.Math.RoundFunction>();
         registry.RegisterScalar<Scalar.Math.FloorFunction>();

@@ -832,7 +832,7 @@ public static class QueryExplainer
             BinaryExpression bin => $"{FormatExpression(bin.Left)} {FormatBinaryOp(bin.Operator)} {FormatExpression(bin.Right)}",
             LikeExpression like => $"{FormatExpression(like.Expression)} {(like.CaseInsensitive ? "ILIKE" : "LIKE")} {FormatExpression(like.Pattern)} ESCAPE {FormatExpression(like.EscapeCharacter)}",
             UnaryExpression unary => FormatUnary(unary),
-            FunctionCallExpression func => $"{func.FunctionName}({(func.Distinct ? "DISTINCT " : "")}{string.Join(", ", func.Arguments.Select(FormatExpression))})",
+            FunctionCallExpression func => FormatFunctionCall(func),
             InExpression inExpr => $"{FormatExpression(inExpr.Expression)} {(inExpr.Negated ? "NOT IN" : "IN")} ({string.Join(", ", inExpr.Values.Select(FormatExpression))})",
             BetweenExpression between => $"{FormatExpression(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {FormatExpression(between.Low)} AND {FormatExpression(between.High)}",
             IsNullExpression isNull => $"{FormatExpression(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
@@ -841,6 +841,22 @@ public static class QueryExplainer
             WindowFunctionCallExpression window => FormatWindowFunctionCall(window),
             _ => expression.ToString() ?? "?",
         };
+    }
+
+    private static string FormatFunctionCall(FunctionCallExpression func)
+    {
+        string distinct = func.Distinct ? "DISTINCT " : string.Empty;
+        string args = string.Join(", ", func.Arguments.Select(FormatExpression));
+        string inlineOrderBy = func.OrderBy is { Count: > 0 }
+            ? " ORDER BY " + string.Join(", ", func.OrderBy.Select(o => $"{FormatExpression(o.Expression)} {(o.Direction == SortDirection.Descending ? "DESC" : "ASC")}"))
+            : string.Empty;
+        string call = $"{func.FunctionName}({distinct}{args}{inlineOrderBy})";
+        if (func.WithinGroupOrderBy is { Count: > 0 })
+        {
+            string wgItems = string.Join(", ", func.WithinGroupOrderBy.Select(o => $"{FormatExpression(o.Expression)} {(o.Direction == SortDirection.Descending ? "DESC" : "ASC")}"));
+            call += $" WITHIN GROUP (ORDER BY {wgItems})";
+        }
+        return call;
     }
 
     private static string FormatLiteral(object? value)

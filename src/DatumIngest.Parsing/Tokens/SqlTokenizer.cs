@@ -226,6 +226,7 @@ public static class SqlTokenizer
             .Match(Span.EqualTo(">="), SqlToken.GreaterOrEqual)
             .Match(Span.EqualTo("!="), SqlToken.NotEquals)
             .Match(Span.EqualTo("<>"), SqlToken.NotEquals)
+            .Match(Span.EqualTo("||"), SqlToken.DoublePipe)
 
             // Single-character symbols
             .Match(Character.EqualTo('*'), SqlToken.Star)

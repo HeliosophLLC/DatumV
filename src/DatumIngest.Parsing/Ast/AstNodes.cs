@@ -613,7 +613,17 @@ public enum UnaryOperator
 /// <param name="Arguments">The ordered argument expressions.</param>
 /// <param name="OrderBy">
 /// Optional intra-aggregate ORDER BY items, used by functions like
-/// <c>STRING_AGG(expr, separator ORDER BY expr ASC)</c>.
+/// <c>STRING_AGG(expr, separator ORDER BY expr ASC)</c> (the inline form
+/// before the closing paren).
+/// </param>
+/// <param name="WithinGroupOrderBy">
+/// Optional <c>WITHIN GROUP (ORDER BY …)</c> ORDER BY items. Mutually
+/// exclusive with <see cref="OrderBy"/> — the parser populates one or
+/// the other depending on which syntactic form was used. The planner
+/// consults the aggregate's
+/// <c>IAggregateFunction.WithinGroupSemantics</c> to decide whether
+/// these expressions become aggregate <em>data</em> (ordered-set
+/// aggregates) or just a row sort modifier (e.g. <c>STRING_AGG</c>).
 /// </param>
 /// <param name="Distinct">Whether the DISTINCT modifier is present.</param>
 /// <param name="Span">The source location span of the function call.</param>
@@ -622,7 +632,8 @@ public sealed record FunctionCallExpression(
     IReadOnlyList<Expression> Arguments,
     IReadOnlyList<OrderByItem>? OrderBy = null,
     bool Distinct = false,
-    SourceSpan? Span = null) : Expression;
+    SourceSpan? Span = null,
+    IReadOnlyList<OrderByItem>? WithinGroupOrderBy = null) : Expression;
 
 /// <summary>
 /// The IN predicate: <c>expression IN (value1, value2, ...)</c>.

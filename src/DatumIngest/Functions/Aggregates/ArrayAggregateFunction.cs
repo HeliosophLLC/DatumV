@@ -25,6 +25,9 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     public string Name => "ARRAY_AGG";
 
     /// <inheritdoc/>
+    public WithinGroupSemantics WithinGroupSemantics => WithinGroupSemantics.SortModifier;
+
+    /// <inheritdoc/>
     /// <remarks>
     /// ARRAY_AGG produces <c>Array&lt;Scalar&gt;</c>, so the per-element kind
     /// equals the argument kind. Array-ness is signalled via

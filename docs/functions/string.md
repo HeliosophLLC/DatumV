@@ -330,6 +330,36 @@ Concatenate two or more strings. Null args treated as empty.
 SELECT concat('hello', ' ', 'world') -- 'hello world'
 ```
 
+The `||` operator is the SQL-standard string-concatenation operator (SQL-92 §6.27). It binds at the same precedence as `+` and `-`, is left-associative, and propagates nulls strictly: `'a' || NULL` returns `NULL`. Internally it parses to `concat_strict` (see below); the difference between `concat` and `concat_strict` is purely how each treats null operands.
+
+```sql
+SELECT 'hello' || ' ' || 'world'         -- 'hello world'
+SELECT first_name || ' ' || last_name    -- 'Alice Smith', or NULL if either column is NULL
+```
+
+Both operands must be `String`. Cast non-string values explicitly:
+
+```sql
+SELECT 'price: ' || cast(price AS String)
+```
+
+If you specifically want null-skipping semantics (PostgreSQL-style, where missing columns become empty strings instead of nulling the whole result), call `concat` directly:
+
+```sql
+SELECT concat(first_name, ' ', middle_name, ' ', last_name)   -- skips a null middle name
+```
+
+### concat_strict
+
+`concat_strict(a, b, ...)` → String | QU: 1
+
+Strict, null-propagating string concatenation. Returns `NULL` when any argument is null; otherwise concatenates all arguments. This is the SQL-92 string-concat semantics, surfaced as a function for explicit invocation and as the desugar target for the `||` operator.
+
+```sql
+SELECT concat_strict('a', NULL, 'b')      -- NULL
+SELECT concat_strict('a', 'b')            -- 'ab'
+```
+
 ### concat_ws
 
 `concat_ws(sep, s1, s2, ...)` → String | QU: 1

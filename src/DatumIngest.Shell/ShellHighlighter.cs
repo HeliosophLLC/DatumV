@@ -91,7 +91,8 @@ internal sealed class ShellHighlighter : IHighlighter
             SqlToken.LessThan or SqlToken.GreaterThan or
             SqlToken.LessOrEqual or SqlToken.GreaterOrEqual or
             SqlToken.Plus or SqlToken.Minus or SqlToken.Slash or
-            SqlToken.Percent or SqlToken.Caret or SqlToken.Pipe => "yellow",
+            SqlToken.Percent or SqlToken.Caret or SqlToken.Pipe or
+            SqlToken.DoublePipe => "yellow",
 
             SqlToken.Comma or SqlToken.Dot or
             SqlToken.LeftParen or SqlToken.RightParen => "grey",

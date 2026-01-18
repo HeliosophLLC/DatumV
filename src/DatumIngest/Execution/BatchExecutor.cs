@@ -1256,7 +1256,7 @@ public sealed class BatchExecutor
                 }
                 return rewrittenArgs is null
                     ? fn
-                    : new FunctionCallExpression(fn.FunctionName, rewrittenArgs, fn.OrderBy, fn.Distinct, fn.Span);
+                    : new FunctionCallExpression(fn.FunctionName, rewrittenArgs, fn.OrderBy, fn.Distinct, fn.Span, fn.WithinGroupOrderBy);
             }
 
             case InExpression inExpr:

@@ -445,7 +445,35 @@ public static class ParameterBinder
             arguments[i] = BindExpression(function.Arguments[i], parameters);
         }
 
-        return new FunctionCallExpression(function.FunctionName, arguments, function.OrderBy, function.Distinct, function.Span);
+        // OrderBy / WithinGroupOrderBy items reference column refs and
+        // literals only — parameter substitution flows through them so
+        // an aggregate like `string_agg(x, $sep ORDER BY $key)` gets
+        // both pieces bound. The lists are usually short (1-2 items),
+        // so we walk them eagerly.
+        IReadOnlyList<OrderByItem>? boundOrderBy =
+            function.OrderBy is null ? null : BindOrderByItems(function.OrderBy, parameters);
+        IReadOnlyList<OrderByItem>? boundWithinGroup =
+            function.WithinGroupOrderBy is null ? null : BindOrderByItems(function.WithinGroupOrderBy, parameters);
+
+        return new FunctionCallExpression(
+            function.FunctionName,
+            arguments,
+            boundOrderBy,
+            function.Distinct,
+            function.Span,
+            boundWithinGroup);
+    }
+
+    private static IReadOnlyList<OrderByItem> BindOrderByItems(
+        IReadOnlyList<OrderByItem> items,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        OrderByItem[] result = new OrderByItem[items.Count];
+        for (int i = 0; i < items.Count; i++)
+        {
+            result[i] = new OrderByItem(BindExpression(items[i].Expression, parameters), items[i].Direction);
+        }
+        return result;
     }
 
     private static InExpression BindInExpression(
