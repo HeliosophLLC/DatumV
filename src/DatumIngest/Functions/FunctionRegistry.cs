@@ -409,6 +409,13 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Json.JsonQueryFunction>();
         registry.RegisterScalar<Scalar.Json.JsonToTextFunction>();
 
+        // Templates — per-LLM-family chat-template primitives. Three
+        // functions per family (open / msg / assistant_turn) for
+        // assembling multi-turn prompts in plain SQL. See
+        // Functions/Templates/ChatTemplateFunctions.cs for the family
+        // list and call shape.
+        Templates.ChatTemplateFunctions.RegisterAll(registry);
+
         // Image — pipeline functions are still wired through the legacy
         // path; the image rework is out of scope for this rebuild.
         // (Re-enabled per-image-function once those are migrated.)

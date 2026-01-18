@@ -97,35 +97,117 @@ The enabling changes:
 That's it. No `CREATE TEMP TABLE` repair work, no session machinery, no
 new RPC paradigm.
 
-## Conversation history as a regular table
+## Persisted conversation + uploads (m:1 attachments)
 
-The assistant's chat history is staged the same way as any other input:
-as a regular table named `conversation` with columns `(speaker, text,
-turn_index)` (or similar). The front-end uploads the prior turns each
-request, then runs:
+DDL/DML are now shipped (PR9.5–PR12), so chat state lives in real catalog
+tables — no per-request staging required for the dev assistant. Three tables
+get seeded into a workspace on first use:
 
 ```sql
-SELECT llama_3_2(chat_format(speaker, text) WITHIN GROUP (ORDER BY turn_index))
-FROM conversation;
+CREATE TABLE conversations (
+  id          BIGINT PRIMARY KEY IDENTITY,
+  workspace   TEXT,
+  title       TEXT,
+  started_at  TIMESTAMP);
+
+CREATE TABLE uploads (
+  id           BIGINT PRIMARY KEY IDENTITY,
+  workspace    TEXT,
+  bytes        IMAGE,
+  mime         TEXT,
+  size_bytes   INT,
+  uploaded_at  TIMESTAMP);
+
+CREATE TABLE messages (
+  id              BIGINT PRIMARY KEY IDENTITY,
+  conversation_id BIGINT,        -- FK convention; constraint pending
+  turn_index      INT,
+  role            TEXT,          -- 'user'|'assistant'|'system'|'tool'
+  content         TEXT,
+  upload_id       BIGINT,        -- FK to uploads.id (nullable, m:1 in v1)
+  tool_call_id    TEXT,          -- links role='tool' rows to assistant JSON
+  created_at      TIMESTAMP);
 ```
 
-The key constraint the user articulated: **feeding history into the model
-must work via existing SQL primitives — no different from what a user
-could write themselves**. So the templating step is a SQL aggregate
-(`chat_format(speaker, text)`), not a special model invocation shape.
-The model itself stays a normal single-string-input function.
+The single-`upload_id`-per-message shape covers v1 chat ergonomics (one
+image attached to one user turn). Multi-attachment ("compare these three
+screenshots") is a v2 migration to a `message_attachments` join table — the
+schema add is cheap once the FK feature exists, and starting m:1 is easier
+to evolve from than retrofit constraints onto.
 
-This means:
+### Folding history into a prompt
 
-- **No multi-turn `LlamaChatTemplate` refactor in v1.** The aggregate
-  produces the formatted prompt; the model receives a single string and
-  uses its existing single-message template.
-- The aggregate is just another scalar / aggregate function in the registry
-  (likely needs a `chat_format` per template family, or one variadic with
-  a model-name argument that pulls the template).
-- Users in SQL-land can construct prompts the same way the assistant does.
-  They could write their own filtering / reordering / few-shot injection
-  before the aggregate without any new machinery.
+Conversation context is built with ordinary SQL primitives — the
+[chat-templates plan](chat-templates-as-functions.md) ships per-family
+`templates.X_open` / `_msg(role, content)` / `_assistant_turn` scalar
+functions:
+
+```sql
+SELECT models.llama_3_2(
+  templates.llama31_open()
+  || string_agg(templates.llama31_msg(role, content)) WITHIN GROUP (ORDER BY turn_index)
+  || templates.llama31_assistant_turn(),
+  templated => true)
+FROM messages WHERE conversation_id = @conv_id;
+```
+
+No `chat_format` aggregate, no special model dispatch. A user could write
+the same query against their own tables — the assistant has no privileged
+path.
+
+### Image-attached turn
+
+When the user attaches an image with their question, the front-end runs three
+inserts + the assistant query:
+
+```sql
+-- (1) Stage the image
+INSERT INTO uploads (workspace, bytes, mime, size_bytes, uploaded_at)
+VALUES (@ws, @img, 'image/png', @sz, now())
+RETURNING id;
+
+-- (2) User turn references the upload
+INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at)
+VALUES (@conv, @next_idx, 'user', @text, @upload_id, now());
+
+-- (3) Auto-caption row — a separate message so string_agg picks it up naturally
+INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at)
+SELECT @conv, @next_idx + 1, 'system',
+       'Image attached. Auto-description: ' || models.florence_2(bytes, 'describe'),
+       @upload_id, now()
+FROM uploads WHERE id = @upload_id;
+
+-- (4) Assistant turn — same fold as before, now sees the caption
+SELECT models.llama_3_2(...) FROM messages WHERE conversation_id = @conv;
+```
+
+Auto-caption model selection is a front-end choice — Florence-2 for general
+descriptions, Phi-3.5-vision for targeted UI questioning, Moondream2 when
+latency matters more than fidelity (cf. the shipped VLM comparison harness).
+Any of them, or several, can write rows against the same `upload_id` — the
+FK is the join key, not a uniqueness constraint.
+
+### Direct invocation ("upload image, run model")
+
+The assistant flow is one specialization of a more general pattern: any
+front-end caller can stage data with `INSERT` and run a model query against
+it. "I uploaded an image, run depth estimation" is just step (1) above plus
+a single SELECT — no `messages` involvement at all:
+
+```sql
+INSERT INTO uploads (workspace, bytes, mime, size_bytes, uploaded_at) VALUES (...) RETURNING id;
+SELECT models.depth_estimation(bytes) FROM uploads WHERE id = @upload_id;
+```
+
+### Why this supersedes per-request `conversation` staging
+
+The original plan staged conversation history per request via a `tables`
+JSON map and a per-request child catalog overlay. With DDL/DML shipped, that
+mechanism isn't needed for the dev assistant — chat state survives reload,
+history grows incrementally, and the front-end stops re-uploading the prior
+turns each request. The per-request overlay still has a role for the
+production inference service (stateless requests, ephemeral data, no catalog
+mutation under load) — see v2 / later.
 
 ## v1 scope
 
@@ -135,149 +217,184 @@ that the production inference service depends on.
 
 ### In scope
 
-1. **Per-request child `TableCatalog` overlay.**
-   Builds a child catalog with `Parent = global`, registers an
-   `InMemoryTableProvider` per `tables` entry, returns an `IDisposable`
-   that the request handler scopes with `using`. The query planner sees
-   a unified view; the global catalog is never mutated.
+1. **Persisted schema seed.**
+   First-boot DDL for `conversations`, `messages`, `uploads` against the
+   workspace catalog. Idempotent (skip when tables already exist).
 
-2. **Parameter binding + table staging on `/api/query{,/stream}`.**
-   Request gains `parameters: { name: { kind, value } }` and
-   `tables: { name: { columns: [...], rows: [...] } }`. JSON-to-DataValue
+2. **`parameters` map on `/api/query{,/stream}`.**
+   Request gains `parameters: { name: { kind, value } }`. JSON-to-DataValue
    mapper handles primitives + base64 for Image / UInt8 array.
-   `ParameterBinder` runs before planning (already exists). Tables are
-   registered in the per-request catalog overlay before planning.
+   `ParameterBinder` runs before planning (already exists). The `tables`
+   JSON map / per-request catalog overlay is **not** in v1 scope — see v2.
 
-3. **`chat_format` aggregate function.**
-   Takes (speaker, text) ordered by some key, produces a single formatted
-   prompt string for the target model's chat template. Uses the existing
-   `LlamaChatTemplate.Format` per template family. Model-aware variant or
-   per-family functions — exact shape to be decided during implementation.
+3. **Chat-templating functions** — tracked separately in
+   [chat-templates-as-functions.md](chat-templates-as-functions.md). Ships
+   per-family `templates.X_open` / `_msg(role, content)` / `_assistant_turn`
+   scalars and a `templated => true` override on `LlamaModel`.
 
-4. **Right-docked AI assistant panel UI.**
+4. **Image-attachment + auto-caption flow.**
+   Front-end orchestrates upload + user-turn + caption-turn inserts and
+   the assistant SELECT. Auto-caption defaults to a single configurable
+   vision model (`models.florence_2` initial pick, with Phi-3.5-vision and
+   Moondream2 selectable per workspace). No engine changes — vision models
+   are already in the catalog.
+
+5. **Right-docked AI assistant panel UI.**
    Sibling to `#group-container`, toggleable from the top toolbar. Markdown
-   rendering for assistant messages, streaming token display, input box,
-   send button. Reuses existing CSS variables / layout patterns / NDJSON
-   reader. Submits a SQL query over a `conversation` table that it stages
-   from IDB on each turn.
+   rendering, streaming token display, image-attach button, send button.
+   Reuses existing CSS variables / layout patterns / NDJSON reader.
 
-5. **Per-workspace conversation history in IndexedDB.**
-   Reuses the result-IDB pattern. Schema:
-   `conversations[workspaceId][convId] = [{speaker, text, timestamp}]`.
-   Single conversation per workspace for v1.
+6. **IndexedDB last-known-good cache for conversation/messages.**
+   Reuses the result-IDB pattern. Acts as a hydration cache for instant
+   reload — the *source of truth* is the catalog tables. Schema:
+   `conversations[workspaceId][convId] = { messages: [...] }`.
 
-6. **Cursor-context auto-injection.**
-   On submit, the front-end prepends a system row (or constructs a
-   pre-context row in the conversation table) with active tab name,
-   cursor line/col, and ±10 lines around the cursor. No model-side tool
-   call needed for v1.
+7. **Cursor-context auto-injection.**
+   On submit, the front-end inserts a `role='system'` `messages` row with
+   active tab name, cursor line/col, and ±10 lines around the cursor before
+   firing the assistant SELECT. No model-side tool call needed for v1.
 
 ### Out of scope (deferred, see "v2 / later")
 
 - Tool calling / agentic loop.
+- m:n attachments (`message_attachments` join table). v1 ships m:1 — single
+  `upload_id` column on `messages`.
+- Per-request `tables` JSON map + child `TableCatalog` overlay. Now an
+  inference-service concern — the dev assistant uses persisted tables.
 - OmniParser integration (separate track).
 - Multi-conversation per workspace.
-- Vision / multimodal input to the assistant LLM itself.
-- Multi-turn `LlamaChatTemplate` refactor — superseded by `chat_format`
-  aggregate.
+- Native multimodal input to the assistant LLM itself (LLaVA-style). v1
+  routes images through the vision-caption hop.
+- FK constraint enforcement on `messages.conversation_id` /
+  `messages.upload_id`. Convention only in v1 — the catalog supports the
+  PRIMARY KEY side but cross-table FK constraints aren't yet a feature.
 
 ### Effort estimate
 
-| Piece                                                                 | Time     |
-| --------------------------------------------------------------------- | -------- |
-| Per-request child `TableCatalog` overlay + `IDisposable` scope        | 0.5 day  |
-| Extend `/api/query{,/stream}` with `parameters` + `tables` + base64   | 0.5 day  |
-| `chat_format` aggregate function (single template family for v1)      | 0.5 day  |
-| Right-docked panel UI + streaming token render                        | 1.0 day  |
-| IDB conversation history                                              | 0.5 day  |
-| Cursor-context auto-inject                                            | 0.5 day  |
-| **Total**                                                             | ~3.5 days |
+| Piece                                                                 | Time      |
+| --------------------------------------------------------------------- | --------- |
+| Schema seed (CREATE TABLE on first boot, front-end-driven)            | 0.25 day  |
+| Extend `/api/query{,/stream}` with `parameters` + base64              | 0.5 day   |
+| Chat-templates functions (separate plan, ~1.5d, **shared work**)      | —         |
+| Image-attachment + auto-caption front-end flow                        | 0.5 day   |
+| Right-docked panel UI + streaming + image attach                      | 1.0 day   |
+| IDB conversation cache                                                | 0.5 day   |
+| Cursor-context auto-inject (now a `messages` insert)                  | 0.25 day  |
+| **Total (excludes chat-templates plan)**                              | ~3.0 days |
+| **Total (with chat-templates plan)**                                  | ~4.5 days |
 
 ## Open issues / things to work through
 
-1. **Per-request catalog disposal correctness.**
-   The child catalog must be disposed only after the streaming response
-   completes — operators may still be scanning the in-memory tables when
-   the first events have already flushed to the wire. Verify the lifecycle
-   ties to the response stream's completion, not to the planner returning.
+1. **Default vision model for auto-caption.**
+   Three candidates already wired (Florence-2, Phi-3.5-vision, Moondream2).
+   Florence-2 is the proposed default — broad coverage, fast on CUDA, and
+   the OCR-region prompt covers most "what's on screen" needs without a
+   targeted question. Make the choice per-workspace settable so the user
+   can swap to Phi-3.5-vision when reasoning over UI controls or to
+   Moondream2 for latency. Decide a default during PR landing.
 
-2. **Wire format for binary data.**
+2. **Schema seeding ergonomics.**
+   When does the front-end run the CREATE TABLE statements? Options: (a)
+   on every workspace open (idempotent CREATE TABLE IF NOT EXISTS), (b)
+   once at first assistant-panel toggle, (c) baked into the workspace
+   create flow. (a) is the safest — paying nothing if tables exist — but
+   needs IF NOT EXISTS to actually be a no-op. Verify against the shipped
+   DDL.
+
+3. **FK convention without enforcement.**
+   `messages.conversation_id` and `messages.upload_id` are FK by
+   convention only — the catalog doesn't enforce cross-table refs yet.
+   Risk: front-end bugs leave dangling refs. Mitigation in v1: front-end
+   never DELETEs uploads or conversations (just adds to history), so the
+   only way to break refs is a partial INSERT failure mid-turn. Acceptable
+   for v1; revisit when DELETE flows land.
+
+4. **Wire format for binary data.**
    Base64 inside JSON is the obvious choice. If image sizes get large
    (>5 MB) we'll hit JSON parsing latency and want multipart instead. For
    v1, 512×512 PNGs at base64 are fine. Decision to revisit when actual
    image sizes become a problem.
 
-3. **Cancellation.**
+5. **Cancellation.**
    `/api/query/stream` already supports cancellation via the existing
    AbortController plumbing. Assistant panel's "stop" button just aborts
    the in-flight fetch. Verify the `LlamaModel` honours the cancellation
    token mid-stream.
 
-4. **Concurrent assistant requests.**
+6. **Concurrent assistant requests.**
    Per-workspace serial-only? Or allow multiple in-flight (e.g. user fires
    off a depth-map call from a tab while the assistant is streaming)?
    Each request is a separate query-stream so they don't collide at the
    transport level, but a single GGUF model serialises at the executor
    level. Decide whether the panel UI guards against concurrent submits.
 
-5. **Where the front-end gets the "current model name."**
+7. **Where the front-end gets the "current model name."**
    Probably a workspace-level setting + a small picker in the panel. The
    default is the first available LLM in `system_models` filtered by
    category=text. Enumeration via the existing catalog/models endpoint.
 
-6. **Error shape the assistant panel needs.**
+8. **Error shape the assistant panel needs.**
    `/api/query/stream` error events are JSON lines today; assistant UI
    just renders them as a red bubble. Make sure model load failures
    (CUDA missing, file not found) surface readably and don't kill the
    panel.
 
-7. **Prompt size guards.**
-   Conversation history grows unbounded. Either the front-end trims
-   before staging (drop oldest user/assistant pair until the formatted
-   prompt fits `model.max_context_tokens / 2`), or `chat_format` itself
-   does the trimming with a token-budget argument. Front-end-side is
-   simpler for v1.
+9. **Prompt size guards.**
+   Conversation history grows unbounded as `messages` rows accumulate.
+   Front-end trims before SELECT (drop oldest user/assistant pair until
+   the formatted prompt fits `model.max_context_tokens / 2`) is the
+   simplest v1 shape. A SCAN-based "running token count, drop while
+   over budget" expression is the natural SQL-side alternative — defer
+   until the front-end heuristic is shown to be lossy.
 
-8. **`chat_format` API shape.**
-   Open: one function per template family vs one variadic with a model
-   name vs the aggregate looking up the template via the model catalog.
-   Resolve during implementation when the existing `LlamaChatTemplate`
-   wiring is in front of us.
-
-9. **Multi-statement transactions / DDL.**
-   The per-request child catalog is read-only-by-default for resolving
-   parent tables. If a request submits multi-statement SQL that includes
-   DDL, where does the DDL go? For v1, restrict request SQL to a single
-   query expression — multi-statement is a v2 question.
+10. **Multi-statement request bodies.**
+    The image-attachment flow is four separate `/api/query/stream`
+    round-trips. Could be one round-trip if the endpoint accepted a
+    statement list and chained the `RETURNING id` value into the next
+    statement's parameters. v1 keeps it as four separate calls — cheap
+    enough at the JSON level, and avoids inventing a parameter-chaining
+    syntax. Revisit if latency becomes user-visible.
 
 ## v2 / later
 
 - **Tool calling** with GBNF-constrained JSON output.
   Tools: `get_cursor_context`, `get_active_tab_sql`, `get_schema(table?)`,
-  `run_query(sql)`, `read_results(tab_id)`. Tool dispatch is JS-side; each
-  tool call becomes another `/api/query/stream` round-trip; model gets the
-  tool result and continues. ~2-3 days extra.
+  `run_query(sql)`, `read_results(tab_id)`, `caption_image(upload_id, prompt?)`.
+  Tool dispatch is JS-side; each tool call becomes another
+  `/api/query/stream` round-trip; the result is INSERTed as a `role='tool'`
+  message and the model gets the next turn. ~2-3 days extra.
+
+- **m:n attachments** via `message_attachments(message_id, upload_id, position)`
+  for "compare these three screenshots" / multi-image reasoning. Migration
+  from the v1 m:1 column is a backfill plus a column drop; the FK story
+  needs to land first to make the join table worth it.
+
+- **Per-request `tables` JSON map + child `TableCatalog` overlay** for the
+  production inference service. Stateless requests, ephemeral data, no
+  catalog mutation under load. Same shape as the original v1 plan;
+  deferred because the dev assistant doesn't need it.
 
 - **Production inference service deployment.**
   Container image with UDFs registered at boot from a startup script or
   bundle file. Same `/api/query/stream` endpoint as the dev assistant.
-  Auth/rate-limiting added at the edge. The catalog-overlay mechanism is
-  the same — just no DevWeb client, just direct API consumers.
+  Auth/rate-limiting added at the edge. Uses the per-request overlay
+  above — direct API consumers post `parameters` + `tables` per call,
+  no shared catalog state.
 
 - **Multi-conversation per workspace** + conversation switcher in the
-  panel.
+  panel. Schema already supports it (`conversations.id` is the
+  partition key); just a UI piece.
 
 - **Native multimodal** assistant when LLaVA or similar lands in the
   catalog (per the vision roadmap). Lets the assistant *see* a result
-  cell directly instead of relying on captioning.
+  cell directly instead of relying on a vision-caption hop.
 
 - **OmniParser as a tool** the assistant can call, paired with a captioner
   for non-UI image content. Per the discussion that motivated this plan,
   this is the right shape — not the primary vision path.
 
 - **Multipart upload** for large binary tables when base64-in-JSON gets
-  expensive.
+  expensive (>5 MB images).
 
-- **Multi-statement / DDL submissions** if a use case justifies it.
-  Today everything that needs DDL is done outside the request boundary
-  (UDFs registered at boot; data staged via `tables`).
+- **FK constraint enforcement** on `messages.conversation_id` /
+  `messages.upload_id`. Currently convention only.

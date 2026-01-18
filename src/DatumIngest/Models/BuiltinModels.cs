@@ -310,10 +310,16 @@ public static class BuiltinModels
             // Trailing optional positional args:
             //   [0] temperature (Float64)  — sampling temperature override
             //   [1] max_tokens  (Int32)    — max new tokens to generate
+            //   [2] templated   (Boolean)  — when true, treat the prompt as
+            //                                already templated (skip Format).
+            //                                Pair with templates.llama31_open()
+            //                                || templates.llama31_msg(...) || ...
+            //                                || templates.llama31_assistant_turn().
             // Order matters: callers supply a prefix. `models.llama31_8b(prompt, 0.9)`
             // overrides temperature only; `models.llama31_8b(prompt, 0.9, 64)`
-            // overrides both. Adding a third (e.g. seed) tomorrow is a non-breaking append.
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            // overrides both; pass NULLs to skip earlier opts when only the
+            // tail matters: `models.llama31_8b(p, NULL, NULL, true)`.
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Llama 3.1 8B Instruct",
             Parameters: "8B",
             // Llama 3.1 ships under Meta's custom community license — broadly
@@ -375,7 +381,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Phi-3-mini-4k Instruct",
             Parameters: "3.8B",
             License: "MIT",
@@ -439,7 +445,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Phi3, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Phi-3.5-mini Instruct (128K)",
             Parameters: "3.8B",
             License: "MIT",
@@ -480,7 +486,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Zephyr, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "TinyLlama 1.1B Chat v1.0",
             Parameters: "1.1B",
             License: "Apache-2.0",
@@ -523,7 +529,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Gemma, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Gemma 2 2B Instruct",
             Parameters: "2B",
             License: "Gemma Terms",
@@ -573,7 +579,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: displayName,
             Parameters: parameters,
             License: "Apache-2.0",
@@ -681,7 +687,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Granite, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "IBM Granite 3.1 1B A400M Instruct",
             Parameters: "1B (400M active)",
             License: "Apache-2.0",
@@ -723,7 +729,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.ChatML, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Falcon3 1B Instruct",
             Parameters: "1B",
             License: "Falcon LLM License 2.0",
@@ -770,7 +776,7 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new LlamaModel(modelName, modelPath, LlamaChatTemplate.Mistral, contextSize, maxTokens, temperature);
             },
-            OptionalArgKinds: [DataKind.Float64, DataKind.Int32],
+            OptionalArgKinds: [DataKind.Float64, DataKind.Int32, DataKind.Boolean],
             DisplayName: "Mistral 7B Instruct v0.3",
             Parameters: "7B",
             License: "Apache-2.0",

@@ -343,6 +343,10 @@ public sealed class LlamaModel : IModel, IDisposable
         // Order matches the catalog entry's OptionalArgKinds:
         //   [0] = temperature (Float64)
         //   [1] = max_tokens   (Int32)
+        //   [2] = templated    (Boolean) — when true, skip Format() so a
+        //                       caller that pre-templated via the
+        //                       templates.X scalar functions isn't
+        //                       double-wrapped.
         // Missing or null entries fall back to construction-time defaults.
         float temperature = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
             ? rowOverrides[0].ToFloat()
@@ -350,9 +354,11 @@ public sealed class LlamaModel : IModel, IDisposable
         int maxTokens = rowOverrides.Count > 1 && !rowOverrides[1].IsNull
             ? rowOverrides[1].ToInt32()
             : _maxTokens;
+        bool alreadyTemplated = rowOverrides.Count > 2 && !rowOverrides[2].IsNull
+            && rowOverrides[2].AsBoolean();
 
         string promptText = prompt.AsString();
-        string templated = _template.Format(promptText);
+        string templated = alreadyTemplated ? promptText : _template.Format(promptText);
 
         // No manual KV-cache reset: StatelessExecutor.Context is only valid
         // *during* InferAsync — the executor builds a fresh context per call

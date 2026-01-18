@@ -10,6 +10,12 @@ DatumIngest invokes machine-learning models through SQL functions in the
 documents what's registered out of the box, where each weights file
 comes from, and how to set up the model directory on a fresh machine.
 
+For multi-turn LLM prompts, see the per-family chat-template scalar
+functions in [Chat Templates](sql/chat-templates.md) — they expose the
+role-header / turn-end primitives so a prompt can be assembled in
+plain SQL alongside `string_agg`, with a `templated` opt-arg on the
+model that bypasses the built-in single-message wrapper.
+
 For an introspectable view of the same information, query the
 `system_models` virtual table:
 
