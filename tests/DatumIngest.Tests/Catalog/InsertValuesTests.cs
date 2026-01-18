@@ -239,6 +239,53 @@ public sealed class InsertValuesTests : IAsyncLifetime
         Assert.Equal(5f, rows[0][0].AsFloat32());
     }
 
+    // ──────────────────── Temporal / Decimal coercion ────────────────────
+
+    [Fact]
+    public async Task InsertValues_NowExpression_StoresCurrentDateTime()
+    {
+        // Reproduces the exact pattern that surfaced the gap:
+        //   INSERT INTO conversations VALUES ('default', 'Chat', now())
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE conversations (workspace String, title String, started_at DateTime)");
+
+        DateTimeOffset before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        catalog.Plan("INSERT INTO conversations VALUES ('default', 'Chat', now())");
+        DateTimeOffset after = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["conversations"]);
+        Assert.Single(rows);
+        DateTimeOffset stored = rows[0][2].AsDateTime();
+        Assert.InRange(stored, before, after);
+    }
+
+    [Fact]
+    public async Task InsertValues_DateLiteralString_StoresAsDate()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (d Date)");
+
+        catalog.Plan("INSERT INTO t VALUES ('2026-05-09')");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal(new DateOnly(2026, 5, 9), rows[0][0].AsDate());
+    }
+
+    [Fact]
+    public async Task InsertValues_DecimalFromIntegerLiteral_Accepted()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (amount Decimal)");
+
+        catalog.Plan("INSERT INTO t VALUES (1234)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal(1234m, rows[0][0].AsDecimal());
+    }
+
     // ──────────────────── Validation ────────────────────
 
     [Fact]

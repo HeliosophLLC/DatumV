@@ -76,6 +76,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // The closure follows the parent-chain getter so child catalogs
         // inherit the root's models without duplicating registrations.
         this._functions.SetModelCatalogResolver(() => Models);
+        // Catalog-introspection scalars need a back-reference to this
+        // TableCatalog. Registered as instances rather than the static-
+        // abstract RegisterScalar<T>() because they capture mutable state.
+        this._functions.RegisterScalarInstance(
+            DatumIngest.Functions.Scalar.Catalog.IdentCurrentFunction.Name,
+            new DatumIngest.Functions.Scalar.Catalog.IdentCurrentFunction(this));
         this._udfs = new UdfRegistry();
         this._procedures = new ProcedureRegistry();
         // Case-insensitive lookup matches SQL identifier semantics:

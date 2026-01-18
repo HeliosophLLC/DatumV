@@ -392,6 +392,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
 
+        // Temporal — current time, date/time arithmetic, extraction.
+        registry.RegisterScalar<Scalar.Temporal.NowFunction>();
+
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();
         registry.RegisterScalar<Scalar.Spatial.Point3DFunction>();
@@ -415,10 +418,6 @@ public sealed class FunctionRegistry
         // Functions/Templates/ChatTemplateFunctions.cs for the family
         // list and call shape.
         Templates.ChatTemplateFunctions.RegisterAll(registry);
-
-        // Image — pipeline functions are still wired through the legacy
-        // path; the image rework is out of scope for this rebuild.
-        // (Re-enabled per-image-function once those are migrated.)
 
         // ── Table-valued ──────────────────────────────────────────────────
         // UNNEST retired pending the reference-type-array consolidation; will be

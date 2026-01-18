@@ -188,6 +188,17 @@ public sealed class InMemoryTableProvider : ITableProvider
     public Schema GetSchema() => _schema;
 
     /// <inheritdoc/>
+    public IdentityState? GetIdentityState()
+    {
+        if (_identityColumnIndex < 0) return null;
+        return new IdentityState(
+            ColumnIndex: _identityColumnIndex,
+            ColumnKind: _schema.Columns[_identityColumnIndex].Kind,
+            Spec: new IdentitySpec(Seed: _identitySeed, Step: _identityStep),
+            NextValue: _identityNextValue);
+    }
+
+    /// <inheritdoc/>
     public Manifest.QueryResultsManifest? GetManifest() => null;
 
     /// <inheritdoc/>
@@ -799,6 +810,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             byte b => DataValue.FromUInt8(b),
             float f => DataValue.FromFloat32(f),
             double d => DataValue.FromFloat64(d),
+            decimal m => DataValue.FromDecimal(m),
             bool boolean => DataValue.FromBoolean(boolean),
             DateOnly date => DataValue.FromDate(date),
             DateTimeOffset dto => DataValue.FromDateTime(dto),

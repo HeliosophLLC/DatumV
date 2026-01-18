@@ -496,6 +496,33 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public SourceIndex? GetSourceIndex() => _sourceIndex;
 
     /// <inheritdoc/>
+    public IdentityState? GetIdentityState()
+    {
+        Snapshot snapshot = AcquireSnapshot();
+        try
+        {
+            Schema schema = snapshot.Schema;
+            for (int i = 0; i < schema.Columns.Count; i++)
+            {
+                ColumnInfo c = schema.Columns[i];
+                if (c.Identity is { } spec)
+                {
+                    return new IdentityState(
+                        ColumnIndex: i,
+                        ColumnKind: c.Kind,
+                        Spec: spec,
+                        NextValue: snapshot.Reader.Footer.Prologue.IdentityNextValue);
+                }
+            }
+            return null;
+        }
+        finally
+        {
+            ReleaseSnapshot(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
     public IndexValidity GetIndexValidity()
     {
         // Live-loaded index → Valid. The constructor + RebuildIndex

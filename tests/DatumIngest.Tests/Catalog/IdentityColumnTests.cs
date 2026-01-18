@@ -300,6 +300,133 @@ public sealed class IdentityColumnTests : IAsyncLifetime
             catalog.Plan("ALTER TABLE t ADD COLUMN id Int32 IDENTITY"));
     }
 
+    // ──────────────────── ident_current() scalar ────────────────────
+
+    [Fact]
+    public async Task IdentCurrent_AfterInsert_ReturnsLastReservedValue()
+    {
+        // Mirrors the chat-INSERT-then-FK pattern: insert produces the
+        // IDENTITY value, ident_current() reads it back for the next
+        // statement's FK reference.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE conversations (id Int64 IDENTITY, title String)");
+
+        catalog.Plan("INSERT INTO conversations (title) VALUES ('Chat')");
+
+        long? id = await ScanIdentCurrent(catalog, "conversations");
+        Assert.Equal(1L, id);
+
+        catalog.Plan("INSERT INTO conversations (title) VALUES ('Second')");
+        id = await ScanIdentCurrent(catalog, "conversations");
+        Assert.Equal(2L, id);
+    }
+
+    [Fact]
+    public async Task IdentCurrent_ParametrizedSeed_TracksStepFromSeed()
+    {
+        // IDENTITY(100, 5): first reservation = 100, second = 105.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(100, 5), name String)");
+        catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b'), ('c')");
+
+        long? id = await ScanIdentCurrent(catalog, "t");
+        Assert.Equal(110L, id);
+    }
+
+    [Fact]
+    public async Task IdentCurrent_NoInsertsYet_ReturnsNull()
+    {
+        // Counter is still at the seed → no values reserved → NULL.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
+
+        long? id = await ScanIdentCurrent(catalog, "t");
+        Assert.Null(id);
+    }
+
+    [Fact]
+    public async Task IdentCurrent_TableWithoutIdentity_ReturnsNull()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE plain (id Int32, name String)");
+        catalog.Plan("INSERT INTO plain VALUES (1, 'a')");
+
+        long? id = await ScanIdentCurrent(catalog, "plain");
+        Assert.Null(id);
+    }
+
+    [Fact]
+    public async Task IdentCurrent_UnknownTable_ReturnsNull()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
+
+        long? id = await ScanIdentCurrent(catalog, "nope");
+        Assert.Null(id);
+    }
+
+    [Fact]
+    public async Task IdentCurrent_UsableInsideInsertValues_ResolvesFkReference()
+    {
+        // The actual chat workflow: insert into conversations, then use
+        // ident_current to pull the new id when inserting the message.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE conversations (id Int64 IDENTITY, title String)");
+        catalog.Plan("CREATE TEMP TABLE messages (id Int64 IDENTITY, conversation_id Int64, body String)");
+
+        catalog.Plan("INSERT INTO conversations (title) VALUES ('Chat')");
+        catalog.Plan("INSERT INTO messages (conversation_id, body) VALUES (ident_current('conversations'), 'Hello')");
+
+        await foreach (RowBatch batch in catalog["messages"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Assert.Equal(1L, batch[0][1].AsInt64());
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task IdentCurrent_PersistentTable_RoundTripsAcrossReopen()
+    {
+        Pool pool = new(new PoolBacking());
+        using (TableCatalog catalog = new(pool, CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE conversations (id Int64 IDENTITY, title String)");
+            catalog.Plan("INSERT INTO conversations (title) VALUES ('First'), ('Second'), ('Third')");
+        }
+
+        using TableCatalog reopened = new(pool, CatalogPath);
+        long? id = await ScanIdentCurrent(reopened, "conversations");
+        Assert.Equal(3L, id);
+    }
+
+    private static async Task<long?> ScanIdentCurrent(TableCatalog catalog, string tableName)
+    {
+        // QueryPlan.ExecuteAsync owns and returns each batch via its
+        // own finally — extracting a copy of the value before the next
+        // iteration step is enough; don't dispose explicitly.
+        IQueryPlan plan = catalog.Plan($"SELECT ident_current('{tableName}') AS v");
+        long? captured = null;
+        bool first = true;
+        await foreach (RowBatch batch in plan.ExecuteAsync(default))
+        {
+            if (first && batch.Count > 0)
+            {
+                DataValue v = batch[0][0];
+                captured = v.IsNull ? null : v.AsInt64();
+                first = false;
+            }
+        }
+        return captured;
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     /// <summary>

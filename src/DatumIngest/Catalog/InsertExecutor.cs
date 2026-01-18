@@ -1020,11 +1020,75 @@ internal static class LiteralCoercion
             DataKind.Float64 => DataValue.FromFloat64(ToFloat64(literal, columnName)),
             DataKind.String => CoerceString(literal, arena, columnName),
             DataKind.Uuid => CoerceUuid(literal, columnName),
+            DataKind.Date => CoerceDate(literal, columnName),
+            DataKind.Time => CoerceTime(literal, columnName),
+            DataKind.DateTime => CoerceDateTime(literal, columnName),
+            DataKind.Duration => CoerceDuration(literal, columnName),
+            DataKind.Decimal => CoerceDecimal(literal, columnName),
             _ => throw new InvalidOperationException(
                 $"INSERT VALUES for column '{columnName}': literal coercion to " +
                 $"{target.Kind} is not yet supported."),
         };
     }
+
+    private static DataValue CoerceDate(object literal, string columnName) =>
+        literal switch
+        {
+            DateOnly d => DataValue.FromDate(d),
+            DateTime dt => DataValue.FromDate(DateOnly.FromDateTime(dt)),
+            DateTimeOffset dto => DataValue.FromDate(DateOnly.FromDateTime(dto.Date)),
+            string s when DateOnly.TryParse(s, out DateOnly parsed) => DataValue.FromDate(parsed),
+            _ => throw IncompatibleLiteral(literal, "Date", columnName),
+        };
+
+    private static DataValue CoerceTime(object literal, string columnName) =>
+        literal switch
+        {
+            TimeOnly t => DataValue.FromTime(t),
+            TimeSpan ts when ts >= TimeSpan.Zero && ts < TimeSpan.FromDays(1)
+                => DataValue.FromTime(TimeOnly.FromTimeSpan(ts)),
+            string s when TimeOnly.TryParse(s, out TimeOnly parsed) => DataValue.FromTime(parsed),
+            _ => throw IncompatibleLiteral(literal, "Time", columnName),
+        };
+
+    private static DataValue CoerceDateTime(object literal, string columnName) =>
+        literal switch
+        {
+            DateTimeOffset dto => DataValue.FromDateTime(dto),
+            DateTime dt => DataValue.FromDateTime(new DateTimeOffset(
+                dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt)),
+            DateOnly d => DataValue.FromDateTime(new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
+            string s when DateTimeOffset.TryParse(s, out DateTimeOffset parsed)
+                => DataValue.FromDateTime(parsed),
+            _ => throw IncompatibleLiteral(literal, "DateTime", columnName),
+        };
+
+    private static DataValue CoerceDuration(object literal, string columnName) =>
+        literal switch
+        {
+            TimeSpan ts => DataValue.FromDuration(ts),
+            string s when TimeSpan.TryParse(s, out TimeSpan parsed) => DataValue.FromDuration(parsed),
+            _ => throw IncompatibleLiteral(literal, "Duration", columnName),
+        };
+
+    private static DataValue CoerceDecimal(object literal, string columnName) =>
+        literal switch
+        {
+            decimal d => DataValue.FromDecimal(d),
+            sbyte s => DataValue.FromDecimal(s),
+            short s => DataValue.FromDecimal(s),
+            int i => DataValue.FromDecimal(i),
+            long l => DataValue.FromDecimal(l),
+            byte b => DataValue.FromDecimal(b),
+            ushort u => DataValue.FromDecimal(u),
+            uint u => DataValue.FromDecimal(u),
+            ulong u => DataValue.FromDecimal(u),
+            // Float→decimal could lose precision silently; require an explicit
+            // decimal-typed literal or cast on the SQL side.
+            string s when decimal.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out decimal parsed)
+                => DataValue.FromDecimal(parsed),
+            _ => throw IncompatibleLiteral(literal, "Decimal", columnName),
+        };
 
     private static DataValue CoerceBoolean(object literal, string columnName) =>
         literal switch

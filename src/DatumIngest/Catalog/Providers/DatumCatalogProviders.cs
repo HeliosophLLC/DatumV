@@ -34,7 +34,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
     }
 
     /// <inheritdoc/>
-    public override long GetRowCount() => 0;
+    public override long GetRowCount() => _registry.ScalarFunctionNames.Count() + _registry.AggregateFunctionNames.Count();
 
     /// <inheritdoc/>
     public override Schema GetSchema() => _schema;
