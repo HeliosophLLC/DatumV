@@ -5,9 +5,33 @@
 // are deliberately suppressed here — typing the legacy closure as one
 // blob is busywork, peeling-as-we-go is the migration plan.
 
+import { htmlNode, escapeHtml, truncate } from './html-util.js';
+import {
+  parseParameterList,
+  splitTopLevel,
+  buildExecuteTemplate,
+  buildModifyTemplateFromUdfRow,
+  buildModifyTemplateFromProcedureRow,
+  buildBuiltinExecuteTemplate,
+} from './parser-util.js';
+import {
+  renderJsonNode,
+  renderJsonObject,
+  renderJsonArray,
+} from './json-render.js';
+import * as IDB from './idb.js';
+import { loadTheme, applyTheme, toggleTheme } from './theme.js';
+import {
+  showModal,
+  alertModal,
+  confirmModal,
+  promptModal,
+  openImageLightbox,
+} from './modal.js';
+
   // ===== Storage keys & helpers =====
   // Two-tier persistence:
-  //   localStorage holds small JSON state â€” workspace registry, theme, and
+  //   localStorage holds small JSON state — workspace registry, theme, and
   //     per-workspace { tabs: [{ id, name, sql, lastRunAt, sqlOfLastRun }],
   //     groups: [{ id, tabIds, activeTabId }], focusedGroupId, deletedTabIds,
   //     activeTabId (top-level mirror, kept for backward compat) }.
@@ -35,119 +59,9 @@
     return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 
-  // ===== IndexedDB result store =====
-  // Result payloads (potentially many MB for image/audio queries) live here
-  // instead of localStorage. The DB has one object store keyed by a composite
-  // "<workspaceName>::<tabId>" string so deleting a whole workspace is a
-  // single cursor scan over a key range.
-  const IDB = (() => {
-    const DB_NAME = 'datum-devweb';
-    const DB_VERSION = 1;
-    const STORE_NAME = 'results';
-    let dbPromise = null;
-    let unavailable = false;
+  // IndexedDB result store — see ./idb.ts
 
-    function open() {
-      if (unavailable) return Promise.reject(new Error('IndexedDB unavailable'));
-      if (!dbPromise) {
-        if (!('indexedDB' in window)) {
-          unavailable = true;
-          return Promise.reject(new Error('IndexedDB unavailable'));
-        }
-        dbPromise = new Promise((resolve, reject) => {
-          const req = indexedDB.open(DB_NAME, DB_VERSION);
-          req.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-              db.createObjectStore(STORE_NAME, { keyPath: 'key' });
-            }
-          };
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => { unavailable = true; reject(req.error); };
-          req.onblocked = () => reject(new Error('IndexedDB open blocked'));
-        });
-      }
-      return dbPromise;
-    }
-
-    const key = (ws, tabId) => `${ws}::${tabId}`;
-
-    async function saveResult(ws, tabId, result) {
-      const db = await open();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).put({
-          key: key(ws, tabId),
-          workspaceName: ws,
-          tabId,
-          result,
-          savedAt: Date.now(),
-        });
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
-    }
-
-    async function loadResult(ws, tabId) {
-      const db = await open();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).get(key(ws, tabId));
-        req.onsuccess = () => resolve(req.result ? req.result.result : null);
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    async function deleteResult(ws, tabId) {
-      const db = await open();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).delete(key(ws, tabId));
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    }
-
-    async function deleteWorkspaceResults(ws) {
-      const db = await open();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        const range = IDBKeyRange.bound(`${ws}::`, `${ws}::ï¿¿`);
-        const req = store.openCursor(range);
-        req.onsuccess = (e) => {
-          const cursor = e.target.result;
-          if (cursor) { cursor.delete(); cursor.continue(); }
-        };
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    }
-
-    function isUnavailable() { return unavailable; }
-
-    return { saveResult, loadResult, deleteResult, deleteWorkspaceResults, isUnavailable };
-  })();
-
-  // ===== Theme =====
-  function loadTheme() {
-    const saved = localStorage.getItem(STORE.theme);
-    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
-  }
-  function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    document.getElementById('theme-toggle').textContent = (theme === 'dark') ? 'â˜¾' : 'â˜¼';
-    if (window.monaco) {
-      monaco.editor.setTheme(theme === 'dark' ? 'vs-dark' : 'vs');
-    }
-  }
-  function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme');
-    const next = current === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(STORE.theme, next);
-    applyTheme(next);
-  }
+  // Theme — see ./theme.ts
 
   // ===== Workspaces =====
   // A workspace is { tabs: [Tab], groups: [Group], focusedGroupId,
@@ -162,10 +76,10 @@
   // unchanged. Step 3 will let groups hold disjoint tab subsets.
   // A tab in localStorage is { id, name, sql, lastRunAt, sqlOfLastRun }.
   // The runtime tab object also carries `lastResult`:
-  //   undefined â†’ not yet hydrated from IDB; fetch on activation
-  //   null      â†’ no saved result (never run, or freshly created)
-  //   object    â†’ the result payload, cached in memory
-  // Workspace identity comes from location.hash (no hash â†’ "default").
+  //   undefined → not yet hydrated from IDB; fetch on activation
+  //   null      → no saved result (never run, or freshly created)
+  //   object    → the result payload, cached in memory
+  // Workspace identity comes from location.hash (no hash → "default").
   function workspaceName() {
     const h = (location.hash || '').replace(/^#/, '').trim();
     return validName(h) ? h : 'default';
@@ -196,7 +110,7 @@
       id: uuid(),
       name: `Untitled ${n}`,
       sql: '',
-      lastResult: null,            // never run yet â†’ no IDB entry to fetch
+      lastResult: null,            // never run yet → no IDB entry to fetch
       lastRunAt: 0,
       sqlOfLastRun: '',
       pinned: false,
@@ -207,7 +121,7 @@
       maxRows: 200,
       trace: false,
 
-      // Per-tab run state. None of these are persisted â€” they're
+      // Per-tab run state. None of these are persisted — they're
       // re-initialised per session. `running` flags an in-flight query
       // for THIS tab; `abortController` lets the user cancel it; the
       // accumulator `runningRes` captures streamed events so the
@@ -220,7 +134,7 @@
     };
   }
 
-  // The group whose pane is currently focused â€” target for Run, keyboard
+  // The group whose pane is currently focused — target for Run, keyboard
   // shortcuts, and "active tab" reads. Falls back to the first group so
   // a corrupt focusedGroupId can't strand the workspace.
   function focusedGroup(ws) {
@@ -376,14 +290,14 @@
         ws.tabs = ws.tabs.filter(t => !persistedTombs.has(t && t.id));
       }
       if (ws.tabs.length === 0) {
-        // Tombstones ate everything â€” fall through to the fresh-workspace
+        // Tombstones ate everything — fall through to the fresh-workspace
         // branch below by making the outer guard fail on next iteration.
         return loadFreshWorkspace();
       }
       // Ensure each tab has the expected shape (forward-compat). Tabs hydrated
       // from localStorage have `lastResult` left undefined so the renderer
       // knows to fetch from IDB on first activation. Older saves that included
-      // a `lastResult` field are ignored â€” IDB is the source of truth now.
+      // a `lastResult` field are ignored — IDB is the source of truth now.
       ws.tabs = ws.tabs.map(t => {
         const hasRun = (t.lastRunAt || 0) > 0;
         return {
@@ -446,7 +360,7 @@
   let persistFailureNotified = false;
 
   // Persist current workspace metadata. Result payloads live in IDB and are
-  // not part of this snapshot â€” keeps the localStorage write small and fast.
+  // not part of this snapshot — keeps the localStorage write small and fast.
   //
   // Merge-on-save: read whatever is currently on disk and union it with our
   // in-memory tab list, indexed by id. This keeps a second window's tabs
@@ -457,7 +371,7 @@
     const name = workspaceName();
     const onDisk = readJson(STORE.workspace(name), null);
 
-    // Build the FULL tombstone union *first* â€” local + disk â€” so a
+    // Build the FULL tombstone union *first* — local + disk — so a
     // stale window's in-memory tab list can't resurrect tabs that
     // another window has already tombstoned. (Earlier we only filtered
     // disk tabs against tombstones; in-memory tabs were trusted, which
@@ -494,7 +408,7 @@
       maxRows: t.maxRows,
       trace: t.trace === true,
       // Runtime-only fields (running, abortController, etc.) are
-      // intentionally omitted â€” a reload should always start clean.
+      // intentionally omitted — a reload should always start clean.
     }));
     if (onDisk && Array.isArray(onDisk.tabs)) {
       for (const t of onDisk.tabs) {
@@ -521,7 +435,7 @@
     state.workspace.deletedTabIds = cappedTombs;
 
     // Snapshot the group layout. Each group records only its id, tab-id
-    // ordering, and which tab is active there â€” group memberships are
+    // ordering, and which tab is active there — group memberships are
     // partition info, not tab content. The top-level `activeTabId` field
     // is also written so an older code revision (without group support)
     // can still load the workspace.
@@ -544,13 +458,13 @@
       // pastes can do it). Loud-fail to the console every time so it shows
       // up in dev tools, and pop a one-time modal so the user knows their
       // tabs aren't being saved before they restart and lose work.
-      console.warn('[DatumIngest] Failed to persist workspace â€” localStorage write returned false. ' +
+      console.warn('[DatumIngest] Failed to persist workspace — localStorage write returned false. ' +
                    'Likely quota exceeded; tab changes are not being saved.');
       if (!persistFailureNotified) {
         persistFailureNotified = true;
         try {
           alertModal('Tabs are not being saved',
-            'localStorage rejected the workspace snapshot â€” usually because the per-origin storage quota is full. ' +
+            'localStorage rejected the workspace snapshot — usually because the per-origin storage quota is full. ' +
             'New tabs and edits will be lost on reload until space is freed (close large tabs or clear site data).');
         } catch { /* alertModal may not be ready during early boot */ }
       }
@@ -561,14 +475,14 @@
   // Run state lives on each tab (tab.running / tab.abortController / ...)
   // so multiple tabs can have queries in flight concurrently. The server
   // currently serialises queries via a SemaphoreSlim, so requests from
-  // multiple tabs queue server-side â€” but each tab tracks its own state
+  // multiple tabs queue server-side — but each tab tracks its own state
   // and the UI accurately reflects "running" per tab.
   const state = {
     workspace: null,            // { tabs, groups, focusedGroupId, deletedTabIds }
   };
 
   // Debounce save so rapid keystrokes don't flog localStorage. Kept
-  // short (75ms) so the unsaved-edit window is small â€” important
+  // short (75ms) so the unsaved-edit window is small — important
   // because dev-server restarts can yank the page before a longer
   // debounce gets a chance to fire. Page-visibility / pagehide handlers
   // (see boot()) flush the pending save eagerly to close the gap when
@@ -620,7 +534,7 @@
   }
 
   // Render one group's tab strip from its own `tabIds` (NOT the global
-  // `tabs[]` order â€” each group has its own ordering). The "active" tab
+  // `tabs[]` order — each group has its own ordering). The "active" tab
   // class reflects the group's own activeTabId; clicking a tab focuses
   // its group as a side effect, so visual focus follows interaction.
   function renderTabStripForGroup(group) {
@@ -639,8 +553,8 @@
       if (t.pinned) {
         const pin = document.createElement('span');
         pin.className = 'pin';
-        pin.textContent = 'ðŸ“Œ';
-        pin.title = 'Pinned â€” right-click to unpin';
+        pin.textContent = '📌';
+        pin.title = 'Pinned — right-click to unpin';
         div.appendChild(pin);
       }
 
@@ -650,8 +564,8 @@
       if (t.running) {
         const spinner = document.createElement('span');
         spinner.className = 'running-indicator';
-        spinner.textContent = 'â³';
-        spinner.title = 'Query running â€” Esc on this tab to cancel';
+        spinner.textContent = '⏳';
+        spinner.title = 'Query running — Esc on this tab to cancel';
         div.appendChild(spinner);
       }
 
@@ -668,17 +582,17 @@
       if (t.sql !== t.sqlOfLastRun) {
         const dirty = document.createElement('span');
         dirty.className = 'dirty';
-        dirty.textContent = 'â—';
+        dirty.textContent = '●';
         dirty.title = 'unsaved changes since last run';
         div.appendChild(dirty);
       }
 
       // Pinned tabs hide the close button so an accidental click can't drop
-      // the work; the tab can still be closed via right-click â†’ Unpin â†’ Close.
+      // the work; the tab can still be closed via right-click → Unpin → Close.
       if (!t.pinned) {
         const close = document.createElement('button');
         close.className = 'close';
-        close.textContent = 'Ã—';
+        close.textContent = '×';
         close.title = 'Close tab';
         close.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -689,7 +603,7 @@
 
       div.addEventListener('click', () => activateTab(t.id));
       // Middle-click closes (browser-tab convention). Pinned tabs are
-      // protected â€” same rule as the Ã— button.
+      // protected — same rule as the × button.
       div.addEventListener('auxclick', (e) => {
         if (e.button !== 1 || t.pinned) return;
         e.preventDefault();
@@ -756,18 +670,18 @@
 
     // Per-pane orient toggle: flips this pane's editor/results stack
     // between vertical (default) and horizontal (side-by-side). The
-    // divider line in the SVG previews the *target* state â€” clicking
+    // divider line in the SVG previews the *target* state — clicking
     // produces the layout the icon depicts.
     const orientBtn = document.createElement('button');
     orientBtn.className = 'strip-orient-toggle';
-    orientBtn.title = 'Toggle this pane\'s editor/results layout (vertical â†” side-by-side)';
+    orientBtn.title = 'Toggle this pane\'s editor/results layout (vertical ↔ side-by-side)';
     orientBtn.setAttribute('aria-label', 'Toggle pane layout');
     const horizontal = group.editorOrientation === 'horizontal';
     orientBtn.innerHTML =
       '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">' +
       '<rect x="3" y="4" width="18" height="16" rx="1"></rect>' +
-      // Target = opposite of current: horizontal pane â†’ click produces
-      // a vertical (stacked) layout â†’ horizontal divider line.
+      // Target = opposite of current: horizontal pane → click produces
+      // a vertical (stacked) layout → horizontal divider line.
       `<line class="orient-toggle-divider" ${horizontal
         ? 'x1="3" y1="12" x2="21" y2="12"'
         : 'x1="12" y1="4" x2="12" y2="20"'}></line>` +
@@ -818,7 +732,7 @@
     persistWorkspace();
   }
 
-  // Custom context menu â€” single shared element, repositioned on each open.
+  // Custom context menu — single shared element, repositioned on each open.
   // Dismissed by any outside pointerdown, scroll, resize, or Escape.
   let tabContextMenu = null;
   function showTabContextMenu(x, y, tabId) {
@@ -839,8 +753,8 @@
       const s = document.createElement('div'); s.className = 'sep'; menu.appendChild(s);
     };
 
-    addItem('Renameâ€¦', () => {
-      // Re-find the live name span â€” renderTabStrip may have rebuilt the DOM.
+    addItem('Rename…', () => {
+      // Re-find the live name span — renderTabStrip may have rebuilt the DOM.
       const nameEl = focusedGroupEl().querySelector(`.tab-strip .tab[data-id="${tabId}"] .name`);
       if (nameEl) beginRenameTab(tabId, nameEl);
     });
@@ -952,7 +866,7 @@
     if (!before) toIdx += 1;
     dstGroup.tabIds.splice(toIdx, 0, draggedId);
 
-    // Drop activates the moved tab in dst, and focus follows the drop â€”
+    // Drop activates the moved tab in dst, and focus follows the drop —
     // the user just told us "I want this tab here", so make it current.
     dstGroup.activeTabId = draggedId;
     state.workspace.focusedGroupId = dstGroup.id;
@@ -960,7 +874,7 @@
     // Recover src: if the active tab moved away, fall back to the first
     // remaining; if src is now empty, dissolve it (always allowed in
     // multi-group state since the user explicitly moved its last tab
-    // out â€” symmetric to closing the last tab in a non-only group).
+    // out — symmetric to closing the last tab in a non-only group).
     if (srcGroup.tabIds.length === 0) {
       dissolveGroup(srcGroup.id);
     } else if (srcGroup.activeTabId === draggedId) {
@@ -984,7 +898,7 @@
   async function closeTab(id) {
     const tab = state.workspace.tabs.find(t => t.id === id);
     if (!tab) return;
-    // Pinned tabs are protected â€” unpin first to close.
+    // Pinned tabs are protected — unpin first to close.
     if (tab.pinned) return;
     if (tab.sql && tab.sql !== tab.sqlOfLastRun) {
       const ok = await confirmModal('Close tab', `"${tab.name}" has unsaved changes since last run. Close anyway?`);
@@ -1008,7 +922,7 @@
       containingGroup.tabIds = containingGroup.tabIds.filter(tid => tid !== id);
       if (containingGroup.tabIds.length === 0) {
         if (state.workspace.groups.length === 1) {
-          // Last tab in the only group â†’ seed a fresh tab so the user
+          // Last tab in the only group → seed a fresh tab so the user
           // never lands in an empty workspace.
           const fresh = freshTab(1);
           state.workspace.tabs.push(fresh);
@@ -1034,14 +948,14 @@
   // We keep one Monaco editor *per group* and swap models per tab. Each tab has
   // its own ITextModel, so cursor position, scroll, and undo stack survive
   // tab switches. Until Monaco loads we use a textarea fallback (also one
-  // per group). Models stay 1:1 with tabs and are shared across editors â€”
+  // per group). Models stay 1:1 with tabs and are shared across editors —
   // a tab lives in exactly one group at a time, so its model is attached
   // to at most one editor at a time.
   const monacoEditorsByGroup = new Map();        // groupId -> IStandaloneCodeEditor
   const monacoModels = new Map();                // tabId -> ITextModel
   const fallbackTextareasByGroup = new Map();    // groupId -> HTMLTextAreaElement
 
-  // Convenience accessors â€” reads/writes that used to operate on the lone
+  // Convenience accessors — reads/writes that used to operate on the lone
   // singleton route through the focused group. When a second group exists
   // (step 3b+) the Run button, keyboard shortcuts, and selection capture
   // continue to target whichever pane the user last interacted with.
@@ -1092,7 +1006,7 @@
   }
 
   // Stand up the textarea fallback inside one group's editor host. Each
-  // group gets its own textarea instance keyed by groupId â€” tabs in that
+  // group gets its own textarea instance keyed by groupId — tabs in that
   // group share it the same way they share the group's Monaco editor.
   function bootFallbackForGroup(groupId) {
     if (fallbackTextareasByGroup.has(groupId)) return;   // already booted
@@ -1121,7 +1035,7 @@
       }
     });
     ta.addEventListener('input', () => {
-      // Edits go to whichever tab is active in *this* group â€” not the
+      // Edits go to whichever tab is active in *this* group — not the
       // focused group, in case the user is typing into a non-focused pane.
       const group = state.workspace.groups.find(g => g.id === groupId);
       if (!group) return;
@@ -1173,7 +1087,7 @@
 
       // Disable Monaco's word-based suggestion fallback. Default since
       // Monaco 0.34 is 'matchingDocuments', which scrapes words from
-      // every open SQL tab and offers them as plain Text completions â€”
+      // every open SQL tab and offers them as plain Text completions —
       // so a tab containing `system_models` makes the column name
       // `backend` surface in unrelated zones (e.g. typing `b` at the
       // start of an empty file). The DatumIngest language server is
@@ -1183,8 +1097,8 @@
     });
 
     // Ctrl/Cmd+Enter is handled at window-level (see boot()) so it
-    // routes by `focusedGroupId` â€” which the pane's pointerdown handler
-    // updates on every click â€” instead of by Monaco's per-editor
+    // routes by `focusedGroupId` — which the pane's pointerdown handler
+    // updates on every click — instead of by Monaco's per-editor
     // keyboard-focus, which can desync from the user's intent if they
     // clicked the pane's chrome rather than its editor host.
     editor.onDidFocusEditorWidget(() => {
@@ -1240,13 +1154,13 @@
     if (!window.monaco) return;
 
     // Replace Monaco's built-in 'sql' tokenizer with the DatumIngest grammar
-    // so backtick template strings, ${â€¦} splices, and dialect-specific
+    // so backtick template strings, ${…} splices, and dialect-specific
     // keywords/types render with the right colors. Fetch is async; if it
     // fails we just keep the default tokenizer (everything still works,
     // backticks just render as identifiers).
     // Models created before this resolves are tokenized with Monaco's
     // built-in 'sql' grammar, which doesn't know about backtick template
-    // strings â€” they render as a sequence of identifiers/operators with
+    // strings — they render as a sequence of identifiers/operators with
     // no error. Swapping the provider does NOT retokenize existing
     // models, so we re-set each model's language to 'sql' to force a
     // fresh tokenization pass with the new grammar.
@@ -1287,7 +1201,7 @@
 
       // Auto-close pairs are suppressed when the cursor is in a string or
       // comment context (per the Monarch tokenizer's classes). That stops
-      // `'` from auto-closing inside a backtick template body â€” the
+      // `'` from auto-closing inside a backtick template body — the
       // tokenizer tags the body as `string`, so `notIn: ['string']`
       // applies.
       autoClosingPairs: [
@@ -1311,16 +1225,16 @@
 
     monaco.languages.registerCompletionItemProvider('sql', {
       // '\n' was here too, but it caused the suggest popup to appear every
-      // time the user pressed Enter for a fresh line â€” and Monaco then
+      // time the user pressed Enter for a fresh line — and Monaco then
       // selects the first match (alphabetically near 'ALTER'), so an
       // unsuspecting Enter to confirm gobbles the wrong word. Trigger only
       // on intent-bearing characters: word boundary (space) and member
       // access (dot). Argument separators ('(' and ',') are NOT triggers
-      // here â€” those fire signature help instead, and having both fire on
+      // here — those fire signature help instead, and having both fire on
       // the same character causes the completions popup to render in
       // front of and obscure the signature tooltip. Inside an arg list
       // the user can still pull up completions explicitly via Ctrl+Space,
-      // or just start typing â€” Monaco's quick-suggestions kick in on
+      // or just start typing — Monaco's quick-suggestions kick in on
       // letters.
       triggerCharacters: [' ', '.'],
       provideCompletionItems: async (model, position) => {
@@ -1413,7 +1327,7 @@
       },
     });
 
-    // Diagnostics â€” debounced. Re-run on any model content change. Markers
+    // Diagnostics — debounced. Re-run on any model content change. Markers
     // are written directly with monaco.editor.setModelMarkers under the
     // owner key 'datum-ingest' so we own the namespace cleanly.
     let diagnoseTimer = null;
@@ -1514,8 +1428,8 @@
     if (!tab) return;
 
     // The mediaUrlCollector swap below keeps blob-URL ownership pinned to
-    // this group across the synchronous render call chain (renderResult â†’
-    // renderCell â†’ dataB64ToBlobUrl). We wrap each render entry-point
+    // this group across the synchronous render call chain (renderResult →
+    // renderCell → dataB64ToBlobUrl). We wrap each render entry-point
     // because awaiting IDB in this function would otherwise let a sibling
     // group's render clobber the collector before our sync work runs.
     let groupUrls = mediaObjectUrlsByGroup.get(group.id);
@@ -1544,7 +1458,7 @@
     if (tab.lastResult === undefined) {
       const loading = document.createElement('div');
       loading.className = 'meta';
-      loading.textContent = 'Loading saved resultâ€¦';
+      loading.textContent = 'Loading saved result…';
       results.appendChild(loading);
       const captureTabId = tab.id;
       const captureWs = workspaceName();
@@ -1575,7 +1489,7 @@
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent = tab.lastRunAt
-        ? '(saved result not found â€” re-run to see it)'
+        ? '(saved result not found — re-run to see it)'
         : 'No results yet. Press Run.';
       results.appendChild(meta);
       return;
@@ -1585,12 +1499,12 @@
     if (!r.error) {
       const rowText = `${r.rowCount} ${r.rowCount === 1 ? 'row' : 'rows'}`;
       const timeText = typeof r.elapsedMs === 'number' ? `${(r.elapsedMs / 1000).toFixed(2)} s` : '';
-      elapsed.textContent = timeText ? `${rowText} Â· ${timeText}` : rowText;
+      elapsed.textContent = timeText ? `${rowText} · ${timeText}` : rowText;
     }
   }
 
   // Renders the partial state of a query that's still in flight on this
-  // tab â€” invoked when the user switches back to a running tab. Rebuilds
+  // tab — invoked when the user switches back to a running tab. Rebuilds
   // any streaming chunks from the accumulator and lists how many rows
   // have arrived. The live ticker on the `.elapsed` slot paints the elapsed time
   // from its next 250ms tick.
@@ -1598,12 +1512,12 @@
     const res = tab.runningRes;
     const meta = document.createElement('div');
     meta.className = 'meta';
-    meta.textContent = `Runningâ€¦ (Esc to cancel) Â· ${res.rowCount.toLocaleString()} ${res.rowCount === 1 ? 'row' : 'rows'} so far`;
+    meta.textContent = `Running… (Esc to cancel) · ${res.rowCount.toLocaleString()} ${res.rowCount === 1 ? 'row' : 'rows'} so far`;
     container.appendChild(meta);
 
     if (res.chunks && res.chunks.length > 0) {
       // Rebuild the live token-stream pane from the accumulated chunks.
-      // The live append path in run() will continue from this point â€”
+      // The live append path in run() will continue from this point —
       // checking `streamPane` truthy in the chunk handler now hits the
       // newly-attached element.
       const header = document.createElement('div');
@@ -1622,14 +1536,14 @@
   }
 
   // Refresh every group's toolbar to match its own active tab. Each
-  // group's toolbar reflects ITS active tab's settings â€” Run button
-  // label, maxRows, trace â€” so the two panes stay independent. The
+  // group's toolbar reflects ITS active tab's settings — Run button
+  // label, maxRows, trace — so the two panes stay independent. The
   // header status only reflects the focused group.
   function syncToolbarToActiveTab() {
     for (const g of state.workspace.groups) syncToolbarForGroup(g);
     const status = document.getElementById('status');
     const tab = activeTab();
-    status.textContent = (tab && tab.running) ? 'runningâ€¦ (Esc to cancel)' : '';
+    status.textContent = (tab && tab.running) ? 'running… (Esc to cancel)' : '';
     // Header icons reflect focused-group state (which can change when
     // the user clicks into a non-focused pane).
     updateSplitButtonIcon();
@@ -1654,7 +1568,7 @@
     runBtn.textContent = tab.running ? 'Cancel' : 'Run';
     runBtn.title = tab.running
       ? 'Stop the in-flight query for this tab (Esc)'
-      : 'Run the SQL in this tab (Ctrl/âŒ˜+Enter)';
+      : 'Run the SQL in this tab (Ctrl/⌘+Enter)';
     maxRowsInput.disabled = false;
     traceToggle.disabled = false;
     maxRowsInput.value = tab.maxRows || 200;
@@ -1672,14 +1586,14 @@
       heading.className = 'meta result-set-label';
       const rowCount = set.rowCount ?? (set.rows ? set.rows.length : 0);
       heading.textContent =
-        `Result ${label} Â· ${rowCount.toLocaleString()} ${rowCount === 1 ? 'row' : 'rows'}`;
+        `Result ${label} · ${rowCount.toLocaleString()} ${rowCount === 1 ? 'row' : 'rows'}`;
       container.appendChild(heading);
     }
 
     if (set.truncated) {
       const w = document.createElement('div');
       w.className = 'warn';
-      w.textContent = `âš  Truncated at ${set.rowCount} rows (raise the max rows control to see more).`;
+      w.textContent = `⚠ Truncated at ${set.rowCount} rows (raise the max rows control to see more).`;
       container.appendChild(w);
     }
 
@@ -1728,7 +1642,7 @@
 
     // One entry per row-producing statement. Each renders as its own
     // table so multi-statement scripts don't conflate schemas. The "Result N"
-    // heading only appears when there's more than one â€” single-statement
+    // heading only appears when there's more than one — single-statement
     // runs render exactly as they did before.
     const sets = res.resultSets ?? [];
     sets.forEach((set, index) => {
@@ -1759,7 +1673,7 @@
   }
 
   // Object URLs created for the currently-rendered media cells. Tracked so
-  // we can revoke them on the next render â€” without revocation the browser
+  // we can revoke them on the next render — without revocation the browser
   // would hold the underlying blobs alive indefinitely (a few MB per image
   // adds up across runs).
   // Per-group URL tracking. With two panes rendering concurrently, a
@@ -1772,7 +1686,7 @@
   // render media cells set this to the right group's list immediately
   // before the synchronous rendering call and restore it after. Using
   // a module-level flag works only because the cell-rendering call
-  // chain (renderResult â†’ renderCell â†’ dataB64ToBlobUrl) is fully
+  // chain (renderResult → renderCell → dataB64ToBlobUrl) is fully
   // synchronous; no await separates the assignment from the use.
   let mediaUrlCollector = null;
   function revokeMediaObjectUrlsForGroup(groupId) {
@@ -1782,7 +1696,7 @@
     mediaObjectUrlsByGroup.set(groupId, []);
   }
 
-  // Decode base64 â†’ Blob â†’ object URL. Used in place of `data:` URLs for
+  // Decode base64 → Blob → object URL. Used in place of `data:` URLs for
   // image / audio / video cells: blob URLs aren't subject to Chromium's
   // ~2 MB URL-length limit, so right-click "Open image in new tab" works
   // reliably regardless of the image's encoded size.
@@ -1799,7 +1713,7 @@
   // Hover-revealed copy button. `getText` is a thunk so JSON cells can copy
   // their pretty-printed display text (which the renderer computes once
   // and stores on the <pre>) without us having to capture it eagerly.
-  // Skipped for media cells â€” copying base64 image bytes isn't useful and
+  // Skipped for media cells — copying base64 image bytes isn't useful and
   // would clobber the clipboard with megabytes of text.
   const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6">'
     + '<rect x="9" y="9" width="11" height="11" rx="1.5"></rect>'
@@ -1815,7 +1729,7 @@
     btn.setAttribute('aria-label', 'Copy cell value');
     btn.innerHTML = COPY_ICON_SVG;
     btn.addEventListener('click', async (e) => {
-      // Don't bubble into the cell â€” image cells handle clicks for the
+      // Don't bubble into the cell — image cells handle clicks for the
       // lightbox, and we don't want a stray copy click to also expand.
       e.stopPropagation();
       try {
@@ -1833,151 +1747,7 @@
     td.appendChild(btn);
   }
 
-  /// Renders a parsed JSON value as a collapsible DOM tree. Used by the
-  /// json cell renderer in place of a flat pretty-printed string.
-  ///
-  /// Shape rules:
-  ///   - Primitives (string / number / boolean / null) render inline with
-  ///     a syntax-coloured span.
-  ///   - Empty objects render as `{}`, empty arrays as `[]` (no toggle).
-  ///   - Non-empty objects/arrays render as <details>: a summary line
-  ///     showing `{` plus a count preview ("3 keys" / "5 items"), and a
-  ///     children block with each entry on its own row. The preview line
-  ///     also shows a tiny inline glimpse of the first one or two values
-  ///     so collapsed structures still hint at their shape.
-  function renderJsonNode(value, depth = 0) {
-    if (value === null) {
-      const span = document.createElement('span');
-      span.className = 'json-null';
-      span.textContent = 'null';
-      return span;
-    }
-    const t = typeof value;
-    if (t === 'string') {
-      const span = document.createElement('span');
-      span.className = 'json-string';
-      span.textContent = JSON.stringify(value);
-      return span;
-    }
-    if (t === 'number') {
-      const span = document.createElement('span');
-      span.className = 'json-number';
-      span.textContent = String(value);
-      return span;
-    }
-    if (t === 'boolean') {
-      const span = document.createElement('span');
-      span.className = 'json-boolean';
-      span.textContent = value ? 'true' : 'false';
-      return span;
-    }
-    if (Array.isArray(value)) {
-      return renderJsonArray(value, depth);
-    }
-    if (t === 'object') {
-      return renderJsonObject(value, depth);
-    }
-    // Fallback for exotic types (BigInt, etc.) â€” shouldn't appear from
-    // JSON.parse but cover the case so the renderer never throws.
-    const span = document.createElement('span');
-    span.textContent = String(value);
-    return span;
-  }
-
-  function renderJsonObject(obj, depth) {
-    const keys = Object.keys(obj);
-    if (keys.length === 0) {
-      const span = document.createElement('span');
-      span.className = 'json-bracket';
-      span.textContent = '{}';
-      return span;
-    }
-    const details = document.createElement('details');
-    // Top level opens by default (shallow objects show their fields at
-    // a glance), nested levels stay collapsed so deep LLM-style payloads
-    // don't dominate the cell. Users click to drill down.
-    details.open = depth === 0;
-    const summary = document.createElement('summary');
-    const opener = document.createElement('span');
-    opener.className = 'json-bracket';
-    opener.textContent = '{';
-    summary.appendChild(opener);
-    const preview = document.createElement('span');
-    preview.className = 'json-summary-preview';
-    preview.textContent = `${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`;
-    summary.appendChild(preview);
-    details.appendChild(summary);
-
-    const children = document.createElement('div');
-    children.className = 'json-children';
-    keys.forEach((key, i) => {
-      const row = document.createElement('span');
-      row.className = 'json-row';
-      const k = document.createElement('span');
-      k.className = 'json-key';
-      k.textContent = JSON.stringify(key);
-      row.appendChild(k);
-      row.appendChild(document.createTextNode(': '));
-      row.appendChild(renderJsonNode(obj[key], depth + 1));
-      if (i < keys.length - 1) {
-        const comma = document.createElement('span');
-        comma.className = 'json-comma';
-        comma.textContent = ',';
-        row.appendChild(comma);
-      }
-      children.appendChild(row);
-    });
-    details.appendChild(children);
-
-    const closer = document.createElement('span');
-    closer.className = 'json-bracket';
-    closer.textContent = '}';
-    details.appendChild(closer);
-    return details;
-  }
-
-  function renderJsonArray(arr, depth) {
-    if (arr.length === 0) {
-      const span = document.createElement('span');
-      span.className = 'json-bracket';
-      span.textContent = '[]';
-      return span;
-    }
-    const details = document.createElement('details');
-    details.open = depth === 0;
-    const summary = document.createElement('summary');
-    const opener = document.createElement('span');
-    opener.className = 'json-bracket';
-    opener.textContent = '[';
-    summary.appendChild(opener);
-    const preview = document.createElement('span');
-    preview.className = 'json-summary-preview';
-    preview.textContent = `${arr.length} ${arr.length === 1 ? 'item' : 'items'}`;
-    summary.appendChild(preview);
-    details.appendChild(summary);
-
-    const children = document.createElement('div');
-    children.className = 'json-children';
-    arr.forEach((item, i) => {
-      const row = document.createElement('span');
-      row.className = 'json-row';
-      row.appendChild(renderJsonNode(item, depth + 1));
-      if (i < arr.length - 1) {
-        const comma = document.createElement('span');
-        comma.className = 'json-comma';
-        comma.textContent = ',';
-        row.appendChild(comma);
-      }
-      children.appendChild(row);
-    });
-    details.appendChild(children);
-
-    const closer = document.createElement('span');
-    closer.className = 'json-bracket';
-    closer.textContent = ']';
-    details.appendChild(closer);
-    return details;
-  }
+  // renderJsonNode/Object/Array — see ./json-render.ts
 
   function renderCell(cell) {
     const td = document.createElement('td');
@@ -2033,14 +1803,14 @@
       const note = document.createElement('div');
       note.className = 'blob';
       const bytes = Math.floor((cell.dataB64.length * 3) / 4);
-      note.textContent = `${cell.mime} Â· ${bytes.toLocaleString()} bytes`;
+      note.textContent = `${cell.mime} · ${bytes.toLocaleString()} bytes`;
       td.appendChild(note);
       return td;
     }
     if (cell.kind === 'json') {
-      // Server already decoded CBOR â†’ JSON text. Render as a collapsible
+      // Server already decoded CBOR → JSON text. Render as a collapsible
       // tree so deep structures stay inspectable without taking over the
-      // cell. If the text doesn't parse (shouldn't happen â€” the server
+      // cell. If the text doesn't parse (shouldn't happen — the server
       // only emits this kind on successful decode), fall back to a flat
       // pretty-printed pre.
       const text = cell.text ?? '';
@@ -2099,7 +1869,7 @@
   async function run() {
     const tab = activeTab();
     if (!tab) return;
-    if (tab.running) return;  // already running on THIS tab â€” Cancel button handles abort
+    if (tab.running) return;  // already running on THIS tab — Cancel button handles abort
 
     // If text is highlighted, run just that fragment; otherwise run the
     // whole tab. Trim AFTER picking so leading/trailing whitespace in a
@@ -2121,7 +1891,7 @@
       // multi-statement scripts render one table per statement instead
       // of fighting over a single shared one.
       resultSets: [],
-      // Aggregate row count across all sets â€” surfaced in the running
+      // Aggregate row count across all sets — surfaced in the running
       // toolbar status as "N rows so far".
       rowCount: 0,
       elapsedMs: 0,
@@ -2159,11 +1929,11 @@
     renderTabStrip();
     {
       const results = liveResultsPane();
-      if (results) results.innerHTML = '<div class="meta">Runningâ€¦ (Esc to cancel)</div>';
+      if (results) results.innerHTML = '<div class="meta">Running… (Esc to cancel)</div>';
     }
 
     // Live tick on the toolbar's elapsed slot. Only paints while the tab
-    // is the active one in some group â€” switching tabs leaves the
+    // is the active one in some group — switching tabs leaves the
     // visible elapsed slot showing the new active tab's static stats,
     // not a clobbered live value from a backgrounded run.
     function paintLiveStats() {
@@ -2172,7 +1942,7 @@
       const seconds = (performance.now() - tab.runStartedAt) / 1000;
       const rows = tab.runningRes.rowCount;
       const rowText = `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}`;
-      slot.textContent = `${rowText} Â· ${seconds.toFixed(1)} s (running)`;
+      slot.textContent = `${rowText} · ${seconds.toFixed(1)} s (running)`;
     }
     paintLiveStats();
     tab.liveTickHandle = setInterval(paintLiveStats, 250);
@@ -2183,7 +1953,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sql,
-          // Per-tab settings â€” each tab remembers its own row cap and
+          // Per-tab settings — each tab remembers its own row cap and
           // trace toggle so switching tabs doesn't change the next run's
           // shape.
           maxRows: tab.maxRows || 200,
@@ -2201,7 +1971,7 @@
         }
       } else {
         // Clear the placeholder if the tab is being displayed somewhere
-        // â€” events render in place from here.
+        // — events render in place from here.
         {
           const results = liveResultsPane();
           if (results) results.innerHTML = '';
@@ -2269,7 +2039,7 @@
           res.chunks.push({ model: event.model, text: event.text });
           if (isActive) {
             // After a tab switch-back, our closure's streamPane may be
-            // stale (the DOM was wiped) â€” but renderRunningTab already
+            // stale (the DOM was wiped) — but renderRunningTab already
             // rebuilt the pane from res.chunks. Re-grab it from the DOM
             // before appending so we don't end up with two duplicate
             // streaming panes one above the other.
@@ -2296,7 +2066,7 @@
           break;
         case 'row':
           // Attach to the current result set (the most-recent schema's).
-          // If a row arrives before any schema (defensive â€” shouldn't
+          // If a row arrives before any schema (defensive — shouldn't
           // happen on the wire), open a placeholder set to anchor it.
           {
             let cur = res.resultSets[res.resultSets.length - 1];
@@ -2373,7 +2143,7 @@
     if (!tab || !tab.running || !tab.abortController) return;
     tab.abortController.abort();
     const status = document.getElementById('status');
-    if (status) status.textContent = 'cancellingâ€¦';
+    if (status) status.textContent = 'cancelling…';
   }
 
   // ===== Workspace switcher =====
@@ -2397,7 +2167,7 @@
       return;
     }
     if (listWorkspaces().includes(name)) {
-      // Already exists â€” just switch.
+      // Already exists — just switch.
       location.hash = name === 'default' ? '' : name;
       return;
     }
@@ -2422,7 +2192,7 @@
     persistWorkspace();
     const name = workspaceName();
     registerWorkspace(name);
-    // Workspace switch invalidates every group's editor â€” the new
+    // Workspace switch invalidates every group's editor — the new
     // workspace may have a different group layout entirely. Tear them
     // down before swapping state so reconcileGroupDom rebuilds cleanly.
     for (const editor of monacoEditorsByGroup.values()) {
@@ -2452,14 +2222,14 @@
   // is how Window A learns about Window B's saves without a reload.
   //
   // Three keys are interesting:
-  //   STORE.workspace(<currentName>) â€” our workspace was just rewritten by
+  //   STORE.workspace(<currentName>) — our workspace was just rewritten by
   //     another window. Merge in any new tabs and apply remote tombstones.
-  //   STORE.workspaces â€” the workspace registry changed (another window
+  //   STORE.workspaces — the workspace registry changed (another window
   //     created or deleted a workspace). Refresh the dropdown.
-  //   STORE.theme â€” the user toggled theme in another window. Mirror it.
+  //   STORE.theme — the user toggled theme in another window. Mirror it.
   //
   // We deliberately don't try to reconcile *content edits* on tabs that
-  // exist in both windows â€” picking up a remote edit mid-typing would
+  // exist in both windows — picking up a remote edit mid-typing would
   // stomp the local user's keystrokes. In-memory always wins for tabs we
   // already have; only adds and remote-tombstone removals propagate.
   function applyRemoteWorkspaceSnapshot(onDisk) {
@@ -2472,7 +2242,7 @@
     let tabsChanged = false;
     let activeMissing = false;
 
-    // Apply remote tombstones first â€” drop tabs another window deleted.
+    // Apply remote tombstones first — drop tabs another window deleted.
     for (const id of diskTombs) {
       if (localTombs.has(id)) continue;       // already gone here
       const idx = state.workspace.tabs.findIndex(t => t.id === id);
@@ -2488,7 +2258,7 @@
       if (id === state.workspace.activeTabId) activeMissing = true;
     }
 
-    // Add tabs we don't have. Skip anything we tombstoned locally â€” our
+    // Add tabs we don't have. Skip anything we tombstoned locally — our
     // delete is fresher than disk's "still alive" view (next save will
     // propagate the tombstone to disk). Newly-arrived tabs land in the
     // focused group (where to assign them is otherwise ambiguous; users
@@ -2551,14 +2321,14 @@
       // cross-window changes here.
       if (!e.key) return;
 
-      // Workspace registry changed â€” refresh the dropdown so newly created
+      // Workspace registry changed — refresh the dropdown so newly created
       // workspaces from other windows show up immediately.
       if (e.key === STORE.workspaces) {
         rebuildWsSelect();
         return;
       }
 
-      // Theme toggled in another window â€” mirror it.
+      // Theme toggled in another window — mirror it.
       if (e.key === STORE.theme && e.newValue) {
         applyTheme(e.newValue);
         return;
@@ -2575,103 +2345,13 @@
     });
   }
 
-  // ===== Modal helpers (alert/confirm/prompt) =====
-  function showModal(buildContent) {
-    return new Promise((resolve) => {
-      const root = document.getElementById('modal-root');
-      const backdrop = document.createElement('div');
-      backdrop.className = 'modal-backdrop';
-      const modal = document.createElement('div');
-      modal.className = 'modal';
-      backdrop.appendChild(modal);
-      root.appendChild(backdrop);
-      const close = (value) => { root.removeChild(backdrop); resolve(value); };
-      buildContent(modal, close);
-      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(null); });
-    });
-  }
-  function alertModal(title, message) {
-    return showModal((modal, close) => {
-      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
-      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
-      const actions = document.createElement('div'); actions.className = 'actions';
-      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
-      ok.addEventListener('click', () => close(true));
-      actions.appendChild(ok); modal.appendChild(actions); ok.focus();
-    });
-  }
-  function confirmModal(title, message) {
-    return showModal((modal, close) => {
-      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
-      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
-      const actions = document.createElement('div'); actions.className = 'actions';
-      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
-      cancel.addEventListener('click', () => close(false));
-      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
-      ok.addEventListener('click', () => close(true));
-      actions.appendChild(cancel); actions.appendChild(ok); modal.appendChild(actions);
-      ok.focus();
-    });
-  }
-  function promptModal(title, message, defaultValue = '') {
-    return showModal((modal, close) => {
-      const h = document.createElement('h3'); h.textContent = title; modal.appendChild(h);
-      const p = document.createElement('p'); p.textContent = message; modal.appendChild(p);
-      const input = document.createElement('input'); input.type = 'text'; input.value = defaultValue;
-      modal.appendChild(input);
-      const actions = document.createElement('div'); actions.className = 'actions';
-      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
-      cancel.addEventListener('click', () => close(null));
-      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'OK';
-      ok.addEventListener('click', () => close(input.value));
-      actions.appendChild(cancel); actions.appendChild(ok); modal.appendChild(actions);
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') close(input.value);
-        if (e.key === 'Escape') close(null);
-      });
-      input.focus(); input.select();
-    });
-  }
-
-  // Image lightbox. Built ad-hoc rather than via showModal so the backdrop
-  // can swallow clicks anywhere outside the image (the standard modal only
-  // closes when clicking the backdrop element directly, which would conflict
-  // with the close-button positioning). Restores body scroll and removes the
-  // Escape listener on close so multiple opens don't stack handlers.
-  function openImageLightbox(url) {
-    const root = document.getElementById('modal-root');
-    const backdrop = document.createElement('div');
-    backdrop.className = 'lightbox-backdrop';
-    const img = document.createElement('img');
-    img.src = url; img.alt = '';
-    const close = document.createElement('button');
-    close.className = 'lightbox-close';
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Close');
-    close.textContent = 'âœ•';
-    backdrop.appendChild(img);
-    backdrop.appendChild(close);
-    root.appendChild(backdrop);
-
-    const dismiss = () => {
-      document.removeEventListener('keydown', onKey);
-      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-    };
-    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
-    backdrop.addEventListener('click', (e) => {
-      // Click on the image itself shouldn't dismiss â€” only clicks on the
-      // surrounding backdrop or the close button.
-      if (e.target === backdrop || e.target === close) dismiss();
-    });
-    img.addEventListener('click', (e) => e.stopPropagation());
-    document.addEventListener('keydown', onKey);
-  }
+  // Modal helpers (alert/confirm/prompt) + image lightbox — see ./modal.ts
 
   // ===== Catalog sidebar =====
   // Activity-bar-driven panel listing the user's catalog (tables, UDFs,
   // procedures, built-in functions, models) with right-click templates that
   // scaffold queries into new tabs. Backend data comes either from the
-  // existing /api/tables endpoint or â€” for the system_* virtual tables â€”
+  // existing /api/tables endpoint or — for the system_* virtual tables —
   // a regular /api/query call. State (active section, collapsed flag,
   // width) lives in localStorage.
   const SIDEBAR_STORE = {
@@ -2747,7 +2427,7 @@
     });
 
     // Ctrl+B (Cmd+B on Mac) toggles the sidebar collapsed/expanded. The
-    // listener is window-level so it fires even when Monaco has focus â€”
+    // listener is window-level so it fires even when Monaco has focus —
     // and we preventDefault to suppress the browser's "toggle bookmarks
     // bar" default. We bypass when a text input outside the editor has
     // focus so the user can still type a literal "b" with modifiers in
@@ -2807,7 +2487,7 @@
   // changed. Best-effort: a regex tells us "the SQL mentions a CREATE/DROP/
   // ALTER FUNCTION/PROCEDURE/TABLE statement" and we invalidate the matching
   // section. False positives (e.g. those tokens inside a string literal) are
-  // harmless â€” at worst we re-fetch a section that didn't actually change.
+  // harmless — at worst we re-fetch a section that didn't actually change.
   function refreshSidebarForSql(sql) {
     if (!sql) return;
     const text = String(sql);
@@ -2870,13 +2550,13 @@
   async function loadSection(name) {
     const content = document.getElementById('sidebar-content');
     if (sidebarCache[name]) {
-      // Rendered DOM survives a section switch â€” re-attach instead of
+      // Rendered DOM survives a section switch — re-attach instead of
       // re-rendering. (Fast path; refresh button clears the cache.)
       content.replaceChildren(sidebarCache[name]);
       return;
     }
 
-    content.replaceChildren(htmlNode('<div class="empty-state">Loadingâ€¦</div>'));
+    content.replaceChildren(htmlNode('<div class="empty-state">Loading…</div>'));
 
     try {
       let frag;
@@ -2897,23 +2577,13 @@
     }
   }
 
-  function htmlNode(html) {
-    const tpl = document.createElement('template');
-    tpl.innerHTML = html.trim();
-    return tpl.content.firstChild;
-  }
+  // htmlNode, escapeHtml — see ./html-util.ts
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    })[c]);
-  }
-
-  // â”€â”€â”€â”€â”€ Section loaders â”€â”€â”€â”€â”€
+  // ───── Section loaders ─────
 
   async function loadTablesSection() {
     const res = await fetch('/api/tables');
-    if (!res.ok) throw new Error(`/api/tables â†’ ${res.status}`);
+    if (!res.ok) throw new Error(`/api/tables → ${res.status}`);
     const tables = await res.json();
     if (!Array.isArray(tables) || tables.length === 0) {
       return htmlNode('<div class="empty-state">No tables registered.</div>');
@@ -2969,10 +2639,10 @@
 
   async function loadFunctionsSection() {
     // Built-in functions come from the LanguageServer's static manifest, not
-    // a virtual SQL table â€” they're fixed at startup and the manifest is the
+    // a virtual SQL table — they're fixed at startup and the manifest is the
     // canonical source. Endpoint pre-filters internal `__` helpers.
     const res = await fetch('/api/lang/functions');
-    if (!res.ok) throw new Error(`/api/lang/functions â†’ ${res.status}`);
+    if (!res.ok) throw new Error(`/api/lang/functions → ${res.status}`);
     const fns = await res.json();
     if (!Array.isArray(fns) || fns.length === 0) {
       return htmlNode('<div class="empty-state">No functions found.</div>');
@@ -2983,7 +2653,7 @@
       container.appendChild(renderTreeNode({
         name: f.name,
         meta: f.category || '',
-        popover: `${sig}${f.returnType ? ' â†’ ' + f.returnType : ''}`,
+        popover: `${sig}${f.returnType ? ' → ' + f.returnType : ''}`,
         onContextMenu: (e) => openFunctionContextMenu(e, f),
       }));
     }
@@ -3001,17 +2671,14 @@
       container.appendChild(renderTreeNode({
         name: r.name,
         meta: r.backend || '',
-        title: `${r.name} â€” ${r.category || ''} (${r.status || ''})`,
+        title: `${r.name} — ${r.category || ''} (${r.status || ''})`,
         onContextMenu: (e) => openModelContextMenu(e, r),
       }));
     }
     return container;
   }
 
-  function truncate(s, n) {
-    s = String(s || '');
-    return s.length > n ? s.slice(0, n - 1) + 'â€¦' : s;
-  }
+  // truncate — see ./html-util.ts
 
   function renderTreeNode({ name, meta, title, popover, onContextMenu }) {
     const node = document.createElement('div');
@@ -3102,7 +2769,7 @@
         const cell = row[i];
         if (!cell || cell.kind === 'null') { o[cols[i]] = null; continue; }
         if (cell.kind === 'text' || cell.kind === 'json') { o[cols[i]] = cell.text; continue; }
-        // Media / unknown â€” just stash the cell object so the caller can
+        // Media / unknown — just stash the cell object so the caller can
         // decide; introspection columns shouldn't hit this.
         o[cols[i]] = cell;
       }
@@ -3110,7 +2777,7 @@
     });
   }
 
-  // â”€â”€â”€â”€â”€ Context menus â”€â”€â”€â”€â”€
+  // ───── Context menus ─────
 
   function openContextMenu(e, items) {
     closeCatalogContextMenu();
@@ -3203,114 +2870,15 @@
     ]);
   }
 
-  // â”€â”€â”€â”€â”€ Template builders â”€â”€â”€â”€â”€
-  // Parses a parameter string from system_udfs / system_procedures.
-  // Format mirrors what UdfsTableProvider / ProceduresTableProvider emit:
-  //   "@a INT32, @b STRING IS NOT NULL, @c INT32 = 0"
-  // We pull each parameter's name and type for DECLARE scaffolding.
-  function parseParameterList(s) {
-    if (!s) return [];
-    const parts = splitTopLevel(s, ',');
-    return parts.map(p => {
-      const m = p.trim().match(/^@(\w+)\s+(\w+)/);
-      return m ? { name: m[1], type: m[2] } : null;
-    }).filter(Boolean);
-  }
-
-  // Splits on `delim` ignoring delimiters inside parens / brackets / braces
-  // and quoted strings. Used because parameter defaults may contain commas.
-  function splitTopLevel(s, delim) {
-    const out = [];
-    let depth = 0, buf = '', inStr = null;
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (inStr) {
-        buf += c;
-        if (c === inStr && s[i - 1] !== '\\') inStr = null;
-        continue;
-      }
-      if (c === "'" || c === '"' || c === '`') { inStr = c; buf += c; continue; }
-      if (c === '(' || c === '[' || c === '{') depth++;
-      if (c === ')' || c === ']' || c === '}') depth--;
-      if (depth === 0 && c === delim) { out.push(buf); buf = ''; continue; }
-      buf += c;
-    }
-    if (buf.length) out.push(buf);
-    return out;
-  }
-
-  // Builds:
-  //   DECLARE @a INT32
-  //   DECLARE @b STRING
-  //   EXEC udf.name(@a, @b)
-  // for UDFs/procedures. Caller fills in values before running.
-  function buildExecuteTemplate(prefix, name, parameterList) {
-    const params = parseParameterList(parameterList);
-    if (params.length === 0) {
-      return `EXEC ${prefix}.${name}()`;
-    }
-    const declares = params.map(p => `DECLARE @${p.name} ${p.type}`).join('\n');
-    const args = params.map(p => `@${p.name}`).join(', ');
-    return `${declares}\n\nEXEC ${prefix}.${name}(${args})`;
-  }
-
-  // Macro UDFs don't persist original source â€” recompose from parameters,
-  // return type, and the formatted body expression. Procedural UDFs do
-  // persist their full source_text in the body column, so we rewrite the
-  // header to `CREATE OR ALTER FUNCTION` and leave the BEGINâ€¦END body alone.
-  function buildModifyTemplateFromUdfRow(udf) {
-    if ((udf.body_kind || 'macro').toLowerCase() === 'procedural') {
-      let src = udf.body || '';
-      src = src.replace(
-        /^\s*CREATE\s+(OR\s+REPLACE\s+|OR\s+ALTER\s+)?(PURE\s+)?FUNCTION\b/i,
-        (_match, _orPrefix, pureKw) =>
-          `CREATE OR ALTER ${pureKw ? 'PURE ' : ''}FUNCTION`);
-      return src || `CREATE OR ALTER FUNCTION ${udf.name}() RETURNS STRING BEGIN\n  RETURN ''\nEND`;
-    }
-    const params = udf.parameters || '';
-    const returns = udf.return_type ? ` RETURNS ${udf.return_type}` : '';
-    const body = udf.body || 'NULL';
-    return `CREATE OR ALTER FUNCTION ${udf.name}(${params})${returns} AS\n  ${body}`;
-  }
-
-  // Procedures persist the verbatim source text â€” modify by rewriting
-  // CREATE [OR REPLACE] PROCEDURE â†’ CREATE OR ALTER PROCEDURE.
-  function buildModifyTemplateFromProcedureRow(proc) {
-    let src = proc.source_text || '';
-    // Best-effort header rewrite. Handles CREATE PROCEDURE and
-    // CREATE OR REPLACE PROCEDURE; leaves anything else untouched.
-    src = src.replace(
-      /^\s*CREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\b/i,
-      'CREATE OR ALTER PROCEDURE');
-    return src || `CREATE OR ALTER PROCEDURE ${proc.name}() AS BEGIN\n  -- body\nEND`;
-  }
-
-  // For built-in functions: scaffold a SELECT that calls the function with
-  // placeholder DECLAREs typed by the manifest's parameter list. Aggregate
-  // and window functions take a column expression â€” we emit a comment hint
-  // instead of a generic call site.
-  function buildBuiltinExecuteTemplate(fn) {
-    const params = fn.parameters || [];
-    if (fn.isAggregate || fn.isWindow) {
-      return `-- ${fn.name} is ${fn.isAggregate ? 'an aggregate' : 'a window'} function.\n` +
-        `-- Use it inside a SELECT against a table:\n` +
-        `--   SELECT ${fn.name}(some_column) FROM your_table${fn.isWindow ? ' OVER (...)' : ''}`;
-    }
-    if (params.length === 0) {
-      return `SELECT ${fn.name}()`;
-    }
-    const declares = params.map(p => `DECLARE @${p.name} ${p.type}`).join('\n');
-    const args = params.map(p => `@${p.name}`).join(', ');
-    return `${declares}\n\nSELECT ${fn.name}(${args})`;
-  }
+  // Template builders — see ./parser-util.ts
 
   // Opens a fresh tab, names it from the supplied label, fills in the SQL,
   // and switches to it.
   function openSqlInNewTab(name, sql) {
     const t = freshTab(state.workspace.tabs.length + 1);
-    t.name = name.length > 32 ? name.slice(0, 31) + 'â€¦' : name;
+    t.name = name.length > 32 ? name.slice(0, 31) + '…' : name;
     t.sql = sql;
-    // Seed sqlOfLastRun so the tab opens clean â€” the dirty marker only
+    // Seed sqlOfLastRun so the tab opens clean — the dirty marker only
     // appears once the user actually edits the seeded text.
     t.sqlOfLastRun = sql;
     state.workspace.tabs.push(t);
@@ -3323,7 +2891,7 @@
     persistWorkspace();
   }
 
-  // â”€â”€â”€â”€â”€ Resize â”€â”€â”€â”€â”€
+  // ───── Resize ─────
   function setupSidebarResize() {
     const handle = document.getElementById('sidebar-resize');
     const sidebar = document.getElementById('sidebar');
@@ -3441,7 +3009,7 @@
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       handle.classList.add('dragging');
-      // Suppress text selection while dragging â€” the cursor would otherwise
+      // Suppress text selection while dragging — the cursor would otherwise
       // grab whatever it passes over inside the editor or results table.
       document.body.style.userSelect = 'none';
       dragHorizontal = isHorizontalSplit(groupEl);
@@ -3475,10 +3043,10 @@
   }
 
   // Update the orient-toggle button (rendered into each tab strip) so
-  // its divider line previews the *target* orientation â€” i.e. the
-  // layout that clicking it will produce. Currently horizontal â†’
-  // divider is horizontal (click â†’ vertical/stacked); currently
-  // vertical â†’ divider is vertical (click â†’ horizontal/side-by-side).
+  // its divider line previews the *target* orientation — i.e. the
+  // layout that clicking it will produce. Currently horizontal →
+  // divider is horizontal (click → vertical/stacked); currently
+  // vertical → divider is vertical (click → horizontal/side-by-side).
   function refreshOrientToggleIconForGroup(group) {
     if (!group) return;
     const groupEl = groupElementById(group.id);
@@ -3487,11 +3055,11 @@
     if (!divider) return;
     const horizontal = group.editorOrientation === 'horizontal';
     if (horizontal) {
-      // Target = vertical (stacked) â†’ horizontal divider.
+      // Target = vertical (stacked) → horizontal divider.
       divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
       divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
     } else {
-      // Target = horizontal (side-by-side) â†’ vertical divider.
+      // Target = horizontal (side-by-side) → vertical divider.
       divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
       divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
     }
@@ -3554,7 +3122,7 @@
     controls.appendChild(mergeBtn);
 
     const swapBtn = document.createElement('button');
-    swapBtn.title = 'Swap pane arrangement (side-by-side â†” stacked)';
+    swapBtn.title = 'Swap pane arrangement (side-by-side ↔ stacked)';
     swapBtn.setAttribute('aria-label', 'Swap pane arrangement');
     // Initial divider position is set by refreshGroupOrientToggleIcon
     // after the element is inserted; the placeholder coords here are
@@ -3618,9 +3186,9 @@
 
   // Update the orient-swap button (rendered into the floating controls
   // on the resize line) so its divider line previews the *target*
-  // arrangement â€” i.e. the layout that clicking it will produce.
-  // Currently stacked â†’ divider is vertical (click â†’ side-by-side);
-  // currently side-by-side â†’ divider is horizontal (click â†’ stacked).
+  // arrangement — i.e. the layout that clicking it will produce.
+  // Currently stacked → divider is vertical (click → side-by-side);
+  // currently side-by-side → divider is horizontal (click → stacked).
   function refreshGroupOrientToggleIcon() {
     const splitter = document.getElementById('group-resize');
     if (!splitter) return;
@@ -3629,11 +3197,11 @@
     const container = document.getElementById('group-container');
     const stacked = !!container && container.classList.contains('vertical-stack');
     if (stacked) {
-      // Target = side-by-side â†’ vertical divider.
+      // Target = side-by-side → vertical divider.
       divider.setAttribute('x1', '12'); divider.setAttribute('y1', '4');
       divider.setAttribute('x2', '12'); divider.setAttribute('y2', '20');
     } else {
-      // Target = stacked â†’ horizontal divider.
+      // Target = stacked → horizontal divider.
       divider.setAttribute('x1', '3');  divider.setAttribute('y1', '12');
       divider.setAttribute('x2', '21'); divider.setAttribute('y2', '12');
     }
@@ -3672,7 +3240,7 @@
           '<div class="editor-host"></div>' +
           '<div class="editor-toolbar">' +
             '<button class="run-btn">Run</button>' +
-            '<span class="tip">Ctrl/âŒ˜+Enter</span>' +
+            '<span class="tip">Ctrl/⌘+Enter</span>' +
             '<span class="tip">max rows ' +
               '<input class="max-rows-input" type="number" value="200" min="1" max="100000">' +
             '</span>' +
@@ -3691,7 +3259,7 @@
     return root;
   }
 
-  // Wire one group's toolbar buttons + inputs. Idempotent â€” guarded by a
+  // Wire one group's toolbar buttons + inputs. Idempotent — guarded by a
   // dataset flag so reconcileGroupDom can call it on every reconciliation
   // pass without piling up duplicate handlers. The handlers re-resolve
   // the live group by id from `state.workspace` rather than closing over
@@ -3708,7 +3276,7 @@
     };
 
     // Each handler focuses its group as a side effect, so clicks on the
-    // non-focused pane "follow" â€” the user's interaction defines focus
+    // non-focused pane "follow" — the user's interaction defines focus
     // even when the keyboard hasn't moved yet.
     runBtnEl(groupEl).addEventListener('click', () => {
       const g = liveGroup();
@@ -3737,12 +3305,12 @@
       tab.trace = e.target.checked === true;
       scheduleSave();
     });
-    // Pointerdown anywhere in the pane â†’ focus this group AND move
+    // Pointerdown anywhere in the pane → focus this group AND move
     // Monaco's keyboard focus to its editor. Without the second part,
     // editor-scoped commands like Ctrl+Enter still target whichever
     // editor previously had keyboard focus (e.g. the OTHER pane), so a
     // click on this pane's tab strip followed by Ctrl+Enter could run
-    // the wrong tab. Form inputs are skipped â€” stealing focus from them
+    // the wrong tab. Form inputs are skipped — stealing focus from them
     // would block typing into max-rows / trace controls.
     groupEl.addEventListener('pointerdown', (e) => {
       if (state.workspace.focusedGroupId !== groupId && liveGroup()) {
@@ -3766,7 +3334,7 @@
   // order. Adds any missing .editor-group nodes, removes any orphaned
   // ones, and (idempotently) wires every group's toolbar + resize handle.
   // Also stands up an editor (Monaco if loaded, else the textarea
-  // fallback) for any group that doesn't have one yet â€” so split,
+  // fallback) for any group that doesn't have one yet — so split,
   // workspace-switch, and boot all share one path.
   function reconcileGroupDom() {
     const container = document.getElementById('group-container');
@@ -3783,7 +3351,7 @@
         if (prevEl) prevEl.after(el);
         else container.prepend(el);
       } else if (prevEl && prevEl.nextSibling !== el) {
-        // Order changed â€” re-anchor.
+        // Order changed — re-anchor.
         prevEl.after(el);
       }
       wireGroupToolbar(el, g);
@@ -3939,7 +3507,7 @@
     window.addEventListener('hashchange', onHashChange);
     setupCrossWindowSync();
 
-    // Reconcile DOM with the workspace's groups before any rendering â€”
+    // Reconcile DOM with the workspace's groups before any rendering —
     // this both wires the existing first-group toolbar handlers and
     // stamps out additional .editor-group nodes for any groups loaded
     // from a previously-saved split. Orientation is applied after the
@@ -4000,10 +3568,10 @@
     // Three save triggers ensure pending edits reach localStorage even
     // when the page is yanked unexpectedly (dev-server restart, browser
     // crash, system sleep):
-    //   beforeunload â€” fires on most navigation/close events.
-    //   pagehide â€” fires more reliably than beforeunload on bfcache /
+    //   beforeunload — fires on most navigation/close events.
+    //   pagehide — fires more reliably than beforeunload on bfcache /
     //     mobile / Firefox tab-close paths.
-    //   visibilitychange (hidden) â€” fires when the user alt-tabs to a
+    //   visibilitychange (hidden) — fires when the user alt-tabs to a
     //     terminal (e.g. to restart WebDev) before any unload signal,
     //     so edits made up to the moment of switching are persisted.
     window.addEventListener('beforeunload', flushPendingSave);
