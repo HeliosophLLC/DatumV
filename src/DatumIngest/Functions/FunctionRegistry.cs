@@ -392,6 +392,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageDrawBoundingBoxesFunction>();
         registry.RegisterScalar<Scalar.Image.ApplyColormapFunction>();
 
+        // Spatial — Point2D/Point3D construction, component access, distance.
+        registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();
+        registry.RegisterScalar<Scalar.Spatial.Point3DFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointXFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointYFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointZFunction>();
+        registry.RegisterScalar<Scalar.Spatial.DistanceFunction>();
+        registry.RegisterScalar<Scalar.Spatial.DistanceSqFunction>();
+
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.
         registry.RegisterScalar<Scalar.Json.JsonParseFunction>();

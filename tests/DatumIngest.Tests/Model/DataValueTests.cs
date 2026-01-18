@@ -41,6 +41,71 @@ public class DataValueTests : ServiceTestBase
     }
 
     [Fact]
+    public void Point2DStoresInlineXY()
+    {
+        DataValue value = DataValue.FromPoint2D(1.5f, -2.25f);
+
+        Assert.Equal(DataKind.Point2D, value.Kind);
+        Assert.True(value.IsInline);
+        System.Numerics.Vector2 v = value.AsPoint2D();
+        Assert.Equal(1.5f, v.X);
+        Assert.Equal(-2.25f, v.Y);
+    }
+
+    [Fact]
+    public void Point3DStoresInlineXYZ()
+    {
+        DataValue value = DataValue.FromPoint3D(1.5f, -2.25f, 3.75f);
+
+        Assert.Equal(DataKind.Point3D, value.Kind);
+        Assert.True(value.IsInline);
+        System.Numerics.Vector3 v = value.AsPoint3D();
+        Assert.Equal(1.5f, v.X);
+        Assert.Equal(-2.25f, v.Y);
+        Assert.Equal(3.75f, v.Z);
+    }
+
+    [Fact]
+    public void Point2DEqualityAndHash()
+    {
+        DataValue a = DataValue.FromPoint2D(1f, 2f);
+        DataValue b = DataValue.FromPoint2D(1f, 2f);
+        DataValue c = DataValue.FromPoint2D(1f, 3f);
+
+        Assert.Equal(a, b);
+        Assert.NotEqual(a, c);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+    [Fact]
+    public void Point3DEqualityAndHash()
+    {
+        DataValue a = DataValue.FromPoint3D(1f, 2f, 3f);
+        DataValue b = DataValue.FromPoint3D(1f, 2f, 3f);
+        DataValue c = DataValue.FromPoint3D(1f, 2f, 4f);
+
+        Assert.Equal(a, b);
+        Assert.NotEqual(a, c);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+    [Fact]
+    public void PointKindMismatchIsNotEqual()
+    {
+        DataValue p2 = DataValue.FromPoint2D(1f, 2f);
+        DataValue p3 = DataValue.FromPoint3D(1f, 2f, 0f);
+
+        Assert.NotEqual(p2, p3);
+    }
+
+    [Fact]
+    public void PointDisplayString()
+    {
+        Assert.Equal("(1, 2)", DataValue.FromPoint2D(1f, 2f).ToDisplayString());
+        Assert.Equal("(1, 2, 3)", DataValue.FromPoint3D(1f, 2f, 3f).ToDisplayString());
+    }
+
+    [Fact]
     public void ByteArrayValueStoresByteArray()
     {
         byte[] data = [1, 2, 3, 4];

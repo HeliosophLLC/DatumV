@@ -179,6 +179,17 @@ internal sealed class FixedWidthPageEncoderV2 : IPageEncoderV2
                         "Failed to write UUID into a 16-byte fixed-width slot.");
                 }
                 break;
+            case DataKind.Point2D:
+                System.Numerics.Vector2 p2 = v.AsPoint2D();
+                BinaryPrimitives.WriteSingleLittleEndian(dst[..4], p2.X);
+                BinaryPrimitives.WriteSingleLittleEndian(dst.Slice(4, 4), p2.Y);
+                break;
+            case DataKind.Point3D:
+                System.Numerics.Vector3 p3 = v.AsPoint3D();
+                BinaryPrimitives.WriteSingleLittleEndian(dst[..4], p3.X);
+                BinaryPrimitives.WriteSingleLittleEndian(dst.Slice(4, 4), p3.Y);
+                BinaryPrimitives.WriteSingleLittleEndian(dst.Slice(8, 4), p3.Z);
+                break;
             default:
                 throw new InvalidOperationException(
                     $"FixedWidth encoder cannot encode DataKind.{_kind}.");

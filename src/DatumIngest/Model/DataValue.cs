@@ -1,4 +1,5 @@
 using System.IO.Hashing;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using DatumIngest.DatumFile.Sidecar;
@@ -393,6 +394,27 @@ public readonly struct DataValue : IEquatable<DataValue>
             p2: Unsafe.Add(ref words, 2),
             p3: Unsafe.Add(ref words, 3));
     }
+
+    /// <summary>Creates a 2D point value from X / Y single-precision components.</summary>
+    public static DataValue FromPoint2D(float x, float y) =>
+        new(DataKind.Point2D, flags: 0,
+            p0: BitConverter.SingleToInt32Bits(x),
+            p1: BitConverter.SingleToInt32Bits(y));
+
+    /// <summary>Creates a 2D point value from a <see cref="Vector2"/>.</summary>
+    public static DataValue FromPoint2D(Vector2 value) =>
+        FromPoint2D(value.X, value.Y);
+
+    /// <summary>Creates a 3D point value from X / Y / Z single-precision components.</summary>
+    public static DataValue FromPoint3D(float x, float y, float z) =>
+        new(DataKind.Point3D, flags: 0,
+            p0: BitConverter.SingleToInt32Bits(x),
+            p1: BitConverter.SingleToInt32Bits(y),
+            p2: BitConverter.SingleToInt32Bits(z));
+
+    /// <summary>Creates a 3D point value from a <see cref="Vector3"/>.</summary>
+    public static DataValue FromPoint3D(Vector3 value) =>
+        FromPoint3D(value.X, value.Y, value.Z);
 
     /// <summary>
     /// Creates a byte-array value: <see cref="DataKind.UInt8"/> with the
@@ -1489,7 +1511,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         DataKind.UInt16 or DataKind.Int16 or DataKind.Float16 => 2,
         DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date => 4,
         DataKind.UInt64 or DataKind.Int64 or DataKind.Float64
-            or DataKind.DateTime or DataKind.Time or DataKind.Duration => 8,
+            or DataKind.DateTime or DataKind.Time or DataKind.Duration
+            or DataKind.Point2D => 8,
+        DataKind.Point3D => 12,
         DataKind.Uuid or DataKind.Decimal or DataKind.UInt128 or DataKind.Int128 => 16,
         _ => throw new InvalidOperationException(
             $"DataKind.{kind} has no fixed element byte size — inline arrays of this kind are not supported."),
@@ -2083,6 +2107,27 @@ public readonly struct DataValue : IEquatable<DataValue>
         return Unsafe.As<int, Int128>(ref Unsafe.AsRef(in _p0));
     }
 
+    /// <summary>Returns the 2D point payload as a <see cref="Vector2"/>.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Vector2 AsPoint2D()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Point2D);
+        return new Vector2(
+            BitConverter.Int32BitsToSingle(_p0),
+            BitConverter.Int32BitsToSingle(_p1));
+    }
+
+    /// <summary>Returns the 3D point payload as a <see cref="Vector3"/>.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Vector3 AsPoint3D()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Point3D);
+        return new Vector3(
+            BitConverter.Int32BitsToSingle(_p0),
+            BitConverter.Int32BitsToSingle(_p1),
+            BitConverter.Int32BitsToSingle(_p2));
+    }
+
     // ─────────────────────── Widening numeric conversions ───────────────────────
 
     /// <summary>
@@ -2315,6 +2360,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time      => AsTime(),
             DataKind.Duration  => AsDuration(),
             DataKind.Uuid      => AsUuid(),
+            DataKind.Point2D   => AsPoint2D(),
+            DataKind.Point3D   => AsPoint3D(),
             // Reference types require a store — return the ToString() summary without content.
             _ => ToString(),
         };
@@ -2368,6 +2415,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
             DataKind.Uuid     => AsUuid().ToString("D"),
+            DataKind.Point2D  => FormatPoint2D(),
+            DataKind.Point3D  => FormatPoint3D(),
             DataKind.Type     => FormatType(),
             // Reference types require a store — return ToString() summary without content.
             _ => ToString() ?? _kind.ToString(),
@@ -2839,6 +2888,20 @@ public readonly struct DataValue : IEquatable<DataValue>
         return (DataKind)(byte)_p0;
     }
 
+    private string FormatPoint2D()
+    {
+        Vector2 v = AsPoint2D();
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"({v.X:G}, {v.Y:G})");
+    }
+
+    private string FormatPoint3D()
+    {
+        Vector3 v = AsPoint3D();
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"({v.X:G}, {v.Y:G}, {v.Z:G})");
+    }
+
     /// <summary>
     /// Renders the type this value describes as a human-readable string. When
     /// <paramref name="registry"/> is provided and this value carries a non-zero
@@ -2976,6 +3039,15 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt128 or DataKind.Int128
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
 
+            // Points: per-component IEEE float compare so NaN != NaN and -0 == 0.
+            DataKind.Point2D
+                => BitConverter.Int32BitsToSingle(_p0) == BitConverter.Int32BitsToSingle(other._p0)
+                && BitConverter.Int32BitsToSingle(_p1) == BitConverter.Int32BitsToSingle(other._p1),
+            DataKind.Point3D
+                => BitConverter.Int32BitsToSingle(_p0) == BitConverter.Int32BitsToSingle(other._p0)
+                && BitConverter.Int32BitsToSingle(_p1) == BitConverter.Int32BitsToSingle(other._p1)
+                && BitConverter.Int32BitsToSingle(_p2) == BitConverter.Int32BitsToSingle(other._p2),
+
             // Reference types:
             DataKind.String
                 => CompareStrings(in this, in other),
@@ -3032,6 +3104,17 @@ public readonly struct DataValue : IEquatable<DataValue>
             // 128-bit integers: same — four-int hash.
             DataKind.UInt128 or DataKind.Int128
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
+
+            // Points: hash via float to mirror IEEE equality (-0 == 0).
+            DataKind.Point2D
+                => HashCode.Combine(_kind,
+                    BitConverter.Int32BitsToSingle(_p0),
+                    BitConverter.Int32BitsToSingle(_p1)),
+            DataKind.Point3D
+                => HashCode.Combine(_kind,
+                    BitConverter.Int32BitsToSingle(_p0),
+                    BitConverter.Int32BitsToSingle(_p1),
+                    BitConverter.Int32BitsToSingle(_p2)),
 
             // Reference types:
             // RawContentHash returns XxHash64-over-UTF-8 for both inline and cached-hash

@@ -135,4 +135,22 @@ public enum DataKind : byte
     /// positional <see cref="DataValue"/>[] in the value store.
     /// </summary>
     Struct = 68,
+
+    // ───────────────────────── Spatial / geometric (72–79) ─────────────────────────
+
+    /// <summary>
+    /// A 2D point with single-precision X and Y components (<see cref="System.Numerics.Vector2"/>).
+    /// 8 bytes inline (two <see cref="float"/>s in <c>_p0</c>/<c>_p1</c>). Constructed via
+    /// <c>point2d(x, y)</c>; component access via <c>p.x</c> / <c>p.y</c> (sugar for
+    /// <c>point_x(p)</c> / <c>point_y(p)</c>).
+    /// </summary>
+    Point2D = 72,
+
+    /// <summary>
+    /// A 3D point with single-precision X, Y, Z components (<see cref="System.Numerics.Vector3"/>).
+    /// 12 bytes inline (three <see cref="float"/>s in <c>_p0</c>/<c>_p1</c>/<c>_p2</c>).
+    /// Constructed via <c>point3d(x, y, z)</c>; component access via <c>p.x</c> / <c>p.y</c> /
+    /// <c>p.z</c> (sugar for <c>point_x</c> / <c>point_y</c> / <c>point_z</c>).
+    /// </summary>
+    Point3D = 73,
 }

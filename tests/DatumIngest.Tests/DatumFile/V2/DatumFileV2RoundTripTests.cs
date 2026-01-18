@@ -141,6 +141,62 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
     }
 
     [Fact]
+    public void RoundTrip_Point2D()
+    {
+        ColumnDescriptorV2 column = new(
+            Name: "pt",
+            Kind: DataKind.Point2D,
+            Encoder: EncoderKind.FixedWidth,
+            IsNullable: true);
+
+        DataValue[] values = [
+            DataValue.FromPoint2D(0f, 0f),
+            DataValue.FromPoint2D(1.5f, -2.25f),
+            DataValue.Null(DataKind.Point2D),
+            DataValue.FromPoint2D(float.MaxValue, float.MinValue),
+        ];
+
+        DataValue[] decoded = WriteAndRead("point2d.datum", [column], values);
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.Equal(values[i].IsNull, decoded[i].IsNull);
+            if (!values[i].IsNull)
+            {
+                Assert.Equal(values[i].AsPoint2D(), decoded[i].AsPoint2D());
+            }
+        }
+    }
+
+    [Fact]
+    public void RoundTrip_Point3D()
+    {
+        ColumnDescriptorV2 column = new(
+            Name: "pt",
+            Kind: DataKind.Point3D,
+            Encoder: EncoderKind.FixedWidth,
+            IsNullable: true);
+
+        DataValue[] values = [
+            DataValue.FromPoint3D(0f, 0f, 0f),
+            DataValue.FromPoint3D(1.5f, -2.25f, 3.75f),
+            DataValue.Null(DataKind.Point3D),
+            DataValue.FromPoint3D(float.MaxValue, float.MinValue, 1f),
+        ];
+
+        DataValue[] decoded = WriteAndRead("point3d.datum", [column], values);
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.Equal(values[i].IsNull, decoded[i].IsNull);
+            if (!values[i].IsNull)
+            {
+                Assert.Equal(values[i].AsPoint3D(), decoded[i].AsPoint3D());
+            }
+        }
+    }
+
+    [Fact]
     public void RoundTrip_Uuid()
     {
         ColumnDescriptorV2 column = new(

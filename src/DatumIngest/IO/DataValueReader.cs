@@ -85,6 +85,8 @@ internal static class DataValueReader
             DataKind.Video => ReadVideo(reader, store),
             DataKind.Json => ReadJson(reader, store),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
+            DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
+            DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
     }
@@ -121,6 +123,8 @@ internal static class DataValueReader
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Image => ReadImage(reader),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
+            DataKind.Point2D => DataValue.FromPoint2D(reader.ReadSingle(), reader.ReadSingle()),
+            DataKind.Point3D => DataValue.FromPoint3D(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
     }

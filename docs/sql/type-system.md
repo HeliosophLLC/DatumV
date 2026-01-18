@@ -66,6 +66,8 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Video` | Encoded video bytes (MP4, WebM, AVI, MKV) | `byte[]` |
 | `Json` | A JSON document, stored as canonical CBOR bytes | `byte[]` (CBOR) |
 | `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
+| `Point2D` | 2D point with single-precision X, Y components | `System.Numerics.Vector2` (8 bytes inline) |
+| `Point3D` | 3D point with single-precision X, Y, Z components | `System.Numerics.Vector3` (12 bytes inline) |
 | `Type` | A type tag describing another DataKind | `DataKind` enum value (stored as byte) |
 
 #### Arrays
@@ -76,6 +78,47 @@ values of that kind. `Float32` with `IsArray` is what you'd call a vector;
 `UInt8` with `IsArray` is a raw byte buffer. There is no fixed shape —
 multi-dimensional shapes live above this level (e.g. paired with a separate
 shape descriptor).
+
+#### Points
+
+`Point2D` and `Point3D` are first-class scalar kinds for spatial coordinates.
+Both store single-precision (`Float32`) components packed inline in the
+`DataValue` (8 bytes for `Point2D`, 12 bytes for `Point3D`) — no arena
+allocation, no sidecar reference. They round-trip through the `.datum` v2
+format using the FixedWidth encoder.
+
+Build points with the `point2d` / `point3d` constructors and project
+components with `point_x` / `point_y` / `point_z`:
+
+```sql
+-- Construct a Point3D column from three numeric columns
+SELECT point3d(x, y, z) AS pt FROM raw_lidar
+
+-- Project the X axis back out for filtering
+SELECT * FROM samples WHERE point_x(pt) > 0.0
+
+-- Mixed numeric inputs widen to Float32
+SELECT point2d(latitude, longitude) FROM cities  -- accepts Float64, Int32, etc.
+```
+
+`distance(a, b)` returns the Euclidean distance between two same-dimension
+points as `Float32`; `distance_sq(a, b)` returns the squared distance and
+skips the square root — useful for KNN ranking and threshold checks where
+the absolute distance is not needed:
+
+```sql
+-- Find points within a radius
+SELECT id, distance(pt, point3d(0, 0, 0)) AS r
+FROM cloud
+WHERE distance_sq(pt, point3d(0, 0, 0)) < 100.0
+ORDER BY r
+
+-- Mixing Point2D with Point3D is a function-argument error.
+```
+
+`Point2D` and `Point3D` participate in `typeof()`, `IS Type`, and `CAST` like
+any other DataKind. `point_z` accepts only `Point3D` since `Point2D` has no Z
+component.
 
 ### Type Literals and typeof()
 
@@ -217,8 +260,8 @@ FROM t
 `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
 `Float64`, `Decimal`, `String`, `Date`, `DateTime`, `Time`, `Duration`,
-`Uuid`, `Image`, `Audio`, `Video`, `Json`, `Struct`, `Type`) are reserved in
-expression position. They produce a `Type` value that can be compared with
+`Uuid`, `Image`, `Audio`, `Video`, `Json`, `Struct`, `Point2D`, `Point3D`,
+`Type`) are reserved in expression position. They produce a `Type` value that can be compared with
 `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
 
 To use a type name as a column alias or table name, double-quote it:

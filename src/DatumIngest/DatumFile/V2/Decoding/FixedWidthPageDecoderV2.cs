@@ -88,6 +88,13 @@ internal sealed class FixedWidthPageDecoderV2 : IPageDecoderV2
             DataKind.Duration => DataValue.FromDuration(new TimeSpan(BinaryPrimitives.ReadInt64LittleEndian(slot))),
             DataKind.DateTime => DecodeDateTime(slot),
             DataKind.Uuid => DataValue.FromUuid(new Guid(slot[..16])),
+            DataKind.Point2D => DataValue.FromPoint2D(
+                BinaryPrimitives.ReadSingleLittleEndian(slot[..4]),
+                BinaryPrimitives.ReadSingleLittleEndian(slot.Slice(4, 4))),
+            DataKind.Point3D => DataValue.FromPoint3D(
+                BinaryPrimitives.ReadSingleLittleEndian(slot[..4]),
+                BinaryPrimitives.ReadSingleLittleEndian(slot.Slice(4, 4)),
+                BinaryPrimitives.ReadSingleLittleEndian(slot.Slice(8, 4))),
             _ => throw new InvalidDataException(
                 $"FixedWidth decoder cannot decode DataKind.{_kind}."),
         };

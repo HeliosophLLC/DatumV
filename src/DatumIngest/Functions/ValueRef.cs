@@ -195,6 +195,22 @@ public readonly struct ValueRef
     public static ValueRef FromUuid(Guid value) =>
         new(DataValue.FromUuid(value), null);
 
+    /// <summary>2D point inline value (8 bytes — two Float32 components).</summary>
+    public static ValueRef FromPoint2D(System.Numerics.Vector2 value) =>
+        new(DataValue.FromPoint2D(value), null);
+
+    /// <summary>2D point inline value from explicit X / Y components.</summary>
+    public static ValueRef FromPoint2D(float x, float y) =>
+        new(DataValue.FromPoint2D(x, y), null);
+
+    /// <summary>3D point inline value (12 bytes — three Float32 components).</summary>
+    public static ValueRef FromPoint3D(System.Numerics.Vector3 value) =>
+        new(DataValue.FromPoint3D(value), null);
+
+    /// <summary>3D point inline value from explicit X / Y / Z components.</summary>
+    public static ValueRef FromPoint3D(float x, float y, float z) =>
+        new(DataValue.FromPoint3D(x, y, z), null);
+
     /// <summary>
     /// DataKind tag (the value of <c>typeof(x)</c>). When <paramref name="typeId"/>
     /// is non-zero, the tag carries a <see cref="TypeRegistry"/> id describing the
@@ -588,6 +604,12 @@ public readonly struct ValueRef
     public Half AsFloat16() => _inline.AsFloat16();
     /// <summary>Float32 accessor (inline only).</summary>
     public float AsFloat32() => _inline.AsFloat32();
+
+    /// <summary>2D point payload as a <see cref="System.Numerics.Vector2"/>.</summary>
+    public System.Numerics.Vector2 AsPoint2D() => _inline.AsPoint2D();
+
+    /// <summary>3D point payload as a <see cref="System.Numerics.Vector3"/>.</summary>
+    public System.Numerics.Vector3 AsPoint3D() => _inline.AsPoint3D();
     /// <summary>Float64 accessor (inline only).</summary>
     public double AsFloat64() => _inline.AsFloat64();
     /// <summary>Decimal accessor (inline only).</summary>

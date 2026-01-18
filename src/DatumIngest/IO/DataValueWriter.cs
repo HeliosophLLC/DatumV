@@ -110,6 +110,23 @@ internal static class DataValueWriter
             case DataKind.Duration: writer.Write(value.AsDuration().Ticks); break;
             case DataKind.Uuid:     writer.Write(value.AsUuid().ToByteArray()); break;
 
+            case DataKind.Point2D:
+            {
+                System.Numerics.Vector2 pt = value.AsPoint2D();
+                writer.Write(pt.X);
+                writer.Write(pt.Y);
+                break;
+            }
+
+            case DataKind.Point3D:
+            {
+                System.Numerics.Vector3 pt = value.AsPoint3D();
+                writer.Write(pt.X);
+                writer.Write(pt.Y);
+                writer.Write(pt.Z);
+                break;
+            }
+
             case DataKind.DateTime:
                 DateTimeOffset dto = value.AsDateTime();
                 writer.Write(dto.Ticks);
@@ -238,6 +255,19 @@ internal static class DataValueWriter
                 writer.Write(value.AsUuid().ToByteArray());
                 break;
 
+            case DataKind.Point2D:
+                System.Numerics.Vector2 p2 = value.AsPoint2D();
+                writer.Write(p2.X);
+                writer.Write(p2.Y);
+                break;
+
+            case DataKind.Point3D:
+                System.Numerics.Vector3 p3 = value.AsPoint3D();
+                writer.Write(p3.X);
+                writer.Write(p3.Y);
+                writer.Write(p3.Z);
+                break;
+
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }
@@ -364,6 +394,19 @@ internal static class DataValueWriter
 
             case DataKind.Uuid:
                 writer.Write(value.AsUuid().ToByteArray());
+                break;
+
+            case DataKind.Point2D:
+                System.Numerics.Vector2 p2 = value.AsPoint2D();
+                writer.Write(p2.X);
+                writer.Write(p2.Y);
+                break;
+
+            case DataKind.Point3D:
+                System.Numerics.Vector3 p3 = value.AsPoint3D();
+                writer.Write(p3.X);
+                writer.Write(p3.Y);
+                writer.Write(p3.Z);
                 break;
 
             default:

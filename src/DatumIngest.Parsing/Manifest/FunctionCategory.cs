@@ -56,4 +56,7 @@ public enum FunctionCategory
 
     /// <summary>Window (analytical) functions that compute a value per row over a partition (ROW_NUMBER, RANK, LAG, LEAD, etc.).</summary>
     Window,
+
+    /// <summary>Spatial / geometric: point construction, component access, distance, vector math.</summary>
+    Spatial,
 }
