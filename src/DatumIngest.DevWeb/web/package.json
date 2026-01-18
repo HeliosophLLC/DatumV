@@ -1,0 +1,16 @@
+{
+  "name": "datum-devweb",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "DatumIngest DevWeb frontend bundle.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7"
+  }
+}

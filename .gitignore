@@ -15,3 +15,7 @@ traces/
 .claude/settings.local.json
 .venv/**
 tests/DatumIngest.Tests/TestResults/**
+
+# DevWeb frontend build outputs
+src/DatumIngest.DevWeb/web/node_modules/
+src/DatumIngest.DevWeb/wwwroot/dist/
