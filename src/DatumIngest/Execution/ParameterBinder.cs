@@ -26,7 +26,7 @@ public static class ParameterBinder
     /// </exception>
     public static QueryExpression Bind(
         QueryExpression query,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         HashSet<string> referenced = CollectParameterNames(query);
 
@@ -35,18 +35,122 @@ public static class ParameterBinder
             return query;
         }
 
-        // Validate: all referenced parameters must be supplied.
+        ValidateParameterUsage(referenced, parameters.Keys);
+        return BindQueryExpression(query, parameters);
+    }
+
+    /// <summary>
+    /// Convenience overload that wraps every <see cref="DataValue"/> in
+    /// an <see cref="InlineParameter"/>. Preserves the original
+    /// <c>Bind(QueryExpression, dict&lt;string, DataValue&gt;)</c> contract for
+    /// callers that don't need binary parameters.
+    /// </summary>
+    public static QueryExpression Bind(
+        QueryExpression query,
+        IReadOnlyDictionary<string, DataValue> parameters)
+        => Bind(query, AsParameterValues(parameters));
+
+    /// <summary>
+    /// Binds named parameters in a top-level <see cref="Statement"/> to
+    /// concrete values. Dispatches across every statement subtype that
+    /// can carry an <see cref="Expression"/> or nested
+    /// <see cref="Statement"/> / <see cref="QueryExpression"/>; identity
+    /// for statements that hold no parameter-bearing nodes (DDL,
+    /// BREAK/CONTINUE, etc.).
+    /// </summary>
+    /// <param name="statement">The parsed top-level statement.</param>
+    /// <param name="parameters">A dictionary mapping parameter names to values.</param>
+    /// <returns>A new statement with all parameters substituted.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a parameter referenced by the statement is not present
+    /// in <paramref name="parameters"/>, or when <paramref name="parameters"/>
+    /// contains names not referenced by the statement.
+    /// </exception>
+    public static Statement Bind(
+        Statement statement,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        HashSet<string> referenced = CollectParameterNames(statement);
+        ValidateParameterUsage(referenced, parameters.Keys);
+        return BindAnyStatement(statement, parameters);
+    }
+
+    /// <summary>
+    /// Convenience overload that wraps every <see cref="DataValue"/> in
+    /// an <see cref="InlineParameter"/>.
+    /// </summary>
+    public static Statement Bind(
+        Statement statement,
+        IReadOnlyDictionary<string, DataValue> parameters)
+        => Bind(statement, AsParameterValues(parameters));
+
+    /// <summary>
+    /// Binds named parameters across a batch of top-level statements. The
+    /// union of referenced names across the batch is validated against
+    /// <paramref name="parameters"/> exactly once — individual statements
+    /// in the batch may legitimately not reference every supplied
+    /// parameter, so per-statement strict validation would be wrong.
+    /// </summary>
+    /// <summary>
+    /// Convenience overload that wraps every <see cref="DataValue"/> in
+    /// an <see cref="InlineParameter"/>.
+    /// </summary>
+    public static IReadOnlyList<Statement> Bind(
+        IReadOnlyList<Statement> statements,
+        IReadOnlyDictionary<string, DataValue> parameters)
+        => Bind(statements, AsParameterValues(parameters));
+
+    /// <summary>
+    /// Binds named parameters across a batch of top-level statements
+    /// using the <see cref="ParameterValue"/> shape that supports both
+    /// inline scalars and binary references for multipart payloads.
+    /// </summary>
+    public static IReadOnlyList<Statement> Bind(
+        IReadOnlyList<Statement> statements,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        HashSet<string> referenced = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Statement s in statements)
+        {
+            CollectFromAnyStatement(s, referenced);
+        }
+        ValidateParameterUsage(referenced, parameters.Keys);
+        if (parameters.Count == 0) return statements;
+
+        Statement[] bound = new Statement[statements.Count];
+        for (int i = 0; i < statements.Count; i++)
+        {
+            bound[i] = BindAnyStatement(statements[i], parameters);
+        }
+        return bound;
+    }
+
+    /// <summary>
+    /// Collects all distinct parameter names referenced anywhere in a
+    /// top-level statement, recursing into nested statements / queries /
+    /// expressions.
+    /// </summary>
+    public static HashSet<string> CollectParameterNames(Statement statement)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        CollectFromAnyStatement(statement, names);
+        return names;
+    }
+
+    private static void ValidateParameterUsage(
+        HashSet<string> referenced,
+        IEnumerable<string> suppliedNames)
+    {
+        HashSet<string> supplied = new(suppliedNames, StringComparer.OrdinalIgnoreCase);
         foreach (string name in referenced)
         {
-            if (!parameters.ContainsKey(name))
+            if (!supplied.Contains(name))
             {
                 throw new ArgumentException(
                     $"Query references parameter '${name}' but no value was supplied.");
             }
         }
-
-        // Validate: all supplied parameters must be referenced.
-        foreach (string name in parameters.Keys)
+        foreach (string name in supplied)
         {
             if (!referenced.Contains(name))
             {
@@ -54,8 +158,6 @@ public static class ParameterBinder
                     $"Parameter '${name}' was supplied but is not referenced in the query.");
             }
         }
-
-        return BindQueryExpression(query, parameters);
     }
 
     /// <summary>
@@ -72,7 +174,7 @@ public static class ParameterBinder
     /// </exception>
     public static SelectStatement Bind(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         HashSet<string> referenced = CollectParameterNames(statement);
 
@@ -81,27 +183,30 @@ public static class ParameterBinder
             return statement;
         }
 
-        // Validate: all referenced parameters must be supplied.
-        foreach (string name in referenced)
-        {
-            if (!parameters.ContainsKey(name))
-            {
-                throw new ArgumentException(
-                    $"Query references parameter '${name}' but no value was supplied.");
-            }
-        }
-
-        // Validate: all supplied parameters must be referenced.
-        foreach (string name in parameters.Keys)
-        {
-            if (!referenced.Contains(name))
-            {
-                throw new ArgumentException(
-                    $"Parameter '${name}' was supplied but is not referenced in the query.");
-            }
-        }
-
+        ValidateParameterUsage(referenced, parameters.Keys);
         return BindStatement(statement, parameters);
+    }
+
+    /// <summary>
+    /// Convenience overload that wraps every <see cref="DataValue"/> in
+    /// an <see cref="InlineParameter"/>. Preserves the original
+    /// <c>Bind(SelectStatement, dict&lt;string, DataValue&gt;)</c> contract.
+    /// </summary>
+    public static SelectStatement Bind(
+        SelectStatement statement,
+        IReadOnlyDictionary<string, DataValue> parameters)
+        => Bind(statement, AsParameterValues(parameters));
+
+    private static IReadOnlyDictionary<string, ParameterValue> AsParameterValues(
+        IReadOnlyDictionary<string, DataValue> raw)
+    {
+        Dictionary<string, ParameterValue> result =
+            new(raw.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, DataValue> kvp in raw)
+        {
+            result[kvp.Key] = new InlineParameter(kvp.Value);
+        }
+        return result;
     }
 
     /// <summary>
@@ -133,7 +238,7 @@ public static class ParameterBinder
 
     private static SelectStatement BindStatement(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         IReadOnlyList<SelectColumn> columns = BindSelectColumns(statement.Columns, parameters);
         Expression? where = statement.Where is not null ? BindExpression(statement.Where, parameters) : null;
@@ -205,7 +310,7 @@ public static class ParameterBinder
 
     private static IReadOnlyList<SelectColumn> BindSelectColumns(
         IReadOnlyList<SelectColumn> columns,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         SelectColumn[] result = new SelectColumn[columns.Count];
         for (int i = 0; i < columns.Count; i++)
@@ -226,7 +331,7 @@ public static class ParameterBinder
 
     private static TableSource BindTableSource(
         TableSource source,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         if (source is FunctionSource functionSource)
         {
@@ -251,7 +356,7 @@ public static class ParameterBinder
 
     private static Expression BindExpression(
         Expression expression,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         return expression switch
         {
@@ -292,10 +397,24 @@ public static class ParameterBinder
 
     private static LiteralExpression ToLiteral(
         ParameterExpression parameter,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
-        DataValue value = parameters[parameter.Name];
+        ParameterValue raw = parameters[parameter.Name];
+        return raw switch
+        {
+            InlineParameter inline => InlineToLiteral(inline.Value),
+            BinaryParameter binary => new LiteralExpression(binary),
+            // Raw managed string lands on the existing string-case in
+            // ExpressionEvaluator.EvaluateLiteral, which materialises via
+            // DataValue.FromString(s, frame.Target).
+            StringParameter str => new LiteralExpression(str.Value),
+            _ => throw new InvalidOperationException(
+                $"Unrecognised ParameterValue subtype: {raw.GetType().Name}."),
+        };
+    }
 
+    private static LiteralExpression InlineToLiteral(DataValue value)
+    {
         if (value.IsNull)
         {
             return new LiteralExpression(null);
@@ -318,7 +437,7 @@ public static class ParameterBinder
 
     private static FunctionCallExpression BindFunctionCall(
         FunctionCallExpression function,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         Expression[] arguments = new Expression[function.Arguments.Count];
         for (int i = 0; i < function.Arguments.Count; i++)
@@ -331,7 +450,7 @@ public static class ParameterBinder
 
     private static InExpression BindInExpression(
         InExpression inExpr,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         Expression[] values = new Expression[inExpr.Values.Count];
         for (int i = 0; i < inExpr.Values.Count; i++)
@@ -347,7 +466,7 @@ public static class ParameterBinder
 
     private static CaseExpression BindCaseExpression(
         CaseExpression caseExpr,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         Expression? operand = caseExpr.Operand is not null
             ? BindExpression(caseExpr.Operand, parameters)
@@ -545,7 +664,7 @@ public static class ParameterBinder
 
     private static QueryExpression BindQueryExpression(
         QueryExpression query,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         return query switch
         {
@@ -566,7 +685,7 @@ public static class ParameterBinder
 
     private static OrderByClause BindOrderByClause(
         OrderByClause orderBy,
-        IReadOnlyDictionary<string, DataValue> parameters)
+        IReadOnlyDictionary<string, ParameterValue> parameters)
     {
         OrderByItem[] orderItems = new OrderByItem[orderBy.Items.Count];
         for (int i = 0; i < orderBy.Items.Count; i++)
@@ -576,5 +695,343 @@ public static class ParameterBinder
         }
 
         return new OrderByClause(orderItems);
+    }
+
+    // ───────────────────── Top-level Statement binding ─────────────────────
+
+    /// <summary>
+    /// Recursively binds parameters in a top-level statement. Walks every
+    /// subtype that can carry an <see cref="Expression"/> /
+    /// <see cref="QueryExpression"/> / nested <see cref="Statement"/>;
+    /// returns DDL and control-flow leaves unchanged.
+    /// </summary>
+    /// <remarks>
+    /// CREATE FUNCTION / CREATE PROCEDURE bodies are <em>not</em> bound:
+    /// their stored body is the function/procedure definition, not a
+    /// call site. Parameter substitution happens at the call site, where
+    /// the inliner sees both the body and the per-call argument values.
+    /// </remarks>
+    private static Statement BindAnyStatement(
+        Statement statement,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        switch (statement)
+        {
+            case QueryStatement q:
+                return new QueryStatement(BindQueryExpression(q.Query, parameters));
+
+            case InsertStatement ins:
+                return new InsertStatement(
+                    ins.TableName,
+                    ins.ColumnNames,
+                    BindInsertSource(ins.Source, parameters));
+
+            case UpdateStatement upd:
+                return BindUpdate(upd, parameters);
+
+            case DeleteStatement del:
+                return new DeleteStatement(
+                    del.TableName,
+                    del.Where is not null ? BindExpression(del.Where, parameters) : null);
+
+            case ExecStatement exec:
+                return new ExecStatement(BindExpression(exec.Call, parameters), exec.Span);
+
+            case CreateTableAsSelectStatement ctas:
+                return new CreateTableAsSelectStatement(
+                    ctas.TableName,
+                    BindQueryExpression(ctas.Query, parameters),
+                    ctas.IsTemp,
+                    ctas.IfNotExists,
+                    ctas.StoragePath);
+
+            case AlterTableAddColumnStatement alter:
+                return new AlterTableAddColumnStatement(
+                    alter.TableName,
+                    alter.ColumnName,
+                    alter.TypeName,
+                    alter.DefaultValue is not null ? BindExpression(alter.DefaultValue, parameters) : null,
+                    alter.Nullable,
+                    alter.ComputedExpression is not null ? BindExpression(alter.ComputedExpression, parameters) : null);
+
+            case BlockStatement block:
+            {
+                Statement[] inner = new Statement[block.Statements.Count];
+                for (int i = 0; i < block.Statements.Count; i++)
+                {
+                    inner[i] = BindAnyStatement(block.Statements[i], parameters);
+                }
+                return new BlockStatement(inner, block.Span);
+            }
+
+            case IfStatement ifs:
+                return new IfStatement(
+                    BindExpression(ifs.Predicate, parameters),
+                    BindAnyStatement(ifs.Then, parameters),
+                    ifs.Else is not null ? BindAnyStatement(ifs.Else, parameters) : null,
+                    ifs.Span);
+
+            case WhileStatement whileStmt:
+                return new WhileStatement(
+                    BindExpression(whileStmt.Predicate, parameters),
+                    BindAnyStatement(whileStmt.Body, parameters),
+                    whileStmt.Span);
+
+            case ForCounterStatement forCounter:
+                return new ForCounterStatement(
+                    forCounter.VariableName,
+                    BindExpression(forCounter.Start, parameters),
+                    BindExpression(forCounter.End, parameters),
+                    forCounter.Step is not null ? BindExpression(forCounter.Step, parameters) : null,
+                    BindAnyStatement(forCounter.Body, parameters),
+                    forCounter.Span);
+
+            case ForInStatement forIn:
+                return new ForInStatement(
+                    forIn.VariableName,
+                    BindQueryExpression(forIn.Source, parameters),
+                    BindAnyStatement(forIn.Body, parameters),
+                    forIn.Span);
+
+            case DeclareStatement decl:
+                return new DeclareStatement(
+                    decl.VariableName,
+                    decl.TypeName,
+                    decl.Initializer is not null ? BindExpression(decl.Initializer, parameters) : null,
+                    decl.Span);
+
+            case SetStatement set:
+                return new SetStatement(
+                    set.VariableName,
+                    BindExpression(set.Value, parameters),
+                    set.Span);
+
+            case ReturnStatement ret:
+                return new ReturnStatement(BindExpression(ret.Value, parameters), ret.Span);
+
+            case PrintStatement print:
+                return new PrintStatement(BindExpression(print.Value, parameters), print.Span);
+
+            case AssertStatement assertStmt:
+                return new AssertStatement(
+                    BindExpression(assertStmt.Predicate, parameters),
+                    assertStmt.Message is not null ? BindExpression(assertStmt.Message, parameters) : null,
+                    assertStmt.Span);
+
+            case RaiseStatement raise:
+                return new RaiseStatement(BindExpression(raise.Message, parameters), raise.Span);
+
+            case TryStatement tryStmt:
+                return new TryStatement(
+                    BindAnyStatement(tryStmt.TryBody, parameters),
+                    tryStmt.ErrorVariableName,
+                    BindAnyStatement(tryStmt.CatchBody, parameters),
+                    tryStmt.FinallyBody is not null ? BindAnyStatement(tryStmt.FinallyBody, parameters) : null,
+                    tryStmt.Span);
+
+            // DDL leaves and procedural control-flow signals: no
+            // expressions to bind. CREATE FUNCTION / CREATE PROCEDURE
+            // bodies are stored verbatim — call-site param substitution
+            // happens through inlining, not at definition time.
+            case CreateTableStatement:
+            case DropTableStatement:
+            case AlterTableDropColumnStatement:
+            case AnalyzeTableStatement:
+            case ReindexTableStatement:
+            case CreateFunctionStatement:
+            case DropFunctionStatement:
+            case CreateProcedureStatement:
+            case DropProcedureStatement:
+            case BreakStatement:
+            case ContinueStatement:
+                return statement;
+
+            default:
+                return statement;
+        }
+    }
+
+    private static InsertSource BindInsertSource(
+        InsertSource source,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        switch (source)
+        {
+            case InsertQuerySource q:
+                return new InsertQuerySource(BindQueryExpression(q.Query, parameters));
+            case InsertValuesSource v:
+            {
+                IReadOnlyList<Expression>[] rows = new IReadOnlyList<Expression>[v.Rows.Count];
+                for (int r = 0; r < v.Rows.Count; r++)
+                {
+                    IReadOnlyList<Expression> row = v.Rows[r];
+                    Expression[] bound = new Expression[row.Count];
+                    for (int c = 0; c < row.Count; c++)
+                    {
+                        bound[c] = BindExpression(row[c], parameters);
+                    }
+                    rows[r] = bound;
+                }
+                return new InsertValuesSource(rows);
+            }
+            default:
+                return source;
+        }
+    }
+
+    private static UpdateStatement BindUpdate(
+        UpdateStatement upd,
+        IReadOnlyDictionary<string, ParameterValue> parameters)
+    {
+        ColumnAssignment[] assigns = new ColumnAssignment[upd.Assignments.Count];
+        for (int i = 0; i < upd.Assignments.Count; i++)
+        {
+            ColumnAssignment a = upd.Assignments[i];
+            assigns[i] = new ColumnAssignment(a.ColumnName, BindExpression(a.Value, parameters));
+        }
+
+        FromClause? from = upd.From is not null
+            ? new FromClause(BindTableSource(upd.From.Source, parameters))
+            : null;
+
+        IReadOnlyList<JoinClause>? joins = null;
+        if (upd.Joins is not null)
+        {
+            JoinClause[] boundJoins = new JoinClause[upd.Joins.Count];
+            for (int i = 0; i < upd.Joins.Count; i++)
+            {
+                JoinClause j = upd.Joins[i];
+                Expression? on = j.OnCondition is not null
+                    ? BindExpression(j.OnCondition, parameters)
+                    : null;
+                boundJoins[i] = new JoinClause(j.Type, BindTableSource(j.Source, parameters), on);
+            }
+            joins = boundJoins;
+        }
+
+        Expression? where = upd.Where is not null ? BindExpression(upd.Where, parameters) : null;
+
+        return new UpdateStatement(upd.TableName, upd.Alias, assigns, from, joins, where);
+    }
+
+    // ───────────────────── Top-level Statement collection ─────────────────────
+
+    private static void CollectFromAnyStatement(Statement statement, HashSet<string> names)
+    {
+        switch (statement)
+        {
+            case QueryStatement q:
+                CollectFromQueryExpression(q.Query, names);
+                break;
+
+            case InsertStatement ins:
+                CollectFromInsertSource(ins.Source, names);
+                break;
+
+            case UpdateStatement upd:
+                foreach (ColumnAssignment a in upd.Assignments) CollectFromExpression(a.Value, names);
+                if (upd.From is not null) CollectFromTableSource(upd.From.Source, names);
+                if (upd.Joins is not null)
+                {
+                    foreach (JoinClause j in upd.Joins)
+                    {
+                        CollectFromTableSource(j.Source, names);
+                        if (j.OnCondition is not null) CollectFromExpression(j.OnCondition, names);
+                    }
+                }
+                if (upd.Where is not null) CollectFromExpression(upd.Where, names);
+                break;
+
+            case DeleteStatement del:
+                if (del.Where is not null) CollectFromExpression(del.Where, names);
+                break;
+
+            case ExecStatement exec:
+                CollectFromExpression(exec.Call, names);
+                break;
+
+            case CreateTableAsSelectStatement ctas:
+                CollectFromQueryExpression(ctas.Query, names);
+                break;
+
+            case AlterTableAddColumnStatement alter:
+                if (alter.DefaultValue is not null) CollectFromExpression(alter.DefaultValue, names);
+                if (alter.ComputedExpression is not null) CollectFromExpression(alter.ComputedExpression, names);
+                break;
+
+            case BlockStatement block:
+                foreach (Statement s in block.Statements) CollectFromAnyStatement(s, names);
+                break;
+
+            case IfStatement ifs:
+                CollectFromExpression(ifs.Predicate, names);
+                CollectFromAnyStatement(ifs.Then, names);
+                if (ifs.Else is not null) CollectFromAnyStatement(ifs.Else, names);
+                break;
+
+            case WhileStatement whileStmt:
+                CollectFromExpression(whileStmt.Predicate, names);
+                CollectFromAnyStatement(whileStmt.Body, names);
+                break;
+
+            case ForCounterStatement forCounter:
+                CollectFromExpression(forCounter.Start, names);
+                CollectFromExpression(forCounter.End, names);
+                if (forCounter.Step is not null) CollectFromExpression(forCounter.Step, names);
+                CollectFromAnyStatement(forCounter.Body, names);
+                break;
+
+            case ForInStatement forIn:
+                CollectFromQueryExpression(forIn.Source, names);
+                CollectFromAnyStatement(forIn.Body, names);
+                break;
+
+            case DeclareStatement decl:
+                if (decl.Initializer is not null) CollectFromExpression(decl.Initializer, names);
+                break;
+
+            case SetStatement set:
+                CollectFromExpression(set.Value, names);
+                break;
+
+            case ReturnStatement ret:
+                CollectFromExpression(ret.Value, names);
+                break;
+
+            case PrintStatement print:
+                CollectFromExpression(print.Value, names);
+                break;
+
+            case AssertStatement assertStmt:
+                CollectFromExpression(assertStmt.Predicate, names);
+                if (assertStmt.Message is not null) CollectFromExpression(assertStmt.Message, names);
+                break;
+
+            case RaiseStatement raise:
+                CollectFromExpression(raise.Message, names);
+                break;
+
+            case TryStatement tryStmt:
+                CollectFromAnyStatement(tryStmt.TryBody, names);
+                CollectFromAnyStatement(tryStmt.CatchBody, names);
+                if (tryStmt.FinallyBody is not null) CollectFromAnyStatement(tryStmt.FinallyBody, names);
+                break;
+        }
+    }
+
+    private static void CollectFromInsertSource(InsertSource source, HashSet<string> names)
+    {
+        switch (source)
+        {
+            case InsertQuerySource q:
+                CollectFromQueryExpression(q.Query, names);
+                break;
+            case InsertValuesSource v:
+                foreach (IReadOnlyList<Expression> row in v.Rows)
+                {
+                    foreach (Expression e in row) CollectFromExpression(e, names);
+                }
+                break;
+        }
     }
 }

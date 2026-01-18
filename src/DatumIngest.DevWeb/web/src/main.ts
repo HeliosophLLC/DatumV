@@ -30,6 +30,9 @@ import { createRoot } from 'react-dom/client';
 import { createElement } from 'react';
 import { subscribe } from 'valtio';
 import { VizPanel } from './viz-panel.js';
+import { AttachmentsPanel } from './attachments-panel.js';
+import { addAttachment, attachmentsState } from './attachments.js';
+import { ensureAssistantSchema } from './assistant-schema.js';
 import {
   state,
   viz,
@@ -864,6 +867,44 @@ import {
             sortText: typeof it.sortOrder === 'number'
               ? String(it.sortOrder).padStart(8, '0')
               : undefined,
+            range,
+          })),
+        };
+      },
+    });
+
+    // Attachments-name completion provider. Triggers on `$` to suggest
+    // every staged attachment, ranked by recency (most-recent at top).
+    // Registered as a separate provider so its triggerCharacters /
+    // suggestion shape don't have to negotiate with the keyword/UDF
+    // provider above.
+    monaco.languages.registerCompletionItemProvider('sql', {
+      triggerCharacters: ['$'],
+      provideCompletionItems: (model, position) => {
+        const items = attachmentsState.items;
+        if (items.length === 0) return { suggestions: [] };
+
+        // Replace from one column before the `$` (so the inserted text
+        // overwrites the trigger char itself) through to the end of the
+        // current word. Without this, Monaco's heuristic range can leave
+        // a duplicate `$` after acceptance.
+        const word = model.getWordUntilPosition(position);
+        const triggerCol = Math.max(1, word.startColumn - 1);
+        const range = new monaco.Range(
+          position.lineNumber, triggerCol,
+          position.lineNumber, word.endColumn,
+        );
+
+        const Kind = monaco.languages.CompletionItemKind.Variable;
+        return {
+          suggestions: items.map((a, idx) => ({
+            label: `$${a.name}`,
+            kind: Kind,
+            insertText: `$${a.name}`,
+            detail: `${a.kind} · ${a.originalFilename}`,
+            // Most-recent first — items[] grows by push, so reverse the
+            // index to favour later additions in alphabetic ranking.
+            sortText: String(items.length - idx).padStart(6, '0'),
             range,
           })),
         };
@@ -2358,6 +2399,10 @@ import {
     loadInitialState();
     setupCrossWindowSync();
 
+    // First-boot seed for the AI-assistant tables. Fire-and-forget;
+    // CREATE TABLE IF NOT EXISTS is a no-op on subsequent boots.
+    void ensureAssistantSchema();
+
     // Mount the 3D viz panel React root once. Visibility is gated by
     // viz.open in state.ts (panel returns null when closed); we also
     // toggle a body class so the drawer's CSS hides the empty chrome.
@@ -2373,6 +2418,70 @@ import {
     subscribe(viz, updateVizBodyClass);
     document.getElementById('viz-toggle')?.addEventListener('click', () => {
       viz.open = !viz.open;
+    });
+
+    // Mount the attachments drawer React root once. Same pattern as
+    // the viz panel: visibility gated by attachmentsState.open.
+    const attDrawer = document.getElementById('attachments-drawer');
+    if (attDrawer) {
+      const attRoot = createRoot(attDrawer);
+      attRoot.render(createElement(AttachmentsPanel));
+    }
+    const updateAttachmentsBodyClass = () => {
+      document.body.classList.toggle('attachments-closed', !attachmentsState.open);
+    };
+    const updateAttachmentsBadge = () => {
+      const count = attachmentsState.items.length;
+      const span = document.getElementById('attachments-count');
+      if (span) span.textContent = String(count);
+      const btn = document.getElementById('attachments-toggle');
+      if (btn) btn.classList.toggle('has-attachments', count > 0);
+    };
+    updateAttachmentsBodyClass();
+    updateAttachmentsBadge();
+    subscribe(attachmentsState, () => {
+      updateAttachmentsBodyClass();
+      updateAttachmentsBadge();
+    });
+    document.getElementById('attachments-toggle')?.addEventListener('click', () => {
+      attachmentsState.open = !attachmentsState.open;
+    });
+
+    // Page-wide drag-and-drop: drop a file anywhere on the page to
+    // stage it as an attachment. The dragenter/leave dance is the
+    // standard "show overlay while a file is hovering" pattern; we
+    // count enter/leave events to handle nested elements correctly.
+    let dragDepth = 0;
+    const isFileDrag = (e: DragEvent): boolean =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    window.addEventListener('dragenter', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      document.body.classList.add('dragging-files');
+    });
+    window.addEventListener('dragover', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (!isFileDrag(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) document.body.classList.remove('dragging-files');
+    });
+    window.addEventListener('drop', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      document.body.classList.remove('dragging-files');
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      files.forEach((f) => addAttachment(f));
+      // Auto-open the drawer on first drop so the user sees the file
+      // landed somewhere. They can dismiss by clicking the toggle.
+      if (files.length > 0 && !attachmentsState.open) {
+        attachmentsState.open = true;
+      }
     });
 
     // Reconcile DOM with the loaded groups before any rendering — this

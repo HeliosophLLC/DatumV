@@ -171,25 +171,29 @@ app.MapGet("/api/tables", () =>
 
 app.MapPost("/api/query", async (HttpRequest request, CancellationToken ct) =>
 {
-    QueryRequest? body;
+    QueryRequestEnvelope envelope;
     try
     {
-        body = await JsonSerializer.DeserializeAsync<QueryRequest>(
-            request.Body, jsonOptions, ct).ConfigureAwait(false);
+        envelope = await QueryRequestBinding.ReadAsync(request, jsonOptions, ct);
     }
     catch (JsonException ex)
     {
         return Results.Json(new { error = $"Bad request: {ex.Message}" }, jsonOptions, statusCode: 400);
     }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(new { error = $"Bad request: {ex.Message}" }, jsonOptions, statusCode: 400);
+    }
 
-    if (body is null || string.IsNullOrWhiteSpace(body.Sql))
+    QueryRequest body = envelope.Body;
+    if (string.IsNullOrWhiteSpace(body.Sql))
     {
         return Results.Json(new { error = "sql is required" }, jsonOptions, statusCode: 400);
     }
 
     int maxRows = body.MaxRows is > 0 ? body.MaxRows.Value : 1000;
 
-    return await ExecuteQuery(catalog, body.Sql, maxRows, body.Trace == true, jsonOptions, ct)
+    return await ExecuteQuery(catalog, body.Sql, maxRows, body.Trace == true, envelope.Parameters, jsonOptions, ct)
         .ConfigureAwait(false);
 });
 
@@ -227,11 +231,10 @@ app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
 
     CancellationToken ct = httpCtx.RequestAborted;
 
-    QueryRequest? body;
+    QueryRequestEnvelope envelope;
     try
     {
-        body = await JsonSerializer.DeserializeAsync<QueryRequest>(
-            httpCtx.Request.Body, jsonOptions, ct).ConfigureAwait(false);
+        envelope = await QueryRequestBinding.ReadAsync(httpCtx.Request, jsonOptions, ct);
     }
     catch (JsonException ex)
     {
@@ -239,8 +242,15 @@ app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
         await httpCtx.Response.WriteAsJsonAsync(new { error = $"Bad request: {ex.Message}" }, jsonOptions, ct);
         return;
     }
+    catch (InvalidOperationException ex)
+    {
+        httpCtx.Response.StatusCode = 400;
+        await httpCtx.Response.WriteAsJsonAsync(new { error = $"Bad request: {ex.Message}" }, jsonOptions, ct);
+        return;
+    }
 
-    if (body is null || string.IsNullOrWhiteSpace(body.Sql))
+    QueryRequest body = envelope.Body;
+    if (string.IsNullOrWhiteSpace(body.Sql))
     {
         httpCtx.Response.StatusCode = 400;
         await httpCtx.Response.WriteAsJsonAsync(new { error = "sql is required" }, jsonOptions, ct);
@@ -250,7 +260,7 @@ app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
     int maxRows = body.MaxRows is > 0 ? body.MaxRows.Value : 1000;
     string sql = body.Sql;
 
-    await ExecuteQueryStreaming(catalog, sql, maxRows, body.Trace == true, jsonOptions, httpCtx);
+    await ExecuteQueryStreaming(catalog, sql, maxRows, body.Trace == true, envelope.Parameters, jsonOptions, httpCtx);
 });
 
 // Language services. The LanguageService methods are pure over the (immutable)
@@ -393,6 +403,7 @@ static async Task<IResult> ExecuteQuery(
     string sql,
     int maxRows,
     bool trace,
+    IReadOnlyDictionary<string, ParameterValue> parameters,
     JsonSerializerOptions jsonOptions,
     CancellationToken ct)
 {
@@ -407,7 +418,27 @@ static async Task<IResult> ExecuteQuery(
     IQueryPlan plan;
     try
     {
-        plan = catalog.Plan(sql);
+        if (parameters.Count > 0)
+        {
+            // Parse → bind → plan. For multi-statement scripts, /api/query
+            // delegates to the streaming endpoint; here we assume a single
+            // statement and surface a clear error otherwise.
+            IReadOnlyList<(DatumIngest.Parsing.Ast.Statement Statement, string SourceText)> stmts =
+                DatumIngest.Parsing.SqlParser.ParseBatchWithText(sql);
+            if (stmts.Count != 1)
+            {
+                if (traceCapture is not null) DatumIngest.Diagnostics.ExecutionTracer.EndCapture(traceCapture);
+                return Results.Json(
+                    new { error = "/api/query with parameters supports a single statement; use /api/query/stream for batches." },
+                    jsonOptions, statusCode: 400);
+            }
+            DatumIngest.Parsing.Ast.Statement bound = ParameterBinder.Bind(stmts[0].Statement, parameters);
+            plan = catalog.Plan(bound, stmts[0].SourceText);
+        }
+        else
+        {
+            plan = catalog.Plan(sql);
+        }
     }
     catch (Exception ex)
     {
@@ -515,6 +546,7 @@ static async Task ExecuteQueryStreaming(
     string sql,
     int maxRows,
     bool trace,
+    IReadOnlyDictionary<string, ParameterValue> parameters,
     JsonSerializerOptions jsonOptions,
     HttpContext httpCtx)
 {
@@ -532,6 +564,23 @@ static async Task ExecuteQueryStreaming(
     try
     {
         statements = DatumIngest.Parsing.SqlParser.ParseBatchWithText(sql);
+
+        // Parameter binding runs before any execution begins, so missing
+        // / unused parameter errors land as 400s rather than mid-stream
+        // events. The bound statement list keeps each per-statement
+        // source slice alongside its rebound AST.
+        if (parameters.Count > 0)
+        {
+            DatumIngest.Parsing.Ast.Statement[] toBind =
+                new DatumIngest.Parsing.Ast.Statement[statements.Count];
+            for (int i = 0; i < statements.Count; i++) toBind[i] = statements[i].Statement;
+            IReadOnlyList<DatumIngest.Parsing.Ast.Statement> bound =
+                ParameterBinder.Bind(toBind, parameters);
+            (DatumIngest.Parsing.Ast.Statement, string)[] paired =
+                new (DatumIngest.Parsing.Ast.Statement, string)[statements.Count];
+            for (int i = 0; i < statements.Count; i++) paired[i] = (bound[i], statements[i].SourceText);
+            statements = paired;
+        }
     }
     catch (Exception ex)
     {
@@ -759,8 +808,6 @@ internal sealed record TraceEvent(string Type, string Cell, string Text);
 internal sealed record CellCompletedEvent(string Type, string Cell, double ElapsedMs);
 internal sealed record CompleteEvent(string Type, double ElapsedMs);
 internal sealed record ErrorEvent(string Type, string? Cell, string Message, string? Detail);
-
-internal sealed record QueryRequest(string Sql, int? MaxRows, bool? Trace);
 
 internal sealed record LangPositionRequest(string? Sql, int Offset);
 

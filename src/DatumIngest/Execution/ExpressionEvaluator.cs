@@ -390,8 +390,30 @@ public sealed class ExpressionEvaluator
             double doubleValue => DataValue.FromFloat64(doubleValue),
             string stringValue => DataValue.FromString(stringValue, frame.Target),
             bool boolValue => DataValue.FromBoolean(boolValue),
+            BinaryParameter binary => MaterializeBinaryParameter(binary, frame.Target),
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type: {literal.Value.GetType().Name}."),
+        };
+    }
+
+    /// <summary>
+    /// Materialises a <see cref="BinaryParameter"/> wrapper (carried in a
+    /// <see cref="LiteralExpression"/> by the parameter binder for binary
+    /// parameters delivered as multipart parts) into a <see cref="DataValue"/>
+    /// against the active query store. Lazy materialisation keeps the
+    /// parameter binder unaware of the per-query <see cref="IValueStore"/>.
+    /// </summary>
+    private static DataValue MaterializeBinaryParameter(BinaryParameter binary, IValueStore target)
+    {
+        return binary.Kind switch
+        {
+            DataKind.Image => DataValue.FromImage(binary.Bytes, target),
+            DataKind.Audio => DataValue.FromAudio(binary.Bytes, target),
+            DataKind.Video => DataValue.FromVideo(binary.Bytes, target),
+            DataKind.UInt8 => DataValue.FromByteArray(binary.Bytes, target),
+            _ => throw new InvalidOperationException(
+                $"BinaryParameter kind {binary.Kind} is not a recognised binary kind. " +
+                "Use Image / Audio / Video / UInt8."),
         };
     }
 

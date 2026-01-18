@@ -19,7 +19,7 @@ SELECT models.llama31_8b(
   || templates.llama31_assistant_turn(),
   NULL, NULL, true)              -- temperature, max_tokens, templated
 FROM messages
-WHERE conversation_id = @conv_id;
+WHERE conversation_id = $conv_id;
 ```
 
 The trailing `true` is the `templated` positional override that tells
@@ -82,7 +82,7 @@ SELECT models.llama_3_2_3b(
   || templates.llama31_assistant_turn(),
   NULL, NULL, true)
 FROM messages
-WHERE conversation_id = @conv_id;
+WHERE conversation_id = $conv_id;
 ```
 
 `templated => true` (positional `NULL, NULL, true` until keyword args
@@ -100,10 +100,10 @@ other role:
 ```sql
 INSERT INTO messages (conversation_id, turn_index, role, content)
 VALUES
-  (@conv, 1, 'user',      'What is 6 * 7?'),
-  (@conv, 2, 'assistant', '<call: multiply(6, 7)>'),
-  (@conv, 3, 'tool',      '{"result": 42}'),  -- Llama 3.1 emits as ipython
-  (@conv, 4, 'assistant', '');                -- assistant-turn slot
+  ($conv, 1, 'user',      'What is 6 * 7?'),
+  ($conv, 2, 'assistant', '<call: multiply(6, 7)>'),
+  ($conv, 3, 'tool',      '{"result": 42}'),  -- Llama 3.1 emits as ipython
+  ($conv, 4, 'assistant', '');                -- assistant-turn slot
 
 -- The dispatch from the assistant-turn row reads turns 1–3 and asks
 -- the model to produce the final answer:
@@ -114,7 +114,7 @@ SELECT models.llama_3_2_3b(
   || templates.llama31_assistant_turn(),
   NULL, NULL, true)
 FROM messages
-WHERE conversation_id = @conv AND turn_index BETWEEN 1 AND 3;
+WHERE conversation_id = $conv AND turn_index BETWEEN 1 AND 3;
 ```
 
 The `'tool'` role surfaces in the wire as

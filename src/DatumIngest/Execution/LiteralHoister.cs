@@ -140,6 +140,21 @@ public static class LiteralHoister
             double f64 => DataValue.FromFloat64(f64),
             string s  => DataValue.FromString(s, store),
             bool b    => DataValue.FromBoolean(b),
+            // Multipart-parameter binary payloads land here when the
+            // ParameterBinder produces a LiteralExpression(BinaryParameter)
+            // for $img / $clip / etc. The bytes go into the per-query
+            // store once at hoist time so every row sees the same
+            // arena-backed DataValue.
+            BinaryParameter binary => binary.Kind switch
+            {
+                DataKind.Image => DataValue.FromImage(binary.Bytes, store),
+                DataKind.Audio => DataValue.FromAudio(binary.Bytes, store),
+                DataKind.Video => DataValue.FromVideo(binary.Bytes, store),
+                DataKind.UInt8 => DataValue.FromByteArray(binary.Bytes, store),
+                _ => throw new InvalidOperationException(
+                    $"BinaryParameter kind {binary.Kind} is not a recognised binary kind. " +
+                    "Use Image / Audio / Video / UInt8."),
+            },
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type for hoisting: {lit.Value.GetType().Name}."),
         };

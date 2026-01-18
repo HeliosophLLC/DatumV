@@ -17,6 +17,10 @@ import {
 } from './state.js';
 import * as IDB from './idb.js';
 import type { Cell, QueryResult, StreamEvent } from './result-types.js';
+import {
+  attachmentByName,
+  extractParameterNames,
+} from './attachments.js';
 
 // ===== Hooks =====
 //
@@ -146,16 +150,12 @@ export async function runQuery(selectedText: string): Promise<void> {
   }, 250) as unknown as number;
 
   try {
-    const response = await fetch('/api/query/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sql,
-        maxRows: tab.maxRows || 200,
-        trace: tab.trace === true,
-      }),
-      signal: tab.abortController.signal,
-    });
+    const response = await fetch('/api/query/stream', buildFetchInit(
+      sql,
+      tab.maxRows || 200,
+      tab.trace === true,
+      tab.abortController.signal,
+    ));
 
     if (!response.ok) {
       try {
@@ -247,6 +247,63 @@ export async function runQuery(selectedText: string): Promise<void> {
 interface PendingBuffer {
   rows: Cell[][];
   setIdx: number;
+}
+
+// Build the fetch() init for /api/query/stream. When the SQL contains
+// `$name` references that match staged attachments, switch to a
+// multipart/form-data body with one JSON `request` part and one binary
+// part per attachment. Otherwise stay on the existing JSON path so
+// queries with no parameters incur no extra cost.
+function buildFetchInit(
+  sql: string,
+  maxRows: number,
+  trace: boolean,
+  signal: AbortSignal,
+): RequestInit {
+  const referenced = extractParameterNames(sql);
+  const matched = referenced
+    .map((n) => ({ name: n, att: attachmentByName(n) }))
+    .filter((r): r is { name: string; att: NonNullable<typeof r.att> } =>
+      r.att !== undefined,
+    );
+
+  if (matched.length === 0) {
+    return {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, maxRows, trace }),
+      signal,
+    };
+  }
+
+  // Multipart path. The JSON part names each binary parameter via a
+  // `ref` to its multipart part name; we use the attachment.id as the
+  // part name (stable, opaque, no SQL-identifier collision worry).
+  const parameters: Record<string, { kind: string; ref: string }> = {};
+  const fd = new FormData();
+  for (const { name, att } of matched) {
+    parameters[name] = { kind: att.kind, ref: att.id };
+    // FormData accepts Blob/File directly; the third arg sets the
+    // Content-Disposition filename, which the server ignores but
+    // helps DevTools network-panel readability.
+    fd.append(att.id, att.blob, att.originalFilename);
+  }
+
+  const requestJson = JSON.stringify({
+    sql,
+    maxRows,
+    trace,
+    parameters,
+  });
+  fd.append('request', new Blob([requestJson], { type: 'application/json' }));
+
+  return {
+    method: 'POST',
+    body: fd,
+    signal,
+    // Don't set Content-Type — fetch + FormData computes the
+    // correct multipart/form-data; boundary= for us.
+  };
 }
 
 function handleStreamEvent(
