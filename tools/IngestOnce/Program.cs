@@ -6,6 +6,20 @@ using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
 using DatumIngest.Serialization.Idx;
 using DatumIngest.Serialization.Zip;
+using DatumIngest.Tools.IngestOnce;
+
+// Sub-command dispatch. The original single-file mode is the default
+// when args[0] doesn't match a known sub-command — preserves existing
+// CLI behaviour for callers that pass a source path directly.
+if (args.Length > 0 && string.Equals(args[0], "merge-csv", StringComparison.OrdinalIgnoreCase))
+{
+    return await MergeCsv.RunAsync(args);
+}
+
+if (args.Length > 0 && string.Equals(args[0], "merge-images", StringComparison.OrdinalIgnoreCase))
+{
+    return await MergeImages.RunAsync(args);
+}
 
 string sourcePath = args.Length > 0
     ? args[0]
