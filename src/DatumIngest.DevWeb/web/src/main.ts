@@ -22,12 +22,12 @@ import {
 import * as IDB from './idb.js';
 import { loadTheme, applyTheme, toggleTheme } from './theme.js';
 import {
-  showModal,
   alertModal,
   confirmModal,
   promptModal,
   openImageLightbox,
 } from './modal.js';
+import { ref, snapshot } from 'valtio';
 import {
   state,
   type Tab,
@@ -1474,7 +1474,10 @@ import {
     // Tab-scoped run state. The closure captures `tab` so handlers below
     // operate on this specific tab even if the user switches away.
     tab.running = true;
-    tab.abortController = new AbortController();
+    // ref() so valtio doesn't proxy the AbortController — fetch's signal
+    // getter would otherwise hand a proxied AbortSignal to the browser
+    // and trigger "Illegal invocation".
+    tab.abortController = ref(new AbortController());
     tab.runStartedAt = performance.now();
     tab.runIsPartial = isPartial;
     tab.runningRes = {
@@ -1721,7 +1724,9 @@ import {
     // be running and need to keep its Cancel state).
     syncToolbarToActiveTab();
 
-    IDB.saveResult(tab.id, finalRes).catch(err =>
+    // snapshot() unwraps the valtio proxy into a plain object so
+    // IndexedDB's structuredClone-based put() doesn't choke on Proxy.
+    IDB.saveResult(tab.id, snapshot(finalRes)).catch(err =>
       console.warn(`Couldn't save result for tab ${tab.id}:`, err));
 
     if (!finalRes.error) refreshSidebarForSql(sql);

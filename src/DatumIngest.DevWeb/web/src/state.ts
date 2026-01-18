@@ -1,8 +1,15 @@
 // The single shared state singleton. Holds the data layer (tabs / groups
 // / tombstones); DOM rendering and Monaco editor lifecycle are owned by
-// main.ts. This module is dependency-light: only modal.ts (for the
-// quota-exhausted alert) and the storage browser APIs.
+// main.ts. This module is dependency-light: modal.ts (for the
+// quota-exhausted alert), valtio (proxy + useSnapshot), and the storage
+// browser APIs.
+//
+// Wrapped in valtio's `proxy()` so React components can `useSnapshot(state)`
+// and re-render only on the slices they actually accessed. Existing
+// imperative code (`state.tabs.push(...)`, `state.focusedGroupId = ...`)
+// continues to work unchanged — proxy() preserves direct-mutation API.
 
+import { proxy } from 'valtio';
 import { alertModal } from './modal.js';
 
 // ===== Storage keys =====
@@ -97,7 +104,7 @@ export function migrateLegacyKeys(): void {
 
 // ===== State singleton =====
 
-export const state: AppState = {
+export const state = proxy<AppState>({
   tabs: [],
   groups: [],
   focusedGroupId: null,
@@ -105,7 +112,7 @@ export const state: AppState = {
   // activeTabId is installed as an accessor below — the `undefined` here
   // is just a placeholder for the type.
   activeTabId: undefined,
-};
+});
 
 // Install `activeTabId` as an accessor that proxies the focused group's
 // value. `enumerable: false` keeps it out of JSON.stringify so any

@@ -11,6 +11,7 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "useDefineForClassFields": true,
+    "jsx": "react-jsx",
     "noEmit": true
   },
   "include": ["src"]
