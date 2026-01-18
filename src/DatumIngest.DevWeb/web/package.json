@@ -12,13 +12,16 @@
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.7"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.24",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "three": "^0.184.0",
     "valtio": "^2.3.2"
   }
 }

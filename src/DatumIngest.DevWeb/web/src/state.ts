@@ -12,6 +12,7 @@
 import { proxy } from 'valtio';
 import { alertModal } from './modal.js';
 import type { QueryResult } from './result-types.js';
+import type { VizConfig } from './viz-types.js';
 
 // ===== Storage keys =====
 
@@ -20,6 +21,28 @@ export const THEME_STORAGE_KEY = 'datum.devweb.theme';
 export const EDITOR_ORIENTATION_STORE = 'datum.devweb.editorOrientation';
 
 // ===== Types =====
+
+export interface SelectionAnchor {
+  row: number;
+  col: number;
+}
+
+// Selection state for the results table. Scoped to a single result set
+// because multi-statement scripts produce independent tables — switching
+// to a different set clears the selection in the previous one.
+//
+// Selected cells live in three orthogonal sets: discrete cells (`r,c`
+// composite keys), whole rows, whole columns. A cell is rendered
+// "selected" if it appears in `cells`, or its row in `rows`, or its col
+// in `cols`. The anchor is the most-recent click site, used as the
+// pivot for shift-extending range selections.
+export interface SelectionState {
+  resultSetIndex: number;
+  anchor: SelectionAnchor | null;
+  rows: number[];
+  cols: number[];
+  cells: string[];
+}
 
 export interface Tab {
   id: string;
@@ -44,6 +67,23 @@ export interface Tab {
   // completion.
   runIsPartial?: boolean;
   liveTickHandle: number | null;
+  // Results-table selection (runtime-only, not persisted). null when
+  // nothing is selected.
+  selection: SelectionState | null;
+  // 3D visualization role assignments. Persisted so role choices
+  // survive a tab switch. null until the user opens the viz panel and
+  // either accepts auto-detected defaults or picks columns manually.
+  vizConfig: VizConfig | null;
+}
+
+// ===== Global viz panel state =====
+//
+// Visibility is application-wide (one drawer panel total). Per-tab
+// role configuration lives on Tab.vizConfig — the panel reads the
+// focused tab's config at render time.
+
+export interface GlobalVizState {
+  open: boolean;
 }
 
 export type EditorOrientation = 'horizontal' | 'vertical';
@@ -117,6 +157,13 @@ export const state = proxy<AppState>({
   // activeTabId is installed as an accessor below — the `undefined` here
   // is just a placeholder for the type.
   activeTabId: undefined,
+});
+
+// Separate proxy for viz panel visibility — independent of tab content
+// so toggling the panel doesn't trigger workspace re-renders. Per-tab
+// role configuration lives on Tab.vizConfig.
+export const viz = proxy<GlobalVizState>({
+  open: false,
 });
 
 // Install `activeTabId` as an accessor that proxies the focused group's
@@ -207,6 +254,8 @@ export function freshTab(n: number): Tab {
     runStartedAt: 0,
     runningRes: null,
     liveTickHandle: null,
+    selection: null,
+    vizConfig: null,
   };
 }
 
@@ -294,6 +343,13 @@ export function loadInitialState(): void {
           runStartedAt: 0,
           runningRes: null,
           liveTickHandle: null,
+          selection: null,
+          vizConfig:
+            t.vizConfig &&
+            typeof t.vizConfig === 'object' &&
+            t.vizConfig.roles
+              ? (t.vizConfig as VizConfig)
+              : null,
         };
       });
       state.groups = Array.isArray(raw.groups) ? raw.groups : [];
@@ -375,7 +431,7 @@ export function persistState(): void {
   }
   const inMemoryById = new Map(state.tabs.map((t) => [t.id, t]));
 
-  const tabsToWrite = state.tabs.map((t) => ({
+  const tabsToWrite: any[] = state.tabs.map((t) => ({
     id: t.id,
     name: t.name,
     sql: t.sql,
@@ -384,6 +440,7 @@ export function persistState(): void {
     pinned: t.pinned === true,
     maxRows: t.maxRows,
     trace: t.trace === true,
+    vizConfig: t.vizConfig ?? null,
   }));
   if (onDisk && Array.isArray(onDisk.tabs)) {
     for (const t of onDisk.tabs) {
@@ -400,6 +457,7 @@ export function persistState(): void {
         maxRows:
           typeof t.maxRows === 'number' && t.maxRows > 0 ? t.maxRows : 200,
         trace: t.trace === true,
+        vizConfig: t.vizConfig ?? null,
       });
     }
   }

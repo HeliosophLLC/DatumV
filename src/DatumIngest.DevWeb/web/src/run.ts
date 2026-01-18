@@ -16,7 +16,7 @@ import {
   type Tab,
 } from './state.js';
 import * as IDB from './idb.js';
-import type { QueryResult, StreamEvent } from './result-types.js';
+import type { Cell, QueryResult, StreamEvent } from './result-types.js';
 
 // ===== Hooks =====
 //
@@ -85,7 +85,10 @@ export async function runQuery(selectedText: string): Promise<void> {
   if (!sql) return;
 
   // Tab-scoped run state. The closure captures `tab` so handlers below
-  // operate on this specific tab even if the user switches away.
+  // operate on this specific tab even if the user switches away. The
+  // existing selection (if any) referenced rows/cols of the previous
+  // result and is meaningless for the new one — clear it.
+  tab.selection = null;
   tab.running = true;
   // ref() so valtio doesn't proxy the AbortController — fetch's signal
   // getter would otherwise hand a proxied AbortSignal to the browser
@@ -106,11 +109,41 @@ export async function runQuery(selectedText: string): Promise<void> {
   hooks.syncToolbar();
   hooks.renderTabStrip();
 
+  // Per-run row buffer. Accumulates rows from `row` events and flushes
+  // them into the proxied state in batches every ~250ms. Pushing one
+  // row at a time would trigger N valtio invalidations and N React
+  // re-renders during a 20k-row query — the batch flush cuts that to
+  // ~80 invalidations regardless of row count.
+  const pending: { rows: Cell[][]; setIdx: number } = {
+    rows: [],
+    setIdx: -1,
+  };
+  const flushPending = () => {
+    if (pending.rows.length === 0) return;
+    const res = tab.runningRes;
+    if (!res || pending.setIdx < 0) {
+      pending.rows = [];
+      return;
+    }
+    const set = res.resultSets[pending.setIdx];
+    if (!set) {
+      pending.rows = [];
+      return;
+    }
+    // Single .push(...) call → one valtio invalidation regardless of N.
+    set.rows.push(...pending.rows);
+    set.rowCount = set.rows.length;
+    res.rowCount += pending.rows.length;
+    pending.rows = [];
+  };
+
   paintElapsedForTab(tab);
-  tab.liveTickHandle = setInterval(
-    () => paintElapsedForTab(tab),
-    250,
-  ) as unknown as number;
+  // Combined tick: paint elapsed slot AND flush pending rows so the
+  // table updates at the same cadence as the elapsed time.
+  tab.liveTickHandle = setInterval(() => {
+    paintElapsedForTab(tab);
+    flushPending();
+  }, 250) as unknown as number;
 
   try {
     const response = await fetch('/api/query/stream', {
@@ -136,6 +169,10 @@ export async function runQuery(selectedText: string): Promise<void> {
       const decoder = new TextDecoder();
       let buf = '';
 
+      const onEvent = (event: StreamEvent) => {
+        handleStreamEvent(tab, event, pending, flushPending);
+      };
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -150,12 +187,12 @@ export async function runQuery(selectedText: string): Promise<void> {
           } catch {
             continue;
           }
-          handleStreamEvent(tab, event);
+          onEvent(event);
         }
       }
       if (buf.trim()) {
         try {
-          handleStreamEvent(tab, JSON.parse(buf) as StreamEvent);
+          onEvent(JSON.parse(buf) as StreamEvent);
         } catch {
           /* ignore trailing junk */
         }
@@ -175,6 +212,10 @@ export async function runQuery(selectedText: string): Promise<void> {
       clearInterval(tab.liveTickHandle);
       tab.liveTickHandle = null;
     }
+    // Final flush — anything not yet pushed to the proxy at end of
+    // stream (or on abort/error) gets committed here so the table
+    // doesn't drop trailing rows.
+    flushPending();
     tab.running = false;
     tab.abortController = null;
   }
@@ -203,7 +244,17 @@ export async function runQuery(selectedText: string): Promise<void> {
   if (!finalRes.error) hooks.refreshSidebarForSql(sql);
 }
 
-function handleStreamEvent(tab: Tab, event: StreamEvent): void {
+interface PendingBuffer {
+  rows: Cell[][];
+  setIdx: number;
+}
+
+function handleStreamEvent(
+  tab: Tab,
+  event: StreamEvent,
+  pending: PendingBuffer,
+  flushPending: () => void,
+): void {
   const res = tab.runningRes;
   if (!res) return;
   switch (event.type) {
@@ -213,30 +264,46 @@ function handleStreamEvent(tab: Tab, event: StreamEvent): void {
     case 'cell_started':
       break;
     case 'schema':
-      // Each schema event opens a new result set. Rows that follow
-      // attach to the most-recent set.
+      // Each schema event opens a new result set. Flush any pending
+      // rows belonging to the previous set first so they don't leak
+      // into the new one.
+      flushPending();
       res.resultSets.push({
         schema: event.columns,
         rows: [],
         rowCount: 0,
         truncated: false,
       });
+      pending.setIdx = res.resultSets.length - 1;
       break;
     case 'chunk':
+      // Streaming text chunks push directly — they're typically much
+      // less frequent than rows and the streaming-output pane reads
+      // chunks incrementally.
       res.chunks.push({ model: event.model, text: event.text });
       break;
     case 'row': {
-      let cur = res.resultSets[res.resultSets.length - 1];
-      if (!cur) {
-        cur = { schema: null, rows: [], rowCount: 0, truncated: false };
-        res.resultSets.push(cur);
+      // Rows go into the buffer; flushPending() pushes them in batches
+      // every ~250ms (and on stream end / schema change / truncate).
+      // If a row arrives before any schema event (defensive), open a
+      // placeholder set so pending.setIdx is valid.
+      if (pending.setIdx < 0 || !res.resultSets[pending.setIdx]) {
+        res.resultSets.push({
+          schema: null,
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+        });
+        pending.setIdx = res.resultSets.length - 1;
       }
-      cur.rows.push(event.cells);
-      cur.rowCount = cur.rows.length;
-      res.rowCount += 1;
+      pending.rows.push(event.cells);
       break;
     }
     case 'truncated': {
+      // Server is telling us "the run hit maxRows; total would have
+      // been event.rowCount rows." Flush the in-flight batch so the
+      // count we set isn't immediately overwritten by a delayed flush.
+      flushPending();
       const cur = res.resultSets[res.resultSets.length - 1];
       if (cur) {
         cur.truncated = true;

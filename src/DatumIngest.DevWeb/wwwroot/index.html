@@ -329,6 +329,29 @@
     overflow: hidden;
   }
 
+  /* Wrapper around #group-container so the viz drawer can sit beneath
+     the editor groups without being stretched by the existing flex
+     rules. `flex: 1` here, fixed height on #viz-drawer below. */
+  #group-container-wrap {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Bottom drawer for the 3D visualization panel. Shown only while
+     viz.open is true; React component returns null otherwise. We
+     handle visibility in CSS too so the canvas isn't re-allocated
+     when toggling. */
+  #viz-drawer {
+    flex: 0 0 380px; min-height: 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #viz-drawer:empty { display: none; }
+  body.viz-closed #viz-drawer { display: none; }
+
   /* Container holding all editor groups. `.vertical-stack` flips the
      two-pane layout from side-by-side (default) to one-above-the-other.
      The drag-handle between groups (`#group-resize`) is inserted by
@@ -586,6 +609,42 @@
     vertical-align: top;
     max-width: 600px;
   }
+  /* Cap cell content height. LLM-generated text and large JSON trees
+     would otherwise produce arbitrarily tall rows that fight
+     virtualization (variable measurement → layout reshuffle on scroll)
+     and dominate the viewport. Direct children of <td> get clipped at
+     200px with internal scroll. The .blob caption inside media cells
+     and the .cell-copy button stay outside the cap. */
+  table.results td > pre,
+  table.results td > .json-tree,
+  table.results td > .media-array,
+  table.results td > img,
+  table.results td > video,
+  table.results td > audio {
+    max-height: 200px;
+    overflow: auto;
+  }
+  /* Image cells: clamp display height too so the <img> doesn't render
+     full-size before scroll bars kick in. */
+  table.results td > img {
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  /* Virtualized table scroll container. Used only when a result set has
+     enough rows to trigger virtualization. The fixed max-height keeps a
+     huge result from pushing later content (additional sets, trace) far
+     down the page; sticky header keeps working because top: 0 anchors
+     against this container. */
+  .results-virtual-scroll {
+    max-height: 70vh;
+    overflow: auto;
+    border: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .results-virtual-scroll > table.results {
+    margin-bottom: 0;
+  }
   table.results th {
     background: var(--panel-2);
     text-align: left;
@@ -612,8 +671,15 @@
   }
   /* Cells host an absolutely-positioned copy button in their top-right
      corner. Only set on td so th's sticky positioning is unaffected. */
-  table.results td { position: relative; }
+  table.results td { position: relative; cursor: cell; }
   table.results td.null { color: var(--muted); font-style: italic; }
+  /* Selected cells: subtle accent-tinted background. Set on td (cell click,
+     range, or column-selection inheritance) and on th (column header
+     selection). Click target on th is the whole header, hence the cursor
+     change to make the affordance visible. */
+  table.results td.selected { background: rgba(88, 166, 255, 0.18); }
+  table.results th { cursor: pointer; user-select: none; }
+  table.results th.col-selected { background: rgba(88, 166, 255, 0.22); color: var(--fg); }
   /* Copy button: hidden until the cell is hovered, then fades in. Sized
      small to avoid overlapping short content; for narrow cells it may
      overlay text â€” that's fine for a hover-only affordance. */
@@ -810,6 +876,66 @@
     cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
   .lightbox-close:hover { background: rgba(0, 0, 0, 0.7); }
+
+  /* ===== Viz panel ===== */
+  .viz-panel {
+    display: flex; flex-direction: column;
+    height: 100%; min-height: 0;
+  }
+  .viz-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; padding: 16px; color: var(--muted);
+  }
+  .viz-header {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px; padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+    font-size: 12px;
+  }
+  .viz-header .spacer { flex: 1; }
+  .viz-close {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 4px;
+    width: 22px; height: 22px; line-height: 1;
+    cursor: pointer; font-size: 12px;
+  }
+  .viz-close:hover { color: var(--fg); border-color: var(--fg); }
+  .viz-field {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .viz-field > span {
+    color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .viz-field select {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 6px; font-size: 12px; font-family: inherit;
+  }
+  .viz-download {
+    background: var(--accent); color: var(--bg);
+    border: none; border-radius: 4px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit; font-weight: 500;
+  }
+  .viz-download:hover { filter: brightness(1.1); }
+  .viz-download:disabled { opacity: 0.6; cursor: progress; }
+  .viz-warnings {
+    flex-basis: 100%;
+    display: flex; flex-direction: column; gap: 2px;
+    color: var(--muted); font-size: 11px;
+    padding-top: 4px;
+  }
+  .viz-warnings .error-line { color: #d97757; }
+  .viz-warnings .warn-line { color: #c8a100; }
+  .viz-canvas-host {
+    flex: 1; min-height: 0; position: relative;
+    overflow: hidden;
+  }
+  .viz-canvas-host canvas {
+    display: block; width: 100% !important; height: 100% !important;
+  }
 </style>
 
 <!-- Monaco loader from CDN. Editor.main is loaded inside the boot script. -->
@@ -820,6 +946,12 @@
     <span class="title">DatumIngest</span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
+    <button class="icon" id="viz-toggle" title="Toggle 3D visualization panel" aria-label="Toggle visualization">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"></path>
+        <path d="M4 7l8 4 8-4M12 11v10"></path>
+      </svg>
+    </button>
     <button class="icon" id="split-toggle" title="Split editor into two side-by-side panes" aria-label="Split editor">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
         <rect x="3" y="4" width="8" height="16" rx="1"></rect>
@@ -883,6 +1015,7 @@
     <div id="sidebar-resize" title="Drag to resize"></div>
 
     <div id="main-column">
+      <div id="group-container-wrap">
       <div id="group-container">
         <div class="editor-group" data-group-id="g1">
           <div class="tab-strip"></div>
@@ -913,6 +1046,8 @@
           </div>
         </div>
       </div>
+      </div>
+      <div id="viz-drawer"><!-- React root mount target --></div>
     </div>
   </div>
 

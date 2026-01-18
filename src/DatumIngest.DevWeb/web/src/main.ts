@@ -26,8 +26,13 @@ import {
 } from './modal.js';
 import { mountResultsPane, unmountResultsPane } from './react-mount.js';
 import { runQuery, cancelActiveTabRun, setRunHooks } from './run.js';
+import { createRoot } from 'react-dom/client';
+import { createElement } from 'react';
+import { subscribe } from 'valtio';
+import { VizPanel } from './viz-panel.js';
 import {
   state,
+  viz,
   type Tab,
   type Group,
   type AppState,
@@ -1129,6 +1134,8 @@ import {
         runStartedAt: 0,
         runningRes: null,
         liveTickHandle: null,
+        selection: null,
+        vizConfig: null,
       });
       addTabIdToFocusedGroup(t.id);
       tabsChanged = true;
@@ -2350,6 +2357,23 @@ import {
 
     loadInitialState();
     setupCrossWindowSync();
+
+    // Mount the 3D viz panel React root once. Visibility is gated by
+    // viz.open in state.ts (panel returns null when closed); we also
+    // toggle a body class so the drawer's CSS hides the empty chrome.
+    const vizDrawer = document.getElementById('viz-drawer');
+    if (vizDrawer) {
+      const vizRoot = createRoot(vizDrawer);
+      vizRoot.render(createElement(VizPanel));
+    }
+    const updateVizBodyClass = () => {
+      document.body.classList.toggle('viz-closed', !viz.open);
+    };
+    updateVizBodyClass();
+    subscribe(viz, updateVizBodyClass);
+    document.getElementById('viz-toggle')?.addEventListener('click', () => {
+      viz.open = !viz.open;
+    });
 
     // Reconcile DOM with the loaded groups before any rendering — this
     // both wires the existing first-group toolbar handlers and stamps
