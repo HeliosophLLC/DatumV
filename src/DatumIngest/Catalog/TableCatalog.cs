@@ -371,8 +371,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case InsertStatement insert:
-                InsertExecutor.Execute(this, insert);
-                return EmptyQueryPlan.Instance;
+                return InsertExecutor.Execute(this, insert);
 
             case UpdateStatement update:
                 UpdateExecutor.Execute(this, update);

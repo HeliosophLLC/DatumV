@@ -37,7 +37,7 @@ internal static class InsertExecutor
     /// is awaited via <c>GetAwaiter().GetResult()</c> so the dispatch
     /// stays consistent with the rest of <c>Plan()</c>'s sync DDL flow.
     /// </summary>
-    public static void Execute(TableCatalog catalog, InsertStatement insert)
+    public static IQueryPlan Execute(TableCatalog catalog, InsertStatement insert)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -55,44 +55,58 @@ internal static class InsertExecutor
         }
 
         Schema targetSchema = provider.GetSchema();
+        bool captureRows = insert.Returning is not null;
+        RowBatch? captured;
 
         switch (insert.Source)
         {
             case InsertValuesSource values:
-                ApplyValues(catalog, provider, targetSchema, insert.ColumnNames, values);
+                captured = ApplyValuesAsync(
+                    catalog, provider, targetSchema, insert.ColumnNames, values, captureRows)
+                    .GetAwaiter().GetResult();
                 break;
 
             case InsertQuerySource queryRow:
-                ApplySelect(catalog, provider, targetSchema, insert.ColumnNames, queryRow);
+                if (captureRows)
+                {
+                    throw new NotSupportedException(
+                        $"INSERT INTO '{insert.TableName}': RETURNING with a SELECT source is not yet " +
+                        "supported. Use VALUES (RETURNING for SELECT lands in C1d).");
+                }
+                ApplySelectAsync(catalog, provider, targetSchema, insert.ColumnNames, queryRow)
+                    .GetAwaiter().GetResult();
+                captured = null;
                 break;
 
             default:
                 throw new NotSupportedException(
                     $"Unrecognised INSERT source: {insert.Source.GetType().Name}.");
         }
+
+        if (captured is null) return EmptyQueryPlan.Instance;
+
+        return new InsertReturningPlan(
+            insert.TableName,
+            targetSchema,
+            captured,
+            insert.Returning!,
+            catalog);
     }
 
-    private static void ApplyValues(
+    private static async Task<RowBatch?> ApplyValuesAsync(
         TableCatalog catalog,
         ITableProvider provider,
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
-        InsertValuesSource values) =>
-        ApplyValuesAsync(catalog, provider, targetSchema, columnList, values).GetAwaiter().GetResult();
-
-    private static async Task ApplyValuesAsync(
-        TableCatalog catalog,
-        ITableProvider provider,
-        Schema targetSchema,
-        IReadOnlyList<string>? columnList,
-        InsertValuesSource values)
+        InsertValuesSource values,
+        bool captureRows = false)
     {
         if (values.Rows.Count == 0)
         {
             // Nothing to insert. Don't open a session — keeps the
             // semantics simple ("INSERT … VALUES with zero rows is a
             // no-op") and avoids a noisy empty commit.
-            return;
+            return null;
         }
 
         // Source-column count is the column list size if provided, else
@@ -170,6 +184,13 @@ internal static class InsertExecutor
 
         await session.WriteAsync(batch).ConfigureAwait(false);
         await session.CommitAsync().ConfigureAwait(false);
+
+        // Capture the resolved batch for RETURNING. The arena holds the
+        // string / blob payloads for non-inline DataValues, so the plan
+        // must keep both alive until the caller has iterated. RETURNING
+        // is post-commit semantics — yielding only happens after a
+        // successful CommitAsync, so an aborted INSERT yields nothing.
+        return captureRows ? batch : null;
     }
 
     /// <summary>
@@ -560,7 +581,7 @@ internal static class InsertExecutor
     /// null-fill plan (<see cref="OmittedFill.Null"/>). Rejects every
     /// shape that can't produce a value (omitted column with no
     /// <c>DEFAULT</c> on a non-nullable target). Shared between
-    /// <see cref="ApplyValues"/> and <see cref="ApplySelect"/> — the
+    /// <see cref="ApplyValuesAsync"/> and <see cref="ApplySelect"/> — the
     /// only difference is whether <paramref name="sourceColumnCount"/>
     /// comes from the column list / VALUES tuple width or from the
     /// source query's projection arity (read off the first batch's
