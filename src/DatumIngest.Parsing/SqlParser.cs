@@ -3235,8 +3235,10 @@ public static class SqlParser
             ToSpan(tryKw));
 
     /// <summary>
-    /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
-    /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
+    /// Parses <c>INSERT INTO name [(col, ...)] {SELECT … | VALUES (…), …} [RETURNING expr [, expr]*]</c>.
+    /// The optional <c>RETURNING</c> clause turns the INSERT into a query that
+    /// yields the resolved (post-DEFAULT, post-IDENTITY) inserted rows after
+    /// the implicit commit completes — PostgreSQL semantics.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> InsertParser =
         from insertKw in Token.EqualTo(SqlToken.Insert)
@@ -3250,10 +3252,23 @@ public static class SqlParser
         ).AsNullable().OptionalOrDefault()
         from source in ValuesSourceParser.Select(v => (InsertSource)v).Try()
             .Or(SP.Ref(() => QueryExpressionParser!).Select(q => (InsertSource)new InsertQuerySource(q)))
+        from returning in ReturningClauseParser.AsNullable().OptionalOrDefault()
         select (Statement)new InsertStatement(
             tableName,
             columnNames is { Length: > 0 } ? columnNames : null,
-            source);
+            source,
+            returning);
+
+    /// <summary>
+    /// Parses <c>RETURNING expr [, expr]*</c> — the projection list that the
+    /// INSERT statement yields after committing. Reuses <see cref="ColumnList"/>
+    /// so the surface (column references, computed expressions, <c>*</c>,
+    /// table-qualified <c>t.*</c>, aliases) matches a SELECT projection.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<SelectColumn>> ReturningClauseParser =
+        from returningKw in Token.EqualTo(SqlToken.Returning)
+        from columns in ColumnList
+        select (IReadOnlyList<SelectColumn>)columns;
 
     /// <summary>
     /// Parses <c>VALUES (expr, ...), (expr, ...) ...</c>.

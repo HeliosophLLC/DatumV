@@ -200,6 +200,82 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Equal(2, values.Rows[0].Count);
     }
 
+    // ───────────────────── INSERT … RETURNING ─────────────────────
+
+    [Fact]
+    public void Insert_NoReturningClause_FieldIsNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t VALUES (1, 'a')");
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.Null(insert.Returning);
+    }
+
+    [Fact]
+    public void Insert_ReturningSingleColumn_ParsesAsSelectColumn()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat') RETURNING id");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.NotNull(insert.Returning);
+        Assert.Single(insert.Returning);
+        ColumnReference col = Assert.IsType<ColumnReference>(insert.Returning[0].Expression);
+        Assert.Equal("id", col.ColumnName);
+    }
+
+    [Fact]
+    public void Insert_ReturningMultipleColumns_PreservesOrder()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t VALUES (1, 'a') RETURNING id, name, created_at");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.NotNull(insert.Returning);
+        Assert.Equal(3, insert.Returning.Count);
+        Assert.Equal("id", Assert.IsType<ColumnReference>(insert.Returning[0].Expression).ColumnName);
+        Assert.Equal("name", Assert.IsType<ColumnReference>(insert.Returning[1].Expression).ColumnName);
+        Assert.Equal("created_at", Assert.IsType<ColumnReference>(insert.Returning[2].Expression).ColumnName);
+    }
+
+    [Fact]
+    public void Insert_ReturningStar_ParsesAsSelectAllColumns()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t VALUES (1, 'a') RETURNING *");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.NotNull(insert.Returning);
+        Assert.Single(insert.Returning);
+        Assert.IsType<SelectAllColumns>(insert.Returning[0]);
+    }
+
+    [Fact]
+    public void Insert_ReturningExpressionWithAlias_KeepsAlias()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t VALUES (1, 'a') RETURNING id * 10 AS scaled_id");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.NotNull(insert.Returning);
+        Assert.Single(insert.Returning);
+        SelectColumn col = insert.Returning[0];
+        Assert.Equal("scaled_id", col.Alias);
+        Assert.IsType<BinaryExpression>(col.Expression);
+    }
+
+    [Fact]
+    public void Insert_SelectSourceWithReturning_ParsesEndToEnd()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO summary (id, total) SELECT id, sum FROM staging RETURNING id, total");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.IsType<InsertQuerySource>(insert.Source);
+        Assert.NotNull(insert.Returning);
+        Assert.Equal(2, insert.Returning.Count);
+    }
+
     // ───────────────────── UPDATE ─────────────────────
 
     [Fact]

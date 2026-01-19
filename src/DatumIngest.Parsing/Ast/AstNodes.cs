@@ -1079,15 +1079,26 @@ public sealed record DropTableStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
-/// <c>INSERT INTO name SELECT ...</c> — inserts rows from a query into an existing table.
+/// <c>INSERT INTO name [(cols)] {VALUES (...) | SELECT ...} [RETURNING expr [, expr]*]</c>
+/// — inserts rows into an existing table, optionally surfacing a projection of the
+/// resolved (post-DEFAULT, post-IDENTITY) inserted rows. Mirrors PostgreSQL's INSERT
+/// statement.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 /// <param name="ColumnNames">Optional explicit column list. When <see langword="null"/>, all columns in declaration order.</param>
 /// <param name="Source">The source of rows: either a <see cref="QueryExpression"/> or an <see cref="InsertValuesSource"/>.</param>
+/// <param name="Returning">
+/// Optional RETURNING clause. When non-<see langword="null"/>, the INSERT yields the
+/// projection of the resolved rows after the implicit commit completes (post-commit
+/// batch semantics — partial rows from an aborted INSERT are never observable).
+/// Expressions resolve against each inserted row, the same scope SELECT projections
+/// have. <see langword="null"/> when the INSERT is a side-effect-only statement.
+/// </param>
 public sealed record InsertStatement(
     string TableName,
     IReadOnlyList<string>? ColumnNames,
-    InsertSource Source) : Statement;
+    InsertSource Source,
+    IReadOnlyList<SelectColumn>? Returning = null) : Statement;
 
 /// <summary>
 /// Base type for the source of rows in an INSERT statement.

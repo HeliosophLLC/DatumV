@@ -60,7 +60,7 @@ public static class SqlKeywordRegistry
         "ANALYZE", "REINDEX",
 
         // DML keywords
-        "INSERT", "VALUES", "UPDATE", "SET", "DELETE",
+        "INSERT", "VALUES", "RETURNING", "UPDATE", "SET", "DELETE",
 
         // Direct execution
         "EXEC",

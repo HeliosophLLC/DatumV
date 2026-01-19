@@ -268,6 +268,9 @@ public enum SqlToken
     /// <summary>The VALUES keyword (DML literal row values).</summary>
     Values,
 
+    /// <summary>The RETURNING keyword (PG-canonical clause for surfacing inserted/updated rows).</summary>
+    Returning,
+
     /// <summary>The UPDATE keyword (DML row mutation).</summary>
     Update,
 
