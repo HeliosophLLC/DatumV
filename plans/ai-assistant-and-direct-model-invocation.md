@@ -19,48 +19,68 @@ back. There is no second paradigm to build.
 ## Core architecture decision: SQL is the API
 
 Every model invocation — assistant turn, image-to-depth, batched OCR, chat
-completion — is a SQL query routed through `/api/query/stream` with two
-mechanisms for feeding data in:
+completion — is a SQL query routed through `/api/query/stream`. The request
+is `multipart/form-data` with one JSON part naming the SQL + parameters and
+zero or more additional parts carrying binary payloads:
 
 ```
 POST /api/query/stream
-{
-  "sql": "SELECT depth_estimation(@img)",
-  "parameters": { "img": { "kind": "Image", "bytes": "<base64>" } }
-}
-```
+Content-Type: multipart/form-data; boundary=----X
 
-For multi-row inputs, the request also carries a `tables` map:
+----X
+Content-Disposition: form-data; name="request"
+Content-Type: application/json
 
-```
-POST /api/query/stream
 {
-  "sql": "SELECT id, blip_caption(image) FROM uploads",
-  "tables": {
-    "uploads": {
-      "columns": [{"name": "id", "kind": "Int32"}, {"name": "image", "kind": "Image"}],
-      "rows": [[1, "<base64>"], [2, "<base64>"], ...]
-    }
+  "sql": "SELECT models.depth_estimation($img)",
+  "parameters": {
+    "img": { "kind": "Image", "ref": "img_part" }
   }
 }
+----X
+Content-Disposition: form-data; name="img_part"
+Content-Type: image/png
+
+<binary bytes>
+----X--
 ```
 
-Behind the scenes, `tables` entries are wrapped in `InMemoryTableProvider`
-instances and registered in a **per-request child `TableCatalog`** that uses
-the existing `Parent` chain (already used throughout the resolver). The
-child catalog is disposed when the response completes. No mutation of the
-shared catalog, no session state, no concurrent-request name collisions.
+Two parameter shapes:
+
+- **Inline scalar**: `{ "kind": "String", "value": "hello" }` for primitives,
+  numbers, booleans, dates — anything cheap to encode in JSON. The `value`
+  field's JSON type matches the `kind`.
+- **Binary reference**: `{ "kind": "Image", "ref": "img_part" }` for any
+  binary kind (`Image` / `Audio` / `Video` / `UInt8` array). The `ref`
+  field names a sibling multipart part in the same request; the server
+  reads it as a stream into the corresponding `DataValue`.
+
+There is no base64-in-JSON path. Binary ships as binary from day one, so
+audio + video parameters work the moment those `DataKind`s do — no retrofit
+when image sizes grow past the JSON-parsing cliff, and no double encoding
+on every assistant turn.
+
+For multi-row inputs, the request will also gain a `tables` map (deferred
+to v2 — see "Out of scope"). When that lands, a `tables` entry uses the
+same multipart shape: per-row binary cells reference part names instead of
+inlining bytes.
+
+Behind the scenes, `tables` entries (when v2 lands) are wrapped in
+`InMemoryTableProvider` instances and registered in a **per-request child
+`TableCatalog`** that uses the existing `Parent` chain. The child catalog
+is disposed when the response completes. No mutation of the shared
+catalog, no session state, no concurrent-request name collisions.
 
 The same shape covers everything we want to do:
 
 | Use case            | SQL                                                              |
 | ------------------- | ---------------------------------------------------------------- |
-| Depth map           | `SELECT depth_estimation(@img)`                                  |
-| Salient cutout      | `SELECT u2net_cutout(@img)`                                      |
-| Caption             | `SELECT blip_caption(@img)`                                      |
-| OmniParser          | `SELECT omniparser(@img)`                                        |
+| Depth map           | `SELECT depth_estimation($img)`                                  |
+| Salient cutout      | `SELECT u2net_cutout($img)`                                      |
+| Caption             | `SELECT blip_caption($img)`                                      |
+| OmniParser          | `SELECT omniparser($img)`                                        |
 | Single-shot LLM     | `SELECT llama_3_2(@prompt, temperature => @t)`                   |
-| Embedding           | `SELECT minilm_embed(@text)`                                     |
+| Embedding           | `SELECT minilm_embed($text)`                                     |
 | Batched captions    | `SELECT id, blip_caption(image) FROM uploads`                    |
 | Chat with history   | `SELECT llama_3_2(chat_format(speaker, text)) FROM conversation` |
 | Production pipeline | Any SQL the operator writes against staged tables + UDFs         |
@@ -70,7 +90,7 @@ Streaming tokens flow through the existing NDJSON sink for any of these.
 ### Why this works
 
 - `ParameterBinder.Bind(query, dict<string, DataValue>)` already substitutes
-  `@name` with literals before planning; engine-level support is done.
+  `$name` with literals before planning; engine-level support is done.
 - `InMemoryTableProvider` is fully featured (scan, seek, schema inference,
   optional indexing) — we just need to register it in a per-request catalog.
 - `TableCatalog.Parent` chain already exists; child catalogs delegate to
@@ -85,17 +105,66 @@ Streaming tokens flow through the existing NDJSON sink for any of these.
 
 ### What's missing
 
-`/api/query` and `/api/query/stream` currently only accept `{ sql, maxRows }`.
-The enabling changes:
+`/api/query` and `/api/query/stream` currently only accept `{ sql, maxRows }`
+as a JSON body. The enabling changes:
 
-1. Extend the request shape with `parameters` and `tables` maps.
-2. JSON ↔ DataValue mapper (including base64 for binary kinds).
-3. Per-request child `TableCatalog` builder that registers an
-   `InMemoryTableProvider` for each `tables` entry, parented to the
-   global catalog, disposed on response completion.
+1. Accept `multipart/form-data` on both endpoints. Parse the named
+   `request` part as JSON; expose remaining parts to the parameter binder
+   keyed by part name.
+2. Extend the JSON request shape with
+   `parameters: { name: { kind, value | ref } }`.
+3. JSON ↔ `DataValue` mapper for inline scalars (every primitive
+   `DataKind`).
+4. Binary-`ref` resolver: given a `ref` name, look up the corresponding
+   multipart part stream and construct the appropriate `DataValue`
+   (`Image` / `Audio` / `Video` / `UInt8` array).
 
 That's it. No `CREATE TEMP TABLE` repair work, no session machinery, no
-new RPC paradigm.
+new RPC paradigm. The `tables` JSON map + per-request child `TableCatalog`
+overlay is deferred to v2 (production inference service); the dev
+assistant uses persisted catalog tables instead.
+
+## Generalization: drag-and-drop files as named parameters
+
+Once parameters can reference multipart parts, "attach a file to a query"
+is a first-class front-end capability — not specific to the assistant
+panel.
+
+The shape:
+
+- Drop a file into the editor or an "Attachments" side panel.
+- Front-end stages the file in browser memory under a stable name (default:
+  filename normalised to a SQL-friendly identifier; user-renameable).
+- The Attachments panel lists each staged file with its inferred kind
+  (`Image` / `Audio` / `Video` / `UInt8` array — derived from MIME), size,
+  and original filename.
+- The SQL editor auto-completes `@filename` against the panel.
+- On query submit, every `$x` reference whose name matches a staged file
+  becomes a `{ kind, ref: "<part_name>" }` entry in `parameters`, and the
+  file ships as a multipart part with that name. Inline scalars
+  (`$temperature`, `$text`) come from a separate per-query inputs row in
+  the editor, sent as `{ kind, value }`.
+
+This unlocks experimentation against models already in the catalog, with
+no LLM-assistant prerequisite:
+
+| Drop a... | Run                                                     |
+| --------- | ------------------------------------------------------- |
+| PNG       | `SELECT models.depth_estimation($photo)`                |
+| PNG       | `SELECT models.florence_2($photo, 'describe')`          |
+| WAV       | `SELECT models.whisper($clip)` (when wired)             |
+| MP4       | `SELECT models.video_caption($scene)` (when wired)      |
+| CSV       | `INSERT INTO surveys SELECT * FROM read_csv($data)`     |
+
+The assistant panel's image-attach button is a thin wrapper over the same
+mechanism: it pre-stages an attachment with a generated name and references
+it in the assistant turn's `INSERT INTO uploads`. Dropping a file into the
+editor and dropping one into the chat both end up at the same multipart
+part + `ref` parameter shape.
+
+Sequencing: this layer ships **first**. The LLM-assistant work that
+follows reuses the multipart endpoint and the attachments panel without
+modification.
 
 ## Persisted conversation + uploads (m:1 attachments)
 
@@ -148,7 +217,7 @@ SELECT models.llama_3_2(
   || string_agg(templates.llama31_msg(role, content)) WITHIN GROUP (ORDER BY turn_index)
   || templates.llama31_assistant_turn(),
   templated => true)
-FROM messages WHERE conversation_id = @conv_id;
+FROM messages WHERE conversation_id = $conv_id;
 ```
 
 No `chat_format` aggregate, no special model dispatch. A user could write
@@ -163,22 +232,22 @@ inserts + the assistant query:
 ```sql
 -- (1) Stage the image
 INSERT INTO uploads (workspace, bytes, mime, size_bytes, uploaded_at)
-VALUES (@ws, @img, 'image/png', @sz, now())
+VALUES ($ws, $img, 'image/png', $sz, now())
 RETURNING id;
 
 -- (2) User turn references the upload
 INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at)
-VALUES (@conv, @next_idx, 'user', @text, @upload_id, now());
+VALUES ($conv, $next_idx, 'user', $text, $upload_id, now());
 
 -- (3) Auto-caption row — a separate message so string_agg picks it up naturally
 INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at)
-SELECT @conv, @next_idx + 1, 'system',
+SELECT $conv, $next_idx + 1, 'system',
        'Image attached. Auto-description: ' || models.florence_2(bytes, 'describe'),
-       @upload_id, now()
-FROM uploads WHERE id = @upload_id;
+       $upload_id, now()
+FROM uploads WHERE id = $upload_id;
 
 -- (4) Assistant turn — same fold as before, now sees the caption
-SELECT models.llama_3_2(...) FROM messages WHERE conversation_id = @conv;
+SELECT models.llama_3_2(...) FROM messages WHERE conversation_id = $conv;
 ```
 
 Auto-caption model selection is a front-end choice — Florence-2 for general
@@ -196,7 +265,7 @@ a single SELECT — no `messages` involvement at all:
 
 ```sql
 INSERT INTO uploads (workspace, bytes, mime, size_bytes, uploaded_at) VALUES (...) RETURNING id;
-SELECT models.depth_estimation(bytes) FROM uploads WHERE id = @upload_id;
+SELECT models.depth_estimation(bytes) FROM uploads WHERE id = $upload_id;
 ```
 
 ### Why this supersedes per-request `conversation` staging
@@ -211,48 +280,64 @@ mutation under load) — see v2 / later.
 
 ## v1 scope
 
-The smallest slice that delivers (a) image-upload model demos, (b) a
-working docked chat assistant, and (c) the per-request catalog overlay
-that the production inference service depends on.
+Two phases. Phase A delivers a generalized capability — drag a file in,
+reference it from any SQL — that immediately unlocks experimentation
+against image / audio / video models already in the catalog. Phase B adds
+the AI assistant features on top of the Phase A substrate.
 
-### In scope
+### Phase A — multipart parameters + attachments panel (ships first)
 
-1. **Persisted schema seed.**
+A1. **Multipart `parameters` on `/api/query{,/stream}`.**
+   Endpoints accept `multipart/form-data` with a JSON `request` part
+   carrying `parameters: { name: { kind, value | ref } }`. Inline `value`
+   for scalars; binary `ref` resolves against a sibling multipart part for
+   `Image` / `Audio` / `Video` / `UInt8` array. `ParameterBinder` runs
+   before planning (already exists). The `tables` JSON map / per-request
+   catalog overlay is **not** in v1 scope — see v2.
+
+A2. **Attachments panel + drag-and-drop staging.**
+   Right-side panel (or an inline editor zone) shows files staged in
+   browser memory: filename, inferred kind, size. Files are renameable
+   to SQL-friendly identifiers. SQL editor `$name` references auto-complete
+   against the panel; on submit, the front-end builds the `parameters` map
+   and multipart parts automatically. No backend coupling beyond A1.
+
+### Phase B — AI assistant features (reuses Phase A)
+
+B1. **Persisted schema seed.**
    First-boot DDL for `conversations`, `messages`, `uploads` against the
    workspace catalog. Idempotent (skip when tables already exist).
 
-2. **`parameters` map on `/api/query{,/stream}`.**
-   Request gains `parameters: { name: { kind, value } }`. JSON-to-DataValue
-   mapper handles primitives + base64 for Image / UInt8 array.
-   `ParameterBinder` runs before planning (already exists). The `tables`
-   JSON map / per-request catalog overlay is **not** in v1 scope — see v2.
+B2. **Chat-templating functions** — tracked separately in
+   [chat-templates-as-functions.md](chat-templates-as-functions.md) and
+   already shipped. Ships per-family `templates.X_open` /
+   `_msg(role, content)` / `_assistant_turn` scalars and a
+   `templated => true` override on `LlamaModel`.
 
-3. **Chat-templating functions** — tracked separately in
-   [chat-templates-as-functions.md](chat-templates-as-functions.md). Ships
-   per-family `templates.X_open` / `_msg(role, content)` / `_assistant_turn`
-   scalars and a `templated => true` override on `LlamaModel`.
-
-4. **Image-attachment + auto-caption flow.**
+B3. **Image-attachment + auto-caption flow.**
+   Reuses Phase A's attachments panel for the file-staging step.
    Front-end orchestrates upload + user-turn + caption-turn inserts and
    the assistant SELECT. Auto-caption defaults to a single configurable
-   vision model (`models.florence_2` initial pick, with Phi-3.5-vision and
-   Moondream2 selectable per workspace). No engine changes — vision models
-   are already in the catalog.
+   vision model (`models.florence_2` initial pick, with Phi-3.5-vision
+   and Moondream2 selectable per workspace). No engine changes — vision
+   models are already in the catalog.
 
-5. **Right-docked AI assistant panel UI.**
-   Sibling to `#group-container`, toggleable from the top toolbar. Markdown
-   rendering, streaming token display, image-attach button, send button.
-   Reuses existing CSS variables / layout patterns / NDJSON reader.
+B4. **Right-docked AI assistant panel UI.**
+   Sibling to `#group-container`, toggleable from the top toolbar.
+   Markdown rendering, streaming token display, image-attach button (a
+   thin shortcut over Phase A's drag-and-drop), send button. Reuses
+   existing CSS variables / layout patterns / NDJSON reader.
 
-6. **IndexedDB last-known-good cache for conversation/messages.**
+B5. **IndexedDB last-known-good cache for conversation/messages.**
    Reuses the result-IDB pattern. Acts as a hydration cache for instant
    reload — the *source of truth* is the catalog tables. Schema:
    `conversations[workspaceId][convId] = { messages: [...] }`.
 
-7. **Cursor-context auto-injection.**
+B6. **Cursor-context auto-injection.**
    On submit, the front-end inserts a `role='system'` `messages` row with
-   active tab name, cursor line/col, and ±10 lines around the cursor before
-   firing the assistant SELECT. No model-side tool call needed for v1.
+   active tab name, cursor line/col, and ±10 lines around the cursor
+   before firing the assistant SELECT. No model-side tool call needed for
+   v1.
 
 ### Out of scope (deferred, see "v2 / later")
 
@@ -271,17 +356,19 @@ that the production inference service depends on.
 
 ### Effort estimate
 
-| Piece                                                                 | Time      |
-| --------------------------------------------------------------------- | --------- |
-| Schema seed (CREATE TABLE on first boot, front-end-driven)            | 0.25 day  |
-| Extend `/api/query{,/stream}` with `parameters` + base64              | 0.5 day   |
-| Chat-templates functions (separate plan, ~1.5d, **shared work**)      | —         |
-| Image-attachment + auto-caption front-end flow                        | 0.5 day   |
-| Right-docked panel UI + streaming + image attach                      | 1.0 day   |
-| IDB conversation cache                                                | 0.5 day   |
-| Cursor-context auto-inject (now a `messages` insert)                  | 0.25 day  |
-| **Total (excludes chat-templates plan)**                              | ~3.0 days |
-| **Total (with chat-templates plan)**                                  | ~4.5 days |
+| Phase | Piece                                                            | Time      |
+| ----- | ---------------------------------------------------------------- | --------- |
+| A1    | Multipart `parameters` on `/api/query{,/stream}` (server)        | 0.5 day   |
+| A2    | Attachments panel + drag-drop staging + `$name` auto-complete    | 0.75 day  |
+|       | **Phase A subtotal**                                             | ~1.25 day |
+| B1    | Schema seed (idempotent CREATE TABLE on first boot)              | 0.25 day  |
+| B2    | Chat-templates functions (separate plan, **already shipped**)    | —         |
+| B3    | Image-attachment + auto-caption front-end flow (reuses A2)       | 0.25 day  |
+| B4    | Right-docked panel UI + streaming + image-attach shortcut        | 1.0 day   |
+| B5    | IDB conversation cache                                           | 0.5 day   |
+| B6    | Cursor-context auto-inject (`messages` insert)                   | 0.25 day  |
+|       | **Phase B subtotal**                                             | ~2.25 day |
+|       | **Total**                                                        | ~3.5 day  |
 
 ## Open issues / things to work through
 
@@ -309,11 +396,13 @@ that the production inference service depends on.
    only way to break refs is a partial INSERT failure mid-turn. Acceptable
    for v1; revisit when DELETE flows land.
 
-4. **Wire format for binary data.**
-   Base64 inside JSON is the obvious choice. If image sizes get large
-   (>5 MB) we'll hit JSON parsing latency and want multipart instead. For
-   v1, 512×512 PNGs at base64 are fine. Decision to revisit when actual
-   image sizes become a problem.
+4. **Wire format for binary data — resolved.**
+   Multipart from day one (see "Core architecture decision"). Binary
+   parameters ship as raw multipart parts referenced by `ref`, not
+   base64-in-JSON, so audio + video work the moment the corresponding
+   `DataKind`s do. The 5 MB JSON-parsing cliff that motivated v2
+   multipart in earlier drafts of this plan no longer exists, and there
+   is no encoder/decoder layer to maintain.
 
 5. **Cancellation.**
    `/api/query/stream` already supports cancellation via the existing
@@ -392,9 +481,6 @@ that the production inference service depends on.
 - **OmniParser as a tool** the assistant can call, paired with a captioner
   for non-UI image content. Per the discussion that motivated this plan,
   this is the right shape — not the primary vision path.
-
-- **Multipart upload** for large binary tables when base64-in-JSON gets
-  expensive (>5 MB images).
 
 - **FK constraint enforcement** on `messages.conversation_id` /
   `messages.upload_id`. Currently convention only.

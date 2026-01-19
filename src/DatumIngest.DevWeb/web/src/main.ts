@@ -32,7 +32,8 @@ import { subscribe } from 'valtio';
 import { VizPanel } from './viz-panel.js';
 import { AttachmentsPanel } from './attachments-panel.js';
 import { addAttachment, attachmentsState } from './attachments.js';
-import { ensureAssistantSchema } from './assistant-schema.js';
+import { AssistantPanel } from './assistant-panel.js';
+import { assistantState } from './assistant-state.js';
 import {
   state,
   viz,
@@ -2399,10 +2400,6 @@ import {
     loadInitialState();
     setupCrossWindowSync();
 
-    // First-boot seed for the AI-assistant tables. Fire-and-forget;
-    // CREATE TABLE IF NOT EXISTS is a no-op on subsequent boots.
-    void ensureAssistantSchema();
-
     // Mount the 3D viz panel React root once. Visibility is gated by
     // viz.open in state.ts (panel returns null when closed); we also
     // toggle a body class so the drawer's CSS hides the empty chrome.
@@ -2445,6 +2442,23 @@ import {
     });
     document.getElementById('attachments-toggle')?.addEventListener('click', () => {
       attachmentsState.open = !attachmentsState.open;
+    });
+
+    // Mount the AI assistant drawer React root once.
+    const assistantDrawer = document.getElementById('assistant-drawer');
+    if (assistantDrawer) {
+      const assistantRoot = createRoot(assistantDrawer);
+      assistantRoot.render(createElement(AssistantPanel));
+    }
+    const updateAssistantBodyClass = () => {
+      document.body.classList.toggle('assistant-closed', !assistantState.open);
+      const btn = document.getElementById('assistant-toggle');
+      if (btn) btn.classList.toggle('active', assistantState.open);
+    };
+    updateAssistantBodyClass();
+    subscribe(assistantState, updateAssistantBodyClass);
+    document.getElementById('assistant-toggle')?.addEventListener('click', () => {
+      assistantState.open = !assistantState.open;
     });
 
     // Page-wide drag-and-drop: drop a file anywhere on the page to

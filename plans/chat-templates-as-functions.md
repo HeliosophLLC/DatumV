@@ -19,7 +19,7 @@ SELECT models.llama_3_2(
   templated => true
 )
 FROM messages
-WHERE conversation_id = @conv_id;
+WHERE conversation_id = $conv_id;
 ```
 
 Three primitives per family — open / per-message / assistant-turn — plus a

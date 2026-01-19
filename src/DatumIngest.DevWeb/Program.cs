@@ -115,7 +115,50 @@ builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(options => options.SingleLine = true);
 builder.WebHost.UseUrls($"http://localhost:{port}");
 
+// JSON options shared between the minimal-API endpoints and the
+// controllers. Defining the instance up front lets us pass it into
+// the DI container so AssistantController can pull it out of its
+// constructor instead of stitching together its own.
+JsonSerializerOptions jsonOptions = new()
+{
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    Converters = { new JsonStringEnumConverter() },
+};
+
+// Controllers — used for /api/assistant/*. Other routes
+// (/api/query, /api/lang/*, /api/tables) stay on minimal API.
+// Configure the controllers' JSON output to share the same shape
+// so client-side parsing is uniform across both surfaces.
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(opts =>
+    {
+        opts.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        opts.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        opts.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
+
+// Engine + assistant service registrations. Catalog is a singleton
+// so every controller request shares the same in-memory state; the
+// AssistantService wraps it for typed access.
+builder.Services.AddSingleton(catalog);
+builder.Services.AddSingleton(jsonOptions);
+builder.Services.AddSingleton<DatumIngest.DevWeb.Assistant.IAssistantService,
+    DatumIngest.DevWeb.Assistant.AssistantService>();
+
 WebApplication app = builder.Build();
+app.MapControllers();
+
+// Seed the assistant schema once at startup so the dev-loop UI never
+// races a CREATE TABLE through /api/query/stream on its first turn.
+// Idempotent — CREATE TABLE IF NOT EXISTS is a no-op on subsequent
+// boots.
+{
+    DatumIngest.DevWeb.Assistant.IAssistantService _seedService =
+        app.Services.GetRequiredService<DatumIngest.DevWeb.Assistant.IAssistantService>();
+    await _seedService.EnsureSchemaAsync(CancellationToken.None);
+}
 app.Lifetime.ApplicationStopping.Register(() => catalog.Dispose());
 
 // Queries run concurrently. The catalog (and per-query ExecutionContext /
@@ -145,13 +188,6 @@ void RefreshLanguageManifest()
         languageService.Initialize(languageManifest);
     }
 }
-
-JsonSerializerOptions jsonOptions = new()
-{
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    Converters = { new JsonStringEnumConverter() },
-};
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

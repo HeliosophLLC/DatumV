@@ -470,6 +470,181 @@
     border-color: var(--accent); color: var(--accent);
   }
 
+  /* Right-docked AI assistant drawer. Sibling to #main-column in
+     #workspace; visibility is toggled via the body.assistant-closed
+     CSS class so closing collapses the gutter cleanly. */
+  #assistant-drawer {
+    flex: 0 0 380px;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  body.assistant-closed #assistant-drawer { display: none; }
+  .assistant-panel {
+    height: 100%; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .assistant-header {
+    display: flex; align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+    height: 35px; flex: 0 0 auto;
+  }
+  .assistant-title { font-weight: 600; font-size: 13px; flex: 1; }
+  .assistant-close {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; font-size: 18px; line-height: 1; padding: 0 6px;
+    border-radius: 3px;
+  }
+  .assistant-close:hover { background: var(--border); color: var(--fg); }
+  .assistant-log {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .assistant-empty {
+    color: var(--muted); font-size: 13px; padding: 8px;
+    text-align: center;
+  }
+  .assistant-bubble {
+    max-width: 92%; padding: 8px 12px;
+    border-radius: 8px; font-size: 13px; line-height: 1.5;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .assistant-bubble.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .assistant-bubble.user .assistant-bubble-text { color: var(--accent-fg); }
+  .assistant-bubble.assistant {
+    align-self: flex-start;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+  }
+  .assistant-bubble.system {
+    align-self: stretch;
+    background: transparent;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    font-size: 12px;
+  }
+  .assistant-bubble.streaming {
+    background: var(--panel-2);
+    border: 1px solid var(--accent);
+  }
+  .assistant-cursor {
+    display: inline-block; margin-left: 2px;
+    color: var(--accent); animation: assistant-blink 1s steps(2) infinite;
+  }
+  @keyframes assistant-blink { 50% { opacity: 0; } }
+  .assistant-bubble-attachment {
+    margin-top: 4px; font-size: 11px; opacity: 0.8;
+  }
+  .assistant-bubble-md { font-size: 13px; }
+  .assistant-bubble-md p { margin: 0 0 8px 0; }
+  .assistant-bubble-md p:last-child { margin-bottom: 0; }
+  .assistant-bubble-md code {
+    font-family: var(--mono); font-size: 12px;
+    background: var(--bg); padding: 1px 4px; border-radius: 3px;
+  }
+  .assistant-bubble-md pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px; overflow-x: auto;
+    margin: 4px 0;
+  }
+  .assistant-bubble-md pre code {
+    background: transparent; padding: 0; font-size: 12px;
+  }
+  .assistant-bubble-md ul, .assistant-bubble-md ol {
+    margin: 4px 0 8px 0; padding-left: 22px;
+  }
+  .assistant-bubble-md a { color: var(--accent); }
+  .assistant-bubble-md table {
+    border-collapse: collapse; margin: 4px 0;
+  }
+  .assistant-bubble-md th, .assistant-bubble-md td {
+    border: 1px solid var(--border);
+    padding: 4px 8px; font-size: 12px;
+  }
+  .assistant-error {
+    align-self: stretch;
+    color: var(--error);
+    background: var(--error-bg);
+    border: 1px solid var(--error);
+    padding: 6px 8px; border-radius: 4px;
+    font-size: 12px;
+  }
+  .assistant-composer {
+    border-top: 1px solid var(--border);
+    background: var(--panel-2);
+    padding: 8px; flex: 0 0 auto;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .assistant-pending-file {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; font-size: 12px;
+  }
+  .assistant-pending-file-remove {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; line-height: 1;
+    padding: 0 4px; margin-left: auto; border-radius: 3px;
+  }
+  .assistant-pending-file-remove:hover { background: var(--error-bg); color: var(--error); }
+  .assistant-input {
+    width: 100%; resize: vertical; min-height: 44px; max-height: 280px;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 6px 8px; font: inherit; font-size: 13px;
+    outline: none;
+  }
+  .assistant-input:focus { border-color: var(--accent); }
+  .assistant-composer-row {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .assistant-attach-btn {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 4px 8px; cursor: pointer; font-size: 14px;
+  }
+  .assistant-attach-btn:hover:not(:disabled) { background: var(--panel-2); }
+  .assistant-attach-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .assistant-model-name {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .assistant-spacer { flex: 1; }
+  .assistant-send-btn {
+    background: var(--accent); color: var(--accent-fg);
+    border: none; border-radius: 4px;
+    padding: 5px 14px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  .assistant-send-btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .assistant-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .assistant-cancel-btn {
+    background: var(--panel); color: var(--error);
+    border: 1px solid var(--error); border-radius: 4px;
+    padding: 5px 14px; cursor: pointer; font-size: 13px;
+  }
+  .assistant-cancel-btn:hover { background: var(--error-bg); }
+
+  /* Header toggle for the assistant drawer. */
+  header .assistant-toggle {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 3px 8px; font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  header .assistant-toggle:hover { background: var(--panel-2); }
+  header .assistant-toggle.active {
+    border-color: var(--accent); color: var(--accent);
+  }
+
   /* Page-wide drag overlay — draws over the whole workspace when the
      user drags a file onto the page so they can drop anywhere, not
      just on the drawer's drop zone. */
@@ -1077,6 +1252,12 @@
     <span class="title">DatumIngest</span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
+    <button class="assistant-toggle" id="assistant-toggle" title="Toggle AI assistant panel" aria-label="Toggle assistant">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+      Assistant
+    </button>
     <button class="attachments-toggle" id="attachments-toggle" title="Toggle attachments panel" aria-label="Toggle attachments">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6">
         <path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
@@ -1187,6 +1368,7 @@
       <div id="viz-drawer"><!-- React root mount target --></div>
     </div>
     <div id="attachments-drawer"><!-- React root mount target --></div>
+    <div id="assistant-drawer"><!-- React root mount target --></div>
   </div>
 
   <div id="modal-root"></div>
