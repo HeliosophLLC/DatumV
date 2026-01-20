@@ -35,20 +35,20 @@ internal sealed class InsertReturningPlan : IQueryPlan
 {
     private readonly string _tableName;
     private readonly Schema _targetSchema;
-    private readonly RowBatch _capturedBatch;
+    private readonly IReadOnlyList<RowBatch> _capturedBatches;
     private readonly IReadOnlyList<SelectColumn> _returningColumns;
     private readonly TableCatalog _catalog;
 
     public InsertReturningPlan(
         string tableName,
         Schema targetSchema,
-        RowBatch capturedBatch,
+        IReadOnlyList<RowBatch> capturedBatches,
         IReadOnlyList<SelectColumn> returningColumns,
         TableCatalog catalog)
     {
         _tableName = tableName;
         _targetSchema = targetSchema;
-        _capturedBatch = capturedBatch;
+        _capturedBatches = capturedBatches;
         _returningColumns = returningColumns;
         _catalog = catalog;
     }
@@ -81,45 +81,75 @@ internal sealed class InsertReturningPlan : IQueryPlan
         List<(string Name, Expression Expr)> projection = ExpandProjection();
         ColumnLookup outputLookup = new(projection.Select(p => p.Name).ToArray());
 
-        // Per-row evaluator pulls non-inline payloads from the captured
-        // batch's arena (Source) and writes new ones into the output
-        // batch's arena (Target). RETURNING expressions can reference
+        // Per-row evaluator pulls non-inline payloads from each captured
+        // batch's arena (Source) and writes new ones into the corresponding
+        // output batch's arena (Target). RETURNING expressions can reference
         // any inserted column; outer rows / variables are not in scope.
-        ExpressionEvaluator evaluator = new(
-            _catalog.Functions,
-            store: _capturedBatch.Arena);
+        ExpressionEvaluator evaluator = new(_catalog.Functions);
 
-        Arena outArena = new();
-        RowBatch outBatch = _catalog.Pool.RentRowBatch(
-            outputLookup, capacity: _capturedBatch.Count, arena: outArena);
-
+        // Yield one output batch per captured input batch — preserves the
+        // streaming shape of INSERT … SELECT (each source RowBatch becomes
+        // one RETURNING RowBatch). VALUES has a single captured batch and
+        // therefore yields a single output batch, identical to C1b.
         try
         {
-            for (int rowIdx = 0; rowIdx < _capturedBatch.Count; rowIdx++)
+            foreach (RowBatch capturedBatch in _capturedBatches)
             {
-                Row insertedRow = _capturedBatch[rowIdx];
-                EvaluationFrame frame = new(
-                    insertedRow,
-                    source: _capturedBatch.Arena,
-                    target: outArena,
-                    sidecarRegistry: _catalog.SidecarRegistry);
+                Arena outArena = new();
+                RowBatch outBatch = _catalog.Pool.RentRowBatch(
+                    outputLookup, capacity: capturedBatch.Count, arena: outArena);
 
-                DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
-                for (int colIdx = 0; colIdx < projection.Count; colIdx++)
+                bool yielded = false;
+                try
                 {
-                    ValueRef result = await evaluator.EvaluateAsValueRefAsync(
-                        projection[colIdx].Expr, frame, cancellationToken).ConfigureAwait(false);
-                    outRow[colIdx] = result.ToDataValue(outArena);
-                }
-                outBatch.Add(outRow);
-            }
+                    for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
+                    {
+                        Row insertedRow = capturedBatch[rowIdx];
+                        EvaluationFrame frame = new(
+                            insertedRow,
+                            source: capturedBatch.Arena,
+                            target: outArena,
+                            sidecarRegistry: _catalog.SidecarRegistry);
 
-            yield return outBatch;
+                        DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
+                        for (int colIdx = 0; colIdx < projection.Count; colIdx++)
+                        {
+                            ValueRef result = await evaluator.EvaluateAsValueRefAsync(
+                                projection[colIdx].Expr, frame, cancellationToken).ConfigureAwait(false);
+                            outRow[colIdx] = result.ToDataValue(outArena);
+                        }
+                        outBatch.Add(outRow);
+                    }
+
+                    yielded = true;
+                    yield return outBatch;
+                }
+                finally
+                {
+                    if (yielded)
+                    {
+                        // Caller has consumed the batch; safe to return it
+                        // even if it was disposed mid-iteration.
+                        _catalog.Pool.ReturnRowBatch(outBatch);
+                    }
+                    else
+                    {
+                        // Pre-yield throw — the caller never saw outBatch,
+                        // so we own it.
+                        _catalog.Pool.ReturnRowBatch(outBatch);
+                    }
+                }
+            }
         }
         finally
         {
-            _catalog.Pool.ReturnRowBatch(outBatch);
-            _catalog.Pool.ReturnRowBatch(_capturedBatch);
+            // Captured input batches outlive WriteAsync because the executor
+            // intentionally keeps them. Return them to the pool now that the
+            // RETURNING projection is done with them.
+            foreach (RowBatch captured in _capturedBatches)
+            {
+                _catalog.Pool.ReturnRowBatch(captured);
+            }
         }
     }
 

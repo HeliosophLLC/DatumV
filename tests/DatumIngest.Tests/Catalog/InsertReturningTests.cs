@@ -154,21 +154,84 @@ public sealed class InsertReturningTests : IAsyncLifetime
         Assert.Equal("Chat", rows[0][1].AsString());
     }
 
-    // ──────────────────── INSERT … SELECT … RETURNING (deferred) ────────────────────
+    // ──────────────────── INSERT … SELECT … RETURNING (C1d) ────────────────────
 
     [Fact]
-    public void InsertSelect_WithReturning_ThrowsNotSupported()
+    public async Task ReturningSelect_PicksUpIdentitiesFromSource()
     {
-        // C1d ships RETURNING for INSERT … SELECT. C1b is VALUES-only.
+        // The natural pattern: copy source rows into a target with IDENTITY,
+        // RETURNING surfaces the assigned ids.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (name String)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, name String)");
+        catalog.Plan("INSERT INTO src VALUES ('alice'), ('bob'), ('carol')");
+
+        IQueryPlan plan = catalog.Plan(
+            "INSERT INTO dst (name) SELECT name FROM src RETURNING id, name");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(3, rows.Count);
+        Assert.Equal((1L, "alice"), (rows[0][0].AsInt64(), rows[0][1].AsString()));
+        Assert.Equal((2L, "bob"), (rows[1][0].AsInt64(), rows[1][1].AsString()));
+        Assert.Equal((3L, "carol"), (rows[2][0].AsInt64(), rows[2][1].AsString()));
+    }
+
+    [Fact]
+    public async Task ReturningSelect_StarYieldsAllResolvedColumns()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32, status String DEFAULT 'new')");
+        catalog.Plan("INSERT INTO src VALUES (10), (20)");
+
+        IQueryPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING *");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(3, rows[0].Length);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal(10, rows[0][1].AsInt32());
+        Assert.Equal("new", rows[0][2].AsString());
+        Assert.Equal(2L, rows[1][0].AsInt64());
+        Assert.Equal(20, rows[1][1].AsInt32());
+        Assert.Equal("new", rows[1][2].AsString());
+    }
+
+    [Fact]
+    public async Task ReturningSelect_EmptySource_YieldsNoRows()
+    {
+        // INSERT … SELECT against an empty source is a no-op (no commit
+        // even fires); RETURNING yields zero rows.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
-        catalog.Plan("INSERT INTO src VALUES (1)");
 
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
-            catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING id"));
-        Assert.Contains("RETURNING with a SELECT source", ex.Message);
+        IQueryPlan plan = catalog.Plan("INSERT INTO dst (n) SELECT n FROM src RETURNING id");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Empty(rows);
+        Assert.Equal(0, catalog["dst"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task ReturningSelect_WhereFiltered_OnlyYieldsAcceptedRows()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, src_id Int32, name String)");
+        catalog.Plan("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')");
+
+        IQueryPlan plan = catalog.Plan(
+            "INSERT INTO dst (src_id, name) SELECT id, name FROM src WHERE id >= 2 RETURNING id, src_id");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal((1L, 2), (rows[0][0].AsInt64(), rows[0][1].AsInt32()));
+        Assert.Equal((2L, 3), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
     }
 
     // ──────────────────── Helpers ────────────────────

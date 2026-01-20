@@ -56,26 +56,21 @@ internal static class InsertExecutor
 
         Schema targetSchema = provider.GetSchema();
         bool captureRows = insert.Returning is not null;
-        RowBatch? captured;
+        IReadOnlyList<RowBatch>? captured;
 
         switch (insert.Source)
         {
             case InsertValuesSource values:
-                captured = ApplyValuesAsync(
+                RowBatch? singleBatch = ApplyValuesAsync(
                     catalog, provider, targetSchema, insert.ColumnNames, values, captureRows)
                     .GetAwaiter().GetResult();
+                captured = singleBatch is null ? null : [singleBatch];
                 break;
 
             case InsertQuerySource queryRow:
-                if (captureRows)
-                {
-                    throw new NotSupportedException(
-                        $"INSERT INTO '{insert.TableName}': RETURNING with a SELECT source is not yet " +
-                        "supported. Use VALUES (RETURNING for SELECT lands in C1d).");
-                }
-                ApplySelectAsync(catalog, provider, targetSchema, insert.ColumnNames, queryRow)
+                captured = ApplySelectAsync(
+                    catalog, provider, targetSchema, insert.ColumnNames, queryRow, captureRows)
                     .GetAwaiter().GetResult();
-                captured = null;
                 break;
 
             default:
@@ -203,23 +198,13 @@ internal static class InsertExecutor
     /// exceptions abort via the session's dispose-without-commit
     /// semantics (PR9 behaviour).
     /// </summary>
-    private static void ApplySelect(
+    private static async Task<IReadOnlyList<RowBatch>?> ApplySelectAsync(
         TableCatalog catalog,
         ITableProvider provider,
         Schema targetSchema,
         IReadOnlyList<string>? columnList,
-        InsertQuerySource source)
-    {
-        ApplySelectAsync(catalog, provider, targetSchema, columnList, source)
-            .GetAwaiter().GetResult();
-    }
-
-    private static async Task ApplySelectAsync(
-        TableCatalog catalog,
-        ITableProvider provider,
-        Schema targetSchema,
-        IReadOnlyList<string>? columnList,
-        InsertQuerySource source)
+        InsertQuerySource source,
+        bool captureRows = false)
     {
         IQueryPlan sourcePlan = catalog.PlanQuery(source.Query);
         ColumnLookup targetLookup = BuildTargetLookup(targetSchema);
@@ -236,6 +221,8 @@ internal static class InsertExecutor
         // semantics).
         ColumnPlan? plan = null;
         IAppendSession? session = null;
+        List<RowBatch>? capturedBatches = captureRows ? new() : null;
+        bool committed = false;
 
         try
         {
@@ -276,11 +263,22 @@ internal static class InsertExecutor
                 }
 
                 await session!.WriteAsync(targetBatch).ConfigureAwait(false);
+
+                // After WriteAsync, the target batch's arena is no longer
+                // needed by the writer — encoded bytes are in the file
+                // (or in-memory store). For RETURNING we keep the batch
+                // alive so the projection can read from it post-commit;
+                // otherwise it goes out of scope and gets GC'd as before.
+                if (capturedBatches is not null)
+                {
+                    capturedBatches.Add(targetBatch);
+                }
             }
 
             if (session is not null)
             {
                 await session.CommitAsync().ConfigureAwait(false);
+                committed = true;
             }
         }
         finally
@@ -292,7 +290,22 @@ internal static class InsertExecutor
                 // unhandled exception it triggers the abort path.
                 await session.DisposeAsync().ConfigureAwait(false);
             }
+
+            // If commit didn't reach (exception path), don't surface partial
+            // captured rows to the RETURNING plan — return them to the pool
+            // so the caller sees null (no rows yielded) per post-commit
+            // semantics.
+            if (!committed && capturedBatches is not null)
+            {
+                foreach (RowBatch b in capturedBatches)
+                {
+                    catalog.Pool.ReturnRowBatch(b);
+                }
+                capturedBatches = null;
+            }
         }
+
+        return capturedBatches;
     }
 
     /// <summary>
@@ -581,7 +594,7 @@ internal static class InsertExecutor
     /// null-fill plan (<see cref="OmittedFill.Null"/>). Rejects every
     /// shape that can't produce a value (omitted column with no
     /// <c>DEFAULT</c> on a non-nullable target). Shared between
-    /// <see cref="ApplyValuesAsync"/> and <see cref="ApplySelect"/> — the
+    /// <see cref="ApplyValuesAsync"/> and <see cref="ApplySelectAsync"/> — the
     /// only difference is whether <paramref name="sourceColumnCount"/>
     /// comes from the column list / VALUES tuple width or from the
     /// source query's projection arity (read off the first batch's
