@@ -130,14 +130,12 @@ public sealed class AssistantService : IAssistantService
             return ToConversation(rows[0]);
         }
 
-        // Lazy-create. INSERT then SELECT in the same batch so the
-        // row read uses ident_current to pick up the just-inserted id
-        // race-free.
+        // Lazy-create. RETURNING surfaces the resolved (post-IDENTITY,
+        // post-DEFAULT) row in the same statement.
         IReadOnlyList<object?[]> inserted = await SelectAsync(
             "INSERT INTO conversations (workspace, title, started_at) " +
-            "VALUES ($workspace, 'Chat', now()); " +
-            "SELECT id, workspace, title, started_at FROM conversations " +
-            "WHERE id = ident_current('conversations')",
+            "VALUES ($workspace, 'Chat', now()) " +
+            "RETURNING id, workspace, title, started_at",
             new Dictionary<string, ParameterValue>
             {
                 ["workspace"] = new StringParameter(workspace),
@@ -192,8 +190,8 @@ public sealed class AssistantService : IAssistantService
             {
                 IReadOnlyList<object?[]> uploadRows = await SelectAsync(
                     "INSERT INTO uploads (workspace, bytes, mime, size_bytes, uploaded_at) " +
-                    "VALUES ('default', $bytes, $mime, $size, now()); " +
-                    "SELECT id FROM uploads WHERE id = ident_current('uploads')",
+                    "VALUES ('default', $bytes, $mime, $size, now()) " +
+                    "RETURNING id",
                     new Dictionary<string, ParameterValue>
                     {
                         ["bytes"] = new BinaryParameter(DataKind.Image, upload.Bytes),
@@ -218,9 +216,8 @@ public sealed class AssistantService : IAssistantService
             IReadOnlyList<object?[]> userRows = await SelectAsync(
                 "INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at) " +
                 "VALUES (" + convFragment + ", " + userTurnIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " +
-                "        'user', $content, " + uploadFragment + ", now()); " +
-                "SELECT id, turn_index, role, content, upload_id, tool_call_id, created_at " +
-                "FROM messages WHERE id = ident_current('messages')",
+                "        'user', $content, " + uploadFragment + ", now()) " +
+                "RETURNING id, turn_index, role, content, upload_id, tool_call_id, created_at",
                 new Dictionary<string, ParameterValue>
                 {
                     ["content"] = new StringParameter(text),
@@ -278,9 +275,8 @@ public sealed class AssistantService : IAssistantService
             IReadOnlyList<object?[]> assistantRows = await SelectAsync(
                 "INSERT INTO messages (conversation_id, turn_index, role, content, upload_id, created_at) " +
                 "VALUES (" + convFragment + ", " + assistantTurnIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " +
-                "        'assistant', $content, NULL, now()); " +
-                "SELECT id, turn_index, role, content, upload_id, tool_call_id, created_at " +
-                "FROM messages WHERE id = ident_current('messages')",
+                "        'assistant', $content, NULL, now()) " +
+                "RETURNING id, turn_index, role, content, upload_id, tool_call_id, created_at",
                 new Dictionary<string, ParameterValue>
                 {
                     ["content"] = new StringParameter(assistantText),

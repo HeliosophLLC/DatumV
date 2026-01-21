@@ -99,53 +99,37 @@ internal sealed class InsertReturningPlan : IQueryPlan
                 RowBatch outBatch = _catalog.Pool.RentRowBatch(
                     outputLookup, capacity: capturedBatch.Count, arena: outArena);
 
-                bool yielded = false;
-                try
+                for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
                 {
-                    for (int rowIdx = 0; rowIdx < capturedBatch.Count; rowIdx++)
-                    {
-                        Row insertedRow = capturedBatch[rowIdx];
-                        EvaluationFrame frame = new(
-                            insertedRow,
-                            source: capturedBatch.Arena,
-                            target: outArena,
-                            sidecarRegistry: _catalog.SidecarRegistry);
+                    Row insertedRow = capturedBatch[rowIdx];
+                    EvaluationFrame frame = new(
+                        insertedRow,
+                        source: capturedBatch.Arena,
+                        target: outArena,
+                        sidecarRegistry: _catalog.SidecarRegistry);
 
-                        DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
-                        for (int colIdx = 0; colIdx < projection.Count; colIdx++)
-                        {
-                            ValueRef result = await evaluator.EvaluateAsValueRefAsync(
-                                projection[colIdx].Expr, frame, cancellationToken).ConfigureAwait(false);
-                            outRow[colIdx] = result.ToDataValue(outArena);
-                        }
-                        outBatch.Add(outRow);
+                    DataValue[] outRow = _catalog.Pool.RentDataValues(projection.Count);
+                    for (int colIdx = 0; colIdx < projection.Count; colIdx++)
+                    {
+                        ValueRef result = await evaluator.EvaluateAsValueRefAsync(
+                            projection[colIdx].Expr, frame, cancellationToken).ConfigureAwait(false);
+                        outRow[colIdx] = result.ToDataValue(outArena);
                     }
+                    outBatch.Add(outRow);
+                }
 
-                    yielded = true;
-                    yield return outBatch;
-                }
-                finally
-                {
-                    if (yielded)
-                    {
-                        // Caller has consumed the batch; safe to return it
-                        // even if it was disposed mid-iteration.
-                        _catalog.Pool.ReturnRowBatch(outBatch);
-                    }
-                    else
-                    {
-                        // Pre-yield throw — the caller never saw outBatch,
-                        // so we own it.
-                        _catalog.Pool.ReturnRowBatch(outBatch);
-                    }
-                }
+                // Convention: consumer owns the batch after yield and is
+                // responsible for returning it to the pool. The outer
+                // QueryPlan wrapper / CTE materialiser does this. We
+                // intentionally do NOT return outBatch here.
+                yield return outBatch;
             }
         }
         finally
         {
-            // Captured input batches outlive WriteAsync because the executor
-            // intentionally keeps them. Return them to the pool now that the
-            // RETURNING projection is done with them.
+            // Captured input batches are private to this plan — never
+            // yielded out — so we own their lifecycle end-to-end. Return
+            // them to the pool when iteration finishes (success or throw).
             foreach (RowBatch captured in _capturedBatches)
             {
                 _catalog.Pool.ReturnRowBatch(captured);

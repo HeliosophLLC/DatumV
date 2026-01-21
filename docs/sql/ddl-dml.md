@@ -137,6 +137,45 @@ When a column is declared `IDENTITY`, supplying it in the `INSERT` column list i
 
 Each `INSERT` validates that no row duplicates an existing PK or another row in the same batch. The first violation throws `PrimaryKeyViolationException` and the entire batch is aborted (no partial commit). NULL in any PK column is also rejected.
 
+#### RETURNING
+
+`INSERT` accepts an optional `RETURNING` clause that surfaces a projection of the resolved (post-`DEFAULT`, post-`IDENTITY`) inserted rows. Same syntax as a `SELECT` projection list — column references, computed expressions with aliases, `*`, and table-qualified `t.*` are all accepted.
+
+```sql
+-- Surface the auto-generated id alongside the insert.
+INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat')
+RETURNING id, workspace, title
+
+-- All resolved columns, including DEFAULT-filled ones.
+INSERT INTO uploads (mime, size_bytes) VALUES ('image/png', 12480)
+RETURNING *
+
+-- Computed expression with alias.
+INSERT INTO orders (qty, unit_price) VALUES (3, 19.99)
+RETURNING qty * unit_price AS total
+
+-- INSERT … SELECT … RETURNING streams resolved rows for every inserted row.
+INSERT INTO archive (id, payload)
+SELECT id, payload FROM staging WHERE ready = true
+RETURNING id
+```
+
+The `RETURNING` rows are visible only after the implicit commit succeeds — an `INSERT` that aborts mid-write yields no rows. Expressions evaluate against each inserted row in target-table scope; subqueries, aggregates, window functions, and references to other tables are rejected.
+
+`RETURNING` also makes a data-modifying `INSERT` usable as a CTE body, enabling single-statement chains:
+
+```sql
+-- Insert a parent, then insert children that reference the parent's id.
+WITH new_conv AS (
+    INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat')
+    RETURNING id
+)
+INSERT INTO messages (conversation_id, body)
+SELECT id, 'Hello' FROM new_conv
+```
+
+A CTE body that's an `INSERT` must include a `RETURNING` clause — without it the CTE has no rows to project.
+
 ### DELETE
 
 Soft-deletes rows matching a predicate:

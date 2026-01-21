@@ -937,6 +937,24 @@ public abstract record QueryExpression;
 public sealed record SelectQueryExpression(SelectStatement Statement) : QueryExpression;
 
 /// <summary>
+/// A query expression that wraps a data-modifying <see cref="InsertStatement"/>
+/// with a <c>RETURNING</c> clause, surfacing it as a row source for outer
+/// constructs (<c>WITH cte AS (INSERT … RETURNING …) SELECT … FROM cte</c>).
+/// Mirrors PostgreSQL's data-modifying CTEs.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The wrapped <see cref="InsertStatement"/> must carry a non-null
+/// <see cref="InsertStatement.Returning"/>; an INSERT without RETURNING
+/// has no rows to project and is rejected at plan time. The INSERT's side
+/// effect runs at plan time, exactly once per containing query plan,
+/// regardless of how many times the CTE is referenced.
+/// </para>
+/// </remarks>
+/// <param name="Insert">The wrapped INSERT statement.</param>
+public sealed record InsertQueryExpression(InsertStatement Insert) : QueryExpression;
+
+/// <summary>
 /// A compound query expression combining two sub-expressions with a set operation.
 /// <para>
 /// ORDER BY, LIMIT, OFFSET, and INTO apply to the final combined result

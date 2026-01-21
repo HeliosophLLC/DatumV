@@ -315,22 +315,6 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support RebuildManifest (CanRebuildManifest is false).");
 
     /// <summary>
-    /// Returns the current <see cref="IdentityState"/> for this table — the
-    /// <c>IDENTITY</c> column index, the captured spec, and the next counter
-    /// value the provider would hand out on its next
-    /// <see cref="IAppendSession.ReserveNextIdentityValue"/> call. Returns
-    /// <see langword="null"/> when the table has no IDENTITY column.
-    /// </summary>
-    /// <remarks>
-    /// Read-only peek — does not require an open append session. Used by
-    /// catalog-introspection scalar functions (<c>ident_current</c>) and
-    /// future tooling that surfaces IDENTITY state to the host. Default
-    /// implementation returns <see langword="null"/>; providers that
-    /// support IDENTITY override.
-    /// </remarks>
-    IdentityState? GetIdentityState() => null;
-
-    /// <summary>
     /// Returns the current validity state of this table's
     /// <c>.datum-index</c> sidecar — surfaced to users via the
     /// <c>is_valid</c> column on <c>datum_catalog.indexes</c> so they

@@ -47,9 +47,30 @@ public sealed class QueryPlanner
         {
             SelectQueryExpression select => Plan(select.Statement),
             CompoundQueryExpression compound => PlanCompound(compound),
+            InsertQueryExpression insertQuery => PlanInsertQueryExpression(insertQuery),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
         return Finalize(op);
+    }
+
+    /// <summary>
+    /// Plans an <see cref="InsertQueryExpression"/> (a data-modifying CTE body)
+    /// into an <see cref="Operators.InsertReturningOperator"/> wrapping the
+    /// pre-captured RETURNING batches. The INSERT side effect runs at this
+    /// point — exactly once per containing query plan — so the resulting
+    /// operator is purely read-only at execution time.
+    /// </summary>
+    private IQueryOperator PlanInsertQueryExpression(InsertQueryExpression insertQuery)
+    {
+        if (insertQuery.Insert.Returning is null)
+        {
+            throw new InvalidOperationException(
+                $"INSERT INTO '{insertQuery.Insert.TableName}' inside a CTE body must include a " +
+                "RETURNING clause — without it the CTE has no rows to project.");
+        }
+
+        IQueryPlan innerPlan = Catalog.InsertExecutor.Execute(_catalog, insertQuery.Insert);
+        return new Operators.InsertReturningOperator(innerPlan, insertQuery.Insert.TableName);
     }
 
     /// <summary>
@@ -78,6 +99,7 @@ public sealed class QueryPlanner
         {
             SelectQueryExpression select => PlanCore(select.Statement),
             CompoundQueryExpression compound => await PlanCompoundAsync(compound, cancellationToken).ConfigureAwait(false),
+            InsertQueryExpression insertQuery => PlanInsertQueryExpression(insertQuery),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
         return Finalize(op);
@@ -103,6 +125,7 @@ public sealed class QueryPlanner
                 await PlanCoreWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
             CompoundQueryExpression compound =>
                 await PlanCompoundWithSubqueriesAsync(compound, context, cancellationToken).ConfigureAwait(false),
+            InsertQueryExpression insertQuery => PlanInsertQueryExpression(insertQuery),
             _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
         };
         return Finalize(op);

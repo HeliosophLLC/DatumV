@@ -66,6 +66,22 @@ SELECT * FROM latest
 
 Materialized CTEs buffer their results in memory. When a memory budget is configured and the buffer exceeds it, rows spill to temporary files on disk. Materialization adds no Query Units (0 QU) but enforces per-query QU budgets during buffering.
 
+### Data-modifying CTEs
+
+A CTE body can also be an `INSERT … RETURNING` statement. The INSERT runs as part of the surrounding query plan and the CTE projects its `RETURNING` rows. Useful for chaining a parent INSERT and a dependent INSERT in a single statement:
+
+```sql
+-- Insert a conversation, then insert its first message referencing the new id.
+WITH new_conv AS (
+  INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat')
+  RETURNING id
+)
+INSERT INTO messages (conversation_id, body)
+SELECT id, 'Hello' FROM new_conv
+```
+
+The data-modifying CTE body must include a `RETURNING` clause — a CTE has no row source otherwise. See [INSERT … RETURNING](ddl-dml.md#returning) for the projection-list rules.
+
 ### Recursive CTEs
 
 `WITH RECURSIVE` enables iterative queries. The CTE body must contain a `UNION ALL` separating the anchor member (base case) from the recursive member (which references the CTE name):

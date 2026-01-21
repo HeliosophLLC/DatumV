@@ -234,6 +234,111 @@ public sealed class InsertReturningTests : IAsyncLifetime
         Assert.Equal((2L, 3), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
     }
 
+    // ──────────────────── WITH cte AS (INSERT … RETURNING) (C1e) ────────────────────
+
+    [Fact]
+    public async Task ModifyingCte_SelectFromCte_YieldsReturningRows()
+    {
+        // Canonical WITH-INSERT shape: data-modifying CTE + outer SELECT
+        // pulls from it. The INSERT side effect runs at plan time; the
+        // outer query then projects from the captured RETURNING rows.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE conversations (id Int64 IDENTITY, title String)");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH new_conv AS (" +
+            "  INSERT INTO conversations (title) VALUES ('Chat') RETURNING id, title" +
+            ") " +
+            "SELECT id, title FROM new_conv");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Single(rows);
+        Assert.Equal((1L, "Chat"), (rows[0][0].AsInt64(), rows[0][1].AsString()));
+        // Side effect actually applied:
+        Assert.Equal(1, catalog["conversations"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task ModifyingCte_OuterFiltersRows_OnlyMatchingYield()
+    {
+        // Verify the outer SELECT can filter the CTE's RETURNING rows.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, n Int32)");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH inserted AS (" +
+            "  INSERT INTO t (n) VALUES (10), (20), (30) RETURNING id, n" +
+            ") " +
+            "SELECT id, n FROM inserted WHERE n >= 20");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal((2L, 20), (rows[0][0].AsInt64(), rows[0][1].AsInt32()));
+        Assert.Equal((3L, 30), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
+        // All 3 inserts committed regardless of the outer WHERE:
+        Assert.Equal(3, catalog["t"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task ModifyingCte_StarReturning_ProjectsAllColumns()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String DEFAULT 'new')");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH ins AS (INSERT INTO t (name) VALUES ('alice') RETURNING *) " +
+            "SELECT * FROM ins");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0].Length);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal("alice", rows[0][1].AsString());
+        Assert.Equal("new", rows[0][2].AsString());
+    }
+
+    [Fact]
+    public void ModifyingCte_WithoutReturning_Throws()
+    {
+        // An INSERT without RETURNING has no rows to project — reject
+        // explicitly at plan time so the user gets a clear error.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan(
+                "WITH ins AS (INSERT INTO t (name) VALUES ('alice')) " +
+                "SELECT * FROM ins"));
+        Assert.Contains("RETURNING", ex.Message);
+    }
+
+    [Fact]
+    public async Task ModifyingCte_FromInsertSelect_YieldsCapturedRows()
+    {
+        // INSERT … SELECT … RETURNING inside a CTE is also valid.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
+        catalog.Plan("INSERT INTO src VALUES (1), (2), (3)");
+
+        IQueryPlan plan = catalog.Plan(
+            "WITH copied AS (" +
+            "  INSERT INTO dst (n) SELECT n FROM src RETURNING id, n" +
+            ") " +
+            "SELECT id, n FROM copied");
+
+        List<DataValue[]> rows = await CollectRows(plan);
+        Assert.Equal(3, rows.Count);
+        Assert.Equal((1L, 1), (rows[0][0].AsInt64(), rows[0][1].AsInt32()));
+        Assert.Equal((2L, 2), (rows[1][0].AsInt64(), rows[1][1].AsInt32()));
+        Assert.Equal((3L, 3), (rows[2][0].AsInt64(), rows[2][1].AsInt32()));
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     private static async Task<List<DataValue[]>> CollectRows(IQueryPlan plan)

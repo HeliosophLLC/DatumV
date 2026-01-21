@@ -218,28 +218,6 @@ SELECT random() AS rand_val FROM data
 SELECT * FROM data WHERE random() < 0.1  -- ~10% sample
 ```
 
-## Catalog Introspection
-
-### ident_current
-
-`ident_current(table_name)` → Int64 | QU: 1
-
-Returns the most recently reserved `IDENTITY` value for the named table — the value the previous `INSERT` produced. Mirrors SQL Server's `IDENT_CURRENT`.
-
-Returns `NULL` when:
-- The named table is not registered in the catalog
-- The table has no `IDENTITY` column
-- No values have been reserved yet (the counter still sits at the seed)
-
-```sql
--- Insert a parent row, then reference its IDENTITY in a child INSERT.
-INSERT INTO conversations (workspace, title) VALUES ('default', 'Chat');
-INSERT INTO messages (conversation_id, body)
-    VALUES (ident_current('conversations'), 'Hello');
-```
-
-Reads the persisted counter; values reserved by an in-flight `INSERT` session that hasn't committed yet are not visible. Marked impure (its result depends on external state), so multiple references within a row evaluate independently.
-
 ## See Also
 
 - [String Functions](string.md) -- text manipulation and formatting
