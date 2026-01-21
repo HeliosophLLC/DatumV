@@ -290,6 +290,20 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support RebuildIndex (CanRebuildIndex is false).");
 
     /// <summary>
+    /// Async variant of <see cref="RebuildIndex"/>. Production callers
+    /// inside an async context (PlanAsync's REINDEX path) should prefer
+    /// this; the sync version is kept for REPL/script callers and now
+    /// delegates to this method by default.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>;
+    /// providers that opt in via <see cref="CanRebuildIndex"/> override.
+    /// </remarks>
+    Task RebuildIndexAsync() =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support RebuildIndexAsync (CanRebuildIndex is false).");
+
+    /// <summary>
     /// True when this provider supports refreshing the cached half of its
     /// <c>.datum-manifest</c> sidecar (top-K, quantiles, histogram, entropy,
     /// kind-specific summaries) via <see cref="RebuildManifest"/>. Default
@@ -313,6 +327,16 @@ public interface ITableProvider : IDisposable
     void RebuildManifest() =>
         throw new NotSupportedException(
             $"Table '{Name}' does not support RebuildManifest (CanRebuildManifest is false).");
+
+    /// <summary>
+    /// Async variant of <see cref="RebuildManifest"/>. Production callers
+    /// inside an async context (PlanAsync's ANALYZE path) should prefer
+    /// this; the sync version is kept for REPL/script callers and
+    /// delegates here by default.
+    /// </summary>
+    Task RebuildManifestAsync() =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support RebuildManifestAsync (CanRebuildManifest is false).");
 
     /// <summary>
     /// Returns the current validity state of this table's

@@ -469,11 +469,11 @@ static async Task<IResult> ExecuteQuery(
                     jsonOptions, statusCode: 400);
             }
             DatumIngest.Parsing.Ast.Statement bound = ParameterBinder.Bind(stmts[0].Statement, parameters);
-            plan = catalog.Plan(bound, stmts[0].SourceText);
+            plan = await catalog.PlanAsync(bound, stmts[0].SourceText).ConfigureAwait(false);
         }
         else
         {
-            plan = catalog.Plan(sql);
+            plan = await catalog.PlanAsync(sql).ConfigureAwait(false);
         }
     }
     catch (Exception ex)

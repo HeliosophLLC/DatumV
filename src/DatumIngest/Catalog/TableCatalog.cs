@@ -285,6 +285,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
+    /// Asynchronous variant of <see cref="Plan(string)"/>. Production hosts
+    /// running inside an async context (ASP.NET Core, gRPC, etc.) should
+    /// prefer this over <see cref="Plan(string)"/> — the sync overload
+    /// blocks the caller's thread on async DML execution and risks
+    /// thread-pool starvation under load. The sync overload remains for
+    /// REPL / test / script callers that don't have an async path.
+    /// </summary>
+    public Task<IQueryPlan> PlanAsync(string sql)
+    {
+        Statement statement = SqlParser.ParseStatement(sql);
+        return PlanAsync(statement, sql);
+    }
+
+    /// <summary>
+    /// Asynchronous variant of <see cref="Plan(Statement, string?)"/>.
+    /// </summary>
+    public Task<IQueryPlan> PlanAsync(Statement statement)
+        => PlanAsync(statement, sourceText: null);
+
+    /// <summary>
     /// Plans an already-parsed <see cref="Statement"/> against this catalog.
     /// Same dispatch as <see cref="Plan(string)"/> minus the parsing step;
     /// useful for callers that have built a statement programmatically
@@ -379,6 +399,82 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 throw new NotSupportedException(
                     $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
                     $"Use the dedicated APIs (e.g. AddFile for file registration) or extend Plan to dispatch this statement.");
+        }
+    }
+
+    /// <summary>
+    /// Asynchronous statement dispatch — same routing as
+    /// <see cref="Plan(Statement, string?)"/>, but DML executors run on
+    /// their async path instead of being blocked via
+    /// <c>.GetAwaiter().GetResult()</c>. The sync overload now delegates
+    /// here for consistency; production callers should reach this
+    /// directly to avoid thread-pool starvation.
+    /// </summary>
+    public async Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
+    {
+        switch (statement)
+        {
+            case QueryStatement queryStatement:
+                return PlanQuery(queryStatement.Query);
+
+            case CreateFunctionStatement create:
+                _routines.ApplyCreateFunction(create, sourceText);
+                return EmptyQueryPlan.Instance;
+
+            case DropFunctionStatement drop:
+                _routines.ApplyDropFunction(drop);
+                return EmptyQueryPlan.Instance;
+
+            case CreateProcedureStatement create:
+                _routines.ApplyCreateProcedure(create, sourceText);
+                return EmptyQueryPlan.Instance;
+
+            case DropProcedureStatement drop:
+                _routines.ApplyDropProcedure(drop);
+                return EmptyQueryPlan.Instance;
+
+            case ExecStatement exec:
+                return PlanExec(exec);
+
+            case CreateTableStatement createTable:
+                ApplyCreateTable(createTable);
+                return EmptyQueryPlan.Instance;
+
+            case DropTableStatement dropTable:
+                ApplyDropTable(dropTable);
+                return EmptyQueryPlan.Instance;
+
+            case ReindexTableStatement reindex:
+                await ApplyReindexTableAsync(reindex).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            case AnalyzeTableStatement analyze:
+                await ApplyAnalyzeTableAsync(analyze).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            case AlterTableAddColumnStatement alterAdd:
+                ApplyAlterTableAddColumn(alterAdd);
+                return EmptyQueryPlan.Instance;
+
+            case AlterTableDropColumnStatement alterDrop:
+                ApplyAlterTableDropColumn(alterDrop);
+                return EmptyQueryPlan.Instance;
+
+            case InsertStatement insert:
+                return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
+
+            case UpdateStatement update:
+                await UpdateExecutor.ExecuteAsync(this, update).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            case DeleteStatement delete:
+                await DeleteExecutor.ExecuteAsync(this, delete).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            default:
+                throw new NotSupportedException(
+                    $"Statement type '{statement.GetType().Name}' is not yet supported by PlanAsync. " +
+                    $"Use the dedicated APIs (e.g. AddFile for file registration) or extend PlanAsync to dispatch this statement.");
         }
     }
 
@@ -616,6 +712,52 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (provider.CanRebuildIndex)
         {
             provider.RebuildIndex();
+        }
+    }
+
+    /// <summary>Async sibling of <see cref="ApplyReindexTable"/>.</summary>
+    private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
+    {
+        if (!Tables.TryGetValue(reindex.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' is not registered in the catalog.");
+        }
+
+        if (!provider.CanRebuildIndex)
+        {
+            throw new InvalidOperationException(
+                $"Table '{reindex.TableName}' does not support REINDEX " +
+                $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
+        }
+
+        await provider.RebuildIndexAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Async sibling of <see cref="ApplyAnalyzeTable"/>.</summary>
+    private async Task ApplyAnalyzeTableAsync(AnalyzeTableStatement analyze)
+    {
+        if (!Tables.TryGetValue(analyze.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{analyze.TableName}' is not registered in the catalog.");
+        }
+
+        if (!provider.CanRebuildIndex && !provider.CanRebuildManifest)
+        {
+            throw new InvalidOperationException(
+                $"Table '{analyze.TableName}' does not support ANALYZE " +
+                $"(provider type '{provider.GetType().Name}' has no acceleration sidecar or " +
+                "manifest to refresh).");
+        }
+
+        if (provider.CanRebuildManifest)
+        {
+            await provider.RebuildManifestAsync().ConfigureAwait(false);
+        }
+        if (provider.CanRebuildIndex)
+        {
+            await provider.RebuildIndexAsync().ConfigureAwait(false);
         }
     }
 

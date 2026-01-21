@@ -22,7 +22,10 @@ namespace DatumIngest.Catalog;
 /// </remarks>
 internal static class UpdateExecutor
 {
-    public static void Execute(TableCatalog catalog, UpdateStatement update)
+    public static void Execute(TableCatalog catalog, UpdateStatement update) =>
+        ExecuteAsync(catalog, update).GetAwaiter().GetResult();
+
+    public static async Task ExecuteAsync(TableCatalog catalog, UpdateStatement update)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(update);
@@ -40,15 +43,15 @@ internal static class UpdateExecutor
 
         if (update.From is not null)
         {
-            ExecuteWithFromAsync(catalog, provider, update).GetAwaiter().GetResult();
+            await ExecuteWithFromAsync(catalog, provider, update).ConfigureAwait(false);
         }
         else
         {
-            ExecuteAsync(catalog, provider, update).GetAwaiter().GetResult();
+            await ExecuteSimpleAsync(catalog, provider, update).ConfigureAwait(false);
         }
     }
 
-    private static async Task ExecuteAsync(
+    private static async Task ExecuteSimpleAsync(
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update)

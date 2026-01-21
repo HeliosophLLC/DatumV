@@ -61,7 +61,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// the cached half ages until <c>ANALYZE</c> rescans.
     /// <see cref="GetManifest"/> propagates this as
     /// <see cref="FeatureManifest.CachedStatsValid"/>=<see langword="false"/>
-    /// on every column. Cleared by <see cref="RebuildManifestNoLock"/>.
+    /// on every column. Cleared by <see cref="RebuildManifestNoLockAsync"/>.
     /// </summary>
     private bool _cachedStatsStale;
     /// <summary>
@@ -156,7 +156,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <summary>
     /// Per-column acceleration B+Tree indexes (PR13d), backed by companion
     /// <c>.datum-bptree-{column}</c> page-COW files alongside the data file.
-    /// Opened on construction and refreshed by <see cref="RebuildIndexNoLock"/>;
+    /// Opened on construction and refreshed by <see cref="RebuildIndexNoLockAsync"/>;
     /// closed on dispose. Read paths route through <see cref="TryGetColumnIndex"/>;
     /// mutations (insert / delete / update) hold the mutation lock and rewrite
     /// the relevant trees in place. Empty when no acceleration is built (e.g. a
@@ -1251,7 +1251,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private static bool IsFingerprintCurrent(string datumPath, SourceFingerprint storedFingerprint)
     {
         using FileStream fs = File.OpenRead(datumPath);
-        return storedFingerprint.MatchesAsync(fs, CancellationToken.None).GetAwaiter().GetResult();
+        return storedFingerprint.Matches(fs);
     }
 
     /// <summary>
@@ -1507,7 +1507,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // via datum_catalog.indexes.is_valid = false).
             try
             {
-                RebuildIndexNoLock(existingForExtend: null);
+                // Sync UpdateRows entry from a sync ITableProvider method.
+                // The body of RebuildIndexNoLockAsync is genuinely async
+                // (Indexer.IndexAsync / ExtendAsync); bridging here is the
+                // narrowest possible scope until the provider interface
+                // goes async. Pinned for C1g Phase 2 follow-up.
+                RebuildIndexNoLockAsync(existingForExtend: null).GetAwaiter().GetResult();
             }
             catch
             {
@@ -1532,16 +1537,20 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public bool CanRebuildIndex => true;
 
     /// <inheritdoc/>
-    public void RebuildIndex()
+    public void RebuildIndex() =>
+        RebuildIndexAsync().GetAwaiter().GetResult();
+
+    /// <inheritdoc/>
+    public async Task RebuildIndexAsync()
     {
-        _mutationLock.Wait();
+        await _mutationLock.WaitAsync().ConfigureAwait(false);
         try
         {
             // Public REINDEX entry — always full rebuild (no carry-forward
             // from the existing in-memory snapshot). Called by users who
             // want a from-scratch sweep regardless of how the on-disk
             // index drifted.
-            RebuildIndexNoLock(existingForExtend: null);
+            await RebuildIndexNoLockAsync(existingForExtend: null).ConfigureAwait(false);
         }
         finally
         {
@@ -1553,12 +1562,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public bool CanRebuildManifest => true;
 
     /// <inheritdoc/>
-    public void RebuildManifest()
+    public void RebuildManifest() =>
+        RebuildManifestAsync().GetAwaiter().GetResult();
+
+    /// <inheritdoc/>
+    public async Task RebuildManifestAsync()
     {
-        _mutationLock.Wait();
+        await _mutationLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            RebuildManifestNoLock();
+            await RebuildManifestNoLockAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -1574,7 +1587,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <see cref="_mutationLock"/>. After this returns,
     /// <see cref="GetManifest"/> reflects the freshly-built cached half.
     /// </summary>
-    private void RebuildManifestNoLock()
+    private async Task RebuildManifestNoLockAsync()
     {
         Schema schema = _snapshot.Schema;
 
@@ -1583,30 +1596,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         StatisticsCollector collector = new();
         long rowCount = 0;
 
-        IAsyncEnumerator<RowBatch> enumerator = ScanAsync(
+        await foreach (RowBatch batch in ScanAsync(
             requiredColumns: null,
             filterHint: null,
             targetArena: null,
-            cancellationToken: CancellationToken.None).GetAsyncEnumerator();
-        try
+            cancellationToken: CancellationToken.None).ConfigureAwait(false))
         {
-            while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
+            try
             {
-                RowBatch batch = enumerator.Current;
-                try
-                {
-                    collector.Collect(batch);
-                    rowCount += batch.Count;
-                }
-                finally
-                {
-                    batch.Dispose();
-                }
+                collector.Collect(batch);
+                rowCount += batch.Count;
             }
-        }
-        finally
-        {
-            enumerator.DisposeAsync().GetAwaiter().GetResult();
+            finally
+            {
+                batch.Dispose();
+            }
         }
 
         Dictionary<string, ColumnInfo> columnInfos = new(schema.Columns.Count);
@@ -1625,8 +1629,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         string tempPath = finalPath + ".tmp";
         try
         {
-            ManifestSerializer.WriteToFileAsync(_descriptor.Name, manifest, tempPath)
-                .GetAwaiter().GetResult();
+            await ManifestSerializer.WriteToFileAsync(_descriptor.Name, manifest, tempPath)
+                .ConfigureAwait(false);
             if (File.Exists(finalPath))
             {
                 File.Replace(tempPath, finalPath, destinationBackupFileName: null);
@@ -1678,7 +1682,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// per the <see cref="IndexValidity"/> contract.
     /// </para>
     /// </remarks>
-    private void RebuildIndexNoLock(SourceIndex? existingForExtend)
+    private async Task RebuildIndexNoLockAsync(SourceIndex? existingForExtend)
     {
         // Detach the cached index immediately. After mutation, the
         // post-mutation snapshot is already live but the in-memory
@@ -1708,13 +1712,13 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             OutputDescriptor destination = new(tempPath);
             if (useExtend)
             {
-                indexer.ExtendAsync(this, _descriptor.FilePath, destination, existingForExtend!, IndexOptions.Default)
-                    .GetAwaiter().GetResult();
+                await indexer.ExtendAsync(this, _descriptor.FilePath, destination, existingForExtend!, IndexOptions.Default)
+                    .ConfigureAwait(false);
             }
             else
             {
-                indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
-                    .GetAwaiter().GetResult();
+                await indexer.IndexAsync(this, _descriptor.FilePath, destination, IndexOptions.Default)
+                    .ConfigureAwait(false);
             }
         }
         catch
@@ -1738,7 +1742,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <summary>
     /// Phase 3a-wide append-session fast path: writes the supplied (already
     /// merged) <paramref name="merged"/> index to the unified sidecar via the
-    /// same temp-file + atomic-rename dance as <see cref="RebuildIndexNoLock"/>,
+    /// same temp-file + atomic-rename dance as <see cref="RebuildIndexNoLockAsync"/>,
     /// but skips the Indexer scan entirely (the append session built the delta
     /// in lockstep with the data writes). Caller must hold the mutation lock.
     /// Per-column trees stay open across this call — the append session
@@ -2284,8 +2288,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 FileMode.Open, FileAccess.Read, FileShare.Read,
                 bufferSize: 65536, useAsync: false))
             {
-                freshFingerprint = SourceFingerprint.ComputeAsync(stream, default)
-                    .GetAwaiter().GetResult();
+                freshFingerprint = SourceFingerprint.Compute(stream);
             }
 
             SourceIndex delta = _indexBuilder!.Finalize(freshFingerprint);

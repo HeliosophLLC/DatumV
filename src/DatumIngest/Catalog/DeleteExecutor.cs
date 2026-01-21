@@ -23,7 +23,10 @@ namespace DatumIngest.Catalog;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static void Execute(TableCatalog catalog, DeleteStatement delete)
+    public static void Execute(TableCatalog catalog, DeleteStatement delete) =>
+        ExecuteAsync(catalog, delete).GetAwaiter().GetResult();
+
+    public static async Task ExecuteAsync(TableCatalog catalog, DeleteStatement delete)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
@@ -40,10 +43,10 @@ internal static class DeleteExecutor
                 "is read-only (CanDeleteRows = false).");
         }
 
-        ExecuteAsync(catalog, provider, delete.Where).GetAwaiter().GetResult();
+        await ApplyAsync(catalog, provider, delete.Where).ConfigureAwait(false);
     }
 
-    private static async Task ExecuteAsync(
+    private static async Task ApplyAsync(
         TableCatalog catalog, ITableProvider provider, Expression? predicate)
     {
         // Walk the live row sequence with a running counter. The

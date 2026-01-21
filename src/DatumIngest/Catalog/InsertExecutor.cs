@@ -37,7 +37,10 @@ internal static class InsertExecutor
     /// is awaited via <c>GetAwaiter().GetResult()</c> so the dispatch
     /// stays consistent with the rest of <c>Plan()</c>'s sync DDL flow.
     /// </summary>
-    public static IQueryPlan Execute(TableCatalog catalog, InsertStatement insert)
+    public static IQueryPlan Execute(TableCatalog catalog, InsertStatement insert) =>
+        ExecuteAsync(catalog, insert).GetAwaiter().GetResult();
+
+    public static async Task<IQueryPlan> ExecuteAsync(TableCatalog catalog, InsertStatement insert)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
@@ -61,16 +64,16 @@ internal static class InsertExecutor
         switch (insert.Source)
         {
             case InsertValuesSource values:
-                RowBatch? singleBatch = ApplyValuesAsync(
+                RowBatch? singleBatch = await ApplyValuesAsync(
                     catalog, provider, targetSchema, insert.ColumnNames, values, captureRows)
-                    .GetAwaiter().GetResult();
+                    .ConfigureAwait(false);
                 captured = singleBatch is null ? null : [singleBatch];
                 break;
 
             case InsertQuerySource queryRow:
-                captured = ApplySelectAsync(
+                captured = await ApplySelectAsync(
                     catalog, provider, targetSchema, insert.ColumnNames, queryRow, captureRows)
-                    .GetAwaiter().GetResult();
+                    .ConfigureAwait(false);
                 break;
 
             default:
