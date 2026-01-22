@@ -2413,13 +2413,26 @@ public static class SqlParser
             from expr in SP.Ref(() => ExpressionParser!)
             select expr
         ).AsNullable().OptionalOrDefault()
+        // `colname kind AS (expr)` — computed column, paren-delimited. PG
+        // accepts `GENERATED ALWAYS AS (expr) STORED` too; we ship the
+        // bare-AS shorthand first because it's unambiguous and matches what
+        // ALTER TABLE ADD COLUMN already accepts. STORED is implicit (the
+        // only mode we support v1); VIRTUAL is a follow-up.
+        from computedExpression in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from open in Token.EqualTo(SqlToken.LeftParen)
+            from expr in SP.Ref(() => ExpressionParser!)
+            from close in Token.EqualTo(SqlToken.RightParen)
+            select expr
+        ).AsNullable().OptionalOrDefault()
         from identity in IdentityClauseParser.AsNullable().OptionalOrDefault()
         select new ColumnDefinition(
             name, typeName,
             Nullable: !notNull && !primaryKey,
             PrimaryKey: primaryKey,
             DefaultValue: defaultValue,
-            Identity: identity);
+            Identity: identity,
+            ComputedExpression: computedExpression);
 
     /// <summary>
     /// Parses the <c>IDENTITY[(seed, step)]</c> clause. Bare <c>IDENTITY</c>

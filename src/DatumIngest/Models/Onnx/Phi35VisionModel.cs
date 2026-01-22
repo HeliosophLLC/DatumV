@@ -71,9 +71,22 @@ public sealed class Phi35VisionModel : IModel, IDisposable
     /// </summary>
     private const int InputTokenBudget = 4096;
 
+    /// <summary>
+    /// Phi-3.5-vision end-of-turn tokens. The model is trained to emit
+    /// <c>&lt;|endoftext|&gt;</c> (32000) to terminate an assistant turn,
+    /// but Microsoft's GenAI bundles have shipped <c>genai_config.json</c>
+    /// with <c>eos_token_id</c> swapped against <c>pad_token_id</c> — so
+    /// ORT GenAI's <c>IsDone()</c> doesn't fire on the real EOS, and
+    /// generation runs hundreds of tokens past end-of-turn into the KV
+    /// cache's residual state (producing phantom continuations of
+    /// previous rows' content). Stop manually on both turn-end tokens to
+    /// stay correct regardless of bundle-config drift.
+    /// </summary>
+    private const int EndOfTextTokenId = 32000;
+    private const int EndOfTurnTokenId = 32007;
+
     private readonly OgaModel _model;
     private readonly Tokenizer _tokenizer;
-    private readonly MultiModalProcessor _processor;
     private readonly int _maxTokens;
 
     /// <inheritdoc />
@@ -134,7 +147,6 @@ public sealed class Phi35VisionModel : IModel, IDisposable
         config.AppendProvider("cuda");
         _model = new OgaModel(config);
         _tokenizer = new Tokenizer(_model);
-        _processor = new MultiModalProcessor(_model);
     }
 
     /// <inheritdoc />
@@ -195,8 +207,17 @@ public sealed class Phi35VisionModel : IModel, IDisposable
             string formattedPrompt =
                 $"<|user|>\n<|image_1|>\n{userPrompt}<|end|>\n<|assistant|>\n";
 
+            // MultiModalProcessor is per-call rather than shared. In ORT
+            // GenAI 0.5.x the processor retains internal scratch state
+            // across ProcessImages calls; reusing one instance across
+            // rows produces malformed image features for the first
+            // several invocations (visible as the decoder emitting only
+            // <unk> / no-token sentinels for the first 3-4 rows before
+            // outputs stabilise). The processor is cheap to construct
+            // — the cost is dwarfed by the per-row generation budget.
+            using MultiModalProcessor processor = new(_model);
             using Images images = Images.Load([tempPath]);
-            using NamedTensors processed = _processor.ProcessImages(formattedPrompt, images);
+            using NamedTensors processed = processor.ProcessImages(formattedPrompt, images);
 
             using GeneratorParams generatorParams = new(_model);
             generatorParams.SetInputs(processed);
@@ -215,23 +236,36 @@ public sealed class Phi35VisionModel : IModel, IDisposable
             // cleanly without manual reassembly. 0.5.x requires the
             // explicit ComputeLogits() before GenerateNextToken();
             // 0.6.x unified them.
+            //
+            // Decode only the newest token (sequence[^1]) per step. The
+            // sequence at iteration 1 already contains every prompt
+            // token (chat-template wrappers + ~1.9-2.5k image-placeholder
+            // tokens + the user prompt); decoding from index 0 leaks the
+            // user's prompt back into the answer and pumps thousands of
+            // special tokens through TokenizerStream's UTF-8 byte buffer
+            // before any real generation begins.
+            //
+            // Stop on both <|endoftext|> (32000) and <|end|> (32007). Phi-
+            // 3.5-vision is trained to terminate assistant turns with
+            // 32000, but Microsoft's GenAI bundle ships eos_token_id=32007
+            // (mismatched against pad_token_id=32000). Without an explicit
+            // check here, IsDone() runs hundreds of tokens past EOS into
+            // the KV cache's residual state, producing phantom
+            // continuations that look like content from previous rows.
             using TokenizerStream tokenizerStream = _tokenizer.CreateStream();
             StringBuilder answer = new();
-            int previousSeqLength = 0;
 
             while (!generator.IsDone())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 generator.ComputeLogits();
                 generator.GenerateNextToken();
-                ReadOnlySpan<int> sequence = generator.GetSequence(0);
-                // The first call's sequence already includes the prompt
-                // tokens; only decode tokens that newly arrived this step.
-                for (int i = previousSeqLength; i < sequence.Length; i++)
+                int newToken = generator.GetSequence(0)[^1];
+                if (newToken == EndOfTextTokenId || newToken == EndOfTurnTokenId)
                 {
-                    answer.Append(tokenizerStream.Decode(sequence[i]));
+                    break;
                 }
-                previousSeqLength = sequence.Length;
+                answer.Append(tokenizerStream.Decode(newToken));
             }
 
             return answer.ToString().Trim();
@@ -245,7 +279,6 @@ public sealed class Phi35VisionModel : IModel, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        _processor.Dispose();
         _tokenizer.Dispose();
         _model.Dispose();
     }

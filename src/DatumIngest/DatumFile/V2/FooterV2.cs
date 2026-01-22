@@ -31,11 +31,20 @@ namespace DatumIngest.DatumFile.V2;
 /// open. Empty list when the file has no Struct columns or was written
 /// in v4 (no <see cref="DatumFileFlagsV2.HasTypeTable"/> bit).
 /// </param>
+/// <param name="ColumnComputeds">
+/// Per-file table of <c>GENERATED ALWAYS AS</c> computed columns introduced
+/// in format v6. Each entry pairs a column index with its SQL fragment;
+/// the catalog re-parses the fragment on open and the INSERT/UPDATE paths
+/// evaluate the expression per row. Empty list when the file has no
+/// computed columns or was written pre-v6 (no
+/// <see cref="DatumFileFlagsV2.HasColumnComputeds"/> bit).
+/// </param>
 public sealed record FooterV2(
     FooterPrologueV4 Prologue,
     IReadOnlyList<ColumnFooterV2> Columns,
     bool HasVolumeZoneMaps,
-    IReadOnlyList<TypeTableEntryV5> TypeTable)
+    IReadOnlyList<TypeTableEntryV5> TypeTable,
+    IReadOnlyList<ColumnComputedV4> ColumnComputeds)
 {
     /// <summary>
     /// Backwards-compatible constructor without a type table (empty list).
@@ -46,7 +55,22 @@ public sealed record FooterV2(
         FooterPrologueV4 prologue,
         IReadOnlyList<ColumnFooterV2> columns,
         bool hasVolumeZoneMaps)
-        : this(prologue, columns, hasVolumeZoneMaps, Array.Empty<TypeTableEntryV5>())
+        : this(prologue, columns, hasVolumeZoneMaps,
+            Array.Empty<TypeTableEntryV5>(), Array.Empty<ColumnComputedV4>())
+    { }
+
+    /// <summary>
+    /// Backwards-compatible constructor without a computed-columns table
+    /// (empty list). v5 callers that have a type table but no computed
+    /// columns pass through this overload.
+    /// </summary>
+    public FooterV2(
+        FooterPrologueV4 prologue,
+        IReadOnlyList<ColumnFooterV2> columns,
+        bool hasVolumeZoneMaps,
+        IReadOnlyList<TypeTableEntryV5> typeTable)
+        : this(prologue, columns, hasVolumeZoneMaps,
+            typeTable, Array.Empty<ColumnComputedV4>())
     { }
 
     /// <summary>
@@ -61,7 +85,15 @@ public sealed record FooterV2(
     /// the type-table block is omitted entirely so v4 files stay
     /// byte-identical to their pre-v5 layout.
     /// </param>
-    internal void Serialize(BinaryWriter writer, bool hasTypeTable)
+    internal void Serialize(BinaryWriter writer, bool hasTypeTable) =>
+        Serialize(writer, hasTypeTable, hasColumnComputeds: false);
+
+    /// <summary>
+    /// Full-fidelity serializer with explicit <paramref name="hasColumnComputeds"/>.
+    /// Existing callers that don't carry computed columns pass through the
+    /// two-arg overload.
+    /// </summary>
+    internal void Serialize(BinaryWriter writer, bool hasTypeTable, bool hasColumnComputeds)
     {
         Prologue.Serialize(writer);
         foreach (ColumnFooterV2 column in Columns)
@@ -72,6 +104,14 @@ public sealed record FooterV2(
         {
             writer.Write(TypeTable.Count);
             foreach (TypeTableEntryV5 entry in TypeTable)
+            {
+                entry.Serialize(writer);
+            }
+        }
+        if (hasColumnComputeds)
+        {
+            writer.Write(ColumnComputeds.Count);
+            foreach (ColumnComputedV4 entry in ColumnComputeds)
             {
                 entry.Serialize(writer);
             }
@@ -91,7 +131,14 @@ public sealed record FooterV2(
     /// whether the trailing type-table block is read; v4 files always
     /// pass <see langword="false"/> here.
     /// </param>
-    internal static FooterV2 Deserialize(BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable)
+    internal static FooterV2 Deserialize(BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable) =>
+        Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds: false);
+
+    /// <summary>
+    /// Full-fidelity deserializer with explicit <paramref name="hasColumnComputeds"/>.
+    /// </summary>
+    internal static FooterV2 Deserialize(
+        BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable, bool hasColumnComputeds)
     {
         FooterPrologueV4 prologue = FooterPrologueV4.Deserialize(reader);
         ColumnFooterV2[] columns = new ColumnFooterV2[prologue.ColumnCount];
@@ -121,7 +168,28 @@ public sealed record FooterV2(
             typeTable = Array.Empty<TypeTableEntryV5>();
         }
 
-        return new FooterV2(prologue, columns, hasVolumeZoneMaps, typeTable);
+        IReadOnlyList<ColumnComputedV4> columnComputeds;
+        if (hasColumnComputeds)
+        {
+            int count = reader.ReadInt32();
+            if (count < 0)
+            {
+                throw new InvalidDataException(
+                    $"Footer declares negative column-computed count ({count}).");
+            }
+            ColumnComputedV4[] entries = new ColumnComputedV4[count];
+            for (int i = 0; i < count; i++)
+            {
+                entries[i] = ColumnComputedV4.Deserialize(reader);
+            }
+            columnComputeds = entries;
+        }
+        else
+        {
+            columnComputeds = Array.Empty<ColumnComputedV4>();
+        }
+
+        return new FooterV2(prologue, columns, hasVolumeZoneMaps, typeTable, columnComputeds);
     }
 }
 

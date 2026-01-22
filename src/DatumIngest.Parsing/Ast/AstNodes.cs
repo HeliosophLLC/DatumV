@@ -1048,13 +1048,21 @@ public sealed record CreateTableStatement(
 /// the column is auto-filled at INSERT time and explicit values for it
 /// are rejected (PostgreSQL <c>GENERATED ALWAYS</c> semantics).
 /// </param>
+/// <param name="ComputedExpression">
+/// Optional <c>GENERATED ALWAYS AS (expr)</c> computed-column expression.
+/// When non-<see langword="null"/>, the column's value is materialised
+/// per row from the expression instead of accepting an explicit INSERT /
+/// UPDATE value. Mutually exclusive with <see cref="DefaultValue"/> and
+/// <see cref="Identity"/>; the catalog enforces at <c>CREATE TABLE</c> time.
+/// </param>
 public sealed record ColumnDefinition(
     string Name,
     string TypeName,
     bool Nullable = true,
     bool PrimaryKey = false,
     Expression? DefaultValue = null,
-    IdentitySpec? Identity = null);
+    IdentitySpec? Identity = null,
+    Expression? ComputedExpression = null);
 
 /// <summary>
 /// <c>IDENTITY[(seed, step)]</c> spec on a <see cref="ColumnDefinition"/>

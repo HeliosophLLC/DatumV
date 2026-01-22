@@ -42,7 +42,7 @@ public static class DatumFormatV2
     /// "no struct type info" (Struct columns deserialize as untyped,
     /// matching pre-v5 behaviour).
     /// </summary>
-    public const ushort FormatVersion = 5;
+    public const ushort FormatVersion = 6;
 
     /// <summary>
     /// Oldest format version this reader accepts. v4 files contain no
@@ -285,4 +285,15 @@ public enum DatumFileFlagsV2 : ushort
     /// files and in v5 files with no Struct columns.
     /// </summary>
     HasTypeTable = 0x10,
+
+    /// <summary>
+    /// File carries one or more <c>GENERATED ALWAYS AS</c> computed columns
+    /// (v6+). When set, the footer prologue's trailing
+    /// <c>(columnComputedCount, ColumnComputedV4[])</c> block enumerates each
+    /// computed column's SQL fragment; the catalog re-parses it on open and
+    /// the INSERT/UPDATE paths evaluate the expression per row instead of
+    /// accepting an explicit value. Clear in pre-v6 files and in v6 files
+    /// with no computed columns.
+    /// </summary>
+    HasColumnComputeds = 0x20,
 }

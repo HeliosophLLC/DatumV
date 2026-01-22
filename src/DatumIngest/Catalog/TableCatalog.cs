@@ -554,6 +554,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         ColumnDescriptorV2[] descriptors = new ColumnDescriptorV2[schema.Columns.Count];
         List<ColumnDefaultV4>? columnDefaults = null;
+        List<ColumnComputedV4>? columnComputeds = null;
         IdentityWriterSpec? identityWriterSpec = null;
         for (int i = 0; i < schema.Columns.Count; i++)
         {
@@ -573,6 +574,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     SqlFragment: QueryExplainer.FormatExpression(c.DefaultExpression)));
             }
 
+            if (c.ComputedExpression is not null)
+            {
+                columnComputeds ??= new List<ColumnComputedV4>();
+                columnComputeds.Add(new ColumnComputedV4(
+                    ColumnIndex: checked((ushort)i),
+                    SqlFragment: QueryExplainer.FormatExpression(c.ComputedExpression)));
+            }
+
             if (c.Identity is { } identity)
             {
                 // Schema-build validates "at most one IDENTITY column", so
@@ -589,7 +598,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             : schema.PrimaryKeyColumnIndices.Select(i => checked((ushort)i)).ToArray();
 
         DatumFileWriterV2.CreateEmpty(
-            targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices);
+            targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices, columnComputeds);
 
         // Create the on-disk PK index sidecar when the table has a
         // single-column PK (PR10h scope). Composite PKs continue to use
@@ -850,12 +859,41 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             bool isPrimaryKey = pkIndexSet is not null && pkIndexSet.Contains(i);
             bool effectiveNullable = isPrimaryKey ? false : d.Nullable;
 
+            // Computed columns: `GENERATED ALWAYS AS (expr)`. Mutually
+            // exclusive with DEFAULT and IDENTITY — the value is derived,
+            // not supplied. PRIMARY KEY on a computed column is rejected
+            // in v1 because the value depends on other columns and the PK
+            // index would need re-keying on every UPDATE of a referenced
+            // column; not worth the complexity until a real use case lands.
+            if (d.ComputedExpression is not null)
+            {
+                if (defaultExpression is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': cannot combine DEFAULT and GENERATED ALWAYS AS — " +
+                        "computed columns derive their value from other columns and never accept " +
+                        "an explicit fallback.");
+                }
+                if (identity is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': cannot combine IDENTITY and GENERATED ALWAYS AS.");
+                }
+                if (isPrimaryKey)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{d.Name}': GENERATED ALWAYS AS columns cannot be part of the " +
+                        "PRIMARY KEY in v1.");
+                }
+            }
+
             columns[i] = new ColumnInfo(d.Name, kind, effectiveNullable)
             {
                 IsArray = isArray,
                 DefaultExpression = defaultExpression,
                 Identity = identity,
                 IsPrimaryKey = isPrimaryKey,
+                ComputedExpression = d.ComputedExpression,
             };
         }
         return new Schema(columns, pkSchemaIndices);
@@ -1019,25 +1057,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private void ApplyAlterTableAddColumn(AlterTableAddColumnStatement alter)
     {
-        if (alter.ComputedExpression is not null)
-        {
-            throw new InvalidOperationException(
-                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' AS <expr> " +
-                "(computed columns) is not yet supported.");
-        }
-        if (alter.DefaultValue is not null)
-        {
-            throw new InvalidOperationException(
-                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' DEFAULT … " +
-                "is not yet supported. Existing rows would need backfill, which lands in a " +
-                "later PR. Add the column without a DEFAULT for now (existing rows read as NULL).");
-        }
         if (!alter.Nullable)
         {
             throw new InvalidOperationException(
                 $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' NOT NULL " +
                 "is not yet supported. Existing rows would need a non-null backfill value, " +
-                "which requires DEFAULT support that hasn't shipped yet.");
+                "and the format does not yet persist a missing-value sentinel for that path. " +
+                "Add the column nullable (with or without a DEFAULT) for now.");
         }
 
         if (!Model.TypeAnnotationResolver.TryParse(alter.TypeName, out DataKind kind, out bool isArray))
@@ -1046,7 +1072,35 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"Unknown column type '{alter.TypeName}' on column '{alter.ColumnName}'.");
         }
 
-        ColumnInfo column = new(alter.ColumnName, kind, nullable: true) { IsArray = isArray };
+        // DEFAULT validation: same literal-only rules as CREATE TABLE. The
+        // catalog persists the SQL fragment; existing rows continue to read
+        // NULL (the column wasn't present), and new INSERTs that omit this
+        // column auto-fill via the existing CREATE-TABLE default path.
+        Expression? defaultExpr = alter.DefaultValue;
+        if (defaultExpr is not null)
+        {
+            ValidateDefaultLiteral(defaultExpr, alter.ColumnName);
+        }
+
+        // Computed columns: mutually exclusive with DEFAULT — both supply a
+        // value, just from different sides. Pre-existing rows in the table
+        // read NULL for the new computed column (no recompute pass against
+        // historical rows in v1); only INSERTs after the ALTER fire the
+        // expression.
+        Expression? computedExpr = alter.ComputedExpression;
+        if (computedExpr is not null && defaultExpr is not null)
+        {
+            throw new InvalidOperationException(
+                $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': cannot combine " +
+                "DEFAULT and GENERATED ALWAYS AS — pick one.");
+        }
+
+        ColumnInfo column = new(alter.ColumnName, kind, nullable: true)
+        {
+            IsArray = isArray,
+            DefaultExpression = defaultExpr,
+            ComputedExpression = computedExpr,
+        };
         AddColumn(alter.TableName, column);
     }
 

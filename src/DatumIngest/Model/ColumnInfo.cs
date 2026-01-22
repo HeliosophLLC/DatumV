@@ -105,4 +105,16 @@ public sealed record ColumnInfo
     /// at <c>CREATE TABLE</c> time).
     /// </summary>
     public bool IsPrimaryKey { get; init; }
+
+    /// <summary>
+    /// Optional <c>GENERATED ALWAYS AS (expr)</c> computed-column
+    /// expression. When non-<see langword="null"/>, the column's value is
+    /// materialised per row from <see cref="ComputedExpression"/> at INSERT
+    /// time; INSERT and UPDATE reject explicit values for this column
+    /// (PostgreSQL <c>GENERATED ALWAYS</c> semantics).
+    /// Mutually exclusive with <see cref="DefaultExpression"/> and
+    /// <see cref="Identity"/>; enforced by <c>TableCatalog</c> at
+    /// <c>CREATE TABLE</c> / <c>ALTER TABLE</c> time.
+    /// </summary>
+    public Expression? ComputedExpression { get; init; }
 }

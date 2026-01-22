@@ -964,6 +964,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             }
         }
 
+        // Same shape for computed columns (v6+). The footer carries a
+        // sibling block, parsed identically to defaults.
+        Dictionary<ushort, string>? computedsByIndex = null;
+        if (footer.ColumnComputeds.Count > 0)
+        {
+            computedsByIndex = new Dictionary<ushort, string>(footer.ColumnComputeds.Count);
+            foreach (ColumnComputedV4 entry in footer.ColumnComputeds)
+            {
+                computedsByIndex[entry.ColumnIndex] = entry.SqlFragment;
+            }
+        }
+
         // IDENTITY spec — at most one column carries it, identified by
         // footer-column index. Resolve to the schema-column index after
         // tombstone-skipping below.
@@ -1006,6 +1018,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 defaultExpression = ParseDefaultFragment(fragment, d.Name);
             }
 
+            Expression? computedExpression = null;
+            if (computedsByIndex is not null
+                && computedsByIndex.TryGetValue((ushort)i, out string? computedFragment))
+            {
+                // Same re-parse path as DEFAULT — the catalog persisted the
+                // expression via QueryExplainer.FormatExpression; we wrap it
+                // in SELECT and pull out the projected expression.
+                computedExpression = ParseDefaultFragment(computedFragment, d.Name);
+            }
+
             footerIndexToSchemaIndex[i] = columns.Count;
             columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable)
             {
@@ -1013,6 +1035,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 DefaultExpression = defaultExpression,
                 Identity = i == identityFooterIndex ? identitySpec : null,
                 IsPrimaryKey = pkFooterIndexSet is not null && pkFooterIndexSet.Contains((ushort)i),
+                ComputedExpression = computedExpression,
             });
             indices.Add(i);
         }
@@ -1312,10 +1335,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             IsNullable: column.Nullable,
             IsArray: column.IsArray);
 
+        // Translate the column's optional DEFAULT / GENERATED ALWAYS AS
+        // expressions into SQL fragments the writer persists in the
+        // prologue's defaults table / footer's computed-columns block.
+        // Mutual exclusion is enforced upstream by the catalog.
+        string? defaultFragment = column.DefaultExpression is null
+            ? null
+            : Execution.QueryExplainer.FormatExpression(column.DefaultExpression);
+        string? computedFragment = column.ComputedExpression is null
+            ? null
+            : Execution.QueryExplainer.FormatExpression(column.ComputedExpression);
+
         _mutationLock.Wait();
         try
         {
-            DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor);
+            DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor, defaultFragment, computedFragment);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
             InvalidateSourceIndexCache();
         }

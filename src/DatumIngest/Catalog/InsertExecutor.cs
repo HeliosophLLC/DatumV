@@ -161,8 +161,16 @@ internal static class InsertExecutor
 
                 if (sourceIndex >= 0)
                 {
+                    // Pre-fold any scalar subqueries — VALUES expressions can
+                    // contain `(SELECT x FROM y LIMIT 1)` and the tableless
+                    // evaluator only handles literal/binary/function shapes.
+                    // Mirrors BatchExecutor.PrefoldSubqueriesAsync for the
+                    // INSERT-VALUES path.
+                    Expression sourceExpr = await PrefoldSubqueriesAsync(
+                        sourceRow[sourceIndex], catalog, CancellationToken.None).ConfigureAwait(false);
+
                     ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
-                        sourceRow[sourceIndex], frame, CancellationToken.None).ConfigureAwait(false);
+                        sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
                     targetRow[targetIndex] = ConvertValueRefToTarget(
                         evaluated, target, arena, target.Name);
                 }
@@ -175,6 +183,13 @@ internal static class InsertExecutor
                     targetRow[targetIndex] = ResolveOmittedFill(plan, targetIndex, target, arena, session);
                 }
             }
+
+            // Computed columns evaluate after every other slot is filled —
+            // they can reference any non-computed column in the row, and
+            // catalog validation forbids computed-to-computed dependencies
+            // so a single pass is sufficient.
+            await EvaluateComputedColumnsAsync(
+                catalog, targetSchema, lookup, plan, targetRow, arena).ConfigureAwait(false);
 
             pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
             batch.Add(targetRow);
@@ -260,6 +275,11 @@ internal static class InsertExecutor
                             ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, catalog.SidecarRegistry, target, targetArena, target.Name)
                             : ResolveOmittedFill(plan, targetIndex, target, targetArena, session!);
                     }
+
+                    // Computed columns evaluate post-fill against the row
+                    // (see EvaluateComputedColumnsAsync for the contract).
+                    await EvaluateComputedColumnsAsync(
+                        catalog, targetSchema, targetLookup, plan, targetRow, targetArena).ConfigureAwait(false);
 
                     pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
                     targetBatch.Add(targetRow);
@@ -683,13 +703,31 @@ internal static class InsertExecutor
         OmittedFill[] omittedFills = new OmittedFill[targetSchema.Columns.Count];
         for (int i = 0; i < targetSchema.Columns.Count; i++)
         {
+            ColumnInfo target = targetSchema.Columns[i];
+
+            // Computed columns: explicit values are always rejected; the
+            // fill happens in a second per-row pass driven by the
+            // expression. The check goes before the sourceIndexForTarget
+            // branch so an INSERT that supplies the column gets a clear
+            // error.
+            if (target.ComputedExpression is not null)
+            {
+                if (sourceIndexForTarget[i] >= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"INSERT into target column '{target.Name}': column is GENERATED ALWAYS AS " +
+                        "(computed). Drop it from the INSERT column list and the catalog will " +
+                        "compute the value from its expression.");
+                }
+                omittedFills[i] = OmittedFill.Computed;
+                continue;
+            }
+
             if (sourceIndexForTarget[i] >= 0)
             {
                 omittedFills[i] = OmittedFill.None;
                 continue;
             }
-
-            ColumnInfo target = targetSchema.Columns[i];
 
             if (target.Identity is not null)
             {
@@ -734,9 +772,60 @@ internal static class InsertExecutor
                 => LiteralCoercion.Coerce(fill.LiteralValue, target, arena, target.Name),
             OmittedFill.FillKind.Identity
                 => LiteralCoercion.Coerce(session.ReserveNextIdentityValue(), target, arena, target.Name),
+            // Computed columns are filled by a second per-row pass after
+            // every other column resolves; placeholder here so the slot
+            // exists in the row array (NULL of the target kind).
+            OmittedFill.FillKind.Computed => DataValue.Null(target.Kind),
             _ => throw new InvalidOperationException(
                 $"Internal error: column '{target.Name}' has no source index and no fill."),
         };
+    }
+
+    /// <summary>
+    /// Second-pass evaluation for <c>GENERATED ALWAYS AS</c> columns. Runs
+    /// after every other slot in <paramref name="targetRow"/> is filled —
+    /// each computed expression evaluates against the row built so far,
+    /// then overwrites its slot. Computed columns can reference any non-
+    /// computed column (DEFAULT-filled, IDENTITY-filled, or VALUES-supplied);
+    /// computed-to-computed dependencies are rejected at <c>CREATE TABLE</c>
+    /// time so a single pass suffices.
+    /// </summary>
+    private static async Task EvaluateComputedColumnsAsync(
+        TableCatalog catalog,
+        Schema targetSchema,
+        ColumnLookup targetLookup,
+        ColumnPlan plan,
+        DataValue[] targetRow,
+        Arena arena)
+    {
+        bool any = false;
+        for (int i = 0; i < plan.OmittedFills.Length; i++)
+        {
+            if (plan.OmittedFills[i].Kind == OmittedFill.FillKind.Computed)
+            {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return;
+
+        // The frame's Row carries the partially-resolved row so the
+        // expression can read column references via ColumnReference.
+        // Source and Target arenas are both the INSERT batch's arena —
+        // computed values land directly in the batch.
+        ExpressionEvaluator evaluator = new(catalog.Functions, store: arena);
+        Row partialRow = new(targetLookup, targetRow);
+        EvaluationFrame frame = new(partialRow, arena, arena);
+
+        for (int i = 0; i < plan.OmittedFills.Length; i++)
+        {
+            if (plan.OmittedFills[i].Kind != OmittedFill.FillKind.Computed) continue;
+
+            ColumnInfo target = targetSchema.Columns[i];
+            ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
+                target.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
+            targetRow[i] = ConvertValueRefToTarget(evaluated, target, arena, target.Name);
+        }
     }
 
     /// <summary>
@@ -990,7 +1079,7 @@ internal static class InsertExecutor
     /// </summary>
     private readonly struct OmittedFill
     {
-        public enum FillKind : byte { None, Null, Default, Identity }
+        public enum FillKind : byte { None, Null, Default, Identity, Computed }
 
         public FillKind Kind { get; }
         public object? LiteralValue { get; }
@@ -1005,6 +1094,158 @@ internal static class InsertExecutor
         public static OmittedFill Null { get; } = new(FillKind.Null, null);
         public static OmittedFill Default(object? literalValue) => new(FillKind.Default, literalValue);
         public static OmittedFill Identity { get; } = new(FillKind.Identity, null);
+
+        /// <summary>
+        /// Marker for <c>GENERATED ALWAYS AS</c> columns. The fill happens
+        /// in a second pass after the row's non-computed slots are filled;
+        /// the executor evaluates <see cref="ColumnInfo.ComputedExpression"/>
+        /// against the partially-built row and overwrites this slot.
+        /// </summary>
+        public static OmittedFill Computed { get; } = new(FillKind.Computed, null);
+    }
+
+    /// <summary>
+    /// Walks <paramref name="expression"/> and replaces each scalar
+    /// <see cref="SubqueryExpression"/> with a <see cref="LiteralExpression"/>
+    /// holding the executed subquery's result. Mirrors
+    /// <c>BatchExecutor.PrefoldSubqueriesAsync</c> but standalone (no
+    /// procedural batch context required) — INSERT VALUES expressions
+    /// can include subqueries but the tableless evaluator only handles
+    /// scalar shapes, so subqueries must be folded before evaluation.
+    /// </summary>
+    private static async Task<Expression> PrefoldSubqueriesAsync(
+        Expression expression, TableCatalog catalog, CancellationToken ct)
+    {
+        switch (expression)
+        {
+            case SubqueryExpression subquery:
+                return await FoldOneSubqueryAsync(subquery, catalog, ct).ConfigureAwait(false);
+
+            case BinaryExpression binary:
+            {
+                Expression left = await PrefoldSubqueriesAsync(binary.Left, catalog, ct).ConfigureAwait(false);
+                Expression right = await PrefoldSubqueriesAsync(binary.Right, catalog, ct).ConfigureAwait(false);
+                return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
+                    ? binary
+                    : new BinaryExpression(left, binary.Operator, right);
+            }
+
+            case UnaryExpression unary:
+            {
+                Expression operand = await PrefoldSubqueriesAsync(unary.Operand, catalog, ct).ConfigureAwait(false);
+                return ReferenceEquals(operand, unary.Operand)
+                    ? unary
+                    : new UnaryExpression(unary.Operator, operand);
+            }
+
+            case CastExpression cast:
+            {
+                Expression inner = await PrefoldSubqueriesAsync(cast.Expression, catalog, ct).ConfigureAwait(false);
+                return ReferenceEquals(inner, cast.Expression)
+                    ? cast
+                    : new CastExpression(inner, cast.TargetType, cast.Span);
+            }
+
+            case FunctionCallExpression fn:
+            {
+                Expression[]? rewrittenArgs = null;
+                for (int i = 0; i < fn.Arguments.Count; i++)
+                {
+                    Expression rewritten = await PrefoldSubqueriesAsync(fn.Arguments[i], catalog, ct).ConfigureAwait(false);
+                    if (!ReferenceEquals(rewritten, fn.Arguments[i]))
+                    {
+                        rewrittenArgs ??= fn.Arguments.ToArray();
+                        rewrittenArgs[i] = rewritten;
+                    }
+                }
+                return rewrittenArgs is null
+                    ? fn
+                    : new FunctionCallExpression(fn.FunctionName, rewrittenArgs);
+            }
+
+            default:
+                return expression;
+        }
+    }
+
+    /// <summary>
+    /// Plans + executes one scalar subquery and folds its result into a
+    /// <see cref="LiteralExpression"/>. Zero rows → NULL literal; more than
+    /// one row → error.
+    /// </summary>
+    private static async Task<Expression> FoldOneSubqueryAsync(
+        SubqueryExpression subquery, TableCatalog catalog, CancellationToken ct)
+    {
+        IQueryPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));
+
+        DataValue captured = default;
+        bool haveValue = false;
+        bool tooManyRows = false;
+        Arena foldArena = new();
+        try
+        {
+            await foreach (RowBatch batch in innerPlan.ExecuteAsync(ct).ConfigureAwait(false))
+            {
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (haveValue)
+                    {
+                        tooManyRows = true;
+                        break;
+                    }
+                    Row row = batch[i];
+                    if (row.FieldCount != 1)
+                    {
+                        throw new InvalidOperationException(
+                            $"Scalar subquery must return exactly one column, but returned {row.FieldCount}.");
+                    }
+                    captured = DataValueRetention.Stabilize(row[0], batch.Arena, foldArena);
+                    haveValue = true;
+                }
+                if (tooManyRows) break;
+            }
+
+            if (tooManyRows)
+            {
+                throw new InvalidOperationException(
+                    "Scalar subquery returned more than one row.");
+            }
+
+            if (!haveValue || captured.IsNull)
+            {
+                return new LiteralExpression(null);
+            }
+
+            object literal = captured.Kind switch
+            {
+                DataKind.Int8 => (object)captured.AsInt8(),
+                DataKind.Int16 => captured.AsInt16(),
+                DataKind.Int32 => captured.AsInt32(),
+                DataKind.Int64 => captured.AsInt64(),
+                DataKind.UInt8 => captured.AsUInt8(),
+                DataKind.UInt16 => captured.AsUInt16(),
+                DataKind.UInt32 => captured.AsUInt32(),
+                DataKind.UInt64 => captured.AsUInt64(),
+                DataKind.Float32 => captured.AsFloat32(),
+                DataKind.Float64 => captured.AsFloat64(),
+                DataKind.String => captured.AsString(foldArena),
+                DataKind.Boolean => captured.AsBoolean(),
+                DataKind.Date => captured.AsDate(),
+                DataKind.DateTime => captured.AsDateTime(),
+                DataKind.Time => captured.AsTime(),
+                DataKind.Duration => captured.AsDuration(),
+                DataKind.Decimal => captured.AsDecimal(),
+                DataKind.Uuid => captured.AsUuid(),
+                _ => throw new InvalidOperationException(
+                    $"Subquery in INSERT VALUES produced unsupported kind {captured.Kind}."),
+            };
+            return new LiteralExpression(literal);
+        }
+        finally
+        {
+            foldArena.Dispose();
+        }
     }
 }
 

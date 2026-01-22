@@ -286,6 +286,80 @@ public sealed class InsertValuesTests : IAsyncLifetime
         Assert.Equal(1234m, rows[0][0].AsDecimal());
     }
 
+    // ──────────────────── Subqueries in VALUES ────────────────────
+
+    [Fact]
+    public async Task InsertValues_ScalarSubquery_FoldsAtPlanTime()
+    {
+        // Subquery shapes the user wants to write:
+        //   INSERT INTO X (a, b, c) VALUES (1, 2, (SELECT x FROM Y LIMIT 1))
+        // Pre-fold pass executes the inner SELECT, captures the scalar
+        // result, and substitutes it as a literal before the tableless
+        // VALUES evaluator runs.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (a Int32, b Int32, c Int32)");
+        catalog.Plan("INSERT INTO src VALUES (42)");
+
+        catalog.Plan("INSERT INTO dst VALUES (1, 2, (SELECT n FROM src LIMIT 1))");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["dst"]);
+        Assert.Single(rows);
+        Assert.Equal(1, rows[0][0].AsInt32());
+        Assert.Equal(2, rows[0][1].AsInt32());
+        Assert.Equal(42, rows[0][2].AsInt32());
+    }
+
+    [Fact]
+    public async Task InsertValues_ScalarSubqueryEmpty_BecomesNull()
+    {
+        // Zero rows from a scalar subquery → NULL literal.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (a Int32, n Int32)");
+
+        catalog.Plan("INSERT INTO dst VALUES (1, (SELECT n FROM src LIMIT 1))");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["dst"]);
+        Assert.Single(rows);
+        Assert.Equal(1, rows[0][0].AsInt32());
+        Assert.True(rows[0][1].IsNull);
+    }
+
+    [Fact]
+    public async Task InsertValues_SubqueryInsideExpression_FoldsThenEvaluates()
+    {
+        // Subquery nested inside an arithmetic expression — pre-fold
+        // walker recurses into BinaryExpression.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (total Int32)");
+        catalog.Plan("INSERT INTO src VALUES (10)");
+
+        catalog.Plan("INSERT INTO dst VALUES ((SELECT n FROM src LIMIT 1) + 5)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["dst"]);
+        Assert.Single(rows);
+        Assert.Equal(15, rows[0][0].AsInt32());
+    }
+
+    [Fact]
+    public void InsertValues_ScalarSubqueryTooManyRows_Throws()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+        catalog.Plan("CREATE TEMP TABLE dst (n Int32)");
+        catalog.Plan("INSERT INTO src VALUES (1), (2)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO dst VALUES ((SELECT n FROM src))"));
+        Assert.Contains("more than one row", ex.Message);
+    }
+
     // ──────────────────── Validation ────────────────────
 
     [Fact]

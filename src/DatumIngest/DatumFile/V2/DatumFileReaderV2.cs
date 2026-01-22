@@ -178,11 +178,12 @@ public sealed class DatumFileReaderV2 : IDisposable
 
         bool hasVolumeZoneMaps = (header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0;
         bool hasTypeTable = (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0;
+        bool hasColumnComputeds = (header.Flags & DatumFileFlagsV2.HasColumnComputeds) != 0;
         FooterV2 footer;
         using (MemoryStream ms = new(footerBuffer, writable: false))
         using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable);
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds);
         }
 
         // Header's ColumnCount is informational in v4 — the prologue's

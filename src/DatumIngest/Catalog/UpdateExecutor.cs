@@ -553,6 +553,19 @@ internal static class UpdateExecutor
                     $"UPDATE '{update.TableName}': column '{name}' is part of the PRIMARY KEY. " +
                     "PK column values are immutable — DELETE and re-INSERT to change a row's primary key.");
             }
+
+            // GENERATED ALWAYS AS columns: same rule as PG and SQL Server.
+            // The value is derived; explicit assignment is rejected. To
+            // change the column's value, change one of the referenced
+            // columns and the next UPDATE that touches the row will pick
+            // up the new value via the computed-column INSERT/UPDATE path.
+            if (schema.Columns[columnIndex].ComputedExpression is not null)
+            {
+                throw new QueryPlanException(
+                    $"UPDATE '{update.TableName}': column '{name}' is GENERATED ALWAYS AS " +
+                    "(computed). Computed columns derive their value from other columns and " +
+                    "cannot be assigned directly.");
+            }
         }
 
         return provider;

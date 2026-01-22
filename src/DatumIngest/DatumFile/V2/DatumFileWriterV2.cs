@@ -103,6 +103,14 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     // tombstone). FinalizeWriter emits this list verbatim.
     private List<ColumnDefaultV4>? _columnDefaults;
 
+    // Per-column GENERATED ALWAYS AS expressions (v6+). Mirrors
+    // _columnDefaults but for computed columns: the SQL fragment is
+    // persisted in the footer's optional computed-columns block (gated
+    // by DatumFileFlagsV2.HasColumnComputeds) and re-parsed by the
+    // catalog at open. Initialize / AddColumn append entries; the
+    // FinalizeWriter path emits the block when the list is non-empty.
+    private List<ColumnComputedV4>? _columnComputeds;
+
     // IDENTITY state (PR10e). Seeded by Initialize for fresh writes
     // and by RehydrateFromFooter for appends; the running counter
     // (_identityNextValue) bumps via UpdateIdentityNextValue so each
@@ -247,7 +255,23 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults,
         IdentityWriterSpec? identity,
-        IReadOnlyList<ushort>? primaryKeyColumnIndices)
+        IReadOnlyList<ushort>? primaryKeyColumnIndices) =>
+        Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices, columnComputeds: null);
+
+    /// <summary>
+    /// Full-fidelity Initialize that additionally accepts the per-column
+    /// <c>GENERATED ALWAYS AS</c> table. Computed columns are persisted as
+    /// SQL fragments in the footer's optional computed-columns block
+    /// (gated by <see cref="DatumFileFlagsV2.HasColumnComputeds"/>); the
+    /// catalog re-parses each fragment on open and the INSERT path evaluates
+    /// the expression per row.
+    /// </summary>
+    public void Initialize(
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity,
+        IReadOnlyList<ushort>? primaryKeyColumnIndices,
+        IReadOnlyList<ColumnComputedV4>? columnComputeds)
     {
         if (_initialized) throw new InvalidOperationException("Writer already initialized.");
         if (columns.Count == 0) throw new ArgumentException("At least one column required.", nameof(columns));
@@ -267,6 +291,11 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         if (columnDefaults is { Count: > 0 })
         {
             _columnDefaults = new List<ColumnDefaultV4>(columnDefaults);
+        }
+
+        if (columnComputeds is { Count: > 0 })
+        {
+            _columnComputeds = new List<ColumnComputedV4>(columnComputeds);
         }
 
         if (identity is { } id)
@@ -433,6 +462,14 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         {
             flags |= DatumFileFlagsV2.HasTypeTable;
         }
+        // HasColumnComputeds: set when at least one column carries a
+        // GENERATED ALWAYS AS expression. Tells the reader to parse the
+        // trailing computed-columns block.
+        bool hasColumnComputeds = _columnComputeds is { Count: > 0 };
+        if (hasColumnComputeds)
+        {
+            flags |= DatumFileFlagsV2.HasColumnComputeds;
+        }
         // HasExternalPages: clear in PR4 — cross-file pages ship in PR7.
 
         // Build the per-chapter tombstone offsets array. Three states
@@ -469,14 +506,19 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             IdentityNextValue: _identityNextValue,
             PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>());
 
-        FooterV2 footer = new(prologue, columnFooters, emitVolumes, typeTable);
+        IReadOnlyList<ColumnComputedV4> computedsForFooter = _columnComputeds is { Count: > 0 }
+            ? _columnComputeds.ToArray()
+            : Array.Empty<ColumnComputedV4>();
+        FooterV2 footer = new(prologue, columnFooters, emitVolumes, typeTable, computedsForFooter);
 
         // Write the footer body, capture offset and length.
         long footerOffset = _stream.Position;
         using (MemoryStream footerScratch = new())
         using (BinaryWriter footerWriter = new(footerScratch, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer.Serialize(footerWriter, hasTypeTable: (flags & DatumFileFlagsV2.HasTypeTable) != 0);
+            footer.Serialize(footerWriter,
+                hasTypeTable: (flags & DatumFileFlagsV2.HasTypeTable) != 0,
+                hasColumnComputeds: hasColumnComputeds);
             footerWriter.Flush();
             footerScratch.Position = 0;
             footerScratch.CopyTo(_stream);
@@ -740,7 +782,26 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// record absolute offsets.
     /// </para>
     /// </remarks>
-    public void AddColumn(ColumnDescriptorV2 column)
+    public void AddColumn(ColumnDescriptorV2 column) =>
+        AddColumn(column, defaultSqlFragment: null, computedSqlFragment: null);
+
+    /// <summary>
+    /// As <see cref="AddColumn(ColumnDescriptorV2)"/>, plus an optional
+    /// <c>DEFAULT</c> SQL-fragment that lands in the prologue's defaults
+    /// table at finalize time. Future INSERTs that omit this column will
+    /// pick up the default; pre-existing rows still backfill as NULL.
+    /// </summary>
+    public void AddColumn(ColumnDescriptorV2 column, string? defaultSqlFragment) =>
+        AddColumn(column, defaultSqlFragment, computedSqlFragment: null);
+
+    /// <summary>
+    /// As <see cref="AddColumn(ColumnDescriptorV2, string?)"/>, plus an
+    /// optional <c>GENERATED ALWAYS AS</c> SQL-fragment persisted in the
+    /// footer's computed-columns block. Mutually exclusive in practice:
+    /// the catalog rejects DEFAULT + computed on the same column at
+    /// validation time.
+    /// </summary>
+    public void AddColumn(ColumnDescriptorV2 column, string? defaultSqlFragment, string? computedSqlFragment)
     {
         ArgumentNullException.ThrowIfNull(column);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -818,6 +879,24 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         _pageDirectory[newIndex] = new List<PageDescriptorV2>();
         _hierarchies[newIndex] = new ZoneMapHierarchyBuilderV2();
 
+        // Stash the DEFAULT (if any) onto the prologue's defaults table.
+        // Future INSERTs that omit this column will reload it from the file
+        // and auto-fill via the existing CREATE TABLE default machinery.
+        if (defaultSqlFragment is not null)
+        {
+            _columnDefaults ??= new List<ColumnDefaultV4>();
+            _columnDefaults.Add(new ColumnDefaultV4(checked((ushort)newIndex), defaultSqlFragment));
+        }
+
+        // Stash the computed expression (if any) onto the footer's
+        // computed-columns table. INSERTs route through the per-row
+        // evaluator to materialise the value from the resolved row.
+        if (computedSqlFragment is not null)
+        {
+            _columnComputeds ??= new List<ColumnComputedV4>();
+            _columnComputeds.Add(new ColumnComputedV4(checked((ushort)newIndex), computedSqlFragment));
+        }
+
         // Pump _totalRowsWritten null values into the new column's
         // encoder. Pages flush automatically as the encoder fills,
         // streaming all-null bytes past EOF and recording offsets in
@@ -890,7 +969,23 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         IReadOnlyList<ColumnDescriptorV2> columns,
         IReadOnlyList<ColumnDefaultV4>? columnDefaults,
         IdentityWriterSpec? identity,
-        IReadOnlyList<ushort>? primaryKeyColumnIndices)
+        IReadOnlyList<ushort>? primaryKeyColumnIndices) =>
+        CreateEmpty(datumPath, columns, columnDefaults, identity, primaryKeyColumnIndices, columnComputeds: null);
+
+    /// <summary>
+    /// Full-fidelity overload of <c>CreateEmpty</c> that additionally accepts
+    /// computed columns. The catalog passes a non-null
+    /// <paramref name="columnComputeds"/> when at least one column is
+    /// <c>GENERATED ALWAYS AS</c>; the writer persists the SQL fragments in
+    /// the footer's optional computed-columns block.
+    /// </summary>
+    public static void CreateEmpty(
+        string datumPath,
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity,
+        IReadOnlyList<ushort>? primaryKeyColumnIndices,
+        IReadOnlyList<ColumnComputedV4>? columnComputeds)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(columns);
@@ -902,7 +997,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 
         // No sidecar — empty file has no values to spill.
         using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
-        writer.Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices);
+        writer.Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices, columnComputeds);
         writer.FinalizeWriter();
     }
 
@@ -930,14 +1025,33 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// via tail flip. See <see cref="AddColumn(ColumnDescriptorV2)"/> for the
     /// session-scoped equivalent and constraints.
     /// </summary>
-    public static void AddColumn(string datumPath, ColumnDescriptorV2 column)
+    /// <param name="datumPath">Path to the <c>.datum</c> file to mutate.</param>
+    /// <param name="column">Column descriptor to add.</param>
+    /// <param name="defaultSqlFragment">
+    /// Optional SQL-fragment representation of the column's <c>DEFAULT</c>
+    /// expression. When non-<see langword="null"/>, persists in the file's
+    /// prologue defaults table so future INSERTs that omit this column
+    /// auto-fill with the default. Existing rows always backfill as NULL
+    /// regardless.
+    /// </param>
+    /// <param name="computedSqlFragment">
+    /// Optional <c>GENERATED ALWAYS AS</c> expression as a SQL fragment.
+    /// Persists in the footer's computed-columns block; subsequent INSERTs
+    /// evaluate the expression per row instead of accepting an explicit
+    /// value for this column.
+    /// </param>
+    public static void AddColumn(
+        string datumPath,
+        ColumnDescriptorV2 column,
+        string? defaultSqlFragment = null,
+        string? computedSqlFragment = null)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(column);
 
         string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
         using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
-        writer.AddColumn(column);
+        writer.AddColumn(column, defaultSqlFragment, computedSqlFragment);
         writer.FinalizeWriter();
     }
 
@@ -1239,6 +1353,13 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             _columnDefaults = new List<ColumnDefaultV4>(footer.Prologue.ColumnDefaults);
         }
 
+        // Carry forward column-computed expressions (v6+). Same ColumnIndex
+        // stability as defaults.
+        if (footer.ColumnComputeds.Count > 0)
+        {
+            _columnComputeds = new List<ColumnComputedV4>(footer.ColumnComputeds);
+        }
+
         // Carry forward IDENTITY state. The next-value carries the live
         // counter; AddColumn/MarkColumnTombstoned don't shift indices,
         // so the stored ColumnIndex stays valid across appends.
@@ -1498,11 +1619,12 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 
         bool hasVolumeZoneMaps = (header.Flags & DatumFileFlagsV2.HasVolumeZoneMaps) != 0;
         bool hasTypeTable = (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0;
+        bool hasColumnComputeds = (header.Flags & DatumFileFlagsV2.HasColumnComputeds) != 0;
         FooterV2 footer;
         using (MemoryStream ms = new(footerBuffer, writable: false))
         using (BinaryReader reader = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))
         {
-            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable);
+            footer = FooterV2.Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds);
         }
         return (header, footer);
     }

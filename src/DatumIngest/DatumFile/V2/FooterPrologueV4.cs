@@ -314,6 +314,40 @@ public sealed record ColumnDefaultV4(
 }
 
 /// <summary>
+/// One row of the footer's optional computed-columns table (v6+). Pairs a
+/// column index with the SQL fragment the catalog re-parses to recover
+/// the column's <c>GENERATED ALWAYS AS (...)</c> expression. The flag
+/// <see cref="DatumFileFlagsV2.HasColumnComputeds"/> gates whether the
+/// trailing block exists; absent flag means no computed columns.
+/// </summary>
+/// <param name="ColumnIndex">
+/// Index of the column in the schema (0-based) whose value is derived
+/// from the expression.
+/// </param>
+/// <param name="SqlFragment">
+/// The expression rendered as SQL via <c>QueryExplainer.FormatExpression</c>.
+/// Re-parsed on read with <c>SqlParser.Parse("SELECT &lt;fragment&gt;")</c>,
+/// matching the <see cref="ColumnDefaultV4"/> persistence pattern.
+/// </param>
+public sealed record ColumnComputedV4(
+    ushort ColumnIndex,
+    string SqlFragment)
+{
+    internal void Serialize(BinaryWriter writer)
+    {
+        writer.Write(ColumnIndex);
+        writer.Write(SqlFragment);
+    }
+
+    internal static ColumnComputedV4 Deserialize(BinaryReader reader)
+    {
+        ushort columnIndex = reader.ReadUInt16();
+        string fragment = reader.ReadString();
+        return new ColumnComputedV4(columnIndex, fragment);
+    }
+}
+
+/// <summary>
 /// One row of the footer prologue's file table. Maps a non-zero
 /// <see cref="PageDescriptorV2.FileId"/> to a relative path (resolved
 /// against the primary <c>.datum</c> file's directory) plus a

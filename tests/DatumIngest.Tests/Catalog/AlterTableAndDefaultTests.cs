@@ -206,15 +206,46 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     }
 
     [Fact]
-    public void AlterTable_AddColumn_WithDefault_Throws_PendingBackfill()
+    public async Task AlterTable_AddColumn_WithDefault_NewInsertsAutoFill()
     {
+        // ALTER ADD COLUMN now accepts DEFAULT. Pre-existing rows read
+        // NULL (column wasn't present); INSERTs after the ALTER that
+        // omit the new column pick up the DEFAULT.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32)");
+        catalog.Plan("INSERT INTO t VALUES (1), (2)");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN status String DEFAULT 'pending'");
+
+        // Insert a row without supplying the new column — should DEFAULT-fill.
+        catalog.Plan("INSERT INTO t (id) VALUES (3)");
+
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(3, batch.Count);
+            // Existing rows backfilled NULL.
+            Assert.True(batch[0][1].IsNull);
+            Assert.True(batch[1][1].IsNull);
+            // New row picks up the DEFAULT.
+            Assert.Equal("pending", batch[2][1].AsString(batch.Arena));
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public void AlterTable_AddColumn_WithDefault_RejectsNonLiteral()
+    {
+        // Same literal-only validation as CREATE TABLE — function calls
+        // and other computed expressions are rejected at ALTER time.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("ALTER TABLE t ADD COLUMN score Int32 DEFAULT 0"));
-        Assert.Contains("DEFAULT", ex.Message);
+            catalog.Plan("ALTER TABLE t ADD COLUMN created_at DateTime DEFAULT now()"));
+        Assert.Contains("literal", ex.Message);
     }
 
     [Fact]
