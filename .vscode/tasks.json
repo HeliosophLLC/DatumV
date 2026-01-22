@@ -262,6 +262,21 @@
 			"hide": true
 		},
 		{
+			"label": "Debug: Build Client",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"src/DatumIngest.Client",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
 			"label": "Run: ExplainOnce",
 			"type": "shell",
 			"command": "dotnet",

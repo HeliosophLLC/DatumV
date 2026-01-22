@@ -1,0 +1,127 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>DatumIngest.Web</AssemblyName>
+    <RootNamespace>DatumIngest.Web</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OpenAPI document + Swagger UI middleware (runtime). -->
+    <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />
+
+    <!--
+      [Hub] / [Receiver] attributes are defined locally in Hubs/TypedSignalRAttributes.cs
+      under the TypedSignalR.Client namespace. The dotnet-tsrts code generator resolves
+      them by fully-qualified metadata name, not by package identity. Avoids pulling in
+      the TypedSignalR.Client package, whose source generator emits C# client-side
+      HubConnection extensions irrelevant for a SignalR *server* project.
+    -->
+
+    <!-- NSwag CLI surfaced as MSBuild tasks (build-time TS client gen from OpenAPI). -->
+    <PackageReference Include="NSwag.MSBuild" Version="14.2.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!--
+      Build-time TS gen from C# hub interfaces is a dotnet tool, not a package.
+      See ../../dotnet-tools.json (TypedSignalR.Client.TypeScript.Generator).
+      Invoke via 'dotnet-tsrts' from MSBuild targets.
+    -->
+  </ItemGroup>
+
+  <!--
+    Frontend bundle: ClientApp/src/* is built by Vite into wwwroot/.
+    Two staged targets so npm install only runs when package.json /
+    lockfile changes. Set SkipClientApp=true to opt out (e.g. when
+    iterating with `npm run dev` from the ClientApp/ directory).
+  -->
+  <PropertyGroup>
+    <SkipClientApp Condition="'$(SkipClientApp)' == ''">false</SkipClientApp>
+  </PropertyGroup>
+
+  <Target Name="ClientAppInstall"
+          Condition="'$(SkipClientApp)' != 'true'"
+          Inputs="ClientApp/package.json;ClientApp/package-lock.json"
+          Outputs="ClientApp/node_modules/.install-stamp">
+    <Exec Command="npm install" WorkingDirectory="ClientApp" />
+    <Touch Files="ClientApp/node_modules/.install-stamp" AlwaysCreate="true" />
+  </Target>
+
+  <!--
+    Codegen: reflects compiled controllers + DTOs into OpenAPI 3, then emits a
+    TypeScript client into ClientApp/src/api/generated/openapi-client.ts.
+
+    nswag.json drives both stages. NSwag boots Program.CreateHostBuilder (in
+    Program.cs) to resolve IDocumentProvider. Runs after Build so $(TargetPath)
+    is current; also invokable manually via /t:GenerateOpenApi.
+  -->
+  <Target Name="GenerateOpenApi"
+          AfterTargets="Build"
+          Condition="'$(SkipClientApp)' != 'true'"
+          Inputs="$(TargetPath);nswag.json"
+          Outputs="ClientApp/src/api/generated/openapi-client.ts">
+    <Exec Command="$(NSwagExe_Net80) run nswag.json /variables:Configuration=$(Configuration)"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!--
+    Restore dotnet tools from the repo-root manifest (../../dotnet-tools.json).
+    Sentinel keeps it incremental — runs only when the manifest changes.
+  -->
+  <Target Name="ToolRestore"
+          Condition="'$(SkipClientApp)' != 'true'"
+          Inputs="$(MSBuildThisFileDirectory)../../dotnet-tools.json"
+          Outputs="$(IntermediateOutputPath)tool-restore.stamp">
+    <Exec Command="dotnet tool restore" WorkingDirectory="$(MSBuildThisFileDirectory)../.." />
+    <Touch Files="$(IntermediateOutputPath)tool-restore.stamp" AlwaysCreate="true" />
+  </Target>
+
+  <!--
+    Hub codegen via TypedSignalR.Client.TypeScript.Generator. Reflects Hub<T>
+    classes + their client interfaces, emits typed HubConnection wrappers.
+    Runs after GenerateOpenApi so any shared DTOs are emitted first.
+  -->
+  <Target Name="GenerateHubTypes"
+          AfterTargets="GenerateOpenApi"
+          DependsOnTargets="ToolRestore"
+          Condition="'$(SkipClientApp)' != 'true'"
+          Inputs="$(TargetPath)"
+          Outputs="ClientApp/src/api/generated/hubs/TypedSignalR.Client/index.ts">
+    <Exec Command="dotnet tsrts --project DatumIngest.Web.csproj --output ClientApp/src/api/generated/hubs"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- Umbrella for manual codegen: dotnet build /t:GenerateApi -->
+  <Target Name="GenerateApi" DependsOnTargets="GenerateOpenApi;GenerateHubTypes" />
+
+  <Target Name="BuildClientApp"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="ClientAppInstall"
+          Condition="'$(SkipClientApp)' != 'true'"
+          Inputs="ClientApp/src/**/*.ts;ClientApp/src/**/*.tsx;ClientApp/src/**/*.css;ClientApp/index.html;ClientApp/package.json;ClientApp/vite.config.ts;ClientApp/tsconfig.json"
+          Outputs="wwwroot/index.html">
+    <Exec Command="npm run build" WorkingDirectory="ClientApp" />
+    <!--
+      Re-glob from inside the target so first-time builds (when wwwroot/
+      did not exist at evaluation time) still copy outputs to bin. Remove
+      first to avoid duplicates with the static wwwroot Content glob on
+      subsequent builds.
+    -->
+    <ItemGroup>
+      <Content Remove="wwwroot\**\*" />
+      <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+</Project>

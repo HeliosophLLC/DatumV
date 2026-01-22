@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "typedsignalr.client.typescript.generator": {
+      "version": "1.17.0",
+      "commands": [
+        "dotnet-tsrts"
+      ],
+      "rollForward": false
+    }
+  }
+}

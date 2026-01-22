@@ -122,6 +122,18 @@
 			"preLaunchTask": "Debug: Build DevWeb"
 		},
 		{
+			"name": "Client: Debug",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build Client"
+		},
+		{
 			"name": "DevWeb: Release",
 			"type": "coreclr",
 			"request": "launch",
