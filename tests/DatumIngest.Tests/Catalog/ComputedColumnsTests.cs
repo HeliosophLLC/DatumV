@@ -201,6 +201,187 @@ public sealed class ComputedColumnsTests : IAsyncLifetime
         Assert.Contains("computed", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ──────────────────── V2-F1: UPDATE recompute ────────────────────
+
+    [Fact]
+    public async Task Update_SetReferencedColumn_RecomputesDependent()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE orders (id Int32, qty Int32, price Float64, total Float64 AS (price * qty))");
+        catalog.Plan("INSERT INTO orders (id, qty, price) VALUES (1, 3, 10.0), (2, 5, 4.0)");
+
+        catalog.Plan("UPDATE orders SET price = 20.0 WHERE id = 1");
+
+        Dictionary<int, double> totals = new();
+        await foreach (RowBatch batch in catalog["orders"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                totals[batch[r][0].AsInt32()] = batch[r][3].AsFloat64();
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal(60.0, totals[1], 6);  // 3 * 20.0 (recomputed)
+        Assert.Equal(20.0, totals[2], 6);  // 5 * 4.0  (untouched)
+    }
+
+    [Fact]
+    public async Task Update_MultipleDependentsOnSameSource_AllRecompute()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, price Float64, low Float64 AS (price * 0.9), high Float64 AS (price * 1.1))");
+        catalog.Plan("INSERT INTO t (id, price) VALUES (1, 100.0)");
+
+        catalog.Plan("UPDATE t SET price = 200.0 WHERE id = 1");
+
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Assert.Equal(180.0, batch[0][2].AsFloat64(), 6);  // 200 * 0.9
+            Assert.Equal(220.0, batch[0][3].AsFloat64(), 6);  // 200 * 1.1
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Update_NonReferencedColumn_LeavesComputedUnchanged()
+    {
+        // 'notes' is not referenced by 'total'. UPDATE on 'notes' should
+        // not trigger a recompute of 'total'.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE orders (id Int32, qty Int32, price Float64, notes String, total Float64 AS (price * qty))");
+        catalog.Plan("INSERT INTO orders (id, qty, price, notes) VALUES (1, 3, 10.0, 'one')");
+
+        catalog.Plan("UPDATE orders SET notes = 'changed' WHERE id = 1");
+
+        await foreach (RowBatch batch in catalog["orders"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Assert.Equal("changed", batch[0][3].AsString(batch.Arena));
+            Assert.Equal(30.0, batch[0][4].AsFloat64(), 6);  // unchanged: 3 * 10.0
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Update_RecomputeOnAllMatchingRows()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, a Int32, b Int32, sum Int32 AS (a + b))");
+        catalog.Plan("INSERT INTO t (id, a, b) VALUES (1, 1, 2), (2, 10, 20), (3, 100, 200)");
+
+        // WHERE matches all three rows.
+        catalog.Plan("UPDATE t SET a = a * 2");
+
+        Dictionary<int, int> sums = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                sums[batch[r][0].AsInt32()] = batch[r][3].AsInt32();
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal(4, sums[1]);     // 2 + 2
+        Assert.Equal(40, sums[2]);    // 20 + 20
+        Assert.Equal(400, sums[3]);   // 200 + 200
+    }
+
+    [Fact]
+    public async Task Update_StringComputed_RecomputesAcrossPersistentReopen()
+    {
+        // Wide-string computed: exercises the workArena stabilisation path
+        // for non-inline existing slots and verifies the recompute writes
+        // a fresh String result that lands in workArena (survives past the
+        // scan batch's per-batch arena).
+        Pool pool = new(new PoolBacking());
+        using (TableCatalog catalog = new(pool, CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32, name String, label String AS ('row-' || name))");
+            catalog.Plan("INSERT INTO t (id, name) VALUES (1, 'alice'), (2, 'bob')");
+            catalog.Plan("UPDATE t SET name = 'ALICE' WHERE id = 1");
+        }
+
+        using TableCatalog reopened = new(pool, CatalogPath);
+        Dictionary<int, string> labels = new();
+        await foreach (RowBatch batch in reopened["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                labels[batch[r][0].AsInt32()] = batch[r][2].AsString(batch.Arena);
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal("row-ALICE", labels[1]);  // recomputed from new name
+        Assert.Equal("row-bob", labels[2]);    // untouched
+    }
+
+    [Fact]
+    public async Task UpdateFrom_RecomputesDependent()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE orders (id Int32, qty Int32, price Float64, total Float64 AS (price * qty))");
+        catalog.Plan("CREATE TEMP TABLE price_updates (order_id Int32, new_price Float64)");
+        catalog.Plan("INSERT INTO orders (id, qty, price) VALUES (1, 4, 5.0), (2, 2, 10.0)");
+        catalog.Plan("INSERT INTO price_updates VALUES (1, 25.0)");
+
+        catalog.Plan("UPDATE orders SET price = price_updates.new_price FROM price_updates WHERE orders.id = price_updates.order_id");
+
+        Dictionary<int, double> totals = new();
+        await foreach (RowBatch batch in catalog["orders"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                totals[batch[r][0].AsInt32()] = batch[r][3].AsFloat64();
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal(100.0, totals[1], 6);  // 4 * 25.0 (recomputed via FROM)
+        Assert.Equal(20.0, totals[2], 6);   // 2 * 10.0 (untouched)
+    }
+
+    // ──────────────────── V2-F4: computed-to-computed rejection ────────────────────
+
+    [Fact]
+    public void CreateTable_ComputedReferencesComputed_Rejects()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32 AS (a + 1), c Int32 AS (b * 2))"));
+        Assert.Contains("GENERATED", ex.Message);
+        Assert.Contains("b", ex.Message);
+    }
+
+    [Fact]
+    public void AlterAddComputed_ReferencesExistingComputed_Rejects()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool);
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32 AS (a + 1))");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN c Int32 AS (b * 2)"));
+        Assert.Contains("GENERATED", ex.Message);
+        Assert.Contains("b", ex.Message);
+    }
+
     // ──────────────────── ALTER TABLE ADD COLUMN ────────────────────
 
     [Fact]

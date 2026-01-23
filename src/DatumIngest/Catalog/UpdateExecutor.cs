@@ -1,4 +1,5 @@
 using DatumIngest.Execution;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Pooling;
@@ -69,6 +70,14 @@ internal static class UpdateExecutor
             int idx = FindColumnIndex(schema, a.ColumnName);
             setBindings[i] = (idx, a.Value);
         }
+
+        // Computed-column dependents: for each source-column index, the list
+        // of computed columns whose expression references it. When a SET
+        // touches a referenced column, we recompute every dependent. The
+        // catalog's CREATE-TABLE validation forbids computed-to-computed
+        // dependencies, so a single (non-topological) pass suffices.
+        Dictionary<int, int[]>? dependentsByColumn = BuildDependentsByColumn(schema);
+        ColumnLookup? schemaLookup = dependentsByColumn is null ? null : BuildSchemaLookup(schema);
 
         // workArena outlives every per-batch arena because UpdateRows
         // resolves non-inline SET results against it after the scan
@@ -146,6 +155,23 @@ internal static class UpdateExecutor
                         rowValues[columnIndex] = coerced;
                     }
 
+                    // Recompute dependent GENERATED columns. Runs after the
+                    // user-supplied SETs land in rowValues so the partial-row
+                    // frame sees the new values; no-op detection (Equals
+                    // against the existing slot) drops dependents whose
+                    // recomputed value didn't actually change.
+                    await RecomputeDependentsAsync(
+                        evaluator,
+                        schema,
+                        schemaLookup,
+                        row,
+                        sourceArena,
+                        rowValues,
+                        dependentsByColumn,
+                        workArena,
+                        catalog.SidecarRegistry,
+                        CancellationToken.None).ConfigureAwait(false);
+
                     if (rowValues.Count > 0)
                     {
                         requests.Add(new RowUpdateRequest(liveRowIndex, rowValues));
@@ -203,6 +229,13 @@ internal static class UpdateExecutor
 
         Schema targetSchema = provider.GetSchema();
         Schema sourceSchema = source.GetSchema();
+
+        // Same dependents-map pattern as the simple path. The recompute
+        // runs after the cross-product scan completes (see below) because
+        // last-match-wins means rowValues only stabilises after every
+        // matching source row has had its SET evaluated.
+        Dictionary<int, int[]>? dependentsByColumn = BuildDependentsByColumn(targetSchema);
+        ColumnLookup? targetSchemaLookup = dependentsByColumn is null ? null : BuildSchemaLookup(targetSchema);
 
         // Resolve SET column names → target-schema column indices.
         (int columnIndex, Expression valueExpression)[] setBindings =
@@ -387,6 +420,27 @@ internal static class UpdateExecutor
                             }
                         }
                     }
+
+                    // After every source row has been considered for this
+                    // target row, the accumulator carries the last-match-
+                    // wins SET state. Recompute dependent GENERATED columns
+                    // now while targetRow is still in scope (the scan batch
+                    // disposes at end of this foreach block).
+                    if (matched.TryGetValue(liveRowIndex, out Dictionary<int, DataValue>? finalValues) &&
+                        finalValues.Count > 0)
+                    {
+                        await RecomputeDependentsAsync(
+                            evaluator,
+                            targetSchema,
+                            targetSchemaLookup,
+                            targetRow,
+                            targetArena,
+                            finalValues,
+                            dependentsByColumn,
+                            workArena,
+                            catalog.SidecarRegistry,
+                            CancellationToken.None).ConfigureAwait(false);
+                    }
                 }
             }
             finally
@@ -457,31 +511,18 @@ internal static class UpdateExecutor
             return source;
         }
 
-        object scalar = source.Kind switch
+        // Composite / blob results from SET expressions aren't supported —
+        // LiteralCoercion deals in scalars. Reject them with a descriptive
+        // message before falling into ToObject's ToString-summary path.
+        if (source.IsArray || source.IsBlobKind || source.Kind == DataKind.Struct)
         {
-            DataKind.String => source.AsString(sourceStore),
-            DataKind.Boolean => source.AsBoolean(),
-            DataKind.Uuid => source.AsUuid(),
-            DataKind.Int8 => source.AsInt8(),
-            DataKind.Int16 => source.AsInt16(),
-            DataKind.Int32 => source.AsInt32(),
-            DataKind.Int64 => source.AsInt64(),
-            DataKind.UInt8 => source.AsUInt8(),
-            DataKind.UInt16 => source.AsUInt16(),
-            DataKind.UInt32 => source.AsUInt32(),
-            DataKind.UInt64 => source.AsUInt64(),
-            DataKind.Float32 => source.AsFloat32(),
-            DataKind.Float64 => source.AsFloat64(),
-            DataKind.Date => source.AsDate(),
-            DataKind.Time => source.AsTime(),
-            DataKind.DateTime => source.AsDateTime(),
-            DataKind.Duration => source.AsDuration(),
-            _ => throw new QueryPlanException(
+            throw new QueryPlanException(
                 $"UPDATE '{tableName}': SET expression for column '{target.Name}' " +
                 $"produced kind {source.Kind} which is not yet supported (composite kinds — " +
-                "Struct, typed arrays, Image / Audio / ByteArray — land in a follow-up)."),
-        };
+                "Struct, typed arrays, Image / Audio / ByteArray — land in a follow-up).");
+        }
 
+        object scalar = source.ToObject(sourceStore)!;
         return LiteralCoercion.Coerce(scalar, target, targetArena, target.Name);
     }
 
@@ -581,5 +622,135 @@ internal static class UpdateExecutor
             }
         }
         return -1;
+    }
+
+    /// <summary>
+    /// Builds the per-source-column map of dependent <c>GENERATED</c>
+    /// columns: for each non-computed column index, the list of computed
+    /// column indices whose expression references it. Returns
+    /// <see langword="null"/> when the schema has no computed columns
+    /// (caller skips the recompute path entirely).
+    /// </summary>
+    private static Dictionary<int, int[]>? BuildDependentsByColumn(Schema schema)
+    {
+        Dictionary<int, List<int>>? acc = null;
+        for (int comp = 0; comp < schema.Columns.Count; comp++)
+        {
+            Expression? expr = schema.Columns[comp].ComputedExpression;
+            if (expr is null) continue;
+
+            HashSet<(string? TableName, string ColumnName)> refs =
+                ColumnReferenceCollector.Collect(expr);
+            foreach ((string? _, string refName) in refs)
+            {
+                int srcIdx = FindColumnIndex(schema, refName);
+                if (srcIdx < 0) continue;
+                acc ??= new Dictionary<int, List<int>>();
+                if (!acc.TryGetValue(srcIdx, out List<int>? list))
+                {
+                    list = new List<int>();
+                    acc[srcIdx] = list;
+                }
+                if (!list.Contains(comp)) list.Add(comp);
+            }
+        }
+
+        if (acc is null) return null;
+        Dictionary<int, int[]> result = new(acc.Count);
+        foreach ((int k, List<int> v) in acc) result[k] = v.ToArray();
+        return result;
+    }
+
+    private static ColumnLookup BuildSchemaLookup(Schema schema)
+    {
+        string[] names = new string[schema.Columns.Count];
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            names[i] = schema.Columns[i].Name;
+        }
+        return new ColumnLookup(names);
+    }
+
+    /// <summary>
+    /// Recomputes every <c>GENERATED</c> column whose expression references
+    /// at least one column touched by the SET assignments in
+    /// <paramref name="rowValues"/>. Builds a partial row by overlaying
+    /// the SET values on the existing row's slots (stabilised into
+    /// <paramref name="workArena"/> so the evaluator can resolve mixed-store
+    /// slots through a single arena), evaluates each dependent's
+    /// expression, and writes results back into <paramref name="rowValues"/>.
+    /// </summary>
+    /// <remarks>
+    /// No-op detection (Equals against the existing slot) mirrors the
+    /// user-supplied SET path: if a recomputed value matches the existing
+    /// cell, it isn't added — keeps the rewrite request minimal and
+    /// preserves the "UPDATE that touches no actual state is dropped"
+    /// behaviour. Single-pass evaluation is correct because the catalog
+    /// rejects computed-to-computed dependencies at CREATE TABLE time.
+    /// </remarks>
+    private static async Task RecomputeDependentsAsync(
+        ExpressionEvaluator evaluator,
+        Schema schema,
+        ColumnLookup? schemaLookup,
+        Row existingRow,
+        IValueStore existingStore,
+        Dictionary<int, DataValue> rowValues,
+        Dictionary<int, int[]>? dependentsByColumn,
+        Arena workArena,
+        DatumFile.Sidecar.SidecarRegistry? sidecarRegistry,
+        CancellationToken cancellationToken)
+    {
+        if (dependentsByColumn is null || schemaLookup is null || rowValues.Count == 0) return;
+
+        HashSet<int>? dependentsToEval = null;
+        foreach (int touched in rowValues.Keys)
+        {
+            if (!dependentsByColumn.TryGetValue(touched, out int[]? deps)) continue;
+            foreach (int dep in deps)
+            {
+                // rowValues should never already contain a dependent index
+                // (UPDATE rejects SET on computed columns); guard anyway so
+                // a user-set already-overridden value wins.
+                if (rowValues.ContainsKey(dep)) continue;
+                dependentsToEval ??= new HashSet<int>();
+                dependentsToEval.Add(dep);
+            }
+        }
+        if (dependentsToEval is null) return;
+
+        // Overlay SET values on the existing row; stabilise non-inline
+        // existing slots into workArena so the frame's single Source
+        // store can resolve every slot the evaluator might read.
+        DataValue[] partial = new DataValue[schema.Columns.Count];
+        for (int c = 0; c < schema.Columns.Count; c++)
+        {
+            partial[c] = rowValues.TryGetValue(c, out DataValue overlay)
+                ? overlay
+                : DataValueRetention.Stabilize(existingRow[c], existingStore, workArena);
+        }
+        Row partialRow = new(schemaLookup, partial);
+        EvaluationFrame frame = new(
+            partialRow,
+            workArena,
+            workArena,
+            outerRow: null,
+            sidecarRegistry: sidecarRegistry,
+            types: null);
+
+        foreach (int depIdx in dependentsToEval)
+        {
+            ColumnInfo target = schema.Columns[depIdx];
+            ValueRef result = await evaluator.EvaluateAsValueRefAsync(
+                target.ComputedExpression!, frame, cancellationToken).ConfigureAwait(false);
+            DataValue converted = ComputedColumnEvaluator.ConvertValueRefToTarget(
+                result, target, workArena, target.Name);
+
+            // No-op detection: if the recomputed value equals the existing
+            // slot, don't emit a write (cross-store Equals is conservative
+            // and may return false even when the bytes match — that's fine,
+            // we just emit a redundant write).
+            if (converted.Equals(existingRow[depIdx])) continue;
+            rowValues[depIdx] = converted;
+        }
     }
 }

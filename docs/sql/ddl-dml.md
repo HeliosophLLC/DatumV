@@ -45,8 +45,9 @@ Column types use the kind names from the type system: `Int8`, `Int16`, `Int32`, 
 | `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on `INSERT` — duplicate key values are rejected with `PrimaryKeyViolationException`. PK columns must be fixed-size kinds (Int*, UInt*, Float*, Boolean, Date/Time/DateTime/Duration, Uuid); the total key size must be ≤ 16 bytes. |
 | `DEFAULT <literal>` | Column receives the literal when omitted from an `INSERT`. Accepts string / numeric / boolean / NULL literals and unary-negate over a numeric literal. Function-call defaults are not accepted. |
 | `IDENTITY` / `IDENTITY(seed, step)` | Auto-generates an integer value on each `INSERT`. Bare form defaults to `seed=1, step=1`. Step may be negative. At most one `IDENTITY` column per table. The column kind must be a signed or unsigned integer (Int8/16/32/64, UInt8/16/32/64); 128-bit integers are not supported. Explicit values for an `IDENTITY` column are always rejected — drop the column from the `INSERT` column list and the catalog fills it. |
+| `AS (expr)` | `GENERATED ALWAYS AS` computed column. The value is materialised per row from `expr` at `INSERT` time; explicit values are rejected on both `INSERT` and `UPDATE`. The expression references other columns of the same row. Mutually exclusive with `DEFAULT` and `IDENTITY`. STORED only — `VIRTUAL` is not supported. See [Computed columns](#computed-columns) below for the full surface. |
 
-Column-modifier order in the parser is fixed: `NOT NULL → PRIMARY KEY → DEFAULT → IDENTITY`. `Int64 IDENTITY PRIMARY KEY` parse-fails; write `Int64 PRIMARY KEY IDENTITY`.
+Column-modifier order in the parser is fixed: `NOT NULL → PRIMARY KEY → DEFAULT → AS (expr) → IDENTITY`. `Int64 IDENTITY PRIMARY KEY` parse-fails; write `Int64 PRIMARY KEY IDENTITY`.
 
 Composite primary keys are declared with a table-level constraint:
 
@@ -136,6 +137,58 @@ When a column is declared `IDENTITY`, supplying it in the `INSERT` column list i
 #### PRIMARY KEY
 
 Each `INSERT` validates that no row duplicates an existing PK or another row in the same batch. The first violation throws `PrimaryKeyViolationException` and the entire batch is aborted (no partial commit). NULL in any PK column is also rejected.
+
+#### Computed columns
+
+A column declared `AS (expr)` is a `GENERATED ALWAYS AS` computed column. Its value is materialised at `INSERT` time by evaluating the expression against the row being built; explicit values are rejected.
+
+```sql
+CREATE TABLE orders (
+    qty Int32,
+    price Float64,
+    total Float64 AS (price * qty)
+);
+
+INSERT INTO orders (qty, price) VALUES (3, 19.99);
+-- row reads back as (3, 19.99, 59.97)
+
+INSERT INTO orders (qty, price, total) VALUES (3, 19.99, 100.0);
+-- ERROR: column 'total' is GENERATED ALWAYS AS (computed). Drop it from the
+--        INSERT column list and the catalog will compute the value.
+```
+
+The expression can reference any other non-computed column in the same row. It can also reference `IDENTITY` and `DEFAULT`-filled columns — those resolve before computed columns evaluate, so the expression sees the post-fill values:
+
+```sql
+CREATE TABLE conversations (
+    id Int64 IDENTITY,
+    title String,
+    slug String AS ('conv-' || cast(id as string))
+);
+
+INSERT INTO conversations (title) VALUES ('Chat');
+-- row reads back as (1, 'Chat', 'conv-1')
+```
+
+`UPDATE` rejects `SET` on a computed column. To change the column's value, change one of its referenced source columns.
+
+```sql
+UPDATE orders SET total = 0 WHERE id = 5;
+-- ERROR: column 'total' is GENERATED ALWAYS AS (computed). Computed columns
+--        derive their value from other columns and cannot be assigned directly.
+```
+
+##### v1 limitations
+
+Four things to know about today's implementation:
+
+1. **`UPDATE` does not recompute dependent computed columns.** If you have `total Float64 AS (price * qty)` and run `UPDATE orders SET price = 10 WHERE id = 5`, the `total` column of row 5 retains its old value. **This is a silent correctness bug**; downstream reads will show stale derived values. PostgreSQL recomputes; we will too, once the dependency tracking lands. Workaround: re-`INSERT` the row instead of updating it, or avoid `UPDATE` on columns that other generated columns reference.
+
+2. **`ALTER TABLE ADD COLUMN ... AS (expr)` leaves historical rows NULL.** New `INSERT`s after the `ALTER` evaluate normally; rows that existed before the column was added read NULL for the new column. Workaround: re-create the table and `INSERT … SELECT` from the original.
+
+3. **`VIRTUAL` is not supported.** Only `STORED` (the default) — computed values are materialised on disk. There is no scan-time computation mode. The `STORED` keyword is implied by the bare `AS (expr)` form; writing `AS (expr) VIRTUAL` fails to parse.
+
+4. **Computed-to-computed references silently produce NULL.** A computed column that references another computed column reads as NULL — they all evaluate in declaration order in a single pass. The catalog should reject this at `CREATE TABLE` time but does not yet. Workaround: inline the inner expression. `b AS (a + 1), c AS (b * 2)` should be written as `b AS (a + 1), c AS ((a + 1) * 2)`.
 
 #### RETURNING
 

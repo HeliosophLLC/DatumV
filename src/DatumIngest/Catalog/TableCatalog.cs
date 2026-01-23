@@ -896,7 +896,52 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ComputedExpression = d.ComputedExpression,
             };
         }
+
+        // GENERATED expressions cannot reference other GENERATED columns —
+        // the single-pass evaluator in InsertExecutor / UpdateExecutor
+        // would see the referenced computed column still NULL and silently
+        // produce a NULL result. Lift to topological-sort eval if a real
+        // workload needs it.
+        ValidateNoComputedToComputedReferences(columns);
+
         return new Schema(columns, pkSchemaIndices);
+    }
+
+    /// <summary>
+    /// Rejects schemas where a <c>GENERATED ALWAYS AS</c> expression
+    /// references another <c>GENERATED</c> column. Without this gate the
+    /// single-pass evaluator silently fills the dependent column with
+    /// NULL (the referenced column hasn't been computed yet when the
+    /// dependent's expression runs). Users get a clear error at
+    /// <c>CREATE TABLE</c> / <c>ALTER TABLE ADD COLUMN</c> time and can
+    /// inline the inner expression.
+    /// </summary>
+    private static void ValidateNoComputedToComputedReferences(IReadOnlyList<ColumnInfo> columns)
+    {
+        Dictionary<string, ColumnInfo> byName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ColumnInfo c in columns)
+        {
+            byName[c.Name] = c;
+        }
+
+        foreach (ColumnInfo c in columns)
+        {
+            if (c.ComputedExpression is null) continue;
+            HashSet<(string? TableName, string ColumnName)> refs =
+                ColumnReferenceCollector.Collect(c.ComputedExpression);
+            foreach ((string? _, string refName) in refs)
+            {
+                if (byName.TryGetValue(refName, out ColumnInfo? referenced) &&
+                    referenced.ComputedExpression is not null &&
+                    !ReferenceEquals(referenced, c))
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{c.Name}': GENERATED expressions cannot reference other " +
+                        $"GENERATED columns (references '{referenced.Name}'). Inline the inner " +
+                        "expression instead.");
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1093,6 +1138,31 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             throw new InvalidOperationException(
                 $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': cannot combine " +
                 "DEFAULT and GENERATED ALWAYS AS — pick one.");
+        }
+
+        // Reject computed-to-computed dependencies against the table's
+        // existing schema. Same rationale as the CREATE TABLE gate: the
+        // single-pass row-fill evaluator can't see another computed
+        // column's value during evaluation.
+        if (computedExpr is not null && TryGetTable(alter.TableName, out ITableProvider? existingProvider))
+        {
+            Schema existingSchema = existingProvider.GetSchema();
+            HashSet<(string? TableName, string ColumnName)> refs =
+                ColumnReferenceCollector.Collect(computedExpr);
+            foreach ((string? _, string refName) in refs)
+            {
+                foreach (ColumnInfo existing in existingSchema.Columns)
+                {
+                    if (string.Equals(existing.Name, refName, StringComparison.OrdinalIgnoreCase) &&
+                        existing.ComputedExpression is not null)
+                    {
+                        throw new ExecutionException(
+                            $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': " +
+                            $"GENERATED expressions cannot reference other GENERATED columns " +
+                            $"(references '{existing.Name}'). Inline the inner expression instead.");
+                    }
+                }
+            }
         }
 
         ColumnInfo column = new(alter.ColumnName, kind, nullable: true)

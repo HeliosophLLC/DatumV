@@ -171,7 +171,7 @@ internal static class InsertExecutor
 
                     ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                         sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
-                    targetRow[targetIndex] = ConvertValueRefToTarget(
+                    targetRow[targetIndex] = ComputedColumnEvaluator.ConvertValueRefToTarget(
                         evaluated, target, arena, target.Name);
                 }
                 else
@@ -341,168 +341,6 @@ internal static class InsertExecutor
     /// Image, Audio, ByteArray, …) are intentionally deferred to a
     /// future PR.
     /// </summary>
-    /// <summary>
-    /// Converts a <see cref="ValueRef"/> (the output of
-    /// <see cref="ExpressionEvaluator.EvaluateAsValueRefAsync"/>) into a target-shaped
-    /// <see cref="DataValue"/> for the INSERT VALUES path. Handles array literals
-    /// natively — when the source array's element kind doesn't match the target
-    /// (e.g. <c>[10, 20, 30]</c> narrows to <c>Int8[]</c> but the column is
-    /// <c>Int32[]</c>), elements are widened individually through
-    /// <see cref="LiteralCoercion"/>. Cross-arena copies are not needed because
-    /// VALUES uses a single arena for evaluation and writing.
-    /// </summary>
-    private static DataValue ConvertValueRefToTarget(
-        ValueRef source, ColumnInfo target, Arena targetArena, string columnName)
-    {
-        if (source.IsNull)
-        {
-            if (!target.Nullable)
-            {
-                throw new InvalidOperationException(
-                    $"Column '{columnName}' is NOT NULL but the supplied value is NULL.");
-            }
-            return target.IsArray ? DataValue.NullArrayOf(target.Kind) : DataValue.Null(target.Kind);
-        }
-
-        // Typed-array target: shape must match (source.IsArray == true).
-        if (target.IsArray)
-        {
-            if (!source.IsArray)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': target is {target.Kind}[] but the " +
-                    $"supplied value is scalar {source.Kind}.");
-            }
-
-            ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
-
-            // Same element kind: hand the array directly to ToDataValue, which
-            // materialises payload bytes into the target arena.
-            if (source.Kind == target.Kind)
-            {
-                return source.ToDataValue(targetArena);
-            }
-
-            // Different element kind: per-element coerce via LiteralCoercion,
-            // then assemble a new typed array from the coerced DataValues.
-            return CoerceArrayElements(elements, target, targetArena, columnName);
-        }
-
-        // Scalar target. Reject array-source / struct-source up front.
-        if (source.IsArray)
-        {
-            throw new InvalidOperationException(
-                $"INSERT for column '{columnName}': target is scalar {target.Kind} but the " +
-                "supplied value is an array.");
-        }
-        if (source.Kind == DataKind.Struct)
-        {
-            throw new InvalidOperationException(
-                $"INSERT for column '{columnName}': struct values are not yet supported. " +
-                "Struct-typed manifest support lands with the Value Type Registry.");
-        }
-
-        // Blob-kind sources (Image / Audio / Video / Json). ValueRef.ToDataValue
-        // already handles materialising managed bytes / SKBitmap / CBOR slices
-        // into the target arena — let it do the byte copy. Reject only on kind
-        // mismatch; no implicit blob coercion.
-        if (source.Kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json)
-        {
-            if (target.Kind != source.Kind)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': target is {target.Kind} but the " +
-                    $"supplied value is {source.Kind}; blob kinds (Image/Audio/Video/Json) " +
-                    "do not coerce across kinds.");
-            }
-            return source.ToDataValue(targetArena);
-        }
-
-        // Non-array, non-struct, non-blob: extract a CLR scalar via the
-        // ValueRef accessors (which handle both inline and materialized
-        // payloads — long strings live in the materialized side) and run
-        // through LiteralCoercion, the same lossless coercion path VALUES
-        // used to use for plain literals.
-        return LiteralCoercion.Coerce(
-            ExtractScalarFromValueRef(source, columnName), target, targetArena, columnName);
-    }
-
-    /// <summary>
-    /// Extracts a CLR scalar from a non-null, non-array, non-struct
-    /// <see cref="ValueRef"/>. <see cref="DataKind.String"/> reads from the
-    /// materialized side (handles strings of any length); fixed-width kinds
-    /// read from the inline carrier.
-    /// </summary>
-    private static object ExtractScalarFromValueRef(ValueRef source, string columnName)
-    {
-        return source.Kind switch
-        {
-            DataKind.String => source.AsString(),
-            DataKind.Boolean => source.AsBoolean(),
-            DataKind.Uuid => source.AsUuid(),
-            DataKind.Int8 => source.AsInt8(),
-            DataKind.Int16 => source.AsInt16(),
-            DataKind.Int32 => source.AsInt32(),
-            DataKind.Int64 => source.AsInt64(),
-            DataKind.UInt8 => source.AsUInt8(),
-            DataKind.UInt16 => source.AsUInt16(),
-            DataKind.UInt32 => source.AsUInt32(),
-            DataKind.UInt64 => source.AsUInt64(),
-            DataKind.Float16 => source.AsFloat16(),
-            DataKind.Float32 => source.AsFloat32(),
-            DataKind.Float64 => source.AsFloat64(),
-            DataKind.Decimal => source.AsDecimal(),
-            DataKind.Date => source.AsDate(),
-            DataKind.DateTime => source.AsDateTime(),
-            DataKind.Time => source.AsTime(),
-            DataKind.Duration => source.AsDuration(),
-            _ => throw new InvalidOperationException(
-                $"INSERT for target column '{columnName}': source kind {source.Kind} is " +
-                "not yet supported."),
-        };
-    }
-
-    /// <summary>
-    /// Builds a typed array <see cref="DataValue"/> from per-element source
-    /// <see cref="ValueRef"/>s, coercing each element to the target column's
-    /// element kind via <see cref="LiteralCoercion"/>. Used when the source
-    /// array's element kind differs from the target's — most commonly because
-    /// integer literals like <c>10</c> narrow to <c>Int8</c> at parse time.
-    /// </summary>
-    private static DataValue CoerceArrayElements(
-        ReadOnlySpan<ValueRef> sourceElements,
-        ColumnInfo target,
-        Arena targetArena,
-        string columnName)
-    {
-        // LiteralCoercion gates IsArray off the column descriptor; build a
-        // scalar-shaped clone so per-element coercion routes through the
-        // normal scalar arms.
-        ColumnInfo elementTarget = new(target.Name, target.Kind, nullable: false);
-
-        DataValue[] coerced = new DataValue[sourceElements.Length];
-        for (int i = 0; i < sourceElements.Length; i++)
-        {
-            ValueRef element = sourceElements[i];
-            if (element.IsNull)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': null element at index {i}; " +
-                    "per-element nulls inside arrays are not yet supported.");
-            }
-            if (element.IsArray)
-            {
-                throw new InvalidOperationException(
-                    $"INSERT for column '{columnName}': nested arrays are not supported.");
-            }
-
-            object scalar = ExtractScalarFromValueRef(element, columnName);
-            coerced[i] = LiteralCoercion.Coerce(scalar, elementTarget, targetArena, columnName);
-        }
-
-        return DataValue.FromTypedArray(target.Kind, coerced, targetArena, targetArena);
-    }
-
     private static DataValue ConvertSourceValue(
         DataValue source,
         IValueStore sourceStore,
@@ -587,26 +425,12 @@ internal static class InsertExecutor
                 "Struct-typed manifest support lands with the Value Type Registry.");
         }
 
-        object scalar = source.Kind switch
-        {
-            DataKind.String => source.AsString(sourceStore),
-            DataKind.Boolean => source.AsBoolean(),
-            DataKind.Uuid => source.AsUuid(),
-            DataKind.Int8 => source.AsInt8(),
-            DataKind.Int16 => source.AsInt16(),
-            DataKind.Int32 => source.AsInt32(),
-            DataKind.Int64 => source.AsInt64(),
-            DataKind.UInt8 => source.AsUInt8(),
-            DataKind.UInt16 => source.AsUInt16(),
-            DataKind.UInt32 => source.AsUInt32(),
-            DataKind.UInt64 => source.AsUInt64(),
-            DataKind.Float32 => source.AsFloat32(),
-            DataKind.Float64 => source.AsFloat64(),
-            _ => throw new InvalidOperationException(
-                $"INSERT for target column '{columnName}': source kind {source.Kind} is " +
-                "not yet supported."),
-        };
-
+        // Inline / String kinds: route to DataValue.ToObject(store) which
+        // boxes the scalar (and resolves String through the store). Composite
+        // and blob kinds are gated above; anything that survives to here is
+        // safe for LiteralCoercion.Coerce — if the target.Kind can't accept
+        // the source kind, LiteralCoercion throws with the canonical message.
+        object? scalar = source.ToObject(sourceStore);
         return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
     }
 
@@ -824,7 +648,7 @@ internal static class InsertExecutor
             ColumnInfo target = targetSchema.Columns[i];
             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                 target.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
-            targetRow[i] = ConvertValueRefToTarget(evaluated, target, arena, target.Name);
+            targetRow[i] = ComputedColumnEvaluator.ConvertValueRefToTarget(evaluated, target, arena, target.Name);
         }
     }
 
@@ -1217,29 +1041,16 @@ internal static class InsertExecutor
                 return new LiteralExpression(null);
             }
 
-            object literal = captured.Kind switch
+            // Composite / blob kinds can't become a literal expression
+            // (LiteralExpression carries a CLR scalar). ToObject() would
+            // fall back to ToString() for those — reject explicitly so the
+            // diagnostic names the actual kind.
+            if (captured.IsArray || captured.IsBlobKind || captured.Kind == DataKind.Struct)
             {
-                DataKind.Int8 => (object)captured.AsInt8(),
-                DataKind.Int16 => captured.AsInt16(),
-                DataKind.Int32 => captured.AsInt32(),
-                DataKind.Int64 => captured.AsInt64(),
-                DataKind.UInt8 => captured.AsUInt8(),
-                DataKind.UInt16 => captured.AsUInt16(),
-                DataKind.UInt32 => captured.AsUInt32(),
-                DataKind.UInt64 => captured.AsUInt64(),
-                DataKind.Float32 => captured.AsFloat32(),
-                DataKind.Float64 => captured.AsFloat64(),
-                DataKind.String => captured.AsString(foldArena),
-                DataKind.Boolean => captured.AsBoolean(),
-                DataKind.Date => captured.AsDate(),
-                DataKind.DateTime => captured.AsDateTime(),
-                DataKind.Time => captured.AsTime(),
-                DataKind.Duration => captured.AsDuration(),
-                DataKind.Decimal => captured.AsDecimal(),
-                DataKind.Uuid => captured.AsUuid(),
-                _ => throw new InvalidOperationException(
-                    $"Subquery in INSERT VALUES produced unsupported kind {captured.Kind}."),
-            };
+                throw new InvalidOperationException(
+                    $"Subquery in INSERT VALUES produced unsupported kind {captured.Kind}.");
+            }
+            object literal = captured.ToObject(foldArena)!;
             return new LiteralExpression(literal);
         }
         finally

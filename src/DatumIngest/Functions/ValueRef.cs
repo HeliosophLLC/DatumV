@@ -686,6 +686,67 @@ public readonly struct ValueRef
     public DataKind AsType() => _inline.AsType();
 
     /// <summary>
+    /// Returns the value as its natural boxed CLR type — the mirror of
+    /// <see cref="DataValue.ToObject(IValueStore?)"/> for the ValueRef
+    /// shape. Reference kinds (<see cref="DataKind.String"/>) read from the
+    /// in-struct materialized payload, so no store is needed at this
+    /// boundary. Null values return <see langword="null"/>.
+    /// </summary>
+    /// <returns>
+    /// The boxed primitive (<see cref="float"/>, <see cref="int"/>,
+    /// <see cref="bool"/>, etc.), a <see cref="string"/> for
+    /// <see cref="DataKind.String"/>, or <see langword="null"/> when
+    /// <see cref="IsNull"/> is <see langword="true"/>.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the value is an array, a struct, or a blob kind
+    /// (<see cref="DataKind.Image"/>, <see cref="DataKind.Audio"/>,
+    /// <see cref="DataKind.Video"/>, <see cref="DataKind.Json"/>). Callers
+    /// that need composite or blob conversion should branch on
+    /// <see cref="IsArray"/> / <see cref="Kind"/> and use
+    /// <see cref="GetStructFields"/> / <see cref="GetArrayElements"/> /
+    /// <see cref="ToDataValue(IValueStore, ushort, TypeRegistry?)"/> directly.
+    /// </exception>
+    public object? ToObject()
+    {
+        if (IsNull) return null;
+        if (IsArray)
+        {
+            throw new InvalidOperationException(
+                $"ValueRef.ToObject(): cannot box array values; recurse via GetArrayElements().");
+        }
+        return Kind switch
+        {
+            DataKind.String => AsString(),
+            DataKind.Boolean => AsBoolean(),
+            DataKind.Uuid => AsUuid(),
+            DataKind.Int8 => AsInt8(),
+            DataKind.Int16 => AsInt16(),
+            DataKind.Int32 => AsInt32(),
+            DataKind.Int64 => AsInt64(),
+            DataKind.UInt8 => AsUInt8(),
+            DataKind.UInt16 => AsUInt16(),
+            DataKind.UInt32 => AsUInt32(),
+            DataKind.UInt64 => AsUInt64(),
+            DataKind.Int128 => AsInt128(),
+            DataKind.UInt128 => AsUInt128(),
+            DataKind.Float16 => AsFloat16(),
+            DataKind.Float32 => AsFloat32(),
+            DataKind.Float64 => AsFloat64(),
+            DataKind.Decimal => AsDecimal(),
+            DataKind.Date => AsDate(),
+            DataKind.DateTime => AsDateTime(),
+            DataKind.Time => AsTime(),
+            DataKind.Duration => AsDuration(),
+            DataKind.Point2D => AsPoint2D(),
+            DataKind.Point3D => AsPoint3D(),
+            _ => throw new InvalidOperationException(
+                $"ValueRef.ToObject(): cannot box kind {Kind}. Composite and blob kinds " +
+                "(Struct, Image, Audio, Video, Json) must be handled by the caller."),
+        };
+    }
+
+    /// <summary>
     /// Materialises this <see cref="ValueRef"/> back into a <see cref="DataValue"/>
     /// against <paramref name="targetStore"/>. Inline and null values pass
     /// through unchanged; managed payloads (strings, byte arrays, recursive

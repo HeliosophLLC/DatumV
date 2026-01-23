@@ -2327,15 +2327,22 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns the value as its natural boxed CLR type. Useful for JSON serialization
     /// and other contexts where the typed object is needed rather than a string.
     /// </summary>
+    /// <param name="store">
+    /// Optional value store used to resolve reference kinds. When supplied,
+    /// <see cref="DataKind.String"/> returns the real <see cref="string"/> payload
+    /// from the store. When <see langword="null"/>, reference kinds fall back to
+    /// <see cref="ToString"/>'s summary form. Inline kinds (integers, floats,
+    /// booleans, dates, etc.) never need a store.
+    /// </param>
     /// <returns>
     /// The boxed primitive (<see cref="float"/>, <see cref="int"/>, <see cref="bool"/>, etc.),
-    /// the reference-type payload (<see cref="string"/>, <c>float[]</c>, <c>byte[]</c>, etc.),
-    /// or <see langword="null"/> when <see cref="IsNull"/> is true.
-    /// Composite types (<see cref="DataKind.Struct"/> and any typed array) return
-    /// the raw <c>DataValue[]</c> — callers that need recursive conversion should handle
-    /// those kinds explicitly.
+    /// the reference-type payload (<see cref="string"/>) when <paramref name="store"/> is
+    /// supplied, or <see langword="null"/> when <see cref="IsNull"/> is true.
+    /// Composite types (<see cref="DataKind.Struct"/>, typed arrays) and other reference
+    /// kinds (Image / Audio / Video / Json) return the <see cref="ToString"/> summary;
+    /// callers that need recursive conversion should handle those kinds explicitly.
     /// </returns>
-    public object? ToObject()
+    public object? ToObject(IValueStore? store = null)
     {
         if (IsNull) return null;
 
@@ -2353,6 +2360,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt64    => AsUInt64(),
             DataKind.Int128    => AsInt128(),
             DataKind.UInt128   => AsUInt128(),
+            DataKind.Float16   => AsFloat16(),
             DataKind.Decimal   => AsDecimal(),
             DataKind.Boolean   => AsBoolean(),
             DataKind.Date      => AsDate(),
@@ -2362,7 +2370,13 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Uuid      => AsUuid(),
             DataKind.Point2D   => AsPoint2D(),
             DataKind.Point3D   => AsPoint3D(),
-            // Reference types require a store — return the ToString() summary without content.
+            // String resolves through the store when supplied; otherwise the
+            // summary form keeps the no-store call sites working unchanged.
+            DataKind.String when store is not null => AsString(store),
+            // Other reference kinds (Image / Audio / Video / Json, byte[],
+            // typed arrays, structs) — return the ToString() summary without
+            // content. Callers that need the payload should branch on
+            // _kind / IsArray and read via the kind-specific accessor.
             _ => ToString(),
         };
     }
