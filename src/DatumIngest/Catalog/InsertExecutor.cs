@@ -176,11 +176,12 @@ internal static class InsertExecutor
                 }
                 else
                 {
-                    // Omitted column: pre-resolved fill (Default / Null /
-                    // Identity). Rebuild the DataValue per row so each
-                    // row owns its own arena-backed copy of strings /
-                    // byte arrays.
-                    targetRow[targetIndex] = ResolveOmittedFill(plan, targetIndex, target, arena, session);
+                    // Omitted column: fill from the per-row evaluator path
+                    // (Default expression / IDENTITY reservation), or place
+                    // a NULL slot for the second-pass Computed eval.
+                    targetRow[targetIndex] = await ResolveOmittedFillAsync(
+                        plan, targetIndex, target, arena, session,
+                        evaluator, frame, CancellationToken.None).ConfigureAwait(false);
                 }
             }
 
@@ -261,6 +262,14 @@ internal static class InsertExecutor
                 RowBatch targetBatch = catalog.Pool.RentRowBatch(
                     targetLookup, capacity: sourceBatch.Count, arena: targetArena);
 
+                // Tableless evaluator + empty frame for the per-row DEFAULT
+                // evaluation path. Built per batch because targetArena is
+                // batch-scoped; reused across every row in the batch.
+                ExpressionEvaluator defaultEvaluator = new(catalog.Functions, store: targetArena);
+                ColumnLookup emptyLookup = new(Array.Empty<string>());
+                Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
+                EvaluationFrame defaultFrame = new(emptyRow, targetArena, targetArena);
+
                 for (int r = 0; r < sourceBatch.Count; r++)
                 {
                     Row sourceRow = sourceBatch[r];
@@ -273,7 +282,9 @@ internal static class InsertExecutor
 
                         targetRow[targetIndex] = sourceIndex >= 0
                             ? ConvertSourceValue(sourceRow[sourceIndex], sourceStore, catalog.SidecarRegistry, target, targetArena, target.Name)
-                            : ResolveOmittedFill(plan, targetIndex, target, targetArena, session!);
+                            : await ResolveOmittedFillAsync(
+                                plan, targetIndex, target, targetArena, session!,
+                                defaultEvaluator, defaultFrame, CancellationToken.None).ConfigureAwait(false);
                     }
 
                     // Computed columns evaluate post-fill against the row
@@ -561,12 +572,10 @@ internal static class InsertExecutor
 
             if (target.DefaultExpression is not null)
             {
-                // PR10b validates DEFAULT is a literal at CREATE TABLE
-                // time, so the cast here is structural — surface a
-                // descriptive error if a future code path slipped a
-                // non-literal through.
-                object? value = ExtractLiteral(target.DefaultExpression, target.Name);
-                omittedFills[i] = OmittedFill.Default(value);
+                // DEFAULT is evaluated per row via ExpressionEvaluator at
+                // fill time. The catalog's ValidateDefaultExpression has
+                // already rejected anything that needs a source row.
+                omittedFills[i] = OmittedFill.Default;
                 continue;
             }
 
@@ -585,24 +594,52 @@ internal static class InsertExecutor
         return new ColumnPlan(sourceColumnCount, sourceIndexForTarget, omittedFills);
     }
 
-    private static DataValue ResolveOmittedFill(
-        ColumnPlan plan, int targetIndex, ColumnInfo target, Arena arena, IAppendSession session)
+    /// <summary>
+    /// Resolves the value for an omitted column. <c>Default</c> evaluates
+    /// the column's <see cref="ColumnInfo.DefaultExpression"/> per row via
+    /// <paramref name="evaluator"/> against an empty <paramref name="frame"/>
+    /// — so <c>DEFAULT now()</c> captures the row's INSERT time,
+    /// <c>DEFAULT gen_random_uuid()</c> produces a fresh UUID per row, and
+    /// <c>DEFAULT [1,2,3]</c> materialises a typed array into the row's arena.
+    /// </summary>
+    private static async Task<DataValue> ResolveOmittedFillAsync(
+        ColumnPlan plan,
+        int targetIndex,
+        ColumnInfo target,
+        Arena arena,
+        IAppendSession session,
+        ExpressionEvaluator evaluator,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
     {
         OmittedFill fill = plan.OmittedFills[targetIndex];
-        return fill.Kind switch
+        switch (fill.Kind)
         {
-            OmittedFill.FillKind.Null => DataValue.Null(target.Kind),
-            OmittedFill.FillKind.Default
-                => LiteralCoercion.Coerce(fill.LiteralValue, target, arena, target.Name),
-            OmittedFill.FillKind.Identity
-                => LiteralCoercion.Coerce(session.ReserveNextIdentityValue(), target, arena, target.Name),
+            case OmittedFill.FillKind.Null:
+                return DataValue.Null(target.Kind);
+
+            case OmittedFill.FillKind.Default:
+            {
+                ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
+                    target.DefaultExpression!, frame, cancellationToken).ConfigureAwait(false);
+                return ComputedColumnEvaluator.ConvertValueRefToTarget(
+                    evaluated, target, arena, target.Name);
+            }
+
+            case OmittedFill.FillKind.Identity:
+                return LiteralCoercion.Coerce(
+                    session.ReserveNextIdentityValue(), target, arena, target.Name);
+
             // Computed columns are filled by a second per-row pass after
             // every other column resolves; placeholder here so the slot
             // exists in the row array (NULL of the target kind).
-            OmittedFill.FillKind.Computed => DataValue.Null(target.Kind),
-            _ => throw new InvalidOperationException(
-                $"Internal error: column '{target.Name}' has no source index and no fill."),
-        };
+            case OmittedFill.FillKind.Computed:
+                return DataValue.Null(target.Kind);
+
+            default:
+                throw new InvalidOperationException(
+                    $"Internal error: column '{target.Name}' has no source index and no fill.");
+        }
     }
 
     /// <summary>
@@ -651,46 +688,6 @@ internal static class InsertExecutor
             targetRow[i] = ComputedColumnEvaluator.ConvertValueRefToTarget(evaluated, target, arena, target.Name);
         }
     }
-
-    /// <summary>
-    /// Extracts the CLR value carried by a <see cref="LiteralExpression"/>,
-    /// flattening <c>UnaryExpression(Negate, numeric literal)</c> into a
-    /// negative literal. Mirrors <see cref="TableCatalog.IsAcceptedDefaultLiteral"/>
-    /// so VALUES accepts the same shapes as <c>DEFAULT</c>.
-    /// </summary>
-    private static object? ExtractLiteral(Expression expression, string columnName)
-    {
-        switch (expression)
-        {
-            case LiteralExpression literal:
-                return literal.Value;
-
-            case UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression numeric }:
-                return Negate(numeric.Value, columnName);
-
-            default:
-                throw new InvalidOperationException(
-                    $"INSERT VALUES for column '{columnName}': only literal expressions are " +
-                    "supported in PR10c. Use INSERT … SELECT for computed values (PR10c').");
-        }
-    }
-
-    private static object? Negate(object? value, string columnName) =>
-        value switch
-        {
-            sbyte s => (object)checked((sbyte)-s),
-            short s => (object)checked((short)-s),
-            int i => (object)checked(-i),
-            long l => (object)checked(-l),
-            float f => -f,
-            double d => -d,
-            decimal m => -m,
-            Half h => (Half)(-(double)h),
-            null => throw new InvalidOperationException(
-                $"INSERT VALUES for column '{columnName}': cannot negate NULL."),
-            _ => throw new InvalidOperationException(
-                $"INSERT VALUES for column '{columnName}': cannot negate {value.GetType().Name}."),
-        };
 
     private static int FindColumnIndex(Schema schema, string columnName)
     {
@@ -906,18 +903,25 @@ internal static class InsertExecutor
         public enum FillKind : byte { None, Null, Default, Identity, Computed }
 
         public FillKind Kind { get; }
-        public object? LiteralValue { get; }
 
-        private OmittedFill(FillKind kind, object? value)
+        private OmittedFill(FillKind kind)
         {
             Kind = kind;
-            LiteralValue = value;
         }
 
         public static OmittedFill None => default;
-        public static OmittedFill Null { get; } = new(FillKind.Null, null);
-        public static OmittedFill Default(object? literalValue) => new(FillKind.Default, literalValue);
-        public static OmittedFill Identity { get; } = new(FillKind.Identity, null);
+        public static OmittedFill Null { get; } = new(FillKind.Null);
+
+        /// <summary>
+        /// Marker for columns with a <c>DEFAULT</c> expression. The fill
+        /// happens per row via <see cref="ExpressionEvaluator"/> against
+        /// an empty <see cref="EvaluationFrame"/>, so non-deterministic
+        /// expressions (<c>now()</c>, <c>gen_random_uuid()</c>) produce a
+        /// fresh value per row.
+        /// </summary>
+        public static OmittedFill Default { get; } = new(FillKind.Default);
+
+        public static OmittedFill Identity { get; } = new(FillKind.Identity);
 
         /// <summary>
         /// Marker for <c>GENERATED ALWAYS AS</c> columns. The fill happens
@@ -925,7 +929,7 @@ internal static class InsertExecutor
         /// the executor evaluates <see cref="ColumnInfo.ComputedExpression"/>
         /// against the partially-built row and overwrites this slot.
         /// </summary>
-        public static OmittedFill Computed { get; } = new(FillKind.Computed, null);
+        public static OmittedFill Computed { get; } = new(FillKind.Computed);
     }
 
     /// <summary>

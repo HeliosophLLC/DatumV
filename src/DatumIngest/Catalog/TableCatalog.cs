@@ -812,7 +812,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             Expression? defaultExpression = null;
             if (d.DefaultValue is not null)
             {
-                ValidateDefaultLiteral(d.DefaultValue, d.Name);
+                ValidateDefaultExpression(d.DefaultValue, d.Name);
                 defaultExpression = d.DefaultValue;
             }
 
@@ -1072,26 +1072,133 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// literal) since the parser models negative number literals that
     /// way.
     /// </summary>
-    private static void ValidateDefaultLiteral(Expression expression, string columnName)
+    /// <summary>
+    /// Validates a column's <c>DEFAULT</c> expression. Any tableless
+    /// expression is accepted — literal, function call (<c>now()</c>,
+    /// <c>gen_random_uuid()</c>), arithmetic, CASE, array literal, etc.
+    /// The walker rejects shapes that need a source row or a query plan
+    /// at evaluation time: <see cref="ColumnReference"/>,
+    /// <see cref="SubqueryExpression"/> / <see cref="InSubqueryExpression"/> /
+    /// <see cref="ExistsExpression"/>, and
+    /// <see cref="WindowFunctionCallExpression"/>. INSERT-time evaluation
+    /// uses an empty <see cref="EvaluationFrame"/> so those shapes would
+    /// have nothing to resolve against.
+    /// </summary>
+    private static void ValidateDefaultExpression(Expression expression, string columnName)
     {
-        if (IsAcceptedDefaultLiteral(expression)) return;
+        Expression? offending = FindDisallowedDefaultNode(expression);
+        if (offending is null) return;
+
+        string offendingKind = offending switch
+        {
+            ColumnReference col => $"column reference '{(col.TableName is null ? col.ColumnName : col.TableName + "." + col.ColumnName)}'",
+            SubqueryExpression => "scalar subquery",
+            InSubqueryExpression => "IN-subquery",
+            ExistsExpression => "EXISTS subquery",
+            WindowFunctionCallExpression => "window function",
+            _ => offending.GetType().Name,
+        };
 
         throw new InvalidOperationException(
-            $"DEFAULT for column '{columnName}' must be a literal expression " +
-            "(string, number, boolean, NULL, or a negated numeric literal). " +
-            "Function calls and other computed expressions are not yet supported as DEFAULTs.");
+            $"DEFAULT for column '{columnName}': {offendingKind} is not allowed. " +
+            "DEFAULT expressions evaluate with no source row in scope; use a literal, " +
+            "a function call (e.g. now(), gen_random_uuid()), or any other tableless " +
+            "expression instead.");
     }
 
-    private static bool IsAcceptedDefaultLiteral(Expression expression) =>
-        expression switch
+    private static Expression? FindDisallowedDefaultNode(Expression expression)
+    {
+        switch (expression)
         {
-            LiteralExpression => true,
-            UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression literal }
-                => literal.Value is sbyte or short or int or long
-                    or byte or ushort or uint or ulong
-                    or float or double or decimal or Half,
-            _ => false,
-        };
+            case ColumnReference:
+            case SubqueryExpression:
+            case InSubqueryExpression:
+            case ExistsExpression:
+            case WindowFunctionCallExpression:
+                return expression;
+
+            case BinaryExpression binary:
+                return FindDisallowedDefaultNode(binary.Left) ?? FindDisallowedDefaultNode(binary.Right);
+
+            case UnaryExpression unary:
+                return FindDisallowedDefaultNode(unary.Operand);
+
+            case LikeExpression like:
+                return FindDisallowedDefaultNode(like.Expression)
+                    ?? FindDisallowedDefaultNode(like.Pattern)
+                    ?? FindDisallowedDefaultNode(like.EscapeCharacter);
+
+            case FunctionCallExpression function:
+                foreach (Expression arg in function.Arguments)
+                {
+                    Expression? offending = FindDisallowedDefaultNode(arg);
+                    if (offending is not null) return offending;
+                }
+                return null;
+
+            case InExpression inExpr:
+            {
+                Expression? offending = FindDisallowedDefaultNode(inExpr.Expression);
+                if (offending is not null) return offending;
+                foreach (Expression v in inExpr.Values)
+                {
+                    offending = FindDisallowedDefaultNode(v);
+                    if (offending is not null) return offending;
+                }
+                return null;
+            }
+
+            case BetweenExpression between:
+                return FindDisallowedDefaultNode(between.Expression)
+                    ?? FindDisallowedDefaultNode(between.Low)
+                    ?? FindDisallowedDefaultNode(between.High);
+
+            case IsNullExpression isNull:
+                return FindDisallowedDefaultNode(isNull.Expression);
+
+            case CastExpression cast:
+                return FindDisallowedDefaultNode(cast.Expression);
+
+            case CaseExpression caseExpr:
+            {
+                if (caseExpr.Operand is not null)
+                {
+                    Expression? offending = FindDisallowedDefaultNode(caseExpr.Operand);
+                    if (offending is not null) return offending;
+                }
+                foreach (WhenClause when in caseExpr.WhenClauses)
+                {
+                    Expression? offending = FindDisallowedDefaultNode(when.Condition)
+                        ?? FindDisallowedDefaultNode(when.Result);
+                    if (offending is not null) return offending;
+                }
+                if (caseExpr.ElseResult is not null)
+                {
+                    return FindDisallowedDefaultNode(caseExpr.ElseResult);
+                }
+                return null;
+            }
+
+            case StructLiteralExpression structLit:
+                foreach (StructField field in structLit.Fields)
+                {
+                    Expression? offending = FindDisallowedDefaultNode(field.Value);
+                    if (offending is not null) return offending;
+                }
+                return null;
+
+            case IndexAccessExpression indexAccess:
+                return FindDisallowedDefaultNode(indexAccess.Source)
+                    ?? FindDisallowedDefaultNode(indexAccess.Index);
+
+            // Leaf shapes that need no source row: literals, type literals,
+            // parameter binders (resolved at INSERT time via the parameter
+            // dictionary), current-timestamp, error markers, lambdas
+            // (closures over no outer row). All accepted.
+            default:
+                return null;
+        }
+    }
 
     /// <summary>
     /// Applies an <c>ALTER TABLE ADD COLUMN</c> statement. PR10b ships
@@ -1124,7 +1231,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         Expression? defaultExpr = alter.DefaultValue;
         if (defaultExpr is not null)
         {
-            ValidateDefaultLiteral(defaultExpr, alter.ColumnName);
+            ValidateDefaultExpression(defaultExpr, alter.ColumnName);
         }
 
         // Computed columns: mutually exclusive with DEFAULT — both supply a

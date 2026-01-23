@@ -79,6 +79,15 @@ public abstract class ServiceTestBase : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="TableCatalog"/> from the provided <paramref name="path"/>
+    /// </summary>
+    /// <param name="path">The path to the catalog.</param>
+    protected TableCatalog CreateCatalog(string path)
+    {
+        return new TableCatalog(GetService<Pool>(), path);
+    }
+
+    /// <summary>
     /// Creates a <see cref="TableCatalog"/> pre-populated with
     /// <see cref="InMemoryTableProvider"/> entries for each supplied
     /// <c>(name, rows)</c> pair.

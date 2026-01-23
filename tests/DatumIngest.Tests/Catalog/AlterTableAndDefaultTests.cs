@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Catalog;
 /// catalog reopen, and the deliberate gaps (<c>ALTER ADD … DEFAULT</c>
 /// and <c>ALTER ADD … NOT NULL</c> are rejected pending backfill).
 /// </summary>
-public sealed class AlterTableAndDefaultTests : IAsyncLifetime
+public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10b_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -40,8 +40,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_DefaultIntLiteral_StoredOnColumnInfo()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (a Int32 DEFAULT 5, b String)");
 
@@ -54,8 +53,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_DefaultStringLiteral_RoundTrips()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (status String DEFAULT 'pending')");
 
@@ -67,8 +65,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_DefaultNullLiteral_PreservedAsLiteral()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (a Int32 DEFAULT NULL)");
 
@@ -80,8 +77,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_DefaultNegativeNumber_AcceptedAsLiteral()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (a Int32 DEFAULT -7)");
 
@@ -95,8 +91,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_DefaultBoolLiteral_RoundTrips()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (flag Boolean DEFAULT true)");
 
@@ -106,27 +101,109 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     }
 
     [Fact]
-    public void CreateTempTable_DefaultNonLiteral_Throws()
+    public async Task CreateTempTable_DefaultNow_EvaluatesPerRow()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        // DEFAULT now() — each INSERTed row that omits the column gets a
+        // fresh UtcNow read, so the two timestamps differ on any clock with
+        // sub-tick resolution. The lift relaxes the old "must be a literal"
+        // gate; per-row evaluation matches PostgreSQL semantics for
+        // non-deterministic DEFAULTs.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts DateTime DEFAULT now())");
+        catalog.Plan("INSERT INTO t (id) VALUES (1), (2)");
 
-        // Function call as DEFAULT — not a literal.
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE t (a Int32 DEFAULT now())"));
-        Assert.Contains("must be a literal", ex.Message);
+        List<DateTimeOffset> stamps = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                stamps.Add(batch[r][1].AsDateTime());
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal(2, stamps.Count);
+        // Both timestamps are recent (within the last minute) and ordered.
+        Assert.True(stamps[0] <= stamps[1], $"Expected non-decreasing timestamps; got {stamps[0]:O} then {stamps[1]:O}.");
+        Assert.True(DateTimeOffset.UtcNow - stamps[0] < TimeSpan.FromMinutes(1));
     }
 
     [Fact]
-    public void CreateTempTable_DefaultArithmeticExpression_Throws()
+    public async Task CreateTempTable_DefaultArithmeticExpression_EvaluatesAtInsertTime()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        // 1 + 2 — accepted as a tableless expression; folded at evaluation
+        // time, not at parse time, so the row reads 3.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, n Int32 DEFAULT 1 + 2)");
+        catalog.Plan("INSERT INTO t (id) VALUES (10)");
 
-        // 1 + 2 is a binary expression, not a literal.
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Assert.Equal(3, batch[0][1].AsInt32());
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task CreateTempTable_DefaultStringConcat_EvaluatesPerRow()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, label String DEFAULT 'row-' || 'x')");
+        catalog.Plan("INSERT INTO t (id) VALUES (1)");
+
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal("row-x", batch[0][1].AsString(batch.Arena));
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task CreateTempTable_DefaultUuidV4_DistinctPerRow()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, key Uuid DEFAULT uuidv4())");
+        catalog.Plan("INSERT INTO t (id) VALUES (1), (2), (3)");
+
+        HashSet<Guid> uuids = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                uuids.Add(batch[r][1].AsUuid());
+            }
+            batch.Dispose();
+        }
+
+        Assert.Equal(3, uuids.Count);
+    }
+
+    [Fact]
+    public void CreateTempTable_DefaultColumnReference_Rejected()
+    {
+        // DEFAULT expressions evaluate against an empty frame, so a column
+        // reference would never resolve. Reject at CREATE TABLE.
+        using TableCatalog catalog = CreateCatalog();
+
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE t (a Int32 DEFAULT 1 + 2)"));
-        Assert.Contains("must be a literal", ex.Message);
+            catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32 DEFAULT a)"));
+        Assert.Contains("column reference", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTempTable_DefaultSubquery_Rejected()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE src (n Int32)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (id Int32, n Int32 DEFAULT (SELECT n FROM src LIMIT 1))"));
+        Assert.Contains("subquery", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     // ──────────────────── DEFAULT on persistent CREATE TABLE ────────────────────
@@ -134,8 +211,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_DefaultsPersistedInFooterPrologue()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, status String DEFAULT 'pending', score Int32 DEFAULT -1)");
         }
@@ -158,13 +234,12 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_ReopenedCatalog_RestoresDefaultsOnSchema()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, status String DEFAULT 'pending')");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         Schema schema = reopened["users"].GetSchema();
 
         Assert.Null(schema.Columns[0].DefaultExpression);
@@ -177,8 +252,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_AddColumn_OnTempTable_AppendsNullableColumn()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         catalog.Plan("ALTER TABLE t ADD COLUMN name String");
@@ -193,8 +267,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_AddColumn_OptionalColumnKeyword_Accepted()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         // COLUMN keyword is optional.
@@ -211,8 +284,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
         // ALTER ADD COLUMN now accepts DEFAULT. Pre-existing rows read
         // NULL (column wasn't present); INSERTs after the ALTER that
         // omit the new column pick up the DEFAULT.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (1), (2)");
 
@@ -235,24 +307,55 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     }
 
     [Fact]
-    public void AlterTable_AddColumn_WithDefault_RejectsNonLiteral()
+    public async Task AlterTable_AddColumn_WithDefaultNow_EvaluatesOnNewInserts()
     {
-        // Same literal-only validation as CREATE TABLE — function calls
-        // and other computed expressions are rejected at ALTER time.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        // ALTER ADD COLUMN ... DEFAULT now() — accepted under the lifted
+        // validator; existing rows still read NULL (no historical backfill
+        // yet, per V2-F2), new INSERTs that omit the column get a fresh
+        // UtcNow timestamp.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32)");
+        catalog.Plan("INSERT INTO t (id) VALUES (1)");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN created_at DateTime DEFAULT now()");
+        catalog.Plan("INSERT INTO t (id) VALUES (2)");
+
+        DateTimeOffset? row2Stamp = null;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                if (batch[r][0].AsInt32() == 1)
+                {
+                    Assert.True(batch[r][1].IsNull);
+                }
+                else if (batch[r][0].AsInt32() == 2)
+                {
+                    row2Stamp = batch[r][1].AsDateTime();
+                }
+            }
+            batch.Dispose();
+        }
+        Assert.NotNull(row2Stamp);
+        Assert.True(DateTimeOffset.UtcNow - row2Stamp!.Value < TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public void AlterTable_AddColumn_WithDefaultColumnReference_Rejected()
+    {
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("ALTER TABLE t ADD COLUMN created_at DateTime DEFAULT now()"));
-        Assert.Contains("literal", ex.Message);
+            catalog.Plan("ALTER TABLE t ADD COLUMN n Int32 DEFAULT id"));
+        Assert.Contains("column reference", ex.Message);
     }
 
     [Fact]
     public void AlterTable_AddColumn_WithNotNull_Throws_PendingBackfill()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -263,14 +366,13 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_AddColumn_OnPersistentTable_PersistsAcrossReopen()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32)");
             catalog.Plan("ALTER TABLE users ADD COLUMN name String");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         Schema schema = reopened["users"].GetSchema();
         Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
     }
@@ -280,8 +382,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_OnTempTable_RemovesColumn()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String, score Int32)");
 
         catalog.Plan("ALTER TABLE t DROP COLUMN name");
@@ -293,8 +394,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_OptionalColumnKeyword_Accepted()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         catalog.Plan("ALTER TABLE t DROP name");
@@ -305,8 +405,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_Missing_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -317,8 +416,7 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_IfExists_NoOpWhenMissing()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         // Should not throw.
@@ -330,14 +428,13 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_OnPersistentTable_PersistsAcrossReopen()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, name String)");
             catalog.Plan("ALTER TABLE users DROP COLUMN name");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         Schema schema = reopened["users"].GetSchema();
         Assert.Equal(["id"], schema.Columns.Select(c => c.Name));
     }
@@ -345,10 +442,48 @@ public sealed class AlterTableAndDefaultTests : IAsyncLifetime
     [Fact]
     public void AlterTable_OnMissingTable_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         Assert.ThrowsAny<Exception>(() =>
             catalog.Plan("ALTER TABLE nope ADD COLUMN x Int32"));
+    }
+
+    // ──────────────────── DEFAULT expression persistence ────────────────────
+
+    [Fact]
+    public async Task PersistentTable_DefaultNow_SurvivesReopen_AndStillEvaluatesPerRow()
+    {
+        // The DEFAULT expression persists as a SQL fragment via the v4
+        // footer prologue. After reopen, INSERTs that omit the column
+        // should re-evaluate the same expression — picking up a fresh
+        // UtcNow on every INSERT.
+        using (TableCatalog catalog = CreateCatalog( CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE events (id Int32, ts DateTime DEFAULT now())");
+            catalog.Plan("INSERT INTO events (id) VALUES (1)");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["events"].GetSchema();
+        Assert.NotNull(schema.Columns[1].DefaultExpression);
+        Assert.IsType<FunctionCallExpression>(schema.Columns[1].DefaultExpression);
+
+        // INSERT after reopen still evaluates the expression freshly.
+        reopened.Plan("INSERT INTO events (id) VALUES (2)");
+
+        List<(int Id, DateTimeOffset Ts)> rows = new();
+        await foreach (RowBatch batch in reopened["events"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                rows.Add((batch[r][0].AsInt32(), batch[r][1].AsDateTime()));
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(2, rows.Count);
+        // Row 2 was inserted second; both timestamps should be recent.
+        Assert.True(DateTimeOffset.UtcNow - rows[0].Ts < TimeSpan.FromMinutes(1));
+        Assert.True(DateTimeOffset.UtcNow - rows[1].Ts < TimeSpan.FromMinutes(1));
     }
 }
