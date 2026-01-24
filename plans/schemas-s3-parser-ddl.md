@@ -10,15 +10,16 @@ Teach the SQL surface about schemas:
   `DROP SCHEMA name [IF EXISTS] [CASCADE | RESTRICT]` exist.
 - `SET search_path = a, b, c` parses into a session-mutation statement.
 
-The parser already handles `FROM schema.table` (S1's planner/router still
-relies on that path via the temporary string indexer). This phase
-generalizes the same shape across DDL and adds the new schema-lifecycle
-statements.
+The parser already handles `FROM schema.table` (S1's planner still
+relies on that path via the temporary string indexer on `TableCatalog`).
+This phase generalizes the same shape across DDL and adds the new
+schema-lifecycle statements.
 
 ## Pre-reqs
 
-- S1 (`ITableCatalog` + `CatalogRouter` + `QualifiedName`). DDL appliers in
-  `TableCatalog` need somewhere to call `CreateSchema` / `DropSchema`.
+- S1 (`ITableCatalog` + `QualifiedName` + `TableCatalog` facade with
+  mounted backends). DDL appliers in `TableCatalog` need somewhere to
+  call `CreateSchema` / `DropSchema`.
 
 ## Locked decisions in scope
 
@@ -117,21 +118,23 @@ public sealed record SetSearchPathStatement(
 ### TableCatalog DDL appliers
 
 These already exist; just need to thread through schemas. The actual
-*execution* of `CREATE SCHEMA` etc. against the router happens here, since
-the router and backends already exposed `CreateSchema`/`DropSchema` in S1.
+*execution* of `CREATE SCHEMA` etc. against the backends happens here,
+since the backends already exposed `CreateSchema`/`DropSchema` in S1.
 
 - `ApplyCreateTable` — resolves `(create.SchemaName ?? "public", create.TableName)`
-  to a `QualifiedName`, asks the router for the writable backend at that
-  schema, calls `CreateTable`. (Search-path-based resolution for unqualified
-  names lands in S4. For S3, unqualified means `public`.)
+  to a `QualifiedName`, looks up the writable backend at that schema in
+  `TableCatalog`'s backend dict, calls `CreateTable`. (Search-path-based
+  resolution for unqualified names lands in S4. For S3, unqualified
+  means `public`.)
 - `ApplyDropTable` — same shape.
 - `ApplyAlterTable*` — same shape.
-- New `ApplyCreateSchema` — calls `_router.GetWritableBackendForNewSchema()`
-  (or simply: `FlatFileCatalog`) and registers the schema there + mounts it
-  on the router.
-- New `ApplyDropSchema` — router-level, dispatches to the owning backend.
-  CASCADE deletes all tables in the schema first; RESTRICT (default) errors
-  if non-empty.
+- New `ApplyCreateSchema` — calls `_backends["public"].CreateSchema(name)`
+  (the new schema lands in `FlatFileCatalog`) and updates `TableCatalog`'s
+  mounted-schema dict so the new schema also resolves through that
+  backend.
+- New `ApplyDropSchema` — `TableCatalog`-level, dispatches to the owning
+  backend. CASCADE deletes all tables in the schema first; RESTRICT
+  (default) errors if non-empty.
 - New `ApplySetSearchPath` — for S3, parse-and-apply lives on the
   `ExecutionContext`, but the actual context plumbing lands in S4. For S3,
   it can be a no-op stub that throws `NotImplementedException("S4")` so
@@ -147,8 +150,9 @@ the router and backends already exposed `CreateSchema`/`DropSchema` in S1.
   - `DROP SCHEMA foo` / `DROP SCHEMA IF EXISTS foo CASCADE`.
   - `SET search_path = a, b, c` and `SET search_path TO a, b, c`.
 - `src/DatumIngest.Tests/Catalog/SchemaDdlExecutionTests.cs` (new):
-  - `CREATE SCHEMA myapp; CREATE TABLE myapp.t (id INT)` succeeds and the
-    router lists `myapp` and `myapp.t`.
+  - `CREATE SCHEMA myapp; CREATE TABLE myapp.t (id INT)` succeeds and
+    `TableCatalog` lists `myapp` in its mounted-schema enumeration and
+    `myapp.t` in `ListTables("myapp")`.
   - `DROP SCHEMA myapp` on non-empty schema fails (RESTRICT).
   - `DROP SCHEMA myapp CASCADE` succeeds and removes the table.
   - `CREATE TABLE system.foo (id INT)` fails (read-only backend).
@@ -175,7 +179,8 @@ dotnet test --no-restore --filter "FullyQualifiedName~Parsing|FullyQualifiedName
       statements + `TableReference`.
 - [ ] `CreateSchemaStatement`, `DropSchemaStatement`,
       `SetSearchPathStatement` round-trip through parse/print tests.
-- [ ] DDL appliers in `TableCatalog` call the router's schema APIs.
+- [ ] DDL appliers in `TableCatalog` call the appropriate backend's
+      schema APIs.
 - [ ] CASCADE / RESTRICT behavior on `DROP SCHEMA` is tested.
 - [ ] `Parsing` and `Catalog` test subtrees green.
 - [ ] No `.Try()` regressions per the parser-factoring memory — verify by

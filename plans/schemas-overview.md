@@ -38,31 +38,52 @@ revisiting this doc.
    returned by a catalog, but the planner stops talking to providers directly.
    This is the boundary that lets a future `DatumDbCatalog` (single-file +
    WAL) drop in without engine work.
+5. **Per-table mutation lives on the provider, not the catalog.** S0 strips
+   the `BeginAppend(name)` / `AddColumn(name, ...)` / etc. wrappers off
+   `TableCatalog` — callers do `catalog[name].X(...)`. A pure refactor done
+   first to keep S1 focused.
 
 ## Architectural shape
 
 ```
-                ┌─────────────────────────────┐
-   Planner ───► │       CatalogRouter         │
-                │ schema → ITableCatalog map  │
-                └──┬──────────┬───────────┬───┘
-                   │          │           │
-            ┌──────▼─────┐ ┌──▼──────┐ ┌──▼────────────┐
-            │FlatFileCat.│ │SystemCat│ │VirtualCatalog │
-            │ public,    │ │ system  │ │info_schema,   │
-            │ user schms │ │         │ │datum_catalog  │
-            └────────────┘ └─────────┘ └───────────────┘
-                  │
+                ┌──────────────────────────────────────┐
+   Planner ───► │             TableCatalog             │
+                │   (top-level facade)                 │
+                │   - Plan / PlanAsync                 │
+                │   - Pool                             │
+                │   - UDF + Procedure registries       │
+                │   - parent/child hierarchy           │
+                │   - schema → ITableCatalog backend   │
+                └──┬───────────────┬──────────────┬────┘
+                   │               │              │
+         ┌─────────▼─────────┐ ┌───▼───────┐ ┌────▼──────────┐
+         │  FlatFileCatalog  │ │SystemCat. │ │VirtualCatalog │
+         │  (was TableCat-   │ │  system   │ │info_schema,   │
+         │   alog's storage) │ │           │ │datum_catalog  │
+         │  public,          │ │           │ │               │
+         │  user schemas     │ │           │ │               │
+         └─────────┬─────────┘ └───────────┘ └───────────────┘
+                   │
             (today: scattered .datum files)
             (future: DatumDbCatalog — one .datumdb + WAL)
 ```
 
-A `CatalogRouter` (what `TableCatalog` becomes) owns a `Dictionary<string
-schema, ITableCatalog backend>`. Multiple schemas can map to the same backend
-instance (one `FlatFileCatalog` typically owns `public` plus all
-user-created schemas). System and virtual schemas are separate backends so
-they can declare themselves read-only and project over in-memory state
-without pretending to be physical tables.
+`TableCatalog` keeps its name and its public surface — every existing caller
+of `Plan`, `AddFile`, `FromFile`, `Pool`, `Dispose` is unaffected. Internally
+it gains a `Dictionary<string schema, ITableCatalog backend>` and delegates
+all table lookup + DDL storage steps to the backend that owns the schema.
+
+The bulk of today's `TableCatalog` (the `Tables` dict, path resolution,
+file-touching DDL appliers, persistent-table tracking) is **renamed** out
+into `FlatFileCatalog` — the first concrete `ITableCatalog` implementation.
+`SystemCatalog` and `VirtualCatalog` are small new backends that project
+over in-memory state (UDF / Procedure registries, the live schema list)
+and declare `SupportsDdl = false`. Multiple schemas can map to the same
+backend instance — one `FlatFileCatalog` typically owns `public` plus all
+user-created schemas.
+
+There is no separate `CatalogRouter` class. The "router" is just a private
+field on `TableCatalog` — `TableCatalog` is the catalog facade, period.
 
 Future-proofing: an `ITransactionalCatalog : ITableCatalog` interface with
 `Begin/Commit/Rollback` is sketched in S1 but **not implemented** — it marks
@@ -75,14 +96,15 @@ cold. Phases are mostly sequential; explicit pre-reqs are noted in each file.
 
 | Phase | File | LOC | Depends on | What it does |
 |-------|------|-----|------------|--------------|
-| S1 | [schemas-s1-catalog-interface.md](schemas-s1-catalog-interface.md) | ~700 | — | Introduce `ITableCatalog`, `CatalogRouter`, `QualifiedName`. Extract `FlatFileCatalog` / `SystemCatalog` / `VirtualCatalog`. Move all existing providers under their real schemas. |
+| S0 | [schemas-s0-table-mutation-on-provider.md](schemas-s0-table-mutation-on-provider.md) | ~150 | — | Pure refactor: drop the per-table mutation wrappers (`BeginAppend(name)` etc.) from `TableCatalog`; callers do `catalog[name].X(...)`. Independent of the schema work; lands first to keep S1's PR focused. |
+| S1 | [schemas-s1-catalog-interface.md](schemas-s1-catalog-interface.md) | ~900 | S0 | Introduce `ITableCatalog`, `QualifiedName`. Rename current `TableCatalog` → `FlatFileCatalog` (the file-backed implementation). Build a new `TableCatalog` facade that owns the schema→backend map plus `Plan` / `Pool` / UDF + Procedure registries. Add `SystemCatalog` / `VirtualCatalog`. Move all existing providers under their real schemas. |
 | S2 | [schemas-s2-manifest-v3.md](schemas-s2-manifest-v3.md) | ~80 | S1 | Bump `CatalogStore` to v3 schema-aware format. Reject v2. Per-backend opaque state blob. |
 | S3 | [schemas-s3-parser-ddl.md](schemas-s3-parser-ddl.md) | ~250 | S1 | Parser + AST for `CREATE/DROP/ALTER TABLE schema.t`, `CREATE/DROP SCHEMA`, `SET search_path`. |
 | S4 | [schemas-s4-resolver-and-search-path.md](schemas-s4-resolver-and-search-path.md) | ~400 | S1, S3 | `SchemaResolver` + `search_path` on `ExecutionContext`. Replace every flat-string concat lookup site. |
 | S5 | [schemas-s5-language-server.md](schemas-s5-language-server.md) | ~300 | S1, S3, S4 | Drop hardcoded virtual-schema list. Schema-aware completion + diagnostics. |
 | S6 | [schemas-s6-three-part-column-refs.md](schemas-s6-three-part-column-refs.md) | ~200 | S4 | (Optional) Three-part `schema.table.column` references. Skip unless real ambiguity hits. |
 
-Total: ~1700 LOC core (S1–S5), ~1900 with S6.
+Total: ~2080 LOC core (S0–S5), ~2280 with S6.
 
 ## Cross-cutting reminders
 

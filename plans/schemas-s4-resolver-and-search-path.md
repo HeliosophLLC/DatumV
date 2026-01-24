@@ -14,7 +14,7 @@ S3 (parser surface).
 
 ## Pre-reqs
 
-- S1 (`CatalogRouter` + `QualifiedName`).
+- S1 (`TableCatalog` facade with mounted backends + `QualifiedName`).
 - S3 (`SetSearchPathStatement` parses; AST DDL records have `SchemaName`).
 - S2 helps but isn't strictly required — the resolver doesn't touch
   manifest format.
@@ -49,24 +49,24 @@ S3 (parser surface).
   ```csharp
   public sealed class SchemaResolver
   {
-      private readonly CatalogRouter _router;
+      private readonly TableCatalog _catalog;
       private readonly IReadOnlyList<string> _searchPath;
 
-      public SchemaResolver(CatalogRouter router, IReadOnlyList<string> searchPath) { ... }
+      public SchemaResolver(TableCatalog catalog, IReadOnlyList<string> searchPath) { ... }
 
       public QualifiedName Resolve(TableReference tableRef)
       {
           if (tableRef.SchemaName is not null)
           {
               var qn = new QualifiedName(tableRef.SchemaName, tableRef.Name);
-              if (!_router.TryGetTable(qn, out _))
+              if (!_catalog.TryGetTable(qn, out _))
                   throw new SchemaResolutionException(/* schema-or-table-missing */);
               return qn;
           }
           foreach (var schema in _searchPath)
           {
               var qn = new QualifiedName(schema, tableRef.Name);
-              if (_router.TryGetTable(qn, out _)) return qn;
+              if (_catalog.TryGetTable(qn, out _)) return qn;
           }
           throw new SchemaResolutionException(/* not found in [search_path] */);
       }
@@ -75,20 +75,25 @@ S3 (parser surface).
       {
           if (explicitSchema is not null)
           {
-              var backend = _router.ResolveBackend(explicitSchema);
-              if (backend.IsReadOnly)
-                  throw new SchemaResolutionException(/* read-only schema */);
+              var backend = _catalog.ResolveBackend(explicitSchema);
+              if (!backend.SupportsDdl)
+                  throw new SchemaResolutionException(/* schema does not accept DDL */);
               return new QualifiedName(explicitSchema, name);
           }
           foreach (var schema in _searchPath)
           {
-              if (_router.TryResolveBackend(schema, out var backend) && !backend.IsReadOnly)
+              if (_catalog.TryResolveBackend(schema, out var backend) && backend.SupportsDdl)
                   return new QualifiedName(schema, name);
           }
-          throw new SchemaResolutionException(/* no writable schema in search_path */);
+          throw new SchemaResolutionException(/* no DDL-capable schema in search_path */);
       }
   }
   ```
+
+  Note: `TableCatalog` exposes `TryGetTable(QualifiedName)`,
+  `ResolveBackend(string)`, and `TryResolveBackend(string, out)` as
+  internal-or-public methods on the facade. These are added in S1 alongside
+  the private backend dict.
 - `src/DatumIngest/Execution/SchemaResolutionException.cs` — sealed; carries
   the original `TableReference` and the search-path snapshot for diagnostics.
 
@@ -102,7 +107,7 @@ S3 (parser surface).
   - New `WithSearchPath(IReadOnlyList<string> path) → ExecutionContext`
     immutable copy-mutator. Copy-on-write so prior contexts captured by
     in-flight queries are unaffected.
-- `TableCatalog` / `CatalogRouter`:
+- `TableCatalog`:
   - Add `ApplySetSearchPath(SetSearchPathStatement, ExecutionContext)`
     returning the new context. (Or hand off to the session manager —
     depends on where S3 left the stub.)
@@ -136,8 +141,8 @@ S3 (parser surface).
     diagnostics).
   - Unqualified lookup walks search_path in order; first hit wins.
   - Unqualified miss lists every schema attempted in the exception.
-  - `ResolveForCreate` skips read-only backends.
-  - `ResolveForCreate` errors when no writable schema in search_path.
+  - `ResolveForCreate` skips backends with `SupportsDdl == false`.
+  - `ResolveForCreate` errors when no DDL-capable schema in search_path.
 - `src/DatumIngest.Tests/Execution/SearchPathTests.cs` (new):
   - Default search_path resolves `udfs` to `system.udfs` (because `system`
     is on the default path) — verify the rip & replace from S1 is

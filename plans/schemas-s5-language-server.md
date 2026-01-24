@@ -6,14 +6,14 @@ Move the language server off its hardcoded virtual-schema list and onto the
 live catalog. After this phase:
 
 - Completion offers schema names and per-schema table lists from the actual
-  router state, not a baked-in dictionary.
+  catalog state, not a baked-in dictionary.
 - Diagnostics distinguish "schema does not exist" from "table not in
   schema" from "table not in any schema on `search_path`."
 - The schema manifest sent to the LSP is schema-grouped, not flat.
 
 ## Pre-reqs
 
-- S1 (`CatalogRouter` + `QualifiedName` — the LSP needs to walk live
+- S1 (`TableCatalog` facade + `QualifiedName` — the LSP needs to walk live
   schemas).
 - S3 (parser emits `SchemaName` on DDL records — completion needs to
   trigger after `CREATE TABLE schema.`).
@@ -45,24 +45,30 @@ Today the LSP receives a flat tables-with-columns map. New shape:
   "schemas": [
     {
       "name": "public",
-      "is_read_only": false,
+      "supports_ddl": true,
       "tables": [
         { "name": "users", "columns": [{"name": "id", "kind": "Int32"}, ...] }
       ]
     },
     {
       "name": "system",
-      "is_read_only": true,
+      "supports_ddl": false,
       "tables": [
         { "name": "udfs", "columns": [...] },
         { "name": "procedures", "columns": [...] }
       ]
     },
-    { "name": "information_schema", "is_read_only": true, "tables": [...] },
-    { "name": "datum_catalog", "is_read_only": true, "tables": [...] }
+    { "name": "information_schema", "supports_ddl": false, "tables": [...] },
+    { "name": "datum_catalog", "supports_ddl": false, "tables": [...] }
   ]
 }
 ```
+
+`supports_ddl` mirrors `ITableCatalog.SupportsDdl` from S1 — drives
+"don't suggest this schema after `CREATE TABLE `" in completion.
+Per-table DML capability (can-INSERT, can-UPDATE) is a separate
+question that lives on the provider; the LSP doesn't need it for any
+diagnostic in this phase.
 
 Locate the manifest producer (likely in `src/DatumIngest.LanguageServer/`
 or wherever DevWeb assembles the manifest) and update both producer and
@@ -96,7 +102,8 @@ consumer. Bump `version: 2` so any cached older manifest is rejected.
       `users` in `public` outranks one in `system`).
     - **After `FROM schema.`** → suggest tables in that schema only.
     - **After `CREATE TABLE `** / `DROP TABLE ` / `ALTER TABLE ` →
-      schema-prefix completion (suggest writable schemas).
+      schema-prefix completion (suggest schemas with `supports_ddl: true`
+      only).
     - **After `CREATE TABLE schema.`** → suggest table names already in
       that schema (for `IF NOT EXISTS` discoverability) — low priority,
       can defer if completion infra is awkward.
@@ -126,7 +133,7 @@ consumer. Bump `version: 2` so any cached older manifest is rejected.
     tables.
   - After `FROM information_schema.` — completion offers `tables`,
     `columns`, `schemata` only.
-  - After `CREATE TABLE ` — `system` not in suggestions (read-only).
+  - After `CREATE TABLE ` — `system` not in suggestions (`supports_ddl: false`).
 - Update existing tests in
   [SemanticAnalyzerTests.cs:691-795](../src/DatumIngest.LanguageServer.Tests/SemanticAnalyzerTests.cs#L691)
   to match new diagnostic message text.

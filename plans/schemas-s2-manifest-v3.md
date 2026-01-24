@@ -12,7 +12,7 @@ This is a small phase by design.
 
 ## Pre-reqs
 
-- S1 (`ITableCatalog` + `CatalogRouter` + three backends are in place).
+- S1 (`ITableCatalog` + `TableCatalog`-as-facade + three backends are in place).
 
 ## Locked decisions in scope
 
@@ -53,13 +53,14 @@ This is a small phase by design.
   Notes:
   - Top-level `tables` is the authoritative `(schema, name)` registry, schema-side. Backend
     state (file paths) lives under `backends.<key>` and is opaque to the
-    router.
+    facade.
   - `udfs` and `procedures` gain a `schema` field. They previously sat
     flat; default migration is impossible (no v2 reader), so existing
     catalogs won't carry them across — fresh start.
   - `schemas` lists *user-created* schemas only. Built-in schemas
     (`public`, `system`, `information_schema`, `datum_catalog`) are
-    re-mounted by the router on construction and don't need persisting.
+    re-mounted by `TableCatalog` on construction and don't need
+    persisting.
   - `backends` is a `Dictionary<string backendKey, JsonElement>`. Each
     backend writes/reads its own slot; the store doesn't introspect.
 
@@ -81,9 +82,9 @@ This is a small phase by design.
 - [src/DatumIngest/Catalog/Backends/FlatFileCatalog.cs](../src/DatumIngest/Catalog/Backends/FlatFileCatalog.cs)
   — gains `SerializeBackendState() → JsonElement` and
   `LoadBackendState(JsonElement)`. Writes the flat-name → relative-path map.
-- `TableCatalog` (the router shell from S1) — wires backend-state
-  serialization into save/load. Removes the temporary "split on `.`"
-  legacy shim added in S1.
+- `TableCatalog` (the facade from S1, with its private backend dict) —
+  wires backend-state serialization into save/load. Removes the
+  temporary "split on `.`" legacy shim added in S1.
 - `CatalogFileTableEntry` and any other v2-shaped DTOs in
   [CatalogStore.cs:632](../src/DatumIngest/Catalog/CatalogStore.cs#L632) —
   deleted.
