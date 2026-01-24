@@ -464,6 +464,7 @@ SELECT * FROM raw_data WHERE is_date(date_column) = 0
 
 ## See Also
 
-- [Encoding & Hashing Functions](encoding.md) -- UUID and hashing utilities
+- [UUID Functions](uuid.md) -- UUID generation, formatting, and timestamp extraction
+- [Cryptographic Hash Functions](crypto.md) -- md5, sha1, sha2 family, and digest dispatcher
 - [Aggregate Functions](aggregate.md) -- grouping and reduction functions
 - [SQL Reference](../sql/select.md) -- full SQL dialect documentation

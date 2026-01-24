@@ -389,6 +389,14 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Uuid.UuidExtractVersionFunction>();
         registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
+        registry.RegisterScalar<Scalar.Crypto.Md5Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha1Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha256Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha384Function>();
+        registry.RegisterScalar<Scalar.Crypto.Sha512Function>();
+        registry.RegisterScalar<Scalar.Crypto.DigestFunction>();
+        registry.RegisterScalar<Scalar.EncodeFunction>();
+        registry.RegisterScalar<Scalar.DecodeFunction>();
         registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
         registry.RegisterScalar<Scalar.ArrayToStringFunction>();
         registry.RegisterScalar<Scalar.ArrayLengthFunction>();

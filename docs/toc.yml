@@ -198,8 +198,12 @@
       href: functions/array.md
     - name: JSON
       href: functions/json.md
-    - name: Encoding & Hashing
+    - name: Encoding & Decoding
       href: functions/encoding.md
+    - name: Cryptographic Hashing
+      href: functions/crypto.md
+    - name: UUID
+      href: functions/uuid.md
     - name: Image
       href: functions/image.md
     - name: Random & Sampling
