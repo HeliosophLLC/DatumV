@@ -33,13 +33,12 @@ SELECT gen_random_uuid() AS id FROM data
 
 ### uuidv7
 
-`uuidv7([shift])` -> Uuid | QU: 1
+`uuidv7()` -> Uuid | QU: 1
 
-Generate a time-ordered version 7 UUID. Optional Duration shift offsets the embedded timestamp (PG 18).
+Generate a time-ordered version 7 UUID (PG 18).
 
 ```sql
--- Generate a UUID with a timestamp shifted 1 hour into the future
-SELECT uuidv7(make_duration(0, 1, 0, 0)) AS future_id FROM data
+SELECT uuidv7() AS id FROM data
 ```
 
 ### is_uuid
@@ -63,6 +62,26 @@ Format UUID as lowercase hyphenated string.
 `uuid_bytes(uuid)` -> UInt8Array | QU: 1
 
 Extract UUID as 16-byte UInt8Array (big-endian).
+
+### uuid_extract_version
+
+`uuid_extract_version(uuid)` -> Int16 | QU: 1
+
+Returns the version number of an RFC 9562 UUID. Returns NULL for non-RFC 9562 variants (PG 18).
+
+```sql
+SELECT uuid_extract_version(uuidv7()) AS v  -- 7
+```
+
+### uuid_extract_timestamp
+
+`uuid_extract_timestamp(uuid)` -> DateTime | QU: 1
+
+Returns the embedded timestamp from a version 1, 6, or 7 UUID. Returns NULL for other versions or non-RFC 9562 variants (PG 18).
+
+```sql
+SELECT uuid_extract_timestamp(uuidv7()) AS created_at
+```
 
 ```sql
 -- Hash composite keys using UUID bytes

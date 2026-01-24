@@ -382,8 +382,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.RandomChoiceFunction>();
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
+        registry.RegisterScalarAlias<Scalar.Uuid.UuidV4Function>("gen_random_uuid");
         registry.RegisterScalar<Scalar.Uuid.UuidV7Function>();
         registry.RegisterScalar<Scalar.Uuid.UuidStrFunction>();
+        registry.RegisterScalar<Scalar.Uuid.UuidExtractTimestampFunction>();
+        registry.RegisterScalar<Scalar.Uuid.UuidExtractVersionFunction>();
         registry.RegisterScalar<Scalar.CyclicalEncodeFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
         registry.RegisterScalar<Scalar.ArrayConstructorFunction>();
