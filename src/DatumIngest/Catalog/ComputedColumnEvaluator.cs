@@ -50,10 +50,13 @@ internal static class ComputedColumnEvaluator
                     $"supplied value is scalar {source.Kind}.");
             }
 
-            ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
-
             // Same element kind: hand the array directly to ToDataValue, which
-            // materialises payload bytes into the target arena.
+            // materialises payload bytes into the target arena. This is the
+            // hot path for functions like sha256/base64 that produce
+            // byte-backed UInt8[] via ValueRef.FromBytes — those don't carry
+            // a ValueRef[] payload, so calling GetArrayElements on them
+            // throws. Same-kind doesn't need per-element extraction, so we
+            // skip GetArrayElements entirely here.
             if (source.Kind == target.Kind)
             {
                 return source.ToDataValue(targetArena);
@@ -61,6 +64,10 @@ internal static class ComputedColumnEvaluator
 
             // Different element kind: per-element coerce via LiteralCoercion,
             // then assemble a new typed array from the coerced DataValues.
+            // GetArrayElements is only called for cross-kind cases — those
+            // arrays come from struct/array literal evaluation, which builds
+            // ValueRef[] payloads, so the call is safe here.
+            ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
             return CoerceArrayElements(elements, target, targetArena, columnName);
         }
 
