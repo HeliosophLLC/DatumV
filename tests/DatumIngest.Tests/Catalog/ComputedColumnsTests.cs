@@ -378,27 +378,121 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
     // ──────────────────── ALTER TABLE ADD COLUMN ────────────────────
 
     [Fact]
-    public async Task AlterTable_AddComputedColumn_NewInsertsCompute()
+    public async Task AlterTable_AddComputedColumn_BackfillsHistoricalRows()
     {
+        // V2-F2 — historical rows present at ALTER time get the computed
+        // value via a post-AddColumn scan + UpdateRows pass. New INSERTs
+        // continue to compute per row through the standard path.
         using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32)");
         catalog.Plan("INSERT INTO t VALUES (1, 2), (10, 20)");
 
         catalog.Plan("ALTER TABLE t ADD COLUMN sum Int32 AS (a + b)");
-
-        // Pre-existing rows read NULL (column wasn't present when they
-        // were inserted); new INSERT picks up the computed value.
         catalog.Plan("INSERT INTO t (a, b) VALUES (100, 200)");
 
         await foreach (RowBatch batch in catalog["t"].ScanAsync(
             requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
         {
             Assert.Equal(3, batch.Count);
-            Assert.True(batch[0][2].IsNull);
-            Assert.True(batch[1][2].IsNull);
-            Assert.Equal(300, batch[2][2].AsInt32());
+            Assert.Equal(3, batch[0][2].AsInt32());    // backfilled
+            Assert.Equal(30, batch[1][2].AsInt32());   // backfilled
+            Assert.Equal(300, batch[2][2].AsInt32()); // new INSERT
             batch.Dispose();
         }
+    }
+
+    [Fact]
+    public void AlterTable_AddComputedColumn_AgainstEmptyTable_NoBackfillWork()
+    {
+        // Degenerate case — no rows to backfill, but the ALTER must
+        // still succeed and the column must be visible to subsequent
+        // INSERTs.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32)");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN sum Int32 AS (a + b)");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Equal(3, schema.Columns.Count);
+        Assert.NotNull(schema.Columns[2].ComputedExpression);
+    }
+
+    [Fact]
+    public async Task AlterTable_AddComputedColumn_BackfillSkipsNullInputs()
+    {
+        // Rows whose source columns are NULL produce NULL via standard
+        // SQL three-valued logic. The backfill should leave those slots
+        // NULL (matching the post-AddColumn pump) rather than spinning
+        // up a UpdateRows request that overwrites NULL with NULL.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32)");
+        catalog.Plan("INSERT INTO t (a, b) VALUES (1, 2), (NULL, 5), (3, NULL)");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN sum Int32 AS (a + b)");
+
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(3, batch.Count);
+            Assert.Equal(3, batch[0][2].AsInt32());
+            Assert.True(batch[1][2].IsNull);
+            Assert.True(batch[2][2].IsNull);
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task AlterTable_AddComputedColumn_BackfillSurvivesPersistentReopen()
+    {
+        // The backfilled values live in the table's pages, so they round-
+        // trip across close + reopen the same way INSERT-time values do.
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
+            catalog.Plan("INSERT INTO t VALUES (4, 5), (10, 7)");
+            catalog.Plan("ALTER TABLE t ADD COLUMN sum Int32 AS (a + b)");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Dictionary<int, int> sums = new();
+        await foreach (RowBatch batch in reopened["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                sums[batch[r][0].AsInt32()] = batch[r][2].AsInt32();
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(9, sums[4]);
+        Assert.Equal(17, sums[10]);
+    }
+
+    [Fact]
+    public async Task AlterTable_AddComputedColumn_WideStringExpression_BackfillsCorrectly()
+    {
+        // Exercises the workArena stabilisation path for a non-inline
+        // result kind. The backfill stores arena-backed Strings; the
+        // UpdateRows pass routes through CoerceForUpdate's sidecar/
+        // arena-aware path.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
+        catalog.Plan("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN label String AS ('row-' || name)");
+
+        Dictionary<int, string> labels = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                labels[batch[r][0].AsInt32()] = batch[r][2].AsString(batch.Arena);
+            }
+            batch.Dispose();
+        }
+        Assert.Equal("row-alice", labels[1]);
+        Assert.Equal("row-bob", labels[2]);
     }
 
     // ──────────────────── Persistent reopen ────────────────────

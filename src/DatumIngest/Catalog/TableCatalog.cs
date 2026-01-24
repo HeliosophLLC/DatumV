@@ -1279,6 +1279,118 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             ComputedExpression = computedExpr,
         };
         AddColumn(alter.TableName, column);
+
+        // V2-F2: backfill the just-added computed column against the
+        // table's historical rows. provider.AddColumn() pumped NULLs into
+        // every existing row's slot for the new column; now we scan the
+        // post-mutation snapshot, evaluate the expression per row, and
+        // dispatch one UpdateRows call with the computed values.
+        //
+        // Caveat: non-deterministic calls (now(), uuidv4(), random()) get
+        // captured at ALTER time, so every historical row sees the value
+        // computed during this scan — not the original INSERT time. New
+        // INSERTs after the ALTER continue to evaluate per row, matching
+        // the v1 INSERT-time behaviour.
+        if (computedExpr is not null)
+        {
+            BackfillComputedColumn(alter.TableName, column);
+        }
+    }
+
+    /// <summary>
+    /// Streams the table's historical rows through the new column's
+    /// <see cref="ColumnInfo.ComputedExpression"/>, then dispatches a
+    /// single page-COW <c>UpdateRows</c> call that installs the computed
+    /// values in place of the NULL pump that <c>provider.AddColumn</c>
+    /// just emitted.
+    /// </summary>
+    /// <remarks>
+    /// Sync-bridges the async scan to match the existing sync shape of
+    /// <see cref="ApplyAlterTableAddColumn"/>; remove once the C1g
+    /// async-Plan cleanup lands.
+    /// </remarks>
+    private void BackfillComputedColumn(string tableName, ColumnInfo column)
+    {
+        if (!TryGetTable(tableName, out ITableProvider? provider)) return;
+        if (!provider.CanUpdateRows)
+        {
+            // Without an UpdateRows path we can't install values into
+            // historical rows. Surface the gap explicitly so a user
+            // doesn't silently get all-NULL historical values.
+            throw new InvalidOperationException(
+                $"ALTER TABLE '{tableName}' ADD COLUMN '{column.Name}' AS (...): " +
+                $"provider type '{provider.GetType().Name}' does not support UpdateRows, " +
+                "so historical rows cannot be backfilled with the computed expression.");
+        }
+
+        BackfillComputedColumnAsync(provider, column).GetAwaiter().GetResult();
+    }
+
+    private async Task BackfillComputedColumnAsync(ITableProvider provider, ColumnInfo column)
+    {
+        Schema schema = provider.GetSchema();
+        int newColIdx = -1;
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (string.Equals(schema.Columns[i].Name, column.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                newColIdx = i;
+                break;
+            }
+        }
+        if (newColIdx < 0) return;
+
+        using Arena workArena = new();
+        ExpressionEvaluator evaluator = new(Functions, sidecarRegistry: SidecarRegistry);
+        List<RowUpdateRequest> requests = new();
+        long liveRowIndex = 0;
+
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: CancellationToken.None).ConfigureAwait(false))
+        {
+            try
+            {
+                Arena scanArena = batch.Arena;
+                for (int r = 0; r < batch.Count; r++, liveRowIndex++)
+                {
+                    Row row = batch[r];
+                    EvaluationFrame frame = new(
+                        row,
+                        scanArena,
+                        workArena,
+                        outerRow: null,
+                        sidecarRegistry: SidecarRegistry,
+                        types: null);
+                    ValueRef result = await evaluator.EvaluateAsValueRefAsync(
+                        column.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
+                    DataValue computed = ComputedColumnEvaluator.ConvertValueRefToTarget(
+                        result, column, workArena, column.Name);
+
+                    // Skip rows whose computed value is NULL — the column's
+                    // pages already hold NULL after AddColumn's pump, so an
+                    // UpdateRows request would be a no-op. Keeps the batch
+                    // tight when an expression like `nullable_col + 1`
+                    // produces NULL for many rows.
+                    if (computed.IsNull) continue;
+
+                    requests.Add(new RowUpdateRequest(
+                        liveRowIndex,
+                        new Dictionary<int, DataValue> { [newColIdx] = computed }));
+                }
+            }
+            finally
+            {
+                batch.Dispose();
+            }
+        }
+
+        if (requests.Count > 0)
+        {
+            provider.UpdateRows(requests, workArena);
+        }
     }
 
     /// <summary>
