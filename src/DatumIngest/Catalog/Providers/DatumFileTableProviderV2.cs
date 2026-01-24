@@ -985,7 +985,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             identitySpec = new IdentitySpec(
                 footer.Prologue.IdentitySeed,
-                footer.Prologue.IdentityStep);
+                footer.Prologue.IdentityStep,
+                footer.Prologue.IdentityAcceptUserValues);
         }
 
         // PRIMARY KEY — set of footer column indices for the per-column
@@ -1346,10 +1347,22 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             ? null
             : Execution.QueryExplainer.FormatExpression(column.ComputedExpression);
 
+        // IDENTITY: the writer needs the new column's footer index, which
+        // it computes itself (newColumnCount - 1 after the resize). We
+        // pass a placeholder ColumnIndex; the writer overwrites it from
+        // its own state at pump time.
+        IdentityWriterSpec? identitySpec = column.Identity is null
+            ? null
+            : new IdentityWriterSpec(
+                ColumnIndex: -1,  // writer assigns the real footer index
+                Seed: column.Identity.Seed,
+                Step: column.Identity.Step,
+                AcceptUserValues: column.Identity.AcceptUserValues);
+
         _mutationLock.Wait();
         try
         {
-            DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor, defaultFragment, computedFragment);
+            DatumFileWriterV2.AddColumn(_descriptor.FilePath, descriptor, defaultFragment, computedFragment, identitySpec);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
             InvalidateSourceIndexCache();
         }

@@ -183,6 +183,7 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
             IdentitySeed: 0,
             IdentityStep: 0,
             IdentityNextValue: 0,
+            IdentityAcceptUserValues: false,
             PrimaryKeyColumnIndices: []);
 
         using MemoryStream ms = new();

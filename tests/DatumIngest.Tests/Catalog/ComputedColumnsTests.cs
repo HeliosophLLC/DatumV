@@ -402,6 +402,40 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public async Task AlterTable_AddComputedColumn_Sha256ByteArrayResult_BackfillsCorrectly()
+    {
+        // Regression: sha256(content) returns a byte-backed UInt8[]
+        // ValueRef (built via ValueRef.FromBytes, not ValueRef[]).
+        // ConvertValueRefToTarget used to call GetArrayElements() before
+        // the same-kind fast path, which throws "Array ValueRef does not
+        // carry a ValueRef[] payload" on byte-backed arrays. The check
+        // is now scoped to the cross-kind branch where per-element
+        // coercion actually needs the elements.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE y (id Int32 GENERATED ALWAYS AS IDENTITY, content String)");
+        catalog.Plan("INSERT INTO y (content) VALUES ('a'), ('b'), ('c')");
+
+        catalog.Plan("ALTER TABLE y ADD COLUMN hash UInt8[] AS (sha256(content))");
+
+        // Each row should have a 32-byte SHA-256 digest, not NULL.
+        Schema schema = catalog["y"].GetSchema();
+        Assert.NotNull(schema.Columns[2].ComputedExpression);
+
+        int hashedRows = 0;
+        await foreach (RowBatch batch in catalog["y"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Assert.False(batch[r][2].IsNull, $"row {r} hash should not be NULL");
+                hashedRows++;
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(3, hashedRows);
+    }
+
+    [Fact]
     public void AlterTable_AddComputedColumn_AgainstEmptyTable_NoBackfillWork()
     {
         // Degenerate case — no rows to backfill, but the ALTER must

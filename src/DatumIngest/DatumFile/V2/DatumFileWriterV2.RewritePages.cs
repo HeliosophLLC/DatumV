@@ -261,6 +261,7 @@ public sealed partial class DatumFileWriterV2
                 IdentitySeed: oldProlog.IdentitySeed,
                 IdentityStep: oldProlog.IdentityStep,
                 IdentityNextValue: oldProlog.IdentityNextValue,
+                IdentityAcceptUserValues: oldProlog.IdentityAcceptUserValues,
                 PrimaryKeyColumnIndices: oldProlog.PrimaryKeyColumnIndices);
 
             // Preserve the file's type table verbatim — RewritePages

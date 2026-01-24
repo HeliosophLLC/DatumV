@@ -120,6 +120,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     private long _identitySeed;
     private long _identityStep;
     private long _identityNextValue;
+    private bool _identityAcceptUserValues;
 
     // PRIMARY KEY column indices (PR10f). Empty when the table has
     // no PK. Carries forward unchanged across appends — neither
@@ -304,6 +305,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             _identitySeed = id.Seed;
             _identityStep = id.Step;
             _identityNextValue = id.Seed;
+            _identityAcceptUserValues = id.AcceptUserValues;
         }
 
         if (primaryKeyColumnIndices is { Count: > 0 })
@@ -504,6 +506,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             IdentitySeed: _identitySeed,
             IdentityStep: _identityStep,
             IdentityNextValue: _identityNextValue,
+            IdentityAcceptUserValues: _identityAcceptUserValues,
             PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>());
 
         IReadOnlyList<ColumnComputedV4> computedsForFooter = _columnComputeds is { Count: > 0 }
@@ -783,7 +786,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// </para>
     /// </remarks>
     public void AddColumn(ColumnDescriptorV2 column) =>
-        AddColumn(column, defaultSqlFragment: null, computedSqlFragment: null);
+        AddColumn(column, defaultSqlFragment: null, computedSqlFragment: null, identityForNewColumn: null);
 
     /// <summary>
     /// As <see cref="AddColumn(ColumnDescriptorV2)"/>, plus an optional
@@ -792,7 +795,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// pick up the default; pre-existing rows still backfill as NULL.
     /// </summary>
     public void AddColumn(ColumnDescriptorV2 column, string? defaultSqlFragment) =>
-        AddColumn(column, defaultSqlFragment, computedSqlFragment: null);
+        AddColumn(column, defaultSqlFragment, computedSqlFragment: null, identityForNewColumn: null);
 
     /// <summary>
     /// As <see cref="AddColumn(ColumnDescriptorV2, string?)"/>, plus an
@@ -801,7 +804,24 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// the catalog rejects DEFAULT + computed on the same column at
     /// validation time.
     /// </summary>
-    public void AddColumn(ColumnDescriptorV2 column, string? defaultSqlFragment, string? computedSqlFragment)
+    public void AddColumn(ColumnDescriptorV2 column, string? defaultSqlFragment, string? computedSqlFragment) =>
+        AddColumn(column, defaultSqlFragment, computedSqlFragment, identityForNewColumn: null);
+
+    /// <summary>
+    /// Full-fidelity <c>AddColumn</c> that additionally accepts an
+    /// <see cref="IdentityWriterSpec"/> when the new column is declared
+    /// <c>GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY</c>. The writer
+    /// pumps sequential counter values into existing rows (instead of
+    /// NULLs), sets up the prologue's identity state, and advances the
+    /// running counter past the backfill. The catalog has already
+    /// validated single-IDENTITY-per-table at this point — the writer
+    /// asserts the invariant defensively.
+    /// </summary>
+    public void AddColumn(
+        ColumnDescriptorV2 column,
+        string? defaultSqlFragment,
+        string? computedSqlFragment,
+        IdentityWriterSpec? identityForNewColumn)
     {
         ArgumentNullException.ThrowIfNull(column);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -897,21 +917,84 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             _columnComputeds.Add(new ColumnComputedV4(checked((ushort)newIndex), computedSqlFragment));
         }
 
-        // Pump _totalRowsWritten null values into the new column's
-        // encoder. Pages flush automatically as the encoder fills,
-        // streaming all-null bytes past EOF and recording offsets in
-        // the new page directory. After this loop the encoder's
-        // RowCount matches every other column's logical position
-        // (zero, since we asserted that above), so subsequent
-        // WriteRowBatch calls extend all columns in lockstep.
-        DataValue nullValue = DataValue.Null(column.Kind);
-        for (long row = 0; row < _totalRowsWritten; row++)
+        // Pump _totalRowsWritten values into the new column's encoder.
+        // For a plain ADD COLUMN, every existing row reads NULL. For an
+        // ADD COLUMN ... GENERATED ... AS IDENTITY, existing rows get
+        // sequential counter values and the writer's identity state is
+        // initialised so subsequent INSERTs continue past the backfill.
+        // Pages flush automatically as the encoder fills.
+        if (identityForNewColumn is not null)
         {
-            _encoders[newIndex].Append(nullValue, store: null, sidecar: null);
-            if (_encoders[newIndex].IsFull)
+            if (_identityColumnIndex >= 0)
             {
-                FlushPage(newIndex);
+                throw new InvalidOperationException(
+                    $"AddColumn: cannot add IDENTITY column '{column.Name}' because the file " +
+                    "already carries an IDENTITY column at footer index " + _identityColumnIndex +
+                    ". Drop the existing IDENTITY column first.");
             }
+
+            long counter = identityForNewColumn.Seed;
+            for (long row = 0; row < _totalRowsWritten; row++)
+            {
+                DataValue value = BuildIdentityValue(column.Kind, counter, column.Name);
+                _encoders[newIndex].Append(value, store: null, sidecar: null);
+                if (_encoders[newIndex].IsFull)
+                {
+                    FlushPage(newIndex);
+                }
+                counter = checked(counter + identityForNewColumn.Step);
+            }
+
+            _identityColumnIndex = checked((short)newIndex);
+            _identitySeed = identityForNewColumn.Seed;
+            _identityStep = identityForNewColumn.Step;
+            _identityAcceptUserValues = identityForNewColumn.AcceptUserValues;
+            _identityNextValue = counter;
+        }
+        else
+        {
+            DataValue nullValue = DataValue.Null(column.Kind);
+            for (long row = 0; row < _totalRowsWritten; row++)
+            {
+                _encoders[newIndex].Append(nullValue, store: null, sidecar: null);
+                if (_encoders[newIndex].IsFull)
+                {
+                    FlushPage(newIndex);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a <see cref="DataValue"/> carrying <paramref name="counterValue"/>
+    /// in the target IDENTITY column's <see cref="DataKind"/>. Throws
+    /// <see cref="OverflowException"/> when the counter has run past the
+    /// kind's range — surfaces as a clean error during ALTER ADD IDENTITY
+    /// backfill rather than a silent wrap.
+    /// </summary>
+    private static DataValue BuildIdentityValue(DataKind kind, long counterValue, string columnName)
+    {
+        try
+        {
+            return kind switch
+            {
+                DataKind.Int8 => DataValue.FromInt8(checked((sbyte)counterValue)),
+                DataKind.Int16 => DataValue.FromInt16(checked((short)counterValue)),
+                DataKind.Int32 => DataValue.FromInt32(checked((int)counterValue)),
+                DataKind.Int64 => DataValue.FromInt64(counterValue),
+                DataKind.UInt8 => DataValue.FromUInt8(checked((byte)counterValue)),
+                DataKind.UInt16 => DataValue.FromUInt16(checked((ushort)counterValue)),
+                DataKind.UInt32 => DataValue.FromUInt32(checked((uint)counterValue)),
+                DataKind.UInt64 => DataValue.FromUInt64(checked((ulong)counterValue)),
+                _ => throw new InvalidOperationException(
+                    $"IDENTITY column '{columnName}': kind {kind} is not a supported integer kind."),
+            };
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"IDENTITY column '{columnName}': counter value {counterValue} does not fit in {kind} " +
+                "during ALTER ADD IDENTITY backfill. Choose a kind with wider range or a smaller seed/step.");
         }
     }
 
@@ -1040,18 +1123,28 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// evaluate the expression per row instead of accepting an explicit
     /// value for this column.
     /// </param>
+    /// <param name="identityForNewColumn">
+    /// Optional <see cref="IdentityWriterSpec"/> when the new column is
+    /// declared <c>GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY</c>. The
+    /// writer backfills existing rows with sequential counter values
+    /// (instead of NULL) and initialises the file's identity state so
+    /// subsequent INSERTs continue past the backfill. The
+    /// <see cref="IdentityWriterSpec.ColumnIndex"/> field is ignored —
+    /// the writer assigns the real footer index itself.
+    /// </param>
     public static void AddColumn(
         string datumPath,
         ColumnDescriptorV2 column,
         string? defaultSqlFragment = null,
-        string? computedSqlFragment = null)
+        string? computedSqlFragment = null,
+        IdentityWriterSpec? identityForNewColumn = null)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(column);
 
         string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
         using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
-        writer.AddColumn(column, defaultSqlFragment, computedSqlFragment);
+        writer.AddColumn(column, defaultSqlFragment, computedSqlFragment, identityForNewColumn);
         writer.FinalizeWriter();
     }
 
@@ -1367,6 +1460,7 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         _identitySeed = footer.Prologue.IdentitySeed;
         _identityStep = footer.Prologue.IdentityStep;
         _identityNextValue = footer.Prologue.IdentityNextValue;
+        _identityAcceptUserValues = footer.Prologue.IdentityAcceptUserValues;
 
         // Carry forward PRIMARY KEY column indices verbatim.
         if (footer.Prologue.PrimaryKeyColumnIndices.Count > 0)
@@ -1826,4 +1920,4 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 /// initial next-value from the seed and persists the live counter
 /// through subsequent commits.
 /// </summary>
-public sealed record IdentityWriterSpec(int ColumnIndex, long Seed, long Step);
+public sealed record IdentityWriterSpec(int ColumnIndex, long Seed, long Step, bool AcceptUserValues = false);

@@ -486,4 +486,65 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         Assert.True(DateTimeOffset.UtcNow - rows[0].Ts < TimeSpan.FromMinutes(1));
         Assert.True(DateTimeOffset.UtcNow - rows[1].Ts < TimeSpan.FromMinutes(1));
     }
+
+    // ──────────────────── DEFAULT type validation at CREATE/ALTER time ────────────────────
+
+    [Fact]
+    public void CreateTempTable_DefaultFloatOnIntColumn_RejectsAtCreateTime()
+    {
+        // `DEFAULT 3.14` on an Int32 column is type-incompatible — the
+        // catalog should reject at CREATE TABLE, not let the failure
+        // surface at INSERT time when an omitted-column resolution kicks
+        // off the runtime coercion.
+        using TableCatalog catalog = CreateCatalog();
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (n Int32 DEFAULT 3.14)"));
+        Assert.Contains("Int32", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTempTable_DefaultStringOnIntColumn_RejectsAtCreateTime()
+    {
+        using TableCatalog catalog = CreateCatalog();
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (n Int32 DEFAULT 'oops')"));
+        Assert.Contains("Int32", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTempTable_DefaultIntOnStringColumn_RejectsAtCreateTime()
+    {
+        using TableCatalog catalog = CreateCatalog();
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("CREATE TEMP TABLE t (s String DEFAULT 5)"));
+        Assert.Contains("String", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTempTable_DefaultNowOnDateTime_StillAccepted()
+    {
+        // Sanity: eager validation must not reject deterministic +
+        // non-deterministic function-call DEFAULTs that DO coerce
+        // correctly. Only the explicit type mismatches should fail.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, ts DateTime DEFAULT now())");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.NotNull(schema.Columns[1].DefaultExpression);
+    }
+
+    [Fact]
+    public void AlterTable_AddColumn_DefaultFloatOnIntColumn_RejectsAtAlterTime()
+    {
+        // Same eager type-validation at ALTER ADD COLUMN time.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32)");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN n Int32 DEFAULT 3.14"));
+        Assert.Contains("Int32", ex.Message);
+    }
 }

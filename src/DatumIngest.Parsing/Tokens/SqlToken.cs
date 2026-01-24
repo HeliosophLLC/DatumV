@@ -307,6 +307,12 @@ public enum SqlToken
     /// <summary>The IDENTITY keyword (auto-incrementing column).</summary>
     Identity,
 
+    /// <summary>The GENERATED keyword (SQL:2003 / Postgres column generation: <c>GENERATED ALWAYS AS …</c>, <c>GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY</c>).</summary>
+    Generated,
+
+    /// <summary>The ALWAYS keyword (used inside <c>GENERATED ALWAYS AS …</c>).</summary>
+    Always,
+
     /// <summary>The IF keyword (conditional DDL guard).</summary>
     If,
 

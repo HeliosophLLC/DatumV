@@ -337,18 +337,43 @@ public sealed class InMemoryTableProvider : ITableProvider
                 }
             }
 
-            // Append the column slot, back-fill existing rows with null.
+            // When the new column is IDENTITY, refuse if the table
+            // already has an IDENTITY column. The catalog enforces this
+            // at validation time, but defending here keeps the provider
+            // honest.
+            if (column.Identity is not null && _identityColumnIndex >= 0)
+            {
+                throw new InvalidOperationException(
+                    $"AddColumn: cannot add IDENTITY column '{column.Name}' because table '{Name}' " +
+                    $"already has an IDENTITY column at index {_identityColumnIndex}.");
+            }
+
+            int newColumnIndex = _columns.Length;
+
+            // Append the column slot, back-fill existing rows. For
+            // IDENTITY columns the backfill produces sequential counter
+            // values; otherwise NULL.
             string[] newColumns = new string[_columns.Length + 1];
             Array.Copy(_columns, newColumns, _columns.Length);
             newColumns[^1] = column.Name;
 
             object?[][] newRows = new object?[_rows.Length][];
+            long backfillCounter = column.Identity?.Seed ?? 0;
+            long backfillStep = column.Identity?.Step ?? 0;
             for (int r = 0; r < _rows.Length; r++)
             {
                 object?[] oldRow = _rows[r];
                 object?[] newRow = new object?[oldRow.Length + 1];
                 Array.Copy(oldRow, newRow, oldRow.Length);
-                newRow[^1] = null;
+                if (column.Identity is not null)
+                {
+                    newRow[^1] = CoerceIdentityCounterToKind(backfillCounter, column.Kind, column.Name);
+                    backfillCounter = checked(backfillCounter + backfillStep);
+                }
+                else
+                {
+                    newRow[^1] = null;
+                }
                 newRows[r] = newRow;
             }
 
@@ -367,10 +392,52 @@ public sealed class InMemoryTableProvider : ITableProvider
             _schema = new Schema(newSchemaColumns, carriedPkIndices);
             _fullLookup = new ColumnLookup(_columns);
             _overrideIndex = null;
+
+            // Wire the new column's IDENTITY state so subsequent INSERTs
+            // continue past the backfill.
+            if (column.Identity is not null)
+            {
+                _identityColumnIndex = newColumnIndex;
+                _identitySeed = column.Identity.Seed;
+                _identityStep = column.Identity.Step;
+                _identityNextValue = backfillCounter;
+            }
         }
         finally
         {
             _mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Coerces a <see cref="long"/> counter value to the boxed CLR shape
+    /// the in-memory row table uses for the IDENTITY column's kind.
+    /// Overflow surfaces as a clean <see cref="InvalidOperationException"/>
+    /// rather than a silent wrap.
+    /// </summary>
+    private static object CoerceIdentityCounterToKind(long counterValue, DataKind kind, string columnName)
+    {
+        try
+        {
+            return kind switch
+            {
+                DataKind.Int8 => (object)checked((sbyte)counterValue),
+                DataKind.Int16 => checked((short)counterValue),
+                DataKind.Int32 => checked((int)counterValue),
+                DataKind.Int64 => counterValue,
+                DataKind.UInt8 => checked((byte)counterValue),
+                DataKind.UInt16 => checked((ushort)counterValue),
+                DataKind.UInt32 => checked((uint)counterValue),
+                DataKind.UInt64 => checked((ulong)counterValue),
+                _ => throw new InvalidOperationException(
+                    $"IDENTITY column '{columnName}': kind {kind} is not a supported integer kind."),
+            };
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"IDENTITY column '{columnName}': counter value {counterValue} does not fit in {kind} " +
+                "during ALTER ADD IDENTITY backfill.");
         }
     }
 

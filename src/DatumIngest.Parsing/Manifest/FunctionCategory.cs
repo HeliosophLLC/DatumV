@@ -28,7 +28,7 @@ public enum FunctionCategory
     /// <summary>Image metadata, loading, transforms, analysis, and perceptual hashing.</summary>
     Image,
 
-    /// <summary>UUID generation/inspection, cryptographic hashing (MD5/SHA/CRC), and base64/hex encoding.</summary>
+    /// <summary>Binary encoding/decoding between byte arrays and text: base64, hex, and Postgres-style escape.</summary>
     Encoding,
 
     /// <summary>JSON path access, existence testing, and array inspection.</summary>
@@ -59,4 +59,7 @@ public enum FunctionCategory
 
     /// <summary>Spatial / geometric: point construction, component access, distance, vector math.</summary>
     Spatial,
+
+    /// <summary>Cryptographic hashing: MD5, SHA-1, SHA-2 family, and the generic <c>digest</c> dispatcher.</summary>
+    Crypto,
 }

@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.Catalog;
 /// counter persistence across reopen for persistent tables;
 /// catalog-level CREATE/INSERT round-trip on temp + persistent.
 /// </summary>
-public sealed class IdentityColumnTests : IAsyncLifetime
+public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10e_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -40,8 +40,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_BareIdentity_DefaultsToOneOne()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
@@ -55,8 +54,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_ParametrizedIdentity_KeepsSeedAndStep()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(100, 5))");
 
@@ -68,8 +66,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_NegativeStepIdentity_Allowed()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(0, -1))");
 
@@ -81,8 +78,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_TwoIdentityColumns_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (a Int32 IDENTITY, b Int64 IDENTITY)"));
@@ -92,8 +88,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_NonIntegerIdentity_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (id String IDENTITY)"));
@@ -103,8 +98,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_ZeroStep_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(1, 0))"));
@@ -115,8 +109,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     public void CreateTempTable_SeedOutOfRangeForKind_Throws()
     {
         // Int8 holds [-128, 127]. Seed 200 doesn't fit.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (id Int8 IDENTITY(200, 1))"));
@@ -128,8 +121,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_AutoFillsIdentity_FromOne()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
         catalog.Plan("INSERT INTO t (name) VALUES ('alice'), ('bob'), ('carol')");
@@ -141,8 +133,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_AutoFillsIdentity_WithCustomSeedAndStep()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(100, 5), name String)");
 
         catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b')");
@@ -154,8 +145,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_TwoBatches_CounterAdvancesAcrossInserts()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY, name String)");
 
         catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b')");
@@ -168,8 +158,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void InsertValues_ColumnListIncludesIdentity_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY, name String)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -180,8 +169,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void InsertValues_PositionalAgainstIdentityTable_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY, name String)");
 
         // Positional supplies values for every column including the
@@ -194,8 +182,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_OmitsIdentityColumn_AutoFills()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE src (n String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 IDENTITY, n String)");
         catalog.Plan("INSERT INTO src VALUES ('x'), ('y')");
@@ -209,8 +196,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_ColumnListIncludesIdentity_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE src (n Int32, m String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 IDENTITY, n String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'x')");
@@ -225,14 +211,13 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_PersistentTable_CounterSurvivesReopen()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int64 IDENTITY, name String)");
             catalog.Plan("INSERT INTO users (name) VALUES ('alice'), ('bob')");
         }
 
-        using (TableCatalog reopened = new(pool, CatalogPath))
+        using (TableCatalog reopened = CreateCatalog(CatalogPath))
         {
             // Insert another row — the counter must continue from 3,
             // not restart at 1.
@@ -246,8 +231,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_IdentityPersistsInFooterPrologue()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32 IDENTITY(50, 2), name String)");
         }
@@ -262,8 +246,7 @@ public sealed class IdentityColumnTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_PersistentTable_AdvancesCounterInFooter()
     {
-        Pool pool = new(new PoolBacking());
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int64 IDENTITY, name String)");
             catalog.Plan("INSERT INTO users (name) VALUES ('a'), ('b'), ('c')");
@@ -278,28 +261,6 @@ public sealed class IdentityColumnTests : IAsyncLifetime
         List<(long id, string name)> rows = await ScanLongFirstString(reopened["users"]);
         Assert.Equal([(1L, "a"), (2L, "b"), (3L, "c")], rows);
     }
-
-    // ──────────────────── ALTER TABLE ADD COLUMN with IDENTITY ────────────────────
-
-    [Fact]
-    public void AlterTableAddColumn_IdentityNotAllowed_OutOfScope()
-    {
-        // PR10b's ALTER ADD COLUMN already rejects DEFAULT and NOT NULL.
-        // IDENTITY through ALTER ADD isn't wired in PR10e — the parser
-        // produces an Identity field on the AST but the executor's
-        // path doesn't propagate it. Pin the current behavior so a
-        // future PR can flip this test to verify the new path.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool);
-        catalog.Plan("CREATE TEMP TABLE t (a Int32)");
-
-        // Current ALTER ADD COLUMN parser doesn't accept IDENTITY in
-        // its body, so the parse itself fails. Either way: not a
-        // supported operation today.
-        Assert.ThrowsAny<Exception>(() =>
-            catalog.Plan("ALTER TABLE t ADD COLUMN id Int32 IDENTITY"));
-    }
-
 
     // ──────────────────── Helpers ────────────────────
 
@@ -334,5 +295,243 @@ public sealed class IdentityColumnTests : IAsyncLifetime
             batch.Dispose();
         }
         return rows;
+    }
+
+    // ──────────────────── GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY ────────────────────
+
+    [Fact]
+    public void CreateTable_GeneratedAlwaysAsIdentity_BehavesLikeBareIdentity()
+    {
+        // The PG-canonical syntax `GENERATED ALWAYS AS IDENTITY` is the
+        // direct replacement for bare `IDENTITY`. Default seed/step (1,1),
+        // explicit values rejected.
+        using TableCatalog catalog = CreateCatalog();
+
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String)");
+
+        IdentitySpec spec = catalog["t"].GetSchema().Columns[0].Identity!;
+        Assert.Equal(1, spec.Seed);
+        Assert.Equal(1, spec.Step);
+        Assert.False(spec.AcceptUserValues);
+    }
+
+    [Fact]
+    public void CreateTable_GeneratedAlwaysAsIdentityWithSeedStep_KeepsValues()
+    {
+        using TableCatalog catalog = CreateCatalog();
+
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 GENERATED ALWAYS AS IDENTITY(100, 5))");
+
+        IdentitySpec spec = catalog["t"].GetSchema().Columns[0].Identity!;
+        Assert.Equal(100, spec.Seed);
+        Assert.Equal(5, spec.Step);
+        Assert.False(spec.AcceptUserValues);
+    }
+
+    [Fact]
+    public void CreateTable_GeneratedByDefaultAsIdentity_SetsAcceptUserValuesTrue()
+    {
+        using TableCatalog catalog = CreateCatalog();
+
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED BY DEFAULT AS IDENTITY, name String)");
+
+        IdentitySpec spec = catalog["t"].GetSchema().Columns[0].Identity!;
+        Assert.Equal(1, spec.Seed);
+        Assert.Equal(1, spec.Step);
+        Assert.True(spec.AcceptUserValues);
+    }
+
+    [Fact]
+    public async Task Insert_AlwaysIdentity_RejectsExplicitValue()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO t (id, name) VALUES (99, 'forced')"));
+        Assert.Contains("GENERATED ALWAYS AS IDENTITY", ex.Message);
+
+        // Sanity: subsequent omitted-id insert still works.
+        catalog.Plan("INSERT INTO t (name) VALUES ('after')");
+        long id = -1;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            id = batch[0][0].AsInt64();
+            batch.Dispose();
+        }
+        Assert.Equal(1L, id);
+    }
+
+    [Fact]
+    public async Task Insert_ByDefaultIdentity_AcceptsExplicitValue()
+    {
+        // GENERATED BY DEFAULT AS IDENTITY accepts user-supplied values
+        // and only invokes the counter when the column is omitted. PG
+        // semantics: the counter is NOT auto-advanced by explicit
+        // inserts, so a later omitted INSERT can collide if the user
+        // explicitly hit a soon-to-be-generated value (their problem).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED BY DEFAULT AS IDENTITY, name String)");
+
+        catalog.Plan("INSERT INTO t (id, name) VALUES (42, 'explicit'), (43, 'also explicit')");
+        catalog.Plan("INSERT INTO t (name) VALUES ('auto')");
+
+        Dictionary<string, long> byName = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                byName[batch[r][1].AsString(batch.Arena)] = batch[r][0].AsInt64();
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(42L, byName["explicit"]);
+        Assert.Equal(43L, byName["also explicit"]);
+        Assert.Equal(1L, byName["auto"]);  // counter started at seed (1), independent of explicit inserts
+    }
+
+    [Fact]
+    public async Task PersistentTable_ByDefaultIdentity_RoundTripsAcceptFlagAcrossReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int64 GENERATED BY DEFAULT AS IDENTITY, name String)");
+            catalog.Plan("INSERT INTO t (id, name) VALUES (100, 'pre-reopen')");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        IdentitySpec spec = reopened["t"].GetSchema().Columns[0].Identity!;
+        Assert.True(spec.AcceptUserValues);
+
+        // Explicit value still accepted after reopen.
+        reopened.Plan("INSERT INTO t (id, name) VALUES (200, 'post-reopen')");
+
+        long[] ids = Array.Empty<long>();
+        await foreach (RowBatch batch in reopened["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            ids = new long[batch.Count];
+            for (int r = 0; r < batch.Count; r++) ids[r] = batch[r][0].AsInt64();
+            batch.Dispose();
+        }
+        Assert.Equal(new[] { 100L, 200L }, ids);
+    }
+
+    [Fact]
+    public void CreateTable_GeneratedAlwaysAsExpression_RoutesToComputedColumn()
+    {
+        // Disambiguation check — `GENERATED ALWAYS AS (expr)` produces a
+        // computed column, not an IDENTITY. The token after AS (`(` vs
+        // `IDENTITY`) is the discriminator.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32 GENERATED ALWAYS AS (a + 1))");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.NotNull(schema.Columns[1].ComputedExpression);
+        Assert.Null(schema.Columns[1].Identity);
+    }
+
+    // ──────────────────── Identity counter boundary handling ────────────────────
+
+    [Fact]
+    public void Insert_Int8Identity_PastMax_Throws()
+    {
+        // Int8 range is [-128, 127]. With seed=126, two omitted INSERTs
+        // fill 126 and 127; the third reservation would advance the
+        // counter to 128 — outside Int8 range. The error must surface
+        // cleanly (no silent wrap to -128).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int8 IDENTITY(126, 1), name String)");
+        catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b')");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t (name) VALUES ('c')"));
+        Assert.Contains("Int8", ex.Message);
+    }
+
+    [Fact]
+    public void Insert_UInt32Identity_PastMax_Throws()
+    {
+        // UInt32 max is 4_294_967_295. Seed at max-1 → two inserts
+        // succeed, third must throw with an UInt32-overflow message
+        // (not silently wrap).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id UInt32 IDENTITY(4294967294, 1), name String)");
+        catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b')");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t (name) VALUES ('c')"));
+        Assert.Contains("UInt32", ex.Message);
+    }
+
+    [Fact]
+    public void Insert_Int8NegativeStep_PastMin_Throws()
+    {
+        // Int8 min is -128. Seed -127, step -1 → first INSERT fills -127,
+        // second fills -128, third would advance to -129 → must throw.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int8 IDENTITY(-127, -1), name String)");
+        catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b')");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t (name) VALUES ('c')"));
+        Assert.Contains("Int8", ex.Message);
+    }
+
+    // ──────────────────── ALTER TABLE ADD COLUMN with IDENTITY ────────────────────
+
+    [Fact]
+    public async Task AlterTable_AddColumn_GeneratedAlwaysAsIdentity_BackfillsHistoricalRows()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (name String)");
+        catalog.Plan("INSERT INTO t (name) VALUES ('alice'), ('bob'), ('carol')");
+
+        catalog.Plan("ALTER TABLE t ADD COLUMN id Int64 GENERATED ALWAYS AS IDENTITY");
+
+        // Historical rows get sequential identity values from the seed.
+        Dictionary<string, long> ids = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                ids[batch[r][0].AsString(batch.Arena)] = batch[r][1].AsInt64();
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(1L, ids["alice"]);
+        Assert.Equal(2L, ids["bob"]);
+        Assert.Equal(3L, ids["carol"]);
+
+        // Subsequent INSERT continues the counter past the backfill.
+        catalog.Plan("INSERT INTO t (name) VALUES ('dave')");
+        long daveId = -1;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                if (batch[r][0].AsString(batch.Arena) == "dave") daveId = batch[r][1].AsInt64();
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(4L, daveId);
+    }
+
+    [Fact]
+    public void AlterTable_AddColumn_Identity_WhenTableAlreadyHasIdentity_Throws()
+    {
+        // At most one IDENTITY column per table — adding a second via
+        // ALTER must be rejected with a clear error.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String)");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN seq Int64 GENERATED ALWAYS AS IDENTITY"));
+        Assert.Contains("IDENTITY", ex.Message);
     }
 }

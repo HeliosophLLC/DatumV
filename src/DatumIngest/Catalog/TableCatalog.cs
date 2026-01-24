@@ -587,7 +587,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 // Schema-build validates "at most one IDENTITY column", so
                 // hitting two here would be a structural bug — fall through
                 // and let the writer's invariants surface it.
-                identityWriterSpec = new IdentityWriterSpec(i, identity.Seed, identity.Step);
+                identityWriterSpec = new IdentityWriterSpec(i, identity.Seed, identity.Step, identity.AcceptUserValues);
             }
         }
 
@@ -813,6 +813,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             if (d.DefaultValue is not null)
             {
                 ValidateDefaultExpression(d.DefaultValue, d.Name);
+                ValidateDefaultExpressionFitsColumn(d.DefaultValue, d.Name, kind, isArray);
                 defaultExpression = d.DefaultValue;
             }
 
@@ -825,30 +826,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         $"Table may have at most one IDENTITY column; both " +
                         $"'{definitions[identityColumnIndex].Name}' and '{d.Name}' carry IDENTITY.");
                 }
-                if (isArray)
-                {
-                    throw new InvalidOperationException(
-                        $"Column '{d.Name}': IDENTITY is not supported on typed-array columns.");
-                }
-                if (!DataValueComparer.IsIntegerKind(kind) ||
-                    kind is DataKind.Int128 or DataKind.UInt128)
-                {
-                    // Int128 / UInt128 are integer kinds per the comparer
-                    // but don't fit in the prologue's int64 seed/step
-                    // storage; reject them explicitly so the error names
-                    // the actual constraint.
-                    throw new InvalidOperationException(
-                        $"Column '{d.Name}': IDENTITY requires a 8/16/32/64-bit integer column kind " +
-                        "(Int8/Int16/Int32/Int64 or UInt8/UInt16/UInt32/UInt64); got " + kind + ".");
-                }
-                if (d.Identity.Step == 0)
-                {
-                    throw new InvalidOperationException(
-                        $"Column '{d.Name}': IDENTITY step must be non-zero.");
-                }
-                ValidateIdentityValueFitsInKind(kind, d.Identity.Seed, d.Name, "seed");
-                ValidateIdentityValueFitsInKind(kind, d.Identity.Step, d.Name, "step");
-
+                ValidateIdentitySpecForColumn(d.Identity, d.Name, kind, isArray);
                 identity = d.Identity;
                 identityColumnIndex = i;
             }
@@ -1042,6 +1020,43 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         return size > 0;
     }
 
+    /// <summary>
+    /// Shared validation for an <see cref="IdentitySpec"/> attached to a
+    /// column at <c>CREATE TABLE</c> or <c>ALTER TABLE ADD COLUMN</c>
+    /// time. Enforces: integer column kind in the 8/16/32/64-bit range
+    /// (Int8…Int64, UInt8…UInt64), non-array, non-zero step, and
+    /// seed/step that fit the kind's range. The single-IDENTITY-per-table
+    /// check lives at the caller because the "existing IDENTITY" set is
+    /// caller-specific (definitions vs. live schema).
+    /// </summary>
+    private static void ValidateIdentitySpecForColumn(
+        IdentitySpec identity, string columnName, DataKind kind, bool isArray)
+    {
+        if (isArray)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': IDENTITY is not supported on typed-array columns.");
+        }
+        if (!DataValueComparer.IsIntegerKind(kind) ||
+            kind is DataKind.Int128 or DataKind.UInt128)
+        {
+            // Int128 / UInt128 are integer kinds per the comparer but
+            // don't fit in the prologue's int64 seed/step storage;
+            // reject them explicitly so the error names the actual
+            // constraint.
+            throw new InvalidOperationException(
+                $"Column '{columnName}': IDENTITY requires a 8/16/32/64-bit integer column kind " +
+                "(Int8/Int16/Int32/Int64 or UInt8/UInt16/UInt32/UInt64); got " + kind + ".");
+        }
+        if (identity.Step == 0)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': IDENTITY step must be non-zero.");
+        }
+        ValidateIdentityValueFitsInKind(kind, identity.Seed, columnName, "seed");
+        ValidateIdentityValueFitsInKind(kind, identity.Step, columnName, "step");
+    }
+
     private static void ValidateIdentityValueFitsInKind(DataKind kind, long value, string columnName, string label)
     {
         bool fits = kind switch
@@ -1104,6 +1119,52 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             "DEFAULT expressions evaluate with no source row in scope; use a literal, " +
             "a function call (e.g. now(), gen_random_uuid()), or any other tableless " +
             "expression instead.");
+    }
+
+    /// <summary>
+    /// Eagerly evaluates the <c>DEFAULT</c> expression against an empty
+    /// frame at <c>CREATE TABLE</c> / <c>ALTER TABLE ADD COLUMN</c> time
+    /// and coerces the result to the column's <see cref="DataKind"/>. If
+    /// the coercion fails — type mismatch, out-of-range literal, etc. —
+    /// the error surfaces here instead of at the first <c>INSERT</c>'s
+    /// per-row evaluation. Side effects from the probe are discarded
+    /// (functions like <c>now()</c> / <c>uuidv4()</c> are pure scalars,
+    /// so the throwaway value never escapes).
+    /// </summary>
+    private void ValidateDefaultExpressionFitsColumn(
+        Expression expression, string columnName, DataKind kind, bool isArray)
+    {
+        using Arena probeArena = new();
+        ExpressionEvaluator evaluator = new(_functions, store: probeArena);
+        ColumnLookup emptyLookup = new(Array.Empty<string>());
+        Row emptyRow = new(emptyLookup, Array.Empty<DataValue>());
+        EvaluationFrame frame = new(emptyRow, probeArena, probeArena);
+
+        // Build a column-info shim with the target kind/nullable/array
+        // shape so ConvertValueRefToTarget validates against the real
+        // surface. Nullable=true keeps null-allowed; runtime per-row
+        // evaluation handles NOT-NULL rejection separately.
+        ColumnInfo probeTarget = new(columnName, kind, nullable: true) { IsArray = isArray };
+
+        try
+        {
+            ValueRef result = evaluator.EvaluateAsValueRefAsync(
+                expression, frame, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            _ = ComputedColumnEvaluator.ConvertValueRefToTarget(
+                result, probeTarget, probeArena, columnName);
+        }
+        catch (Exception inner)
+            when (inner is InvalidOperationException
+                  or NotSupportedException
+                  or OverflowException
+                  or FormatException
+                  or ArgumentException)
+        {
+            throw new InvalidOperationException(
+                $"DEFAULT for column '{columnName}' ({kind}{(isArray ? "[]" : "")}) is not " +
+                $"compatible with the column type: {inner.Message}",
+                inner);
+        }
     }
 
     private static Expression? FindDisallowedDefaultNode(Expression expression)
@@ -1232,6 +1293,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (defaultExpr is not null)
         {
             ValidateDefaultExpression(defaultExpr, alter.ColumnName);
+            ValidateDefaultExpressionFitsColumn(defaultExpr, alter.ColumnName, kind, isArray);
         }
 
         // Computed columns: mutually exclusive with DEFAULT — both supply a
@@ -1245,6 +1307,35 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             throw new InvalidOperationException(
                 $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': cannot combine " +
                 "DEFAULT and GENERATED ALWAYS AS — pick one.");
+        }
+
+        // IDENTITY validation. Mutually exclusive with DEFAULT and
+        // computed expression; rejected when the table already carries
+        // an IDENTITY column.
+        IdentitySpec? identity = alter.Identity;
+        if (identity is not null)
+        {
+            if (defaultExpr is not null || computedExpr is not null)
+            {
+                throw new InvalidOperationException(
+                    $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': IDENTITY " +
+                    "cannot combine with DEFAULT or GENERATED ALWAYS AS — pick one.");
+            }
+            ValidateIdentitySpecForColumn(identity, alter.ColumnName, kind, isArray);
+            if (TryGetTable(alter.TableName, out ITableProvider? existingForIdentity))
+            {
+                Schema existingSchema = existingForIdentity.GetSchema();
+                foreach (ColumnInfo existing in existingSchema.Columns)
+                {
+                    if (existing.Identity is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': " +
+                            $"table already has an IDENTITY column '{existing.Name}'. Only one " +
+                            "IDENTITY column is allowed per table.");
+                    }
+                }
+            }
         }
 
         // Reject computed-to-computed dependencies against the table's
@@ -1277,6 +1368,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             IsArray = isArray,
             DefaultExpression = defaultExpr,
             ComputedExpression = computedExpr,
+            Identity = identity,
         };
         AddColumn(alter.TableName, column);
 

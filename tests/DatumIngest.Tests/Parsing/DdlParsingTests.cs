@@ -450,13 +450,15 @@ public class DdlParsingTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Computed column: <c>ALTER TABLE t ADD COLUMN ratio FLOAT64 AS revenue / cost</c>.
+    /// Computed column: <c>ALTER TABLE t ADD COLUMN ratio FLOAT64 AS (revenue / cost)</c>.
+    /// The parens around the expression match the CREATE TABLE form (and PG's
+    /// `GENERATED ALWAYS AS (expr)` requirement); bare `AS expr` is rejected.
     /// </summary>
     [Fact]
     public void AlterTableAddColumnComputed()
     {
         Statement statement = SqlParser.ParseStatement(
-            "ALTER TABLE t ADD COLUMN ratio FLOAT64 AS revenue / cost");
+            "ALTER TABLE t ADD COLUMN ratio FLOAT64 AS (revenue / cost)");
 
         AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
         Assert.Equal("ratio", alter.ColumnName);
@@ -468,13 +470,13 @@ public class DdlParsingTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Computed column with a function call: <c>AS UPPER(name)</c>.
+    /// Computed column with a function call: <c>AS (UPPER(name))</c>.
     /// </summary>
     [Fact]
     public void AlterTableAddColumnComputedWithFunction()
     {
         Statement statement = SqlParser.ParseStatement(
-            "ALTER TABLE t ADD COLUMN upper_name STRING AS UPPER(name)");
+            "ALTER TABLE t ADD COLUMN upper_name STRING AS (UPPER(name))");
 
         AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
         Assert.NotNull(alter.ComputedExpression);
@@ -489,7 +491,7 @@ public class DdlParsingTests : ServiceTestBase
     public void AlterTableAddColumnComputedNotNull()
     {
         Statement statement = SqlParser.ParseStatement(
-            "ALTER TABLE t ADD COLUMN flag BOOLEAN NOT NULL AS x > 0");
+            "ALTER TABLE t ADD COLUMN flag BOOLEAN NOT NULL AS (x > 0)");
 
         AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
         Assert.False(alter.Nullable);
