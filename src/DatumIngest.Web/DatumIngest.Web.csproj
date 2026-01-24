@@ -68,7 +68,6 @@
   -->
   <Target Name="GenerateOpenApi"
           AfterTargets="Build"
-          Condition="'$(SkipClientApp)' != 'true'"
           Inputs="$(TargetPath);nswag.json"
           Outputs="ClientApp/src/api/generated/openapi-client.ts">
     <Exec Command="$(NSwagExe_Net80) run nswag.json /variables:Configuration=$(Configuration)"
@@ -80,7 +79,6 @@
     Sentinel keeps it incremental — runs only when the manifest changes.
   -->
   <Target Name="ToolRestore"
-          Condition="'$(SkipClientApp)' != 'true'"
           Inputs="$(MSBuildThisFileDirectory)../../dotnet-tools.json"
           Outputs="$(IntermediateOutputPath)tool-restore.stamp">
     <Exec Command="dotnet tool restore" WorkingDirectory="$(MSBuildThisFileDirectory)../.." />
@@ -95,7 +93,6 @@
   <Target Name="GenerateHubTypes"
           AfterTargets="GenerateOpenApi"
           DependsOnTargets="ToolRestore"
-          Condition="'$(SkipClientApp)' != 'true'"
           Inputs="$(TargetPath)"
           Outputs="ClientApp/src/api/generated/hubs/TypedSignalR.Client/index.ts">
     <Exec Command="dotnet tsrts --project DatumIngest.Web.csproj --output ClientApp/src/api/generated/hubs"

@@ -56,6 +56,10 @@ export class HealthClient {
 export interface HealthDto {
     status?: string;
     version?: string;
+    userId?: string;
+    displayName?: string;
+    catalogPath?: string;
+    nodeId?: string;
 }
 
 export class SwaggerException extends Error {

@@ -12,7 +12,15 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        var bootstrap = new WebHostBootstrap(args, "http://127.0.0.1:0", new WebHostOptions());
+        var catalogRootPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DatumIngest");
+        Directory.CreateDirectory(catalogRootPath);
+
+        var bootstrap = new WebHostBootstrap(
+            args,
+            "http://127.0.0.1:0",
+            new WebHostOptions { CatalogRootPath = catalogRootPath });
         var host = WebHost.Start(bootstrap);
 
         Console.WriteLine($"[Client] Kestrel listening at {host.Url}");

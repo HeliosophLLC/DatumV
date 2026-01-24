@@ -14,7 +14,16 @@ public static class Program
     public static int Main(string[] args)
     {
         var url = Environment.GetEnvironmentVariable("DATUM_WEB_URL") ?? "http://127.0.0.1:5000";
-        var bootstrap = new WebHostBootstrap(args, url, new WebHostOptions());
+        var catalogRootPath = Environment.GetEnvironmentVariable("DATUM_CATALOG_PATH")
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DatumIngest");
+        Directory.CreateDirectory(catalogRootPath);
+
+        var bootstrap = new WebHostBootstrap(
+            args,
+            url,
+            new WebHostOptions { CatalogRootPath = catalogRootPath });
 
         var host = WebHost.Start(bootstrap);
         Console.WriteLine($"DatumIngest.Web listening at {host.Url}");

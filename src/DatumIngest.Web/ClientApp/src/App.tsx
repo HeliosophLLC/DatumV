@@ -20,9 +20,16 @@ export default function App() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background text-foreground">
-      <h1 className="text-3xl font-semibold">
-        DatumIngest {data ? `(${data.status} ${data.version})` : '(loading…)'}
-      </h1>
+      <div className="flex flex-col items-center gap-2">
+        <h1 className="text-3xl font-semibold">
+          DatumIngest {data ? `(${data.status} ${data.version})` : '(loading…)'}
+        </h1>
+        {data && (
+          <p className="text-muted-foreground text-sm">
+            {data.displayName} ({data.userId}) · node:{data.nodeId} · {data.catalogPath}
+          </p>
+        )}
+      </div>
       <Button variant="outline" onClick={() => setTheme(nextPreference)}>
         <ThemeIcon />
         {preference} ({resolved})
