@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.DatumFile.Sidecar;
 using DatumIngest.DatumFile.V2;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -339,6 +340,64 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         }
         Assert.NotNull(row2Stamp);
         Assert.True(DateTimeOffset.UtcNow - row2Stamp!.Value < TimeSpan.FromMinutes(1));
+    }
+
+    // ──────────────────── Sidecar registry survives DROP COLUMN ────────────────────
+
+    [Fact]
+    public async Task AlterTable_BackfillRollback_KeepsLaterScansOfSidecarBackedColumnsWorking()
+    {
+        // Regression for the user-reported QA scenario: after a failed
+        // ALTER ADD COLUMN whose Path C rollback drops the half-added
+        // column, a subsequent SELECT that reads a previously-existing
+        // sidecar-backed column used to throw
+        // `Cannot access a disposed object. Object name: 'SidecarReadStore'`.
+        //
+        // Root cause: RebuildSnapshotAfterMutation only updated the
+        // sidecar registry when sidecarMayHaveGrown=true, but
+        // SwapSnapshot disposes the old sidecar unconditionally. After
+        // DropColumn (which passes sidecarMayHaveGrown=false), the
+        // registry's pointer was left dangling at a disposed sidecar.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE y (id Int32, content String)");
+        catalog.Plan("INSERT INTO y (id, content) VALUES (1, 'alice'), (2, 'bob')");
+
+        // First ALTER: sidecar grows during V2-F2 backfill (UInt8[]
+        // values from sha256 go through VariableSlot which spills).
+        catalog.Plan("ALTER TABLE y ADD COLUMN hash UInt8[] AS (sha256(content))");
+
+        // Second ALTER: backfill fails (cast String → Int32 on
+        // non-numeric data). Path C rollback drops the half-added
+        // column. The DropColumn rebuild used to disconnect the
+        // registry from the live sidecar.
+        Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE y ADD COLUMN bad Int32 AS (content)"));
+
+        // After rollback, reading the still-live sidecar-backed `hash`
+        // column's bytes must succeed. The original repro routed
+        // through WebCellFormatter.Format → value.AsByteSpan(arena,
+        // registry), which is the path that hit the disposed sidecar
+        // via the catalog's SidecarRegistry. Reproduce that exact path.
+        SidecarRegistry registry = catalog.SidecarRegistry;
+        int rowsRead = 0;
+        await foreach (RowBatch batch in catalog["y"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                DataValue hash = batch[r][2];
+                Assert.False(hash.IsNull);
+                // sha256 yields a 32-byte digest. AsByteSpan goes through
+                // the registry for sidecar-backed values — this is the
+                // assertion that fails when the registry's pointer is
+                // stale.
+                ReadOnlySpan<byte> bytes = hash.AsByteSpan(batch.Arena, registry);
+                Assert.Equal(32, bytes.Length);
+                rowsRead++;
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(2, rowsRead);
     }
 
     // ──────────────────── DROP + ADD: name reuse after tombstone ────────────────────

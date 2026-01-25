@@ -1890,14 +1890,25 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private void RebuildSnapshotAfterMutation(bool sidecarMayHaveGrown)
     {
         Snapshot next = OpenSnapshot(_descriptor.FilePath);
-        if (sidecarMayHaveGrown && next.Sidecar is not null && SidecarRegistry is not null)
+
+        // Always re-point the registry at the new sidecar handle when
+        // the next snapshot has one. `SwapSnapshot` disposes the old
+        // sidecar unconditionally, so leaving the registry pointing at
+        // it would dangle into a disposed object for any subsequent
+        // sidecar-backed read. The `sidecarMayHaveGrown` flag is just
+        // a hint for invalidating cached statistics — it does NOT
+        // control whether the sidecar handle was replaced (every
+        // rebuild reopens the sidecar fresh).
+        //
+        // First-appearance vs update: the previous snapshot had no
+        // sidecar exactly when the catalog never registered one for
+        // this provider (RegisterProviderSidecar early-returns when
+        // Sidecar is null at provider-add time). In that case the
+        // current `SidecarStoreId` is the default zero, which would
+        // collide with whatever else lives at slot 0 — Register
+        // allocates a fresh slot instead.
+        if (next.Sidecar is not null && SidecarRegistry is not null)
         {
-            // First-appearance vs growth. The previous snapshot had no
-            // sidecar exactly when the catalog never registered one for
-            // this provider (RegisterProviderSidecar early-returns when
-            // Sidecar is null at provider-add time). In that case the
-            // current `SidecarStoreId` is the default zero, which would
-            // collide with whatever else lives at slot 0.
             bool firstAppearance = _snapshot.Sidecar is null;
             if (firstAppearance)
             {
@@ -1915,6 +1926,11 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // away from the live data. Surface that to consumers via
         // CachedStatsValid=false until ANALYZE rescans.
         _cachedStatsStale = true;
+
+        // sidecarMayHaveGrown was used historically to gate the
+        // registry update; it now only documents intent at the call
+        // site. Keep the parameter so callers don't need a sweep.
+        _ = sidecarMayHaveGrown;
     }
 
     /// <summary>

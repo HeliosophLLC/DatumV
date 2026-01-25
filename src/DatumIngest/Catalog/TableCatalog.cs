@@ -1408,14 +1408,36 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             // Without an UpdateRows path we can't install values into
             // historical rows. Surface the gap explicitly so a user
-            // doesn't silently get all-NULL historical values.
+            // doesn't silently get all-NULL historical values. Roll
+            // back the just-added column too — leaving it half-added
+            // would force the user to manually DROP before retrying.
+            try { provider.DropColumn(column.Name); } catch { /* best-effort rollback */ }
             throw new InvalidOperationException(
                 $"ALTER TABLE '{tableName}' ADD COLUMN '{column.Name}' AS (...): " +
                 $"provider type '{provider.GetType().Name}' does not support UpdateRows, " +
                 "so historical rows cannot be backfilled with the computed expression.");
         }
 
-        BackfillComputedColumnAsync(provider, column).GetAwaiter().GetResult();
+        // Wrap the backfill in a try/catch — if any per-row evaluation
+        // or coercion throws, the column is already committed (the
+        // writer's AddColumn finalised its tail flip before we got
+        // here). Drop the half-added column so the table returns to
+        // its pre-ALTER state; the user-facing error then mirrors what
+        // the same failure would look like at INSERT time.
+        try
+        {
+            BackfillComputedColumnAsync(provider, column).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Best-effort rollback. DropColumn shouldn't fail on a
+            // freshly-added column (PK rejection doesn't apply; the
+            // column was just nulled), but if it does we still want to
+            // surface the original backfill exception, not the
+            // rollback failure.
+            try { provider.DropColumn(column.Name); } catch { /* swallow */ }
+            throw;
+        }
     }
 
     private async Task BackfillComputedColumnAsync(ITableProvider provider, ColumnInfo column)

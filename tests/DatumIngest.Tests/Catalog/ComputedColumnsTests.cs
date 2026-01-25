@@ -436,6 +436,69 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
     }
 
     [Fact]
+    public void AlterTable_AddComputedColumn_BackfillFails_RollsBackColumn()
+    {
+        // Path C atomicity: if BackfillComputedColumnAsync throws (e.g.
+        // a per-row value can't be coerced to the declared kind), the
+        // half-added column should be dropped so the table is left in
+        // its pre-ALTER state. Without rollback, the column would
+        // remain visible with NULL data and the user would have to
+        // manually DROP before retrying.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE y (id Int32, name String)");
+        catalog.Plan("INSERT INTO y (id, name) VALUES (1, 'alice'), (2, 'bob')");
+
+        // Backfill must fail: target column is Int32 but the expression
+        // produces a non-numeric String per row.
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE y ADD COLUMN name_int Int32 AS (name)"));
+        Assert.NotNull(ex);
+
+        // Column must not be visible — rollback ran.
+        Schema schema = catalog["y"].GetSchema();
+        Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
+
+        // And the user can retry under the same name without colliding
+        // with a tombstoned half-added column. This is the payoff for
+        // the tombstone-name-reuse fix that landed alongside Path C.
+        catalog.Plan("ALTER TABLE y ADD COLUMN name_int Int32");
+        Schema afterRetry = catalog["y"].GetSchema();
+        Assert.Equal(["id", "name", "name_int"], afterRetry.Columns.Select(c => c.Name));
+    }
+
+    [Fact]
+    public void AlterTable_AddComputedColumn_BackfillFails_OnPersistentTable_RollsBack()
+    {
+        // Same rollback contract on a persistent table — exercises the
+        // DatumFileTableProviderV2 path through writer.DropColumn.
+        // After rollback the user can retry with a correct target kind.
+        string tempDir = Path.Combine(Path.GetTempPath(), $"datum_rollback_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string catalogPath = Path.Combine(tempDir, ".datum-catalog.json");
+            using TableCatalog catalog = CreateCatalog(catalogPath);
+            catalog.Plan("CREATE TABLE y (id Int32, name String)");
+            catalog.Plan("INSERT INTO y (id, name) VALUES (1, 'alice'), (2, 'bob')");
+
+            Assert.ThrowsAny<Exception>(() =>
+                catalog.Plan("ALTER TABLE y ADD COLUMN name_int Int32 AS (name)"));
+
+            // Live schema must not include the half-added column.
+            Schema schema = catalog["y"].GetSchema();
+            Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
+
+            // Retry with the correct kind succeeds (name is now free).
+            catalog.Plan("ALTER TABLE y ADD COLUMN name_copy String AS (name)");
+            Assert.Equal(["id", "name", "name_copy"], catalog["y"].GetSchema().Columns.Select(c => c.Name));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void AlterTable_AddComputedColumn_AgainstEmptyTable_NoBackfillWork()
     {
         // Degenerate case — no rows to backfill, but the ALTER must
