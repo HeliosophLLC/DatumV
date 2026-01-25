@@ -161,11 +161,14 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
     }
 
     [Fact]
-    public void AddColumn_DuplicateNameOfTombstoned_Throws()
+    public void AddColumn_DuplicateNameOfTombstoned_Allowed()
     {
-        // Even after dropping a column, the same name can't be re-used
-        // (PR6 conservative rule — undrop / compact are the recovery
-        // paths).
+        // After DROP, the column name is freed for re-use (PG-aligned
+        // semantics). The footer retains the tombstoned entry for
+        // compaction-time reclamation; a new column with the same name
+        // gets a fresh footer index and lives alongside the tombstoned
+        // one. Schema readers filter tombstones, so live-column
+        // lookups stay unambiguous.
         string path = WriteOneColumnFile("addcol_tombstoned_collision.datum", rowCount: 5);
 
         // Need a second column to drop, since we can't drop the only
@@ -174,11 +177,18 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
             "x", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: true));
         DatumFileWriterV2.DropColumn(path, "x");
 
-        ArgumentException ex = Assert.Throws<ArgumentException>(
-            () => DatumFileWriterV2.AddColumn(path, new ColumnDescriptorV2(
-                "x", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: true)));
-        Assert.Contains("already exists", ex.Message);
-        Assert.Contains("IsTombstoned = True", ex.Message);
+        // Re-add under the same name — must succeed.
+        DatumFileWriterV2.AddColumn(path, new ColumnDescriptorV2(
+            "x", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: true));
+
+        // Reader sees one live `x` column plus the original `v`. The
+        // tombstoned `x` is hidden by the reader's tombstone filter.
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(path);
+        Assert.Equal(["v", "x"], reader.Columns.Select(c => c.Name));
+        // The footer keeps three column entries (v, tombstoned x, live x).
+        Assert.Equal(3, reader.Footer.Columns.Count);
+        Assert.True(reader.Footer.Columns[1].Descriptor.IsTombstoned);
+        Assert.False(reader.Footer.Columns[2].Descriptor.IsTombstoned);
     }
 
     [Fact]

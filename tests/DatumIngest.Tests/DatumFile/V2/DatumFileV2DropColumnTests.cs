@@ -89,29 +89,26 @@ public sealed class DatumFileV2DropColumnTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DropColumn_IsIdempotent()
+    public void DropColumn_DoubleDropOfSameName_Throws()
     {
+        // Once a column is dropped, the name is freed for re-use — so a
+        // second DROP without an intervening ADD has no live target.
+        // Throws with a "not found" message; this matches PG's
+        // semantics. Catalog callers that want "idempotent drop" use
+        // the `DROP COLUMN IF EXISTS` form (handled at the catalog
+        // layer via a schema-lookup pre-check).
         string path = WriteThreeColumnFile("drop_idempotent.datum");
 
         DatumFileWriterV2.DropColumn(path, "b");
-        ulong gen1;
-        using (DatumFileReaderV2 r = DatumFileReaderV2.Open(path))
-        {
-            gen1 = r.Footer.Prologue.Generation;
-        }
 
-        // Dropping the same column again still increments generation
-        // (we still committed a new footer) but doesn't change the
-        // visible state. The "no-op" is at the bit-flip level, not the
-        // commit level — that's fine; future PRs could add a "skip
-        // commit when nothing changed" optimization.
-        DatumFileWriterV2.DropColumn(path, "b");
+        ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+            DatumFileWriterV2.DropColumn(path, "b"));
+        Assert.Contains("b", ex.Message);
 
+        // First drop's state survives the failed second attempt.
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(path);
-        Assert.Equal(2, reader.Columns.Count);
-        Assert.True(reader.Footer.Columns[1].Descriptor.IsTombstoned);
-        // Idempotent at the schema level even if commit did happen.
         Assert.Equal(["a", "c"], reader.Columns.Select(c => c.Name));
+        Assert.True(reader.Footer.Columns[1].Descriptor.IsTombstoned);
     }
 
     [Fact]

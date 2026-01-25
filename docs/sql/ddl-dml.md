@@ -308,6 +308,17 @@ ALTER TABLE features DROP COLUMN IF EXISTS risk_tier
 
 The column block stays in the footer (marked `Tombstoned`) for compaction-time reclamation, but is hidden from `GetSchema()` and from subsequent scans. Dropping a column that's part of the table's `PRIMARY KEY` is rejected.
 
+**The column name is freed immediately on `DROP`.** A subsequent `ALTER TABLE ... ADD COLUMN <same-name> <kind>` succeeds and gets a fresh storage slot:
+
+```sql
+CREATE TABLE y (id Int32, hash String);
+-- ... oops, wanted UInt8[] for hash, not String.
+ALTER TABLE y DROP COLUMN hash;
+ALTER TABLE y ADD COLUMN hash UInt8[];   -- reuses the name; existing rows read NULL for the new hash
+```
+
+Matches PostgreSQL — once a column is dropped, the name is reusable. The tombstoned footer entry lingers until compaction; it remains addressable by the storage layer for that purpose but is invisible at the SQL surface. Double-`DROP` of the same name without an intervening `ADD` errors (unless you use `IF EXISTS`).
+
 ### Batch execution
 
 Multiple statements can be combined into a single batch. Statements execute sequentially; on failure, execution stops and no further statements run.

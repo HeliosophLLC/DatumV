@@ -341,6 +341,118 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         Assert.True(DateTimeOffset.UtcNow - row2Stamp!.Value < TimeSpan.FromMinutes(1));
     }
 
+    // ──────────────────── DROP + ADD: name reuse after tombstone ────────────────────
+
+    [Fact]
+    public async Task AlterTable_DropThenAddSameName_TempTable_Works()
+    {
+        // In-memory provider: DropColumn removes the column outright,
+        // so re-adding under the same name has always worked. Pin the
+        // happy path so any future tombstoning change in the in-memory
+        // provider stays compatible.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, hash String)");
+        catalog.Plan("INSERT INTO t (id, hash) VALUES (1, 'abc')");
+
+        catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE t ADD COLUMN hash UInt8[]");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Equal(["id", "hash"], schema.Columns.Select(c => c.Name));
+        Assert.Equal(DataKind.UInt8, schema.Columns[1].Kind);
+        Assert.True(schema.Columns[1].IsArray);
+
+        // Pre-existing row's hash is NULL (the original `hash` column was
+        // dropped; the new one is unrelated).
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Assert.Equal(1, batch.Count);
+            Assert.True(batch[0][1].IsNull);
+            batch.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task AlterTable_DropThenAddSameName_PersistentTable_Works()
+    {
+        // Persistent provider: DropColumn soft-tombstones the footer
+        // entry. Adding a new column with the same name must succeed —
+        // the tombstoned entry stays in the footer for compaction-time
+        // reclamation, but the live column slot is fresh.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE y (id Int32, hash String)");
+        catalog.Plan("INSERT INTO y (id, hash) VALUES (1, 'first'), (2, 'second')");
+
+        catalog.Plan("ALTER TABLE y DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE y ADD COLUMN hash UInt8[]");
+
+        Schema schema = catalog["y"].GetSchema();
+        Assert.Equal(["id", "hash"], schema.Columns.Select(c => c.Name));
+        Assert.Equal(DataKind.UInt8, schema.Columns[1].Kind);
+        Assert.True(schema.Columns[1].IsArray);
+
+        // Two existing rows + new column → both rows have NULL for the
+        // fresh `hash` column.
+        int rowsSeen = 0;
+        await foreach (RowBatch batch in catalog["y"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Assert.True(batch[r][1].IsNull);
+                rowsSeen++;
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(2, rowsSeen);
+    }
+
+    [Fact]
+    public async Task AlterTable_DropThenAddSameName_NewColumnAcceptsInserts()
+    {
+        // After DROP + ADD, the new column should behave like any other
+        // column — INSERTs that supply a value land in the new slot, not
+        // the tombstoned one.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, hash String)");
+        catalog.Plan("INSERT INTO t (id, hash) VALUES (1, 'old')");
+
+        catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE t ADD COLUMN hash Int32");
+        catalog.Plan("INSERT INTO t (id, hash) VALUES (2, 42)");
+
+        Dictionary<int, int?> rows = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                int id = batch[r][0].AsInt32();
+                rows[id] = batch[r][1].IsNull ? null : batch[r][1].AsInt32();
+            }
+            batch.Dispose();
+        }
+        Assert.Null(rows[1]);
+        Assert.Equal(42, rows[2]);
+    }
+
+    [Fact]
+    public void AlterTable_DropThenAddSameName_RejectsDoubleAdd()
+    {
+        // After a DROP+ADD, the live column is `hash`. A second ADD
+        // without a DROP between should still be rejected against the
+        // live column (not against the tombstoned one).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, hash String)");
+        catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE t ADD COLUMN hash Int32");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN hash Int64"));
+        Assert.Contains("hash", ex.Message);
+    }
+
     [Fact]
     public void AlterTable_AddColumn_WithDefaultColumnReference_Rejected()
     {

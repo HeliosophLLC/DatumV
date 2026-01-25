@@ -733,19 +733,28 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             "MarkColumnTombstoned requires an initialized writer; open the file with OpenForAppend.");
         if (_finalized) throw new InvalidOperationException("Writer is finalized.");
 
+        // Tombstone the LIVE column with this name. After a previous
+        // DROP+ADD cycle the footer may have multiple entries sharing a
+        // name (one tombstoned, one live); walk past the tombstoned
+        // entries to the live one. Skipping tombstoned entries also
+        // keeps `MarkColumnTombstoned("hash")` idempotent against an
+        // already-dropped column — there's no live `hash` to tombstone,
+        // so we throw "not found" with the same message a stranger
+        // column would produce.
         for (int i = 0; i < _columns!.Length; i++)
         {
-            if (_columns[i].Name == columnName)
+            if (_columns[i].Name == columnName && !_columns[i].IsTombstoned)
             {
-                if (_columns[i].IsTombstoned) return; // idempotent
                 _columns[i] = _columns[i] with { IsTombstoned = true };
                 return;
             }
         }
 
         throw new ArgumentException(
-            $"Column '{columnName}' not found in the file's schema. Existing columns: " +
-            string.Join(", ", _columns.Select(c => c.Name)),
+            $"Column '{columnName}' not found in the file's schema (no live column carries this " +
+            "name; previously-dropped columns with the same name are tombstoned and not eligible). " +
+            "Existing live columns: " +
+            string.Join(", ", _columns.Where(c => !c.IsTombstoned).Select(c => c.Name)),
             nameof(columnName));
     }
 
@@ -847,17 +856,20 @@ public sealed partial class DatumFileWriterV2 : IDisposable
                 nameof(column));
         }
 
-        // Reject collisions against any column block — even tombstoned
-        // ones — so a future undrop can recover the dropped column
-        // unambiguously.
+        // Reject collisions against LIVE columns only. Tombstoned
+        // columns keep their footer entries (so compaction can reclaim
+        // the data block later), but the user-facing name is freed —
+        // matches PostgreSQL's behaviour where a dropped column's name
+        // is immediately reusable. Two columns can coexist with the
+        // same name as long as one is tombstoned; schema readers filter
+        // tombstones, so live-column lookups stay unambiguous.
         foreach (ColumnDescriptorV2 existing in _columns!)
         {
-            if (existing.Name == column.Name)
+            if (existing.Name == column.Name && !existing.IsTombstoned)
             {
                 throw new ArgumentException(
-                    $"Column '{column.Name}' already exists in the file's schema " +
-                    $"(IsTombstoned = {existing.IsTombstoned}). Drop or compact first if you " +
-                    "need to re-add a column with the same name.",
+                    $"Column '{column.Name}' already exists in the file's schema. " +
+                    "DROP the existing column first if you need to re-add under the same name.",
                     nameof(column));
             }
         }
