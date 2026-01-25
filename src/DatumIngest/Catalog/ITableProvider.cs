@@ -154,7 +154,7 @@ public interface ITableProvider : IDisposable
 
     /// <summary>
     /// True when this provider supports per-cell row updates via
-    /// <see cref="UpdateRows"/>. Default <see langword="false"/>;
+    /// <see cref="UpdateRowsAsync"/>. Default <see langword="false"/>;
     /// providers that opt in (.datum file via page-COW rewrite, in-memory)
     /// override.
     /// </summary>
@@ -262,13 +262,13 @@ public interface ITableProvider : IDisposable
     /// Providers that maintain a writable backing store override and opt
     /// in via <see cref="CanUpdateRows"/>.
     /// </remarks>
-    void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null) =>
+    Task UpdateRowsAsync(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support UpdateRows (CanUpdateRows is false).");
+            $"Table '{Name}' does not support UpdateRowsAsync (CanUpdateRows is false).");
 
     /// <summary>
     /// True when this provider supports rebuilding its <c>.datum-index</c>
-    /// acceleration sidecar via <see cref="RebuildIndex"/>. Default
+    /// acceleration sidecar via <see cref="RebuildIndexAsync"/>. Default
     /// <see langword="false"/>; only the persistent <c>.datum</c> file
     /// provider opts in. In-memory tables have no index sidecar.
     /// </summary>
@@ -282,20 +282,6 @@ public interface ITableProvider : IDisposable
     /// <c>.datum</c> contents.
     /// </summary>
     /// <remarks>
-    /// Default implementation throws <see cref="NotSupportedException"/>.
-    /// Providers override and opt in via <see cref="CanRebuildIndex"/>.
-    /// </remarks>
-    void RebuildIndex() =>
-        throw new NotSupportedException(
-            $"Table '{Name}' does not support RebuildIndex (CanRebuildIndex is false).");
-
-    /// <summary>
-    /// Async variant of <see cref="RebuildIndex"/>. Production callers
-    /// inside an async context (PlanAsync's REINDEX path) should prefer
-    /// this; the sync version is kept for REPL/script callers and now
-    /// delegates to this method by default.
-    /// </summary>
-    /// <remarks>
     /// Default implementation throws <see cref="NotSupportedException"/>;
     /// providers that opt in via <see cref="CanRebuildIndex"/> override.
     /// </remarks>
@@ -306,7 +292,7 @@ public interface ITableProvider : IDisposable
     /// <summary>
     /// True when this provider supports refreshing the cached half of its
     /// <c>.datum-manifest</c> sidecar (top-K, quantiles, histogram, entropy,
-    /// kind-specific summaries) via <see cref="RebuildManifest"/>. Default
+    /// kind-specific summaries) via <see cref="RebuildManifestAsync"/>. Default
     /// <see langword="false"/>; only the persistent <c>.datum</c> file
     /// provider opts in.
     /// </summary>
@@ -324,16 +310,6 @@ public interface ITableProvider : IDisposable
     /// Default implementation throws <see cref="NotSupportedException"/>.
     /// Providers override and opt in via <see cref="CanRebuildManifest"/>.
     /// </remarks>
-    void RebuildManifest() =>
-        throw new NotSupportedException(
-            $"Table '{Name}' does not support RebuildManifest (CanRebuildManifest is false).");
-
-    /// <summary>
-    /// Async variant of <see cref="RebuildManifest"/>. Production callers
-    /// inside an async context (PlanAsync's ANALYZE path) should prefer
-    /// this; the sync version is kept for REPL/script callers and
-    /// delegates here by default.
-    /// </summary>
     Task RebuildManifestAsync() =>
         throw new NotSupportedException(
             $"Table '{Name}' does not support RebuildManifestAsync (CanRebuildManifest is false).");

@@ -47,7 +47,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private readonly Pool _pool;
     /// <summary>
     /// Cached <c>.datum-manifest</c> contents, loaded at construction and
-    /// refreshed by <see cref="RebuildManifest"/>. <see cref="GetManifest"/>
+    /// refreshed by <see cref="RebuildManifestAsync"/>. <see cref="GetManifest"/>
     /// composes this with the live <see cref="_sourceIndex"/> on every call.
     /// </summary>
     private QueryResultsManifest? _manifest;
@@ -1429,12 +1429,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
-    public void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
+    public async Task UpdateRowsAsync(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         if (requests.Count == 0) return;
 
-        _mutationLock.Wait();
+        await _mutationLock.WaitAsync().ConfigureAwait(false);
         try
         {
             // Map every request's live row index to a raw (pageIndex,
@@ -1554,12 +1554,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // via datum_catalog.indexes.is_valid = false).
             try
             {
-                // Sync UpdateRows entry from a sync ITableProvider method.
-                // The body of RebuildIndexNoLockAsync is genuinely async
-                // (Indexer.IndexAsync / ExtendAsync); bridging here is the
-                // narrowest possible scope until the provider interface
-                // goes async. Pinned for C1g Phase 2 follow-up.
-                RebuildIndexNoLockAsync(existingForExtend: null).GetAwaiter().GetResult();
+                await RebuildIndexNoLockAsync(existingForExtend: null).ConfigureAwait(false);
             }
             catch
             {
@@ -1584,10 +1579,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public bool CanRebuildIndex => true;
 
     /// <inheritdoc/>
-    public void RebuildIndex() =>
-        RebuildIndexAsync().GetAwaiter().GetResult();
-
-    /// <inheritdoc/>
     public async Task RebuildIndexAsync()
     {
         await _mutationLock.WaitAsync().ConfigureAwait(false);
@@ -1607,10 +1598,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     /// <inheritdoc/>
     public bool CanRebuildManifest => true;
-
-    /// <inheritdoc/>
-    public void RebuildManifest() =>
-        RebuildManifestAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc/>
     public async Task RebuildManifestAsync()

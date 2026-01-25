@@ -4,7 +4,7 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// One row's worth of updates passed to
-/// <see cref="ITableProvider.UpdateRows"/>. Names a target row by its
+/// <see cref="ITableProvider.UpdateRowsAsync"/>. Names a target row by its
 /// linear position in the table's live row sequence (post-tombstone,
 /// matching a fresh <c>SELECT * FROM table</c> emission order) and
 /// supplies a sparse column-index → new-value map.

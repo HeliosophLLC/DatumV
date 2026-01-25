@@ -538,13 +538,13 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public void UpdateRows(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
+    public async Task UpdateRowsAsync(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ObjectDisposedException.ThrowIf(Disposed, this);
         if (requests.Count == 0) return;
 
-        _mutationLock.Wait();
+        await _mutationLock.WaitAsync().ConfigureAwait(false);
         try
         {
             // Validate up-front so a partial mutation never lands.

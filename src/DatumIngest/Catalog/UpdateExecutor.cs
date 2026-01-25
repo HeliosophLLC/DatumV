@@ -14,7 +14,7 @@ namespace DatumIngest.Catalog;
 /// PR11a shipped parse + plan-time validation. PR11c wired the plain
 /// path: a single scan of the target with the WHERE predicate
 /// accumulates per-row SET expression results, then dispatches the
-/// page-COW rewrite via <see cref="ITableProvider.UpdateRows"/>.
+/// page-COW rewrite via <see cref="ITableProvider.UpdateRowsAsync"/>.
 /// PR11d adds <c>UPDATE … FROM &lt;single-source&gt;</c>: a Cartesian
 /// nested-loop join (target × source) drives the same accumulator,
 /// with last-match-wins for multiple source rows matching the same
@@ -183,7 +183,7 @@ internal static class UpdateExecutor
 
         if (requests.Count > 0)
         {
-            provider.UpdateRows(requests, workArena);
+            await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
         }
     }
 
@@ -465,7 +465,7 @@ internal static class UpdateExecutor
 
         if (requests.Count == 0) return;
 
-        provider.UpdateRows(requests, workArena);
+        await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
     }
 
     /// <summary>

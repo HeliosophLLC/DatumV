@@ -579,61 +579,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// run after this see acceleration restored. In-memory tables have
     /// no acceleration sidecar, so REINDEX rejects them.
     /// </summary>
-    private void ApplyReindexTable(ReindexTableStatement reindex)
-    {
-        if (!Tables.TryGetValue(reindex.TableName, out ITableProvider? provider))
-        {
-            throw new InvalidOperationException(
-                $"Table '{reindex.TableName}' is not registered in the catalog.");
-        }
-
-        if (!provider.CanRebuildIndex)
-        {
-            throw new InvalidOperationException(
-                $"Table '{reindex.TableName}' does not support REINDEX " +
-                $"(provider type '{provider.GetType().Name}' has no .datum-index sidecar).");
-        }
-
-        provider.RebuildIndex();
-    }
-
-    /// <summary>
-    /// Applies an <c>ANALYZE</c> statement: refreshes the cached half of the
-    /// <c>.datum-manifest</c> sidecar (top-K, quantiles, histogram, entropy,
-    /// kind-specific summaries) by scanning the current data, and rebuilds
-    /// the <c>.datum-index</c> acceleration sidecar so the planner's
-    /// chunk-pruning decisions reflect current data. Both passes are
-    /// best-effort — providers that don't support either skip that pass.
-    /// At least one of the two must be supported, otherwise the table can't
-    /// meaningfully be analysed.
-    /// </summary>
-    private void ApplyAnalyzeTable(AnalyzeTableStatement analyze)
-    {
-        if (!Tables.TryGetValue(analyze.TableName, out ITableProvider? provider))
-        {
-            throw new InvalidOperationException(
-                $"Table '{analyze.TableName}' is not registered in the catalog.");
-        }
-
-        if (!provider.CanRebuildIndex && !provider.CanRebuildManifest)
-        {
-            throw new InvalidOperationException(
-                $"Table '{analyze.TableName}' does not support ANALYZE " +
-                $"(provider type '{provider.GetType().Name}' has no acceleration sidecar or " +
-                "manifest to refresh).");
-        }
-
-        if (provider.CanRebuildManifest)
-        {
-            provider.RebuildManifest();
-        }
-        if (provider.CanRebuildIndex)
-        {
-            provider.RebuildIndex();
-        }
-    }
-
-    /// <summary>Async sibling of <see cref="ApplyReindexTable"/>.</summary>
     private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
     {
         if (!Tables.TryGetValue(reindex.TableName, out ITableProvider? provider))
@@ -652,7 +597,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         await provider.RebuildIndexAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Async sibling of <see cref="ApplyAnalyzeTable"/>.</summary>
+    /// <summary>
+    /// Applies an <c>ANALYZE</c> statement: refreshes the cached half of the
+    /// <c>.datum-manifest</c> sidecar (top-K, quantiles, histogram, entropy,
+    /// kind-specific summaries) by scanning the current data, and rebuilds
+    /// the <c>.datum-index</c> acceleration sidecar so the planner's
+    /// chunk-pruning decisions reflect current data. Both passes are
+    /// best-effort — providers that don't support either skip that pass.
+    /// At least one of the two must be supported, otherwise the table can't
+    /// meaningfully be analysed.
+    /// </summary>
     private async Task ApplyAnalyzeTableAsync(AnalyzeTableStatement analyze)
     {
         if (!Tables.TryGetValue(analyze.TableName, out ITableProvider? provider))
@@ -1409,7 +1363,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         if (requests.Count > 0)
         {
-            provider.UpdateRows(requests, workArena);
+            await provider.UpdateRowsAsync(requests, workArena).ConfigureAwait(false);
         }
     }
 
