@@ -496,6 +496,92 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(42, rows[2]);
     }
 
+    // ──────────────────── Probe #2: DROP+ADD chain reuse ────────────────────
+
+    [Fact]
+    public async Task AlterTable_DropAddDropAddChain_LiveColumnIsLatestAdd()
+    {
+        // Each ADD after a DROP introduces a fresh footer entry while
+        // the prior tombstoned ones linger. The live column should
+        // always be the most recent ADD; reads should see ONLY that
+        // column under the shared name; the second DROP should target
+        // the live column (not silently no-op on a tombstoned one).
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, hash Int32)");
+
+        catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE t ADD COLUMN hash String");
+
+        catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+        catalog.Plan("ALTER TABLE t ADD COLUMN hash UInt8[]");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Equal(["id", "hash"], schema.Columns.Select(c => c.Name));
+        Assert.Equal(DataKind.UInt8, schema.Columns[1].Kind);
+        Assert.True(schema.Columns[1].IsArray);
+
+        // INSERT against the live (UInt8[]) hash works.
+        catalog.Plan("INSERT INTO t (id) VALUES (1)");
+        int rows = 0;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                Assert.Equal(1, batch[r][0].AsInt32());
+                Assert.True(batch[r][1].IsNull);  // newly-added column reads NULL for INSERTs that omitted it
+                rows++;
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(1, rows);
+    }
+
+    // ──────────────────── Probe #3: persistent reopen after DROP+ADD ────────────────────
+
+    [Fact]
+    public async Task AlterTable_DropAddDifferentKind_PersistentReopen_SeesLiveKind()
+    {
+        // After DROP+ADD with a different kind, closing and reopening
+        // the catalog must surface the LIVE column (latest ADD) — not
+        // the tombstoned one. The reader's tombstone filter must
+        // resolve correctly when the footer has two entries sharing a
+        // name with different kinds.
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32, hash Int32)");
+            catalog.Plan("INSERT INTO t (id, hash) VALUES (1, 42)");
+            catalog.Plan("ALTER TABLE t DROP COLUMN hash");
+            catalog.Plan("ALTER TABLE t ADD COLUMN hash String");
+            catalog.Plan("INSERT INTO t (id, hash) VALUES (2, 'after')");
+        }
+
+        // Reopen — schema must show the live String hash, not the
+        // tombstoned Int32.
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["t"].GetSchema();
+        Assert.Equal(["id", "hash"], schema.Columns.Select(c => c.Name));
+        Assert.Equal(DataKind.String, schema.Columns[1].Kind);
+        Assert.False(schema.Columns[1].IsArray);
+
+        // Existing rows: row 1 (pre-drop) reads NULL for the new
+        // String hash; row 2 (post-drop+add) reads 'after'.
+        Dictionary<int, string?> hashes = new();
+        await foreach (RowBatch batch in reopened["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                hashes[batch[r][0].AsInt32()] = batch[r][1].IsNull
+                    ? null
+                    : batch[r][1].AsString(batch.Arena);
+            }
+            batch.Dispose();
+        }
+        Assert.Null(hashes[1]);
+        Assert.Equal("after", hashes[2]);
+    }
+
     [Fact]
     public void AlterTable_DropThenAddSameName_RejectsDoubleAdd()
     {

@@ -339,10 +339,24 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 
         if (batch.Count == 0) return;
 
-        if (batch.ColumnLookup.Count != _columns!.Length)
+        // The batch arrives with one column per LIVE schema column —
+        // callers (InsertExecutor, V2-F2 backfill, etc.) all build
+        // batches from `provider.GetSchema()` which filters tombstones.
+        // The writer's `_columns` array, on the other hand, includes
+        // tombstoned entries (kept on disk for compaction-time
+        // reclamation, hidden from readers). Validate batch arity
+        // against the LIVE count, and pump NULL into the tombstoned
+        // encoders so every column's row count stays in lockstep.
+        int liveCount = 0;
+        for (int i = 0; i < _columns!.Length; i++)
+        {
+            if (!_columns[i].IsTombstoned) liveCount++;
+        }
+        if (batch.ColumnLookup.Count != liveCount)
         {
             throw new InvalidOperationException(
-                $"Row batch column count ({batch.ColumnLookup.Count}) does not match writer schema ({_columns.Length}).");
+                $"Row batch column count ({batch.ColumnLookup.Count}) does not match writer's " +
+                $"live schema ({liveCount} live, {_columns.Length - liveCount} tombstoned).");
         }
 
         IValueStore store = batch.Arena;
@@ -350,9 +364,16 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
         {
             Row row = batch[rowIndex];
+            int batchColIndex = 0;
             for (int colIndex = 0; colIndex < _columns.Length; colIndex++)
             {
-                DataValue value = row[colIndex];
+                // Tombstoned columns: pad with NULL to keep the encoder's
+                // row count in lockstep with the live columns. The bytes
+                // are never read (readers filter tombstones), so any
+                // value works; NULL is the cheapest.
+                DataValue value = _columns[colIndex].IsTombstoned
+                    ? DataValue.Null(_columns[colIndex].Kind)
+                    : row[batchColIndex++];
 
                 // Capture the homogeneous shape for non-array Struct columns.
                 // Array<Struct> columns carry per-element TypeIds in slot

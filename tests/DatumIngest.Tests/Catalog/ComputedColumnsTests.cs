@@ -498,6 +498,56 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
         }
     }
 
+    // ──────────────────── Probe #1: DROP COLUMN referenced by computed ────────────────────
+
+    [Fact]
+    public void DropColumn_ReferencedByComputedColumn_Rejected()
+    {
+        // PG behaviour: `ALTER TABLE t DROP COLUMN x` is rejected with a
+        // dependent-column message when another column's computed
+        // expression references x. We should match — silently allowing
+        // the drop leaves the computed column with a dangling reference
+        // that breaks the next INSERT or UPDATE.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE y (id Int32, content String, hash UInt8[] AS (sha256(content)))");
+        catalog.Plan("INSERT INTO y (id, content) VALUES (1, 'alice')");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE y DROP COLUMN content"));
+        // The error should name both the column being dropped AND the
+        // dependent computed column — gives the user a clear next step.
+        Assert.Contains("content", ex.Message);
+        Assert.Contains("hash", ex.Message);
+    }
+
+    [Fact]
+    public void DropColumn_ReferencedByComputed_AcrossMultipleComputed_NamesAll()
+    {
+        // When several computed columns reference the same source column,
+        // the error message should ideally name all of them (or at least
+        // not silently drop the column). Even an error that only names
+        // one is fine for v1 — the test pins the rejection itself.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32 AS (a + 1), c Int32 AS (a * 2))");
+
+        Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t DROP COLUMN a"));
+    }
+
+    [Fact]
+    public void DropColumn_NotReferencedByComputed_Allowed()
+    {
+        // Sanity: dropping a column that ISN'T referenced by any
+        // computed column should still succeed.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, content String, scratch String, hash UInt8[] AS (sha256(content)))");
+
+        catalog.Plan("ALTER TABLE t DROP COLUMN scratch");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Equal(["id", "content", "hash"], schema.Columns.Select(c => c.Name));
+    }
+
     [Fact]
     public void AlterTable_AddComputedColumn_AgainstEmptyTable_NoBackfillWork()
     {

@@ -262,6 +262,92 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([(1L, "a"), (2L, "b"), (3L, "c")], rows);
     }
 
+    // ──────────────────── Probe #4: ALTER ADD IDENTITY backfill overflow ────────────────────
+
+    [Fact]
+    public async Task AlterTable_AddIdentity_BackfillOverflow_LeavesTableUnchanged()
+    {
+        // Int8 holds [-128, 127]. Seed 120, step 1 — backfill produces
+        // 120, 121, ..., 127 cleanly, then needs 128 on row 9 →
+        // overflow. The writer's AddColumn pumps inside its append
+        // session; an OverflowException should abort the session via
+        // dispose-without-commit, leaving the file in its pre-ALTER
+        // state. The user-visible error should name the kind and the
+        // overflow value.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
+        // 10 rows — backfill will overflow at row 9 (counter would be 128).
+        for (int i = 1; i <= 10; i++)
+        {
+            catalog.Plan($"INSERT INTO t (id, name) VALUES ({i}, 'row{i}')");
+        }
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ADD COLUMN seq Int8 GENERATED ALWAYS AS IDENTITY(120, 1)"));
+        Assert.Contains("Int8", ex.Message);
+
+        // Table state must be unchanged: original 2 columns, 10 rows,
+        // no `seq` column.
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
+        int rows = 0;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            rows += batch.Count;
+            batch.Dispose();
+        }
+        Assert.Equal(10, rows);
+
+        // Retry with a wider kind should succeed — the failed ALTER
+        // didn't poison the schema (and didn't tombstone any column
+        // that would compete for the `seq` name).
+        catalog.Plan("ALTER TABLE t ADD COLUMN seq Int32 GENERATED ALWAYS AS IDENTITY(120, 1)");
+        Schema afterRetry = catalog["t"].GetSchema();
+        Assert.Equal(["id", "name", "seq"], afterRetry.Columns.Select(c => c.Name));
+    }
+
+    [Fact]
+    public async Task AlterTable_AddIdentity_PersistentTable_BackfillOverflow_LeavesTableUnchanged()
+    {
+        // Same scenario on a persistent table — the writer's
+        // dispose-without-commit must roll back the file via torn-tail
+        // recovery semantics. Reopening should still see the original
+        // schema and rows.
+        string tempDir = Path.Combine(Path.GetTempPath(), $"datum_idoverflow_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string catalogPath = Path.Combine(tempDir, ".datum-catalog.json");
+            using (TableCatalog catalog = new(new Pool(new PoolBacking()), catalogPath))
+            {
+                catalog.Plan("CREATE TABLE t (id Int32, name String)");
+                for (int i = 1; i <= 10; i++)
+                {
+                    catalog.Plan($"INSERT INTO t (id, name) VALUES ({i}, 'row{i}')");
+                }
+                Assert.ThrowsAny<Exception>(() =>
+                    catalog.Plan("ALTER TABLE t ADD COLUMN seq Int8 GENERATED ALWAYS AS IDENTITY(120, 1)"));
+            }
+
+            using TableCatalog reopened = new(new Pool(new PoolBacking()), catalogPath);
+            Schema schema = reopened["t"].GetSchema();
+            Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
+            int rows = 0;
+            await foreach (RowBatch batch in reopened["t"].ScanAsync(
+                requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+            {
+                rows += batch.Count;
+                batch.Dispose();
+            }
+            Assert.Equal(10, rows);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch (IOException) { }
+        }
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     /// <summary>

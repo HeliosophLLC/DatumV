@@ -1553,6 +1553,36 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 "the table without the constraint.");
         }
 
+        // PG-style dependent-column check: a column referenced by any
+        // computed (`GENERATED ALWAYS AS (...)`) column can't be
+        // dropped without first dropping the dependents. Silently
+        // allowing the drop would leave the computed expression with a
+        // dangling name reference that breaks the next INSERT or
+        // UPDATE.
+        List<string>? dependentComputedColumns = null;
+        foreach (ColumnInfo c in schema.Columns)
+        {
+            if (c.ComputedExpression is null) continue;
+            HashSet<(string? TableName, string ColumnName)> refs =
+                ColumnReferenceCollector.Collect(c.ComputedExpression);
+            foreach ((string? _, string refName) in refs)
+            {
+                if (string.Equals(refName, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    dependentComputedColumns ??= new List<string>();
+                    dependentComputedColumns.Add(c.Name);
+                    break;
+                }
+            }
+        }
+        if (dependentComputedColumns is not null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot drop column '{alter.ColumnName}' from table '{alter.TableName}' because " +
+                $"the following GENERATED column(s) depend on it: {string.Join(", ", dependentComputedColumns)}. " +
+                "Drop the dependent column(s) first, or alter their expression to remove the reference.");
+        }
+
         DropColumn(alter.TableName, alter.ColumnName);
     }
 
