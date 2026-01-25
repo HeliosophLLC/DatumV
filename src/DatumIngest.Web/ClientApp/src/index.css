@@ -1,5 +1,19 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+
+/* Window-chrome drag regions. React doesn't reliably forward
+   `WebkitAppRegion` via inline style props (non-standard CSS property),
+   so use classes instead. Both prefixed + unprefixed forms because newer
+   Edge WebView2 dropped the -webkit- prefix. */
+.app-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 

@@ -10,7 +10,9 @@ namespace DatumIngest.Web.Settings;
 // temp-file + rename so a torn write can't corrupt the document.
 internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsService
 {
-    private static readonly SettingsDto Defaults = new(Theme: ThemePreference.System);
+    private static readonly SettingsDto Defaults = new(
+        Theme: ThemePreference.System,
+        ChromeStyle: ChromeStyle.Auto);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -37,7 +39,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     {
         var current = await GetAsync(ct);
         var merged = new SettingsDto(
-            Theme: patch.Theme ?? current.Theme);
+            Theme: patch.Theme ?? current.Theme,
+            ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

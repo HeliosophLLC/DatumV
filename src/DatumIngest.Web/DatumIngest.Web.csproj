@@ -11,6 +11,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
+
   <ItemGroup>
     <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
     <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
@@ -19,6 +20,7 @@
   <ItemGroup>
     <!-- OpenAPI document + Swagger UI middleware (runtime). -->
     <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />
+
 
     <!--
       [Hub] / [Receiver] attributes are defined locally in Hubs/TypedSignalRAttributes.cs

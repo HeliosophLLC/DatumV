@@ -277,6 +277,21 @@
 			"hide": true
 		},
 		{
+			"label": "Release: Build Client",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"src/DatumIngest.Client",
+				"-c", "Release"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"hide": true
+		},
+		{
 			"label": "Run: ExplainOnce",
 			"type": "shell",
 			"command": "dotnet",

@@ -131,7 +131,34 @@
 			"console": "integratedTerminal",
 			"justMyCode": false,
 			"stopAtEntry": false,
+			"env": {
+				"ASPNETCORE_ENVIRONMENT": "Development"
+			},
 			"preLaunchTask": "Debug: Build Client"
+		},
+		{
+			"name": "Client: Debug (prod-style)",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Debug: Build Client"
+		},
+		{
+			"name": "Client: Release",
+			"type": "coreclr",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Release/net10.0/datum.dll",
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"stopAtEntry": false,
+			"preLaunchTask": "Release: Build Client"
 		},
 		{
 			"name": "DevWeb: Release",

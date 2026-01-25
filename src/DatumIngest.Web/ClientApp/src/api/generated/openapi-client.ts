@@ -147,12 +147,16 @@ export interface HealthDto {
 
 export interface SettingsDto {
     theme?: ThemePreference;
+    chromeStyle?: ChromeStyle;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
 
+export type ChromeStyle = "auto" | "windows" | "macos" | "linux";
+
 export interface SettingsPatchDto {
     theme?: ThemePreference | undefined;
+    chromeStyle?: ChromeStyle | undefined;
 }
 
 export class SwaggerException extends Error {

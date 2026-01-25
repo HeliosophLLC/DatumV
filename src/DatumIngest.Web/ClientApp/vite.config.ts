@@ -26,11 +26,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Proxy is wired up next round (Photino host uses an ephemeral Kestrel
-    // port; dev-mode standalone hosting will pin a known port for these).
-    // proxy: {
-    //   '/api':  { target: 'http://127.0.0.1:5000', changeOrigin: true },
-    //   '/hubs': { target: 'http://127.0.0.1:5000', ws: true, changeOrigin: true },
-    // },
+    strictPort: true, // fail fast if 5173 is taken — Photino expects it
+    // Forward API + SignalR back to Kestrel (pinned in Client/Program.cs).
+    // Same-origin from the SPA's POV so generated NSwag clients work with
+    // an empty baseUrl in both dev and prod.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:5050', changeOrigin: true },
+      '/hubs': { target: 'http://127.0.0.1:5050', ws: true, changeOrigin: true },
+    },
   },
 });

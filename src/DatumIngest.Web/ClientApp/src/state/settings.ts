@@ -1,6 +1,11 @@
 import { proxy } from 'valtio';
 import { api } from '../api';
-import type { SettingsDto, SettingsPatchDto, ThemePreference } from '../api/generated/openapi-client';
+import type {
+  SettingsDto,
+  SettingsPatchDto,
+  ThemePreference,
+  ChromeStyle,
+} from '../api/generated/openapi-client';
 
 // Mirrors SettingsDto. Server defaults fill in any unset fields on GET, so
 // after refreshSettings the local copy is always non-null. The initial value
@@ -8,10 +13,12 @@ import type { SettingsDto, SettingsPatchDto, ThemePreference } from '../api/gene
 // Photino).
 interface SettingsState {
   theme: ThemePreference;
+  chromeStyle: ChromeStyle;
 }
 
 export const settingsState = proxy<SettingsState>({
   theme: 'system',
+  chromeStyle: 'auto',
 });
 
 export async function refreshSettings(): Promise<void> {
@@ -32,5 +39,8 @@ export async function updateSettings(patch: SettingsPatchDto): Promise<void> {
   }
 }
 
-// Helper for state slices that want to assert SettingsDto shape (e.g. theme).
-export type { SettingsDto, ThemePreference };
+export function setChromeStyle(chromeStyle: ChromeStyle): Promise<void> {
+  return updateSettings({ chromeStyle });
+}
+
+export type { SettingsDto, ThemePreference, ChromeStyle };
