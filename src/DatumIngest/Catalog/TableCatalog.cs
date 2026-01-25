@@ -180,7 +180,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public CatalogStoreLoadReport? CatalogLoadReport { get; }
 
     /// <summary>
-    /// The function registry used by <see cref="Plan(string)"/> for SQL planning.
+    /// The function registry used by <see cref="PlanAsync(string)"/> for SQL planning.
     /// Defaults to <see cref="FunctionRegistry.CreateDefault"/> per catalog. Exposed
     /// for tooling that needs to enumerate registered functions (e.g. building a
     /// language-server manifest).
@@ -266,10 +266,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <remarks>
     /// <para>
     /// Accepts both query expressions (SELECT, compound queries) and DDL that
-    /// the engine knows how to execute (currently <c>CREATE FUNCTION</c> /
-    /// <c>DROP FUNCTION</c>). DDL is applied to the catalog as a side effect
-    /// of <see cref="Plan(string)"/> and produces an empty result plan; this
-    /// keeps the API surface a single entry point for the host.
+    /// the engine knows how to execute. DDL is applied to the catalog as a
+    /// side effect and produces an empty result plan; this keeps the API
+    /// surface a single entry point for the host.
     /// </para>
     /// <para>
     /// Before planning, every <c>udf.X(...)</c> call site in the parsed AST
@@ -277,21 +276,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// substituted bodies. UDFs are macros — by plan time, no UDF call
     /// remains in the tree.
     /// </para>
+    /// <para>
+    /// The catalog exposes the async entry only — DML executors run on their
+    /// natural async path without thread-pool-blocking sync-over-async
+    /// bridges. Synchronous test code reaches this API via the
+    /// <c>TableCatalogTestExtensions.Plan(...)</c> extension methods in the
+    /// test assembly.
+    /// </para>
     /// </remarks>
-    public IQueryPlan Plan(string sql)
-    {
-        Statement statement = SqlParser.ParseStatement(sql);
-        return Plan(statement, sql);
-    }
-
-    /// <summary>
-    /// Asynchronous variant of <see cref="Plan(string)"/>. Production hosts
-    /// running inside an async context (ASP.NET Core, gRPC, etc.) should
-    /// prefer this over <see cref="Plan(string)"/> — the sync overload
-    /// blocks the caller's thread on async DML execution and risks
-    /// thread-pool starvation under load. The sync overload remains for
-    /// REPL / test / script callers that don't have an async path.
-    /// </summary>
     public Task<IQueryPlan> PlanAsync(string sql)
     {
         Statement statement = SqlParser.ParseStatement(sql);
@@ -299,117 +291,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Asynchronous variant of <see cref="Plan(Statement, string?)"/>.
+    /// Plans an already-parsed <see cref="Statement"/> against this catalog.
+    /// Same dispatch as <see cref="PlanAsync(string)"/> minus the parsing
+    /// step; useful for callers that have built a statement programmatically
+    /// (e.g. the procedural batch executor synthesising
+    /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
     /// </summary>
     public Task<IQueryPlan> PlanAsync(Statement statement)
         => PlanAsync(statement, sourceText: null);
 
     /// <summary>
-    /// Plans an already-parsed <see cref="Statement"/> against this catalog.
-    /// Same dispatch as <see cref="Plan(string)"/> minus the parsing step;
-    /// useful for callers that have built a statement programmatically
-    /// (e.g. the procedural batch executor synthesising
-    /// <c>SELECT &lt;expr&gt;</c> for DECLARE / SET initialisers).
+    /// Async statement dispatch — the canonical planning entry point. DDL
+    /// applies as a side effect (returning <see cref="EmptyQueryPlan"/>);
+    /// queries return a plan whose batches stream on
+    /// <see cref="IQueryPlan.ExecuteAsync(CancellationToken)"/>; DML executes
+    /// inline and returns either <see cref="EmptyQueryPlan"/> or a
+    /// <c>RETURNING</c> plan.
     /// </summary>
     /// <remarks>
-    /// <see cref="CreateProcedureStatement"/> is rejected here because the
-    /// original source text is required for catalog persistence and only
-    /// reaches the catalog through <see cref="Plan(string)"/>. Programmatic
-    /// callers that build a procedure AST should serialize it themselves
-    /// and call <see cref="Plan(string)"/>.
+    /// Threads <paramref name="sourceText"/> through for DDL statements that
+    /// need to round-trip the original SQL text through the catalog file
+    /// (procedural <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c> bodies
+    /// don't have a faithful AST formatter, so without the slice they fall
+    /// back to a synthesised header that won't reparse on catalog reload).
+    /// Callers that parsed via <c>SqlParser.ParseBatchWithText</c> already
+    /// have the per-statement slice; callers that built the AST
+    /// programmatically pass <see langword="null"/>.
     /// </remarks>
-    public IQueryPlan Plan(Statement statement) => Plan(statement, sourceText: null);
-
-    /// <summary>
-    /// Plans an already-parsed <see cref="Statement"/>, threading the original
-    /// SQL slice for DDL statements that need to round-trip the source text
-    /// through the catalog file. Procedural <c>CREATE FUNCTION</c> and
-    /// <c>CREATE PROCEDURE</c> bodies don't have a faithful AST formatter, so
-    /// without the slice they fall back to a synthesised header
-    /// (<c>CREATE FUNCTION name</c>) that won't reparse on catalog reload.
-    /// </summary>
-    /// <remarks>
-    /// Callers that have parsed via <c>SqlParser.ParseBatchWithText</c> already
-    /// have the per-statement slice and should pass it. Callers that built a
-    /// statement programmatically (no original SQL) pass <see langword="null"/>
-    /// and accept that the body persists as a placeholder.
-    /// </remarks>
-    public IQueryPlan Plan(Statement statement, string? sourceText)
-    {
-        switch (statement)
-        {
-            case QueryStatement queryStatement:
-                return PlanQuery(queryStatement.Query);
-
-            case CreateFunctionStatement create:
-                _routines.ApplyCreateFunction(create, sourceText);
-                return EmptyQueryPlan.Instance;
-
-            case DropFunctionStatement drop:
-                _routines.ApplyDropFunction(drop);
-                return EmptyQueryPlan.Instance;
-
-            case CreateProcedureStatement create:
-                _routines.ApplyCreateProcedure(create, sourceText);
-                return EmptyQueryPlan.Instance;
-
-            case DropProcedureStatement drop:
-                _routines.ApplyDropProcedure(drop);
-                return EmptyQueryPlan.Instance;
-
-            case ExecStatement exec:
-                return PlanExec(exec);
-
-            case CreateTableStatement createTable:
-                ApplyCreateTable(createTable);
-                return EmptyQueryPlan.Instance;
-
-            case DropTableStatement dropTable:
-                ApplyDropTable(dropTable);
-                return EmptyQueryPlan.Instance;
-
-            case ReindexTableStatement reindex:
-                ApplyReindexTable(reindex);
-                return EmptyQueryPlan.Instance;
-
-            case AnalyzeTableStatement analyze:
-                ApplyAnalyzeTable(analyze);
-                return EmptyQueryPlan.Instance;
-
-            case AlterTableAddColumnStatement alterAdd:
-                ApplyAlterTableAddColumn(alterAdd);
-                return EmptyQueryPlan.Instance;
-
-            case AlterTableDropColumnStatement alterDrop:
-                ApplyAlterTableDropColumn(alterDrop);
-                return EmptyQueryPlan.Instance;
-
-            case InsertStatement insert:
-                return InsertExecutor.Execute(this, insert);
-
-            case UpdateStatement update:
-                UpdateExecutor.Execute(this, update);
-                return EmptyQueryPlan.Instance;
-
-            case DeleteStatement delete:
-                DeleteExecutor.Execute(this, delete);
-                return EmptyQueryPlan.Instance;
-
-            default:
-                throw new NotSupportedException(
-                    $"Statement type '{statement.GetType().Name}' is not yet supported by Plan(string). " +
-                    $"Use the dedicated APIs (e.g. AddFile for file registration) or extend Plan to dispatch this statement.");
-        }
-    }
-
-    /// <summary>
-    /// Asynchronous statement dispatch — same routing as
-    /// <see cref="Plan(Statement, string?)"/>, but DML executors run on
-    /// their async path instead of being blocked via
-    /// <c>.GetAwaiter().GetResult()</c>. The sync overload now delegates
-    /// here for consistency; production callers should reach this
-    /// directly to avoid thread-pool starvation.
-    /// </summary>
     public async Task<IQueryPlan> PlanAsync(Statement statement, string? sourceText)
     {
         switch (statement)
@@ -437,7 +345,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return PlanExec(exec);
 
             case CreateTableStatement createTable:
-                ApplyCreateTable(createTable);
+                await ApplyCreateTableAsync(createTable).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case DropTableStatement dropTable:
@@ -453,7 +361,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case AlterTableAddColumnStatement alterAdd:
-                ApplyAlterTableAddColumn(alterAdd);
+                await ApplyAlterTableAddColumnAsync(alterAdd).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableDropColumnStatement alterDrop:
@@ -499,7 +407,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// and the INSERT layer scans existing rows to reject duplicate /
     /// null PK values.
     /// </remarks>
-    private void ApplyCreateTable(CreateTableStatement create)
+    private async Task ApplyCreateTableAsync(CreateTableStatement create)
     {
         // AT clause gating.
         if (create.StoragePath is not null && !AllowExplicitTablePaths)
@@ -530,7 +438,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         // Build ColumnInfo[] from the AST's ColumnDefinition list.
-        Schema schema = BuildSchemaFromColumnDefinitions(create.Columns, create.PrimaryKeyColumns);
+        Schema schema = await BuildSchemaFromColumnDefinitionsAsync(create.Columns, create.PrimaryKeyColumns)
+            .ConfigureAwait(false);
 
         if (create.IsTemp)
         {
@@ -780,7 +689,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
     }
 
-    private Schema BuildSchemaFromColumnDefinitions(
+    private async Task<Schema> BuildSchemaFromColumnDefinitionsAsync(
         IReadOnlyList<ColumnDefinition> definitions,
         IReadOnlyList<string>? primaryKeyColumnNames)
     {
@@ -813,7 +722,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             if (d.DefaultValue is not null)
             {
                 ValidateDefaultExpression(d.DefaultValue, d.Name);
-                ValidateDefaultExpressionFitsColumn(d.DefaultValue, d.Name, kind, isArray);
+                await ValidateDefaultExpressionFitsColumnAsync(d.DefaultValue, d.Name, kind, isArray)
+                    .ConfigureAwait(false);
                 defaultExpression = d.DefaultValue;
             }
 
@@ -1131,7 +1041,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// (functions like <c>now()</c> / <c>uuidv4()</c> are pure scalars,
     /// so the throwaway value never escapes).
     /// </summary>
-    private void ValidateDefaultExpressionFitsColumn(
+    private async Task ValidateDefaultExpressionFitsColumnAsync(
         Expression expression, string columnName, DataKind kind, bool isArray)
     {
         using Arena probeArena = new();
@@ -1148,8 +1058,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         try
         {
-            ValueRef result = evaluator.EvaluateAsValueRefAsync(
-                expression, frame, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            ValueRef result = await evaluator.EvaluateAsValueRefAsync(
+                expression, frame, CancellationToken.None).ConfigureAwait(false);
             _ = ComputedColumnEvaluator.ConvertValueRefToTarget(
                 result, probeTarget, probeArena, columnName);
         }
@@ -1268,7 +1178,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// later-PR concern), and computed columns (<c>AS expr</c>) are
     /// reserved for a future PR.
     /// </summary>
-    private void ApplyAlterTableAddColumn(AlterTableAddColumnStatement alter)
+    private async Task ApplyAlterTableAddColumnAsync(AlterTableAddColumnStatement alter)
     {
         if (!alter.Nullable)
         {
@@ -1293,7 +1203,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (defaultExpr is not null)
         {
             ValidateDefaultExpression(defaultExpr, alter.ColumnName);
-            ValidateDefaultExpressionFitsColumn(defaultExpr, alter.ColumnName, kind, isArray);
+            await ValidateDefaultExpressionFitsColumnAsync(defaultExpr, alter.ColumnName, kind, isArray)
+                .ConfigureAwait(false);
         }
 
         // Computed columns: mutually exclusive with DEFAULT — both supply a
@@ -1385,7 +1296,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // the v1 INSERT-time behaviour.
         if (computedExpr is not null)
         {
-            BackfillComputedColumn(alter.TableName, column);
+            await BackfillComputedColumnAsync(alter.TableName, column).ConfigureAwait(false);
         }
     }
 
@@ -1396,12 +1307,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// values in place of the NULL pump that <c>provider.AddColumn</c>
     /// just emitted.
     /// </summary>
-    /// <remarks>
-    /// Sync-bridges the async scan to match the existing sync shape of
-    /// <see cref="ApplyAlterTableAddColumn"/>; remove once the C1g
-    /// async-Plan cleanup lands.
-    /// </remarks>
-    private void BackfillComputedColumn(string tableName, ColumnInfo column)
+    private async Task BackfillComputedColumnAsync(string tableName, ColumnInfo column)
     {
         if (!TryGetTable(tableName, out ITableProvider? provider)) return;
         if (!provider.CanUpdateRows)
@@ -1426,7 +1332,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // the same failure would look like at INSERT time.
         try
         {
-            BackfillComputedColumnAsync(provider, column).GetAwaiter().GetResult();
+            await BackfillComputedColumnAsync(provider, column).ConfigureAwait(false);
         }
         catch
         {

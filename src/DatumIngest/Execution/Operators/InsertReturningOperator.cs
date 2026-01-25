@@ -1,49 +1,40 @@
 using DatumIngest.Catalog;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// Adapts an <see cref="InsertReturningPlan"/> into an <see cref="IQueryOperator"/>
+/// Adapts an <see cref="InsertStatement"/> into an <see cref="IQueryOperator"/>
 /// so a data-modifying CTE body — <c>WITH cte AS (INSERT … RETURNING …)</c> —
 /// can act as a row source in the surrounding plan tree.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The wrapped INSERT runs at <see cref="TableCatalog.PlanQuery"/> time, exactly
-/// once per containing query plan (the <see cref="InsertExecutor.Execute"/> call
-/// that produced the plan already committed the side effect). This operator
-/// just replays the captured RETURNING batches — it carries no further side
-/// effects and can be safely materialised by
-/// <see cref="CommonTableExpressionOperator"/> for multi-reference patterns.
-/// </para>
-/// <para>
-/// <b>Caveat (deferred):</b> with the current sync-at-Plan design, even
-/// <c>EXPLAIN WITH cte AS (INSERT …) SELECT …</c> would commit the INSERT
-/// during planning. That mirrors how top-level INSERT … RETURNING already
-/// behaves and is documented as a known divergence from PostgreSQL, where
-/// modifying CTEs run at execution time. The fix lands when the executor
-/// goes async-first (C1g) and INSERT execution moves out of plan time.
-/// </para>
+/// The INSERT side effect fires on first <see cref="ExecuteAsync"/>, exactly
+/// once per surrounding query execution — matching PostgreSQL's
+/// modifying-CTE semantics. <c>EXPLAIN WITH cte AS (INSERT …) SELECT …</c>
+/// no longer commits the INSERT at plan time. Multi-reference CTEs are
+/// memoised by <see cref="CommonTableExpressionOperator"/>, so the INSERT
+/// still runs only once even when the CTE is referenced multiple times.
 /// </remarks>
 internal sealed class InsertReturningOperator : IQueryOperator
 {
-    private readonly IQueryPlan _innerPlan;
+    private readonly TableCatalog _catalog;
+    private readonly InsertStatement _insert;
     private readonly string _explainDetails;
 
-    public InsertReturningOperator(IQueryPlan innerPlan, string targetTableName)
+    public InsertReturningOperator(TableCatalog catalog, InsertStatement insert)
     {
-        _innerPlan = innerPlan;
-        _explainDetails = $"INSERT INTO {targetTableName} … RETURNING …";
+        _catalog = catalog;
+        _insert = insert;
+        _explainDetails = $"INSERT INTO {insert.TableName} … RETURNING …";
     }
 
     /// <inheritdoc />
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        // Forward the inner plan's pre-captured RETURNING batches. The
-        // INSERT side effect already ran during planning; iterating here
-        // is read-only.
-        await foreach (RowBatch batch in _innerPlan.ExecuteAsync(context.CancellationToken)
+        IQueryPlan innerPlan = await InsertExecutor.ExecuteAsync(_catalog, _insert).ConfigureAwait(false);
+        await foreach (RowBatch batch in innerPlan.ExecuteAsync(context.CancellationToken)
             .ConfigureAwait(false))
         {
             yield return batch;
@@ -56,7 +47,7 @@ internal sealed class InsertReturningOperator : IQueryOperator
         Properties = new Dictionary<string, string>
         {
             ["statement"] = _explainDetails,
-            ["timing"] = "side-effect at plan time; rows replayed at execute",
+            ["timing"] = "side effect on first execute (modifying-CTE semantics)",
         },
     };
 }

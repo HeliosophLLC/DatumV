@@ -200,6 +200,77 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Equal(2, values.Rows[0].Count);
     }
 
+    [Fact]
+    public void InsertIntoDefaultValues()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t DEFAULT VALUES");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.Equal("t", insert.TableName);
+        Assert.Null(insert.ColumnNames);
+        Assert.IsType<InsertDefaultValuesSource>(insert.Source);
+        Assert.Null(insert.Returning);
+    }
+
+    [Fact]
+    public void InsertIntoDefaultValues_WithReturning_ParsesBoth()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "INSERT INTO t DEFAULT VALUES RETURNING id");
+
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.IsType<InsertDefaultValuesSource>(insert.Source);
+        Assert.NotNull(insert.Returning);
+        Assert.Single(insert.Returning);
+    }
+
+    // ─────── QA probes: INSERT … DEFAULT VALUES parser shape ───────
+
+    [Fact]
+    public void InsertIntoDefaultValues_LowercaseKeywords_Parses()
+    {
+        // SQL keywords are case-insensitive; the dialect tokenizer
+        // matches DEFAULT / VALUES with EqualToIgnoreCase. A regression
+        // here would indicate a casing mistake in DefaultValuesSourceParser.
+        Statement statement = SqlParser.ParseStatement("INSERT INTO t default values");
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.IsType<InsertDefaultValuesSource>(insert.Source);
+    }
+
+    [Fact]
+    public void InsertInto_DefaultWithoutValues_Throws()
+    {
+        // `DEFAULT` alone is not a valid INSERT source — needs VALUES.
+        // The error position should land at the DEFAULT token or just past.
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("INSERT INTO t DEFAULT"));
+    }
+
+    [Fact]
+    public void InsertInto_DefaultValuesWithTrailingTuple_Throws()
+    {
+        // DEFAULT VALUES is a complete source; a trailing (...) must
+        // not be silently consumed as a RETURNING / further VALUES.
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("INSERT INTO t DEFAULT VALUES (1, 2)"));
+    }
+
+    [Fact]
+    public void InsertInto_EmptyColumnList_DefaultValues_ParsesAsDefaultValues()
+    {
+        // `INSERT INTO t () DEFAULT VALUES` — the column list parser
+        // accepts an empty `()` and the source parser sees DEFAULT VALUES.
+        // The parser's column-list normalization step turns `Length == 0`
+        // into null, so the executor's "column list + DEFAULT VALUES"
+        // rejection does not fire here. Document the current behavior
+        // so a future tightening makes the test fail loudly.
+        Statement statement = SqlParser.ParseStatement("INSERT INTO t () DEFAULT VALUES");
+        InsertStatement insert = Assert.IsType<InsertStatement>(statement);
+        Assert.Null(insert.ColumnNames);
+        Assert.IsType<InsertDefaultValuesSource>(insert.Source);
+    }
+
     // ───────────────────── INSERT … RETURNING ─────────────────────
 
     [Fact]

@@ -8,7 +8,7 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Owns the <c>UPDATE</c>-statement pipeline for
-/// <see cref="TableCatalog.Plan(Statement)"/>.
+/// <see cref="TableCatalog.PlanAsync(Statement)"/>.
 /// </summary>
 /// <remarks>
 /// PR11a shipped parse + plan-time validation. PR11c wired the plain
@@ -23,9 +23,6 @@ namespace DatumIngest.Catalog;
 /// </remarks>
 internal static class UpdateExecutor
 {
-    public static void Execute(TableCatalog catalog, UpdateStatement update) =>
-        ExecuteAsync(catalog, update).GetAwaiter().GetResult();
-
     public static async Task ExecuteAsync(TableCatalog catalog, UpdateStatement update)
     {
         ArgumentNullException.ThrowIfNull(catalog);

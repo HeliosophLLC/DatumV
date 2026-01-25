@@ -344,7 +344,7 @@ internal sealed class InteractiveShell
         IQueryPlan plan;
         try
         {
-            plan = _catalog.Plan(sql);
+            plan = await _catalog.PlanAsync(sql).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -423,7 +423,7 @@ internal sealed class InteractiveShell
         IQueryPlan plan;
         try
         {
-            plan = _catalog.Plan(sql);
+            plan = await _catalog.PlanAsync(sql).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -942,7 +942,7 @@ internal sealed class InteractiveShell
         IQueryPlan plan;
         try
         {
-            plan = _catalog.Plan(sql);
+            plan = await _catalog.PlanAsync(sql).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -1163,6 +1163,15 @@ public sealed record InsertQuerySource(QueryExpression Query) : InsertSource;
 public sealed record InsertValuesSource(IReadOnlyList<IReadOnlyList<Expression>> Rows) : InsertSource;
 
 /// <summary>
+/// PostgreSQL <c>INSERT INTO t DEFAULT VALUES</c> — inserts exactly one row
+/// in which every column is treated as omitted. Each column resolves through
+/// the standard omitted-slot path (IDENTITY counter → DEFAULT expression →
+/// NULL → throw on NOT NULL with no default). A column list is not permitted
+/// with this form.
+/// </summary>
+public sealed record InsertDefaultValuesSource : InsertSource;
+
+/// <summary>
 /// <c>UPDATE name [alias] SET col = expr [, ...] [FROM source [JOIN ...]*] [WHERE ...]</c> — updates rows in a table.
 /// Follows PostgreSQL semantics: SET column names are unqualified; the target table is not
 /// repeated in the FROM clause; the WHERE clause contains both join conditions and filters.

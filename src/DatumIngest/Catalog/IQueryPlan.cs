@@ -5,7 +5,7 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// A planned SQL query, ready to execute or explain. Returned from
-/// <see cref="TableCatalog.Plan(string)"/>. The plan owns a long-lived
+/// <see cref="TableCatalog.PlanAsync(string)"/>. The plan owns a long-lived
 /// hoist store for pre-materialized literals, so the same plan may be
 /// inspected and executed multiple times.
 /// </summary>

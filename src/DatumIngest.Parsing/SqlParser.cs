@@ -3340,7 +3340,8 @@ public static class SqlParser
             from close in Token.EqualTo(SqlToken.RightParen)
             select names
         ).AsNullable().OptionalOrDefault()
-        from source in ValuesSourceParser.Select(v => (InsertSource)v).Try()
+        from source in DefaultValuesSourceParser.Try()
+            .Or(ValuesSourceParser.Select(v => (InsertSource)v).Try())
             .Or(SP.Ref(() => QueryExpressionParser!).Select(q => (InsertSource)new InsertQuerySource(q)))
         from returning in ReturningClauseParser.AsNullable().OptionalOrDefault()
         select (Statement)new InsertStatement(
@@ -3348,6 +3349,15 @@ public static class SqlParser
             columnNames is { Length: > 0 } ? columnNames : null,
             source,
             returning);
+
+    /// <summary>
+    /// Parses the <c>DEFAULT VALUES</c> source form of an INSERT statement —
+    /// PG-compatible shorthand for "insert one row, every column omitted".
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, InsertSource> DefaultValuesSourceParser =
+        from defaultKw in Token.EqualTo(SqlToken.Default)
+        from valuesKw in Token.EqualTo(SqlToken.Values)
+        select (InsertSource)new InsertDefaultValuesSource();
 
     /// <summary>
     /// Parses <c>RETURNING expr [, expr]*</c> — the projection list that the

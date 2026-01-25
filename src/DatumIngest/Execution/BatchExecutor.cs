@@ -157,7 +157,7 @@ public sealed class BatchExecutor
     /// <summary>
     /// Variant that accepts each statement paired with the verbatim source
     /// slice it was parsed from. The slice is forwarded to
-    /// <see cref="TableCatalog.Plan(Statement, string?)"/> for procedural
+    /// <see cref="TableCatalog.PlanAsync(Statement, string?)"/> for procedural
     /// <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c> so the catalog file
     /// captures the body verbatim. Other statement kinds ignore the slice.
     /// Use <c>SqlParser.ParseBatchWithText</c> to obtain the pairs.
@@ -469,7 +469,7 @@ public sealed class BatchExecutor
                     // CREATE PROCEDURE round-trip through catalog
                     // persistence.
                     {
-                        IQueryPlan plan = _catalog.Plan(stmt, sourceText);
+                        IQueryPlan plan = await _catalog.PlanAsync(stmt, sourceText).ConfigureAwait(false);
                         if (plan is not EmptyQueryPlan)
                         {
                             BatchEventStreamingSink sink = new(cellId, onEvent);
@@ -859,7 +859,7 @@ public sealed class BatchExecutor
         BatchContext batchContext,
         CancellationToken ct)
     {
-        IQueryPlan plan = _catalog.Plan(statement);
+        IQueryPlan plan = await _catalog.PlanAsync(statement).ConfigureAwait(false);
 
         await foreach (RowBatch batch in plan
             .ExecuteAsync(ct, streamingSink: null, batchContext)
@@ -1072,7 +1072,7 @@ public sealed class BatchExecutor
         CancellationToken ct)
     {
         QueryStatement sourceQuery = new(forIn.Source);
-        IQueryPlan plan = _catalog.Plan(sourceQuery);
+        IQueryPlan plan = await _catalog.PlanAsync(sourceQuery).ConfigureAwait(false);
 
         IReadOnlyList<string>? fieldNames = null;
         ushort rowTypeId = 0;
@@ -1345,7 +1345,7 @@ public sealed class BatchExecutor
         SubqueryExpression subquery, BatchContext batchContext, CancellationToken ct)
     {
         QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
-        IQueryPlan innerPlan = _catalog.Plan(innerStatement);
+        IQueryPlan innerPlan = await _catalog.PlanAsync(innerStatement).ConfigureAwait(false);
 
         DataValue captured = default;
         bool haveValue = false;
@@ -1435,7 +1435,7 @@ public sealed class BatchExecutor
         QueryStatement synthetic = new(
             new SelectQueryExpression(
                 new SelectStatement(Columns: [new SelectColumn(rewritten)])));
-        IQueryPlan plan = _catalog.Plan(synthetic);
+        IQueryPlan plan = await _catalog.PlanAsync(synthetic).ConfigureAwait(false);
 
         DataValue stable = default;
         bool captured = false;

@@ -8,7 +8,7 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Catalog;
 
 /// <summary>
-/// <see cref="IQueryPlan"/> produced by <see cref="InsertExecutor.Execute"/>
+/// <see cref="IQueryPlan"/> produced by <see cref="InsertExecutor.ExecuteAsync"/>
 /// when the parsed <see cref="InsertStatement"/> carries a <c>RETURNING</c>
 /// clause. Holds the resolved (post-DEFAULT, post-IDENTITY) inserted batch
 /// from the side-effect path, projects each row through the RETURNING

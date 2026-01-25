@@ -6,7 +6,7 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Owns the <c>DELETE FROM …</c> pipeline for
-/// <see cref="TableCatalog.Plan(Statement)"/>: resolves the target
+/// <see cref="TableCatalog.PlanAsync(Statement)"/>: resolves the target
 /// provider, walks the live row sequence with a running index, evaluates
 /// the optional <c>WHERE</c> predicate per row, and forwards the
 /// matching indices to <see cref="ITableProvider.DeleteRows"/>.
@@ -23,9 +23,6 @@ namespace DatumIngest.Catalog;
 /// </remarks>
 internal static class DeleteExecutor
 {
-    public static void Execute(TableCatalog catalog, DeleteStatement delete) =>
-        ExecuteAsync(catalog, delete).GetAwaiter().GetResult();
-
     public static async Task ExecuteAsync(TableCatalog catalog, DeleteStatement delete)
     {
         ArgumentNullException.ThrowIfNull(catalog);

@@ -112,7 +112,12 @@ INSERT INTO features (customer_id, label) VALUES (3, 'churn')
 -- From a query
 INSERT INTO features (id, name, score)
 SELECT id, name, score FROM raw_data WHERE score IS NOT NULL
+
+-- One row with every column omitted — fills from IDENTITY / DEFAULT / NULL
+INSERT INTO features DEFAULT VALUES
 ```
+
+`INSERT … DEFAULT VALUES` inserts exactly one row. Every column resolves through the same omitted-slot rules described below. A column list cannot be combined with `DEFAULT VALUES`. `RETURNING` is supported and surfaces the resolved row.
 
 #### Omitted-column resolution
 
@@ -154,7 +159,7 @@ Each `INSERT` validates that no row duplicates an existing PK or another row in 
 
 #### Computed columns
 
-A column declared `AS (expr)` is a `GENERATED ALWAYS AS` computed column. Its value is materialised at `INSERT` time by evaluating the expression against the row being built; explicit values are rejected.
+A column declared `AS (expr)` is a `GENERATED ALWAYS AS` computed column. Its value is materialised at `INSERT` time by evaluating the expression against the row being built; explicit non-`DEFAULT` values are rejected.
 
 ```sql
 CREATE TABLE orders (
@@ -167,9 +172,15 @@ INSERT INTO orders (qty, price) VALUES (3, 19.99);
 -- row reads back as (3, 19.99, 59.97)
 
 INSERT INTO orders (qty, price, total) VALUES (3, 19.99, 100.0);
--- ERROR: column 'total' is GENERATED ALWAYS AS (computed). Drop it from the
---        INSERT column list and the catalog will compute the value.
+-- ERROR: column 'total' is GENERATED ALWAYS AS (computed). Supply DEFAULT in this
+--        VALUES slot, drop the column from the INSERT column list, or omit it
+--        from the positional row.
+
+INSERT INTO orders (qty, price, total) VALUES (3, 19.99, DEFAULT);
+-- accepted; the computed pass fills total = 59.97
 ```
+
+The `DEFAULT` keyword in a computed-column slot is PG-aligned: it's the only source value accepted there, and it's treated identically to omitting the column.
 
 The expression can reference any other non-computed column in the same row. It can also reference `IDENTITY` and `DEFAULT`-filled columns — those resolve before computed columns evaluate, so the expression sees the post-fill values:
 
@@ -306,7 +317,7 @@ ALTER TABLE features DROP COLUMN risk_tier
 ALTER TABLE features DROP COLUMN IF EXISTS risk_tier
 ```
 
-The column block stays in the footer (marked `Tombstoned`) for compaction-time reclamation, but is hidden from `GetSchema()` and from subsequent scans. Dropping a column that's part of the table's `PRIMARY KEY` is rejected.
+The column block stays in the footer (marked `Tombstoned`) for compaction-time reclamation, but is hidden from `GetSchema()` and from subsequent scans. Dropping a column that's part of the table's `PRIMARY KEY` is rejected. Dropping a column that a computed column (`AS (expr)`) references is also rejected, naming every dependent column — drop the dependent column(s) first, or alter the expression to remove the reference.
 
 **The column name is freed immediately on `DROP`.** A subsequent `ALTER TABLE ... ADD COLUMN <same-name> <kind>` succeeds and gets a fresh storage slot:
 

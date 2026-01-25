@@ -20,7 +20,7 @@ namespace DatumIngest.Catalog;
 /// <c>DROP PROCEDURE</c>. Each method mutates the registries and, when a
 /// <see cref="CatalogStore"/> is configured, persists the resulting state
 /// atomically. The dispatch logic itself stays in
-/// <see cref="TableCatalog.Plan(string)"/> / <see cref="TableCatalog.Plan(Statement)"/>;
+/// <see cref="TableCatalog.PlanAsync(string)"/> / <see cref="TableCatalog.PlanAsync(Statement)"/>;
 /// callers reach this class only through the catalog.
 /// </remarks>
 internal sealed class RoutineRegistrar

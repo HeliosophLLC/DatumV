@@ -55,10 +55,9 @@ public sealed class QueryPlanner
 
     /// <summary>
     /// Plans an <see cref="InsertQueryExpression"/> (a data-modifying CTE body)
-    /// into an <see cref="Operators.InsertReturningOperator"/> wrapping the
-    /// pre-captured RETURNING batches. The INSERT side effect runs at this
-    /// point — exactly once per containing query plan — so the resulting
-    /// operator is purely read-only at execution time.
+    /// into an <see cref="Operators.InsertReturningOperator"/>. The INSERT side
+    /// effect fires when the surrounding plan executes — matching PostgreSQL's
+    /// modifying-CTE semantics. <c>EXPLAIN</c> does not commit it.
     /// </summary>
     private IQueryOperator PlanInsertQueryExpression(InsertQueryExpression insertQuery)
     {
@@ -69,8 +68,7 @@ public sealed class QueryPlanner
                 "RETURNING clause — without it the CTE has no rows to project.");
         }
 
-        IQueryPlan innerPlan = Catalog.InsertExecutor.Execute(_catalog, insertQuery.Insert);
-        return new Operators.InsertReturningOperator(innerPlan, insertQuery.Insert.TableName);
+        return new Operators.InsertReturningOperator(_catalog, insertQuery.Insert);
     }
 
     /// <summary>

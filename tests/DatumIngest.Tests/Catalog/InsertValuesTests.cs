@@ -674,4 +674,391 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("INSERT INTO t (id, note) VALUES (1, DEFAULT)"));
         Assert.Contains("note", ex.Message);
     }
+
+    // ──────────────────── INSERT … DEFAULT VALUES ────────────────────
+    //
+    // PG-compatible shorthand: "INSERT INTO t DEFAULT VALUES" inserts
+    // exactly one row, treating every column as omitted. Each column's
+    // fill follows the same omitted-slot resolution as a column-list
+    // INSERT that names no columns: IDENTITY counter → DEFAULT expr →
+    // NULL → throw. Computed columns evaluate from the resolved row.
+
+    [Fact]
+    public async Task InsertDefaultValues_AllColumnsHaveDefaults_FillsFromDefaults()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 DEFAULT 7, name String DEFAULT 'anon')");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        List<(int id, string name)> rows = await ScanAsTuples(catalog["t"]);
+        Assert.Equal([(7, "anon")], rows);
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_AllNullableNoDefaults_FillsNulls()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Int32, b String)");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Single(rows);
+        Assert.True(rows[0][0].IsNull);
+        Assert.True(rows[0][1].IsNull);
+    }
+
+    [Fact]
+    public void InsertDefaultValues_NotNullColumnWithoutDefault_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 NOT NULL, name String DEFAULT 'x')");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO t DEFAULT VALUES"));
+        Assert.Contains("NOT NULL", ex.Message);
+        Assert.Contains("id", ex.Message);
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_IdentityColumn_AdvancesCounter()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x')");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        List<long> ids = [];
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++) ids.Add(batch[r][0].AsInt64());
+            batch.Dispose();
+        }
+        ids.Sort();
+        Assert.Equal([1L, 2L, 3L], ids);
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_WithComputedColumn_ComputedFiresFromDefaults()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (a Int32 DEFAULT 3, b Int32 DEFAULT 4, " +
+            "c Int32 AS (a + b))");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0][0].AsInt32());
+        Assert.Equal(4, rows[0][1].AsInt32());
+        Assert.Equal(7, rows[0][2].AsInt32());
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_PersistentTable_VisibleAfterReopen()
+    {
+        {
+            using TableCatalog catalog = CreateCatalog(CatalogPath);
+            catalog.Plan("CREATE TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, status String DEFAULT 'new')");
+            catalog.Plan("INSERT INTO t DEFAULT VALUES");
+            catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        }
+        {
+            using TableCatalog catalog = CreateCatalog(CatalogPath);
+            List<long> ids = new();
+            List<string> statuses = new();
+            await foreach (RowBatch batch in catalog["t"].ScanAsync(
+                requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+            {
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    ids.Add(batch[r][0].AsInt64());
+                    statuses.Add(batch[r][1].AsString(batch.Arena));
+                }
+                batch.Dispose();
+            }
+            ids.Sort();
+            Assert.Equal([1L, 2L], ids);
+            Assert.Equal(["new", "new"], statuses);
+        }
+    }
+
+    // ──────────────────── QA probes: DEFAULT VALUES edge cases ────────────────────
+
+    [Fact]
+    public void InsertDefaultValues_ColumnListSupplied_RejectsBeforeAnyWrite()
+    {
+        // INSERT INTO t (col) DEFAULT VALUES — combining a column list
+        // with DEFAULT VALUES is rejected. The check must fire before
+        // any session opens, otherwise the writer's tail-flip protocol
+        // could leave an aborted partial commit on disk.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 DEFAULT 1, name String DEFAULT 'x')");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO t (id) DEFAULT VALUES"));
+        Assert.Contains("DEFAULT VALUES", ex.Message);
+        Assert.Equal(0, catalog["t"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_IdentityAndComputed_ComputedSeesIdentity()
+    {
+        // Ordering invariant: IDENTITY fills before computed evaluates.
+        // The computed slug must see the post-IDENTITY value of `id`,
+        // not NULL (which would surface as 'row-' with no suffix or a
+        // null-propagated final).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, " +
+            "slug String AS ('row-' || cast(id as String)))");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        Dictionary<long, string> rows = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                rows[batch[r][0].AsInt64()] = batch[r][1].AsString(batch.Arena);
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("row-1", rows[1L]);
+        Assert.Equal("row-2", rows[2L]);
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_NondeterministicDefault_DistinctPerInvocation()
+    {
+        // Two DEFAULT VALUES against a `DEFAULT uuidv4()` column must
+        // produce two distinct UUIDs — confirms per-row eval, not a
+        // single-eval-then-bulk-fill shortcut.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, u Uuid DEFAULT uuidv4())");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        HashSet<Guid> uuids = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++) uuids.Add(batch[r][1].AsUuid());
+            batch.Dispose();
+        }
+        Assert.Equal(2, uuids.Count);
+    }
+
+    [Fact]
+    public void InsertDefaultValues_DeterministicDefaultOnPK_SecondInsertCollides()
+    {
+        // PRIMARY KEY DEFAULT 5: first insert lands; second collides on
+        // the PK uniqueness check. The PK check must run after the
+        // omitted-fill resolution — that's the only point at which the
+        // candidate value is known. A regression that runs PK before
+        // fill would let the duplicate through.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY DEFAULT 5, name String DEFAULT 'x')");
+
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("INSERT INTO t DEFAULT VALUES"));
+        Assert.Equal(1, catalog["t"].GetRowCount());  // no partial commit
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_PKIdentity_FiftySequential_AllDistinct()
+    {
+        // Stress the counter+commit path: 50 sequential DEFAULT VALUES,
+        // each opens its own session, advances the counter atomically,
+        // and commits independently. All IDs must be distinct and the
+        // counter must not skip.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x')");
+
+        for (int i = 0; i < 50; i++) catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        HashSet<long> ids = new();
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++) ids.Add(batch[r][0].AsInt64());
+            batch.Dispose();
+        }
+        Assert.Equal(50, ids.Count);
+        Assert.Equal(1L, ids.Min());
+        Assert.Equal(50L, ids.Max());
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_AfterDropColumn_TombstoneWriterPathFires()
+    {
+        // Exercises the writer's tombstone-pad path (the
+        // DatumFileWriterV2 fix from the last QA round): the live-column
+        // count is 2 after DROP, the encoder loop still iterates 3
+        // column slots and pads the tombstoned slot with NULL.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32 DEFAULT 1, name String DEFAULT 'x', extra String DEFAULT 'y')");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+        catalog.Plan("ALTER TABLE t DROP COLUMN extra");
+        catalog.Plan("INSERT INTO t DEFAULT VALUES");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Equal(2, rows.Count);
+        // Schema is now (id, name) — extra is tombstoned and hidden from scan.
+        foreach (DataValue[] row in rows)
+        {
+            Assert.Equal(2, row.Length);
+            Assert.Equal(1, row[0].AsInt32());
+            Assert.Equal("x", row[1].AsString());
+        }
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_ReturningStar_YieldsAllResolvedValues()
+    {
+        // RETURNING * after DEFAULT VALUES yields the post-fill row —
+        // IDENTITY value, DEFAULT value, all resolved. If the RETURNING
+        // plan ran against a pre-fill row, the IDENTITY slot would be
+        // NULL or the literal seed.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, status String DEFAULT 'new')");
+
+        IQueryPlan plan = catalog.Plan("INSERT INTO t DEFAULT VALUES RETURNING *");
+
+        List<DataValue[]> rows = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                DataValue[] copy = new DataValue[batch[r].FieldCount];
+                for (int c = 0; c < copy.Length; c++) copy[c] = batch[r][c];
+                rows.Add(copy);
+            }
+        }
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].Length);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal("new", rows[0][1].AsString());
+    }
+
+    [Fact]
+    public async Task InsertDefaultValues_EquivalentTo_AllDefaultKeywordsInValues_NoComputed()
+    {
+        // Equivalence (no computed columns): `INSERT INTO t DEFAULT
+        // VALUES` and `INSERT INTO t VALUES (DEFAULT, DEFAULT, ...)`
+        // must produce the same row on identical tables. If the two
+        // paths drift apart — different DEFAULT resolution, different
+        // IDENTITY counter sequencing — this catches it.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t1 (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x')");
+        catalog.Plan(
+            "CREATE TEMP TABLE t2 (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x')");
+
+        catalog.Plan("INSERT INTO t1 DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t2 VALUES (DEFAULT, DEFAULT)");
+
+        List<DataValue[]> r1 = await ScanAllValues(catalog["t1"]);
+        List<DataValue[]> r2 = await ScanAllValues(catalog["t2"]);
+        Assert.Single(r1);
+        Assert.Single(r2);
+        Assert.Equal(r1[0][0].AsInt64(), r2[0][0].AsInt64());
+        Assert.Equal(r1[0][1].AsString(), r2[0][1].AsString());
+    }
+
+    [Fact]
+    public async Task InsertValues_DefaultKeyword_OnComputedColumn_AcceptedAsOmitted()
+    {
+        // PG-aligned: DEFAULT keyword in a VALUES slot mapping to a
+        // computed column is treated as omitted — the second-pass
+        // computed-column evaluation supplies the value. Explicit
+        // non-DEFAULT values are still rejected (see test below).
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x', " +
+            "slug String AS ('s-' || cast(id as String)))");
+
+        catalog.Plan("INSERT INTO t VALUES (DEFAULT, DEFAULT, DEFAULT)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Single(rows);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal("x", rows[0][1].AsString());
+        Assert.Equal("s-1", rows[0][2].AsString());
+    }
+
+    [Fact]
+    public void InsertValues_NonDefaultValueOnComputedColumn_StillRejected()
+    {
+        // Explicit (non-DEFAULT) values on computed columns are still
+        // rejected — the per-row guard preserves the original semantics
+        // for the "user tried to override the computed value" case.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int32 DEFAULT 1, name String DEFAULT 'x', " +
+            "slug String AS (name || '-' || cast(id as String)))");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("INSERT INTO t VALUES (DEFAULT, DEFAULT, 'hand-written')"));
+        Assert.Contains("computed", ex.Message);
+        Assert.Contains("slug", ex.Message);
+    }
+
+    [Fact]
+    public async Task InsertValues_NamedColumnList_DefaultOnComputed_AcceptedAsOmitted()
+    {
+        // Named-column-list variant of the same fix: the user mentions
+        // the computed column explicitly and supplies DEFAULT.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x', " +
+            "slug String AS ('s-' || cast(id as String)))");
+
+        catalog.Plan("INSERT INTO t (id, name, slug) VALUES (DEFAULT, DEFAULT, DEFAULT)");
+
+        List<DataValue[]> rows = await ScanAllValues(catalog["t"]);
+        Assert.Single(rows);
+        Assert.Equal(1L, rows[0][0].AsInt64());
+        Assert.Equal("x", rows[0][1].AsString());
+        Assert.Equal("s-1", rows[0][2].AsString());
+    }
+
+    [Fact]
+    public async Task InsertValues_EquivalentToDefaultValues_WithComputedColumn()
+    {
+        // The equivalence probe that originally surfaced the divergence:
+        // DEFAULT VALUES on table A must match VALUES (DEFAULT, DEFAULT,
+        // DEFAULT) on table B when both have computed columns.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan(
+            "CREATE TEMP TABLE t1 (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x', " +
+            "slug String AS ('s-' || cast(id as String) || '-' || name))");
+        catalog.Plan(
+            "CREATE TEMP TABLE t2 (id Int64 GENERATED ALWAYS AS IDENTITY, name String DEFAULT 'x', " +
+            "slug String AS ('s-' || cast(id as String) || '-' || name))");
+
+        catalog.Plan("INSERT INTO t1 DEFAULT VALUES");
+        catalog.Plan("INSERT INTO t2 VALUES (DEFAULT, DEFAULT, DEFAULT)");
+
+        List<DataValue[]> r1 = await ScanAllValues(catalog["t1"]);
+        List<DataValue[]> r2 = await ScanAllValues(catalog["t2"]);
+        Assert.Single(r1);
+        Assert.Single(r2);
+        Assert.Equal(r1[0][0].AsInt64(), r2[0][0].AsInt64());
+        Assert.Equal(r1[0][1].AsString(), r2[0][1].AsString());
+        Assert.Equal(r1[0][2].AsString(), r2[0][2].AsString());
+    }
 }
