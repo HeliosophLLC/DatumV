@@ -6,21 +6,45 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Read-side surface a provider exposes when it backs PK enforcement with an
-/// on-disk index (mutable B+Tree in the <c>.datum-pkindex</c> sidecar).
-/// <see cref="InsertExecutor"/>'s PK checker uses it to skip the full-table
-/// pre-scan that PR10f's HashSet-based path requires — turning per-INSERT
-/// PK enforcement from O(table size) into O(insert size × log table size).
-/// Providers without a backing index (TEMP / InMemory, composite PK in PR10h)
-/// return <see langword="null"/> from <see cref="ITableProvider.GetPrimaryKeyLookup"/>
-/// and the executor falls back to the scan path.
+/// on-disk index. Two modes:
+/// <list type="bullet">
+///   <item><b>Single-column</b> — typed B+Tree keyed by <see cref="DataValue"/>.
+///     <see cref="TryFind(DataValue, out ValueIndexEntry?)"/> probes by typed value.
+///     <see cref="IsComposite"/> is <see langword="false"/>.</item>
+///   <item><b>Composite</b> — bytes-keyed B+Tree storing composite-encoded
+///     keys. <see cref="TryFindComposite"/> probes by encoded byte sequence
+///     (built via <see cref="CompositeKeyEncoder.Encode"/>).
+///     <see cref="IsComposite"/> is <see langword="true"/>.</item>
+/// </list>
+/// Providers without an on-disk PK index (TEMP / InMemory) return
+/// <see langword="null"/> from <see cref="ITableProvider.GetPrimaryKeyLookup"/>
+/// and the executor falls back to the scan-based path.
 /// </summary>
 public interface IPrimaryKeyLookup
 {
     /// <summary>
-    /// Returns <see langword="true"/> and the matching entry if a row with the
-    /// given PK key exists. The entry's chunk + row offset values are not
-    /// consumed by PR10h's PK checker (uniqueness only) but the surface keeps
-    /// them so a future "lookup the actual row" feature can reuse the same path.
+    /// Returns <see langword="true"/> when this lookup serves a composite PK
+    /// (multiple columns, byte-encoded keys). Single-column lookups return
+    /// <see langword="false"/> (the default).
+    /// </summary>
+    bool IsComposite => false;
+
+    /// <summary>
+    /// Single-column probe. Returns <see langword="true"/> and the matching
+    /// entry if a row with the given key exists. Throws
+    /// <see cref="NotSupportedException"/> when invoked on a composite
+    /// lookup — callers should check <see cref="IsComposite"/> and use
+    /// <see cref="TryFindComposite"/> instead.
     /// </summary>
     bool TryFind(DataValue key, [NotNullWhen(true)] out ValueIndexEntry? entry);
+
+    /// <summary>
+    /// Composite probe via composite-encoded bytes. Returns
+    /// <see langword="true"/> and the matching entry if a row with the given
+    /// tuple exists. Throws <see cref="NotSupportedException"/> on
+    /// single-column lookups; callers check <see cref="IsComposite"/> first.
+    /// </summary>
+    bool TryFindComposite(ReadOnlySpan<byte> encodedKey, [NotNullWhen(true)] out ValueIndexEntry? entry)
+        => throw new NotSupportedException(
+            "This lookup is single-column. Use TryFind(DataValue, ...) instead.");
 }

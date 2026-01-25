@@ -84,38 +84,40 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     }
 
     [Fact]
-    public void CreateTempTable_PrimaryKeyOnString_Throws_VariableSize()
+    public void CreateTempTable_PrimaryKeyOnString_Accepted()
     {
+        // Strings are accepted as PK kinds — they route through the
+        // bytes-keyed B+Tree (variable-length) rather than the typed
+        // tree's inline-only path. The COCO-filename use case:
+        // PRIMARY KEY (filename) for filenames >12 bytes.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
 
-        // Strings are variable-size — rejected for PK in PR10f.
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE t (id String PRIMARY KEY)"));
-        Assert.Contains("variable-size", ex.Message);
+        catalog.Plan("CREATE TEMP TABLE t (id String PRIMARY KEY)");
     }
 
     [Fact]
     public void CreateTempTable_PrimaryKeyOnByteArray_Throws()
     {
+        // Byte-array PKs are still rejected — the bytes tree is for
+        // *encoded* keys derived from scalar values, not raw byte arrays.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (id UInt8[] PRIMARY KEY)"));
-        Assert.Contains("variable-size", ex.Message);
+        Assert.Contains("array", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void CreateTempTable_CompositePkOver16Bytes_Throws()
+    public void CreateTempTable_CompositePkOver16Bytes_Accepted()
     {
+        // Composite PKs no longer have the 16-byte total cap — the
+        // bytes-keyed tree handles arbitrary encoded sizes.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool);
 
-        // Two Uuids = 32 bytes > 16-byte cap.
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE t (a Uuid, b Uuid, PRIMARY KEY (a, b))"));
-        Assert.Contains("16-byte", ex.Message);
+        catalog.Plan("CREATE TEMP TABLE t (a Uuid, b Uuid, PRIMARY KEY (a, b))");
     }
 
     [Fact]

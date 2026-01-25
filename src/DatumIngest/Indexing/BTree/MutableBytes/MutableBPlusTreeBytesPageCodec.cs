@@ -1,0 +1,252 @@
+using System.Buffers.Binary;
+using DatumIngest.Indexing.BTree.Mutable;
+
+namespace DatumIngest.Indexing.BTree.MutableBytes;
+
+/// <summary>
+/// Encodes and decodes bytes-keyed B+Tree pages. Page size is shared with
+/// the typed tree (<see cref="MutableBPlusTreeConstants.PageSize"/> = 8 KiB);
+/// the difference is the key encoding inside leaf entries and internal
+/// separators — variable-length byte arrays with a 4-byte length prefix
+/// instead of typed <c>DataValue</c> serialization.
+/// </summary>
+/// <remarks>
+/// <para>Leaf page layout (8192 bytes):</para>
+/// <code>
+/// [PageType: 1B] [EntryCount: 2B] [Reserved: 1B]              ← common header (4B)
+/// [PrevLeaf: 4B] [NextLeaf: 4B] [PayloadLength: 4B]           ← leaf header (12B)
+/// [Entries: each [KeyLen: 4B][KeyBytes][ChunkIdx: 4B][RowOff: 8B]]
+/// [Zero padding to 8192]
+/// </code>
+/// <para>Internal page layout (8192 bytes):</para>
+/// <code>
+/// [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]                ← common header (4B)
+/// [KeyCount × [KeyLen: 4B][KeyBytes]]                         ← separator keys
+/// [KeyCount + 1 × uint32]                                     ← child page ids
+/// [Zero padding to 8192]
+/// </code>
+/// </remarks>
+internal static class MutableBPlusTreeBytesPageCodec
+{
+    /// <summary>Encoded byte overhead for a single leaf entry (excluding key length).</summary>
+    private const int LeafEntryFixedOverhead = 4 /* keyLen */ + 4 /* chunkIdx */ + 8 /* rowOff */;
+
+    /// <summary>Encoded byte overhead for a single internal-page separator key (excluding key length).</summary>
+    private const int InternalKeyFixedOverhead = 4 /* keyLen */;
+
+    /// <summary>
+    /// Encodes a leaf page into a fresh 8 KiB buffer. Callers own the
+    /// buffer and write it to disk at the appropriate page offset.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the entries don't fit in the leaf payload capacity.
+    /// Callers should split before reaching this codec.
+    /// </exception>
+    internal static byte[] EncodeLeafPage(
+        ReadOnlySpan<BytesIndexEntry> entries,
+        uint previousLeafPageId,
+        uint nextLeafPageId)
+    {
+        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+        Span<byte> payload = page.AsSpan(MutableBPlusTreeConstants.LeafHeaderSize);
+
+        int written = SerializeLeafEntries(entries, payload);
+
+        page[0] = (byte)MutableBPlusTreePageType.Leaf;
+        BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)entries.Length);
+        page[3] = 0;
+        BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(4, 4), previousLeafPageId);
+        BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(8, 4), nextLeafPageId);
+        BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(12, 4), written);
+
+        return page;
+    }
+
+    /// <summary>
+    /// Returns the encoded byte size for a list of leaf entries. Used by
+    /// the writer to test split boundaries without committing a buffer.
+    /// </summary>
+    internal static int MeasureLeafEntries(ReadOnlySpan<BytesIndexEntry> entries)
+    {
+        int total = 0;
+        for (int i = 0; i < entries.Length; i++)
+        {
+            total += LeafEntryFixedOverhead + entries[i].Key.Length;
+        }
+        return total;
+    }
+
+    private static int SerializeLeafEntries(ReadOnlySpan<BytesIndexEntry> entries, Span<byte> destination)
+    {
+        int offset = 0;
+        for (int i = 0; i < entries.Length; i++)
+        {
+            BytesIndexEntry entry = entries[i];
+            int total = LeafEntryFixedOverhead + entry.Key.Length;
+            if (offset + total > destination.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Leaf payload ({offset + total} bytes) exceeds page capacity ({destination.Length} bytes).");
+            }
+
+            BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(offset, 4), entry.Key.Length);
+            offset += 4;
+            entry.Key.CopyTo(destination[offset..]);
+            offset += entry.Key.Length;
+            BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(offset, 4), entry.ChunkIndex);
+            offset += 4;
+            BinaryPrimitives.WriteInt64LittleEndian(destination.Slice(offset, 8), entry.RowOffsetInChunk);
+            offset += 8;
+        }
+        return offset;
+    }
+
+    /// <summary>Decodes a leaf page from raw 8 KiB bytes.</summary>
+    internal static MutableBytesLeafPage DecodeLeafPage(byte[] pageBytes, uint pageId)
+    {
+        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        {
+            throw new InvalidDataException(
+                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+        }
+
+        if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Leaf)
+        {
+            throw new InvalidDataException(
+                $"Expected leaf page type ({MutableBPlusTreePageType.Leaf}), got {(MutableBPlusTreePageType)pageBytes[0]}.");
+        }
+
+        ushort entryCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
+        uint prevLeaf = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(4, 4));
+        uint nextLeaf = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(8, 4));
+        int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(12, 4));
+
+        if (payloadLength < 0 || payloadLength > MutableBPlusTreeConstants.LeafPayloadCapacity)
+        {
+            throw new InvalidDataException(
+                $"Invalid leaf payload length {payloadLength}; must be in [0, {MutableBPlusTreeConstants.LeafPayloadCapacity}].");
+        }
+
+        BytesIndexEntry[] entries = new BytesIndexEntry[entryCount];
+        ReadOnlySpan<byte> payload = pageBytes.AsSpan(MutableBPlusTreeConstants.LeafHeaderSize, payloadLength);
+        int offset = 0;
+        for (int i = 0; i < entryCount; i++)
+        {
+            int keyLen = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset, 4));
+            offset += 4;
+            byte[] key = payload.Slice(offset, keyLen).ToArray();
+            offset += keyLen;
+            int chunkIndex = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset, 4));
+            offset += 4;
+            long rowOffset = BinaryPrimitives.ReadInt64LittleEndian(payload.Slice(offset, 8));
+            offset += 8;
+            entries[i] = new BytesIndexEntry(key, chunkIndex, rowOffset);
+        }
+
+        return new MutableBytesLeafPage(pageId, entries, prevLeaf, nextLeaf);
+    }
+
+    /// <summary>Encodes an internal page (separator keys + child page ids).</summary>
+    internal static byte[] EncodeInternalPage(
+        ReadOnlySpan<byte[]> keys,
+        ReadOnlySpan<uint> childPageIds)
+    {
+        if (childPageIds.Length != keys.Length + 1)
+        {
+            throw new ArgumentException(
+                $"Internal page child count ({childPageIds.Length}) must equal key count + 1 ({keys.Length + 1}).",
+                nameof(childPageIds));
+        }
+
+        byte[] page = new byte[MutableBPlusTreeConstants.PageSize];
+
+        page[0] = (byte)MutableBPlusTreePageType.Internal;
+        BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1, 2), (ushort)keys.Length);
+        page[3] = 0;
+
+        int offset = MutableBPlusTreeConstants.CommonPageHeaderSize;
+
+        for (int i = 0; i < keys.Length; i++)
+        {
+            byte[] key = keys[i];
+            int needed = InternalKeyFixedOverhead + key.Length;
+            if (offset + needed > MutableBPlusTreeConstants.PageSize)
+            {
+                throw new InvalidOperationException(
+                    $"Internal page payload ({offset + needed} bytes) exceeds page size ({MutableBPlusTreeConstants.PageSize} bytes).");
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(offset, 4), key.Length);
+            offset += 4;
+            key.CopyTo(page.AsSpan(offset));
+            offset += key.Length;
+        }
+
+        int childrenBytes = childPageIds.Length * 4;
+        if (offset + childrenBytes > MutableBPlusTreeConstants.PageSize)
+        {
+            throw new InvalidOperationException(
+                $"Internal page payload ({offset + childrenBytes} bytes) exceeds page size ({MutableBPlusTreeConstants.PageSize} bytes).");
+        }
+
+        for (int i = 0; i < childPageIds.Length; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(offset, 4), childPageIds[i]);
+            offset += 4;
+        }
+
+        return page;
+    }
+
+    /// <summary>
+    /// Returns the encoded byte size for an internal page with the given key
+    /// list (key count + 1 child pointers). Includes the common header.
+    /// </summary>
+    internal static int MeasureInternalPage(ReadOnlySpan<byte[]> keys)
+    {
+        int total = MutableBPlusTreeConstants.CommonPageHeaderSize;
+        for (int i = 0; i < keys.Length; i++)
+        {
+            total += InternalKeyFixedOverhead + keys[i].Length;
+        }
+        total += (keys.Length + 1) * 4; // child ids
+        return total;
+    }
+
+    /// <summary>Decodes an internal page from raw 8 KiB bytes.</summary>
+    internal static MutableBytesInternalPage DecodeInternalPage(byte[] pageBytes, uint pageId)
+    {
+        if (pageBytes.Length != MutableBPlusTreeConstants.PageSize)
+        {
+            throw new InvalidDataException(
+                $"Page must be exactly {MutableBPlusTreeConstants.PageSize} bytes; got {pageBytes.Length}.");
+        }
+
+        if ((MutableBPlusTreePageType)pageBytes[0] != MutableBPlusTreePageType.Internal)
+        {
+            throw new InvalidDataException(
+                $"Expected internal page type ({MutableBPlusTreePageType.Internal}), got {(MutableBPlusTreePageType)pageBytes[0]}.");
+        }
+
+        ushort keyCount = BinaryPrimitives.ReadUInt16LittleEndian(pageBytes.AsSpan(1, 2));
+
+        byte[][] keys = new byte[keyCount][];
+        uint[] childPageIds = new uint[keyCount + 1];
+
+        int offset = MutableBPlusTreeConstants.CommonPageHeaderSize;
+        for (int i = 0; i < keyCount; i++)
+        {
+            int keyLen = BinaryPrimitives.ReadInt32LittleEndian(pageBytes.AsSpan(offset, 4));
+            offset += 4;
+            keys[i] = pageBytes.AsSpan(offset, keyLen).ToArray();
+            offset += keyLen;
+        }
+
+        for (int i = 0; i <= keyCount; i++)
+        {
+            childPageIds[i] = BinaryPrimitives.ReadUInt32LittleEndian(pageBytes.AsSpan(offset, 4));
+            offset += 4;
+        }
+
+        return new MutableBytesInternalPage(pageId, keys, childPageIds);
+    }
+}

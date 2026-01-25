@@ -51,15 +51,15 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     }
 
     [Fact]
-    public void CreateTable_CompositePk_DoesNotCreatePkIndex()
+    public void CreateTable_CompositePk_CreatesBytesPkIndex()
     {
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, c String, PRIMARY KEY (a, b))");
 
-        Assert.False(File.Exists(PkIndexPath("t")),
-            "Composite PK falls back to the scan path in PR10h — no .datum-pkindex sidecar.");
+        Assert.True(File.Exists(PkIndexPath("t")),
+            "Composite PK creates a bytes-keyed .datum-pkindex sidecar (encoder-fed).");
     }
 
     [Fact]
@@ -104,14 +104,17 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Provider_CompositePk_GetPrimaryKeyLookupNull()
+    public void Provider_CompositePk_GetPrimaryKeyLookupReturnsCompositeLookup()
     {
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, PRIMARY KEY (a, b))");
 
         ITableProvider provider = catalog["t"];
-        Assert.Null(provider.GetPrimaryKeyLookup());
+        IPrimaryKeyLookup? lookup = provider.GetPrimaryKeyLookup();
+
+        Assert.NotNull(lookup);
+        Assert.True(lookup.IsComposite, "Composite PK provider must return a composite-mode lookup.");
     }
 
     [Fact]

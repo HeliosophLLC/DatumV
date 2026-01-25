@@ -252,7 +252,7 @@ internal static class InsertExecutor
             await EvaluateComputedColumnsAsync(
                 catalog, targetSchema, lookup, plan, targetRow, arena).ConfigureAwait(false);
 
-            pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
+            pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, arena);
             batch.Add(targetRow);
         }
 
@@ -374,7 +374,7 @@ internal static class InsertExecutor
                     await EvaluateComputedColumnsAsync(
                         catalog, targetSchema, targetLookup, plan, targetRow, targetArena).ConfigureAwait(false);
 
-                    pkChecker?.EnsureUnique(targetRow, targetSchema.Columns);
+                    pkChecker?.EnsureUnique(targetRow, targetSchema.Columns, targetArena);
                     targetBatch.Add(targetRow);
                 }
 
@@ -897,13 +897,17 @@ internal static class InsertExecutor
             IReadOnlyList<int> pkIndices = targetSchema.PrimaryKeyColumnIndices;
             if (pkIndices.Count == 0) return null;
 
-            // Single-column PK + provider-supplied on-disk index → lookup-backed checker.
-            // Composite PK falls back to scan path (encoder is a follow-up).
-            if (pkIndices.Count == 1 && provider.GetPrimaryKeyLookup() is { } lookup)
+            // PK index path: provider-supplied on-disk lookup (single-column
+            // typed tree OR composite bytes tree) → lookup-backed checker.
+            // No pre-scan; uniqueness check probes the live index per row.
+            if (provider.GetPrimaryKeyLookup() is { } lookup)
             {
                 return new PrimaryKeyChecker(pkIndices, seenKeys: new HashSet<string>(), lookup: lookup);
             }
 
+            // No on-disk index (TEMP / InMemory providers) → fall back to the
+            // pre-scan + HashSet path. O(table size) per INSERT, but the table
+            // is already in memory for these provider types.
             HashSet<string> seen = new();
             await foreach (RowBatch batch in provider.ScanAsync(
                 requiredColumns: null,
@@ -935,10 +939,42 @@ internal static class InsertExecutor
         /// set on success so the next row in the same INSERT can
         /// detect a duplicate without a re-scan.
         /// </summary>
-        public void EnsureUnique(DataValue[] targetRow, IReadOnlyList<ColumnInfo> columns)
+        public void EnsureUnique(DataValue[] targetRow, IReadOnlyList<ColumnInfo> columns, Arena? arena = null)
         {
-            // NULL-in-PK check + within-batch dedup is shared between
-            // lookup and scan paths.
+            // Bytes-keyed lookup path: encode the tuple via CompositeKeyEncoder
+            // and use the encoded bytes for BOTH within-batch dedup (HashSet
+            // keyed on base64-of-encoded-bytes) AND the on-disk probe. Handles
+            // arbitrary-length strings / composite tuples without going through
+            // ToObject() on non-inline DataValues.
+            if (_lookup is not null && _lookup.IsComposite)
+            {
+                DataValue[] tuple = new DataValue[_pkIndices.Count];
+                for (int p = 0; p < _pkIndices.Count; p++)
+                {
+                    if (targetRow[_pkIndices[p]].IsNull)
+                    {
+                        throw new PrimaryKeyViolationException(
+                            $"PRIMARY KEY column '{columns[_pkIndices[p]].Name}' is NULL; PK values must be non-null.");
+                    }
+                    tuple[p] = targetRow[_pkIndices[p]];
+                }
+                byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, arena);
+                string seenKey = Convert.ToBase64String(encoded);
+                if (!_seenKeys.Add(seenKey))
+                {
+                    throw new PrimaryKeyViolationException(
+                        BuildDuplicateMessage(_pkIndices, columns, targetRow));
+                }
+                if (_lookup.TryFindComposite(encoded, out _))
+                {
+                    throw new PrimaryKeyViolationException(
+                        BuildDuplicateMessage(_pkIndices, columns, targetRow));
+                }
+                return;
+            }
+
+            // Single-column typed lookup or scan-based fallback. NULL-in-PK
+            // check + within-batch dedup is shared between both paths.
             string key = BuildKeyFromArray(targetRow, _pkIndices, columns);
             if (!_seenKeys.Add(key))
             {
@@ -946,9 +982,6 @@ internal static class InsertExecutor
                     BuildDuplicateMessage(_pkIndices, columns, targetRow));
             }
 
-            // Lookup-backed: probe the on-disk index for an existing row
-            // with this key. The lookup queries live tree state; no
-            // staleness vs the scan-based pre-load.
             if (_lookup is not null)
             {
                 DataValue pkValue = targetRow[_pkIndices[0]];

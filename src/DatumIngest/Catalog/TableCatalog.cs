@@ -509,18 +509,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         DatumFileWriterV2.CreateEmpty(
             targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices, columnComputeds);
 
-        // Create the on-disk PK index sidecar when the table has a
-        // single-column PK (PR10h scope). Composite PKs continue to use
-        // InsertExecutor's scan-based PK check until the encoder lands.
-        // Dispose explicitly so the file handle is released before the
-        // provider's TryOpenPrimaryKeyIndex re-opens it below.
-        if (schema.PrimaryKeyColumnIndices.Count == 1)
+        // Create the on-disk PK index sidecar. The choice between typed and
+        // bytes-keyed trees is per-PK-shape:
+        // - Single-column fixed-size kind (Int*, UInt*, Float*, Bool, Date,
+        //   DateTime, Time, Duration, Uuid) → typed B+Tree (DataValue-keyed,
+        //   no encoder overhead, no inline-budget concerns)
+        // - Single-column String → bytes-keyed B+Tree (the typed tree's
+        //   inline-only limit caps strings to ~12 bytes; bytes tree handles
+        //   any length, which the COCO-style "filename as PK" case needs)
+        // - Composite PK → bytes-keyed B+Tree (stores composite-encoded
+        //   byte tuples produced by CompositeKeyEncoder)
+        if (schema.PrimaryKeyColumnIndices.Count >= 1)
         {
             string pkIndexPath = Catalog.Providers.DatumFileTableProviderV2.GetPrimaryKeyIndexPath(targetPath);
-            DataKind pkKind = schema.Columns[schema.PrimaryKeyColumnIndices[0]].Kind;
-            Indexing.BTree.Mutable.MutableBPlusTree pkTree =
-                Indexing.BTree.Mutable.MutableBPlusTree.Create(pkIndexPath, pkKind);
-            pkTree.Dispose();
+            bool useBytesTree = ShouldUseBytesPrimaryKeyTree(schema);
+            if (useBytesTree)
+            {
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes pkTree =
+                    Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(pkIndexPath);
+                pkTree.Dispose();
+            }
+            else
+            {
+                DataKind pkKind = schema.Columns[schema.PrimaryKeyColumnIndices[0]].Kind;
+                Indexing.BTree.Mutable.MutableBPlusTree pkTree =
+                    Indexing.BTree.Mutable.MutableBPlusTree.Create(pkIndexPath, pkKind);
+                pkTree.Dispose();
+            }
         }
 
         Add(new TableDescriptor(create.TableName, targetPath));
@@ -825,18 +840,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Enforces the PR10f constraint that the total PK key size is
-    /// ≤ 16 bytes (sum of fixed-size column kinds). Variable-size
-    /// kinds (String, byte arrays, typed arrays, structs, image /
-    /// audio) are rejected up front because they have no bounded
-    /// per-row size.
+    /// Validates that every PRIMARY KEY column is of a kind the
+    /// <c>CompositeKeyEncoder</c> can encode. Rejects array / struct /
+    /// blob / decimal / geometric kinds — those are either deferred
+    /// (Decimal, Point2D/Point3D) or fundamentally unsuitable for B+Tree
+    /// indexing (arrays, structs, large blobs).
     /// </summary>
+    /// <remarks>
+    /// Single-column PKs use the typed B+Tree (which natively handles
+    /// the kind), composite PKs use the bytes-keyed B+Tree fed by
+    /// <c>CompositeKeyEncoder</c>. Both paths reject the same unsupported
+    /// kinds — this validator catches them at <c>CREATE TABLE</c> time
+    /// instead of letting the user discover the gap at the first <c>INSERT</c>.
+    /// </remarks>
     private static void ValidatePrimaryKeySize(
         IReadOnlyList<ColumnDefinition> definitions,
         IReadOnlyList<int> pkSchemaIndices)
     {
-        const int MaxKeyBytes = 16;
-        int total = 0;
         foreach (int idx in pkSchemaIndices)
         {
             ColumnDefinition d = definitions[idx];
@@ -847,21 +867,59 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 // specific error.
                 continue;
             }
-            if (isArray || !TryGetFixedKindSizeBytes(kind, out int size))
+            if (isArray)
             {
                 throw new InvalidOperationException(
-                    $"PRIMARY KEY column '{d.Name}' has variable-size kind {kind}" +
-                    (isArray ? "[]" : "") +
-                    "; PR10f requires fixed-size scalar kinds in the PK (total ≤ 16 bytes).");
+                    $"PRIMARY KEY column '{d.Name}' is an array (kind {kind}[]); array kinds " +
+                    "are not supported in PRIMARY KEY columns. Consider an inverted index for " +
+                    "array contents or a hash projection for unique constraints.");
             }
-            total += size;
+            if (!IsAcceptedPrimaryKeyKind(kind))
+            {
+                throw new InvalidOperationException(
+                    $"PRIMARY KEY column '{d.Name}' has unsupported kind {kind}. Supported PK " +
+                    "kinds: Boolean, Int8–Int128, UInt8–UInt128, Float16/32/64, Date, Time, " +
+                    "DateTime, Duration, Uuid, String. Decimal and geometric kinds are deferred.");
+            }
         }
-        if (total > MaxKeyBytes)
-        {
-            throw new InvalidOperationException(
-                $"PRIMARY KEY total key size is {total} bytes; the catalog enforces a 16-byte cap " +
-                "(sum of column kind sizes). Use fewer / smaller PK columns, or split the table.");
-        }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the kind is supported as a
+    /// PRIMARY KEY component. Matches the kinds <c>CompositeKeyEncoder</c>
+    /// can encode (used by composite PKs) and that the typed B+Tree
+    /// can store inline (used by single-column PKs).
+    /// </summary>
+    private static bool IsAcceptedPrimaryKeyKind(DataKind kind) =>
+        kind is DataKind.Boolean
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64 or DataKind.Int128
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64 or DataKind.UInt128
+            or DataKind.Float16 or DataKind.Float32 or DataKind.Float64
+            or DataKind.Date or DataKind.Time or DataKind.DateTime or DataKind.Duration
+            or DataKind.Uuid
+            or DataKind.String;
+
+    /// <summary>
+    /// Decides whether a table's PRIMARY KEY index should use the
+    /// bytes-keyed B+Tree (variable-length, composite-encoded) versus the
+    /// typed B+Tree (DataValue-keyed, inline-only). Bytes tree for:
+    /// <list type="bullet">
+    ///   <item>Composite PKs (Count &gt; 1) — only the bytes tree handles
+    ///         multi-column encoded keys</item>
+    ///   <item>Single-column String PKs — the typed tree's inline budget
+    ///         caps strings at ~12 bytes; bytes tree handles any length</item>
+    /// </list>
+    /// Typed tree for single-column fixed-size kinds (Int*, UInt*, Float*,
+    /// Bool, Date, DateTime, Time, Duration, Uuid) — those fit inline and
+    /// benefit from the typed compare's fast path.
+    /// </summary>
+    internal static bool ShouldUseBytesPrimaryKeyTree(Schema schema)
+    {
+        IReadOnlyList<int> pkIndices = schema.PrimaryKeyColumnIndices;
+        if (pkIndices.Count > 1) return true;
+        if (pkIndices.Count == 0) return false;
+        DataKind kind = schema.Columns[pkIndices[0]].Kind;
+        return kind == DataKind.String;
     }
 
     /// <summary>
