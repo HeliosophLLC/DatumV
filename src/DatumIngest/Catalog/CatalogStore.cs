@@ -641,6 +641,30 @@ public sealed class CatalogFileTableEntry
     /// <c>AT 'path'</c> outside the catalog tree.
     /// </summary>
     public string? FilePath { get; set; }
+
+    /// <summary>
+    /// User-defined secondary indexes created via <c>CREATE INDEX</c>.
+    /// <see langword="null"/> when the table has no user-defined indexes
+    /// (catalog files written before this field existed load with the same
+    /// semantics they had before).
+    /// </summary>
+    public List<CatalogFileIndexEntry>? Indexes { get; set; }
+}
+
+/// <summary>
+/// One user-defined secondary index entry within a
+/// <see cref="CatalogFileTableEntry"/>. The backing
+/// <c>.datum-cindex-{Name}</c> sidecar lives next to the table's
+/// <c>.datum</c> file; the entry is the catalog's record of which
+/// indexes should be opened at provider construction.
+/// </summary>
+public sealed class CatalogFileIndexEntry
+{
+    /// <summary>The index's name (unique within the owning table).</summary>
+    public string? Name { get; set; }
+
+    /// <summary>The ordered list of column names covered by the index.</summary>
+    public List<string>? Columns { get; set; }
 }
 
 /// <summary>One UDF entry in the persisted catalog.</summary>
@@ -718,10 +742,12 @@ internal sealed class CatalogFileProcedureEntry
 [JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
 [JsonSerializable(typeof(CatalogFileTableEntry))]
+[JsonSerializable(typeof(CatalogFileIndexEntry))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
 [JsonSerializable(typeof(List<CatalogFileTableEntry>))]
+[JsonSerializable(typeof(List<CatalogFileIndexEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,

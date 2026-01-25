@@ -134,8 +134,36 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     // command can prune dead entries.
                     continue;
                 }
-                AddFile(resolved, entry.Name);
+
+                // Materialise the index list from the JSON entry so the
+                // provider can open the corresponding .datum-cindex-* sidecars
+                // at construction. Catalog files written before composite
+                // indexes existed have entry.Indexes == null, which Add()
+                // sees as "no indexes" — equivalent semantics.
+                List<IndexDescriptor>? indexes = null;
+                if (entry.Indexes is { Count: > 0 } indexEntries)
+                {
+                    indexes = new List<IndexDescriptor>(indexEntries.Count);
+                    foreach (CatalogFileIndexEntry indexEntry in indexEntries)
+                    {
+                        if (string.IsNullOrEmpty(indexEntry.Name) || indexEntry.Columns is null || indexEntry.Columns.Count == 0)
+                        {
+                            continue;
+                        }
+                        indexes.Add(new IndexDescriptor(indexEntry.Name, indexEntry.Columns.ToArray()));
+                    }
+                }
+
+                Add(new TableDescriptor(entry.Name, resolved, Indexes: indexes));
                 _persistentTableEntries[entry.Name] = entry.FilePath;
+                if (indexes is { Count: > 0 })
+                {
+                    _persistentTableIndexes[entry.Name] = indexes;
+                    foreach (IndexDescriptor index in indexes)
+                    {
+                        _indexNameToTable[index.Name] = entry.Name;
+                    }
+                }
             }
         }
     }
@@ -170,6 +198,27 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// TEMP tables aren't tracked either; they die with the session.
     /// </summary>
     private readonly Dictionary<string, string> _persistentTableEntries = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Tracks user-defined secondary indexes per persistent table (via
+    /// <c>CREATE INDEX</c>). Keyed by table name (matches
+    /// <see cref="_persistentTableEntries"/>). Each entry is the ordered list
+    /// of <see cref="IndexDescriptor"/>s for that table. Indexes survive
+    /// catalog reopen because they're persisted alongside the table's
+    /// <see cref="CatalogFileTableEntry"/>.
+    /// </summary>
+    private readonly Dictionary<string, List<IndexDescriptor>> _persistentTableIndexes =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Reverse lookup: index name → owning table name. Composite indexes
+    /// have catalog-global names (mirroring Postgres) so <c>DROP INDEX</c>
+    /// can resolve to its table without naming it. Populated from
+    /// <see cref="_persistentTableIndexes"/> at load and on every
+    /// <c>CREATE INDEX</c> / <c>DROP INDEX</c>.
+    /// </summary>
+    private readonly Dictionary<string, string> _indexNameToTable =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>
@@ -350,6 +399,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
             case DropTableStatement dropTable:
                 ApplyDropTable(dropTable);
+                return EmptyQueryPlan.Instance;
+
+            case CreateIndexStatement createIndex:
+                await ApplyCreateIndexAsync(createIndex).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
+            case DropIndexStatement dropIndex:
+                ApplyDropIndex(dropIndex);
                 return EmptyQueryPlan.Instance;
 
             case ReindexTableStatement reindex:
@@ -566,9 +623,153 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-manifest"));
             TryDeleteFile(System.IO.Path.ChangeExtension(resolved, ".datum-pkindex"));
 
+            // User-defined secondary index sidecars (one per CREATE INDEX).
+            // Glob-match the .datum file's stem so we sweep any orphans even
+            // if the descriptor list is stale.
+            string? dir = System.IO.Path.GetDirectoryName(resolved);
+            string stem = System.IO.Path.GetFileNameWithoutExtension(resolved);
+            if (!string.IsNullOrEmpty(dir) && !string.IsNullOrEmpty(stem))
+            {
+                foreach (string cindexFile in Directory.EnumerateFiles(dir, stem + ".datum-cindex-*"))
+                {
+                    TryDeleteFile(cindexFile);
+                }
+            }
+
             _persistentTableEntries.Remove(drop.TableName);
+            if (_persistentTableIndexes.TryGetValue(drop.TableName, out List<IndexDescriptor>? droppedIndexes))
+            {
+                foreach (IndexDescriptor index in droppedIndexes)
+                {
+                    _indexNameToTable.Remove(index.Name);
+                }
+                _persistentTableIndexes.Remove(drop.TableName);
+            }
             _catalogStore?.Save(_udfs, _procedures);
         }
+    }
+
+    /// <summary>
+    /// Applies a <c>CREATE INDEX</c> statement: validates the target table /
+    /// columns, asks the provider to materialise a new
+    /// <c>.datum-cindex-{name}</c> sidecar (and backfill it from existing
+    /// rows), records the index in the catalog descriptor, and persists.
+    /// </summary>
+    private async Task ApplyCreateIndexAsync(CreateIndexStatement create)
+    {
+        // Validate the target table exists and is owned by this catalog.
+        if (!Tables.TryGetValue(create.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{create.TableName}' is not registered in the catalog.");
+        }
+
+        // Index names are catalog-globally unique (Postgres semantics).
+        if (_indexNameToTable.TryGetValue(create.IndexName, out string? existingOwner))
+        {
+            if (create.IfNotExists && string.Equals(existingOwner, create.TableName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            throw new InvalidOperationException(
+                $"Index '{create.IndexName}' already exists" +
+                (string.Equals(existingOwner, create.TableName, StringComparison.OrdinalIgnoreCase)
+                    ? $" on table '{existingOwner}'."
+                    : $" on table '{existingOwner}'. Index names must be unique across the catalog."));
+        }
+
+        if (provider is not Providers.DatumFileTableProviderV2 datumProvider)
+        {
+            throw new InvalidOperationException(
+                $"Table '{create.TableName}' does not support CREATE INDEX. " +
+                "Only persistent .datum tables maintain composite indexes; " +
+                "TEMP / InMemory / external-source tables are excluded.");
+        }
+
+        if (create.Columns.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}' requires at least one column.");
+        }
+
+        // Validate columns exist on the table and have encoder-supported kinds.
+        Model.Schema schema = datumProvider.GetSchema();
+        foreach (string columnName in create.Columns)
+        {
+            Model.ColumnInfo? column = schema.FindColumn(columnName);
+            if (column is null)
+            {
+                throw new InvalidOperationException(
+                    $"CREATE INDEX '{create.IndexName}': column '{columnName}' does not exist on table '{create.TableName}'.");
+            }
+            if (column.IsArray)
+            {
+                throw new InvalidOperationException(
+                    $"CREATE INDEX '{create.IndexName}': column '{columnName}' is an array column and cannot be indexed.");
+            }
+            if (column.Kind is Model.DataKind.Decimal or Model.DataKind.Point2D or Model.DataKind.Point3D)
+            {
+                throw new InvalidOperationException(
+                    $"CREATE INDEX '{create.IndexName}': column '{columnName}' has kind '{column.Kind}' which has no canonical sort encoding.");
+            }
+        }
+
+        IndexDescriptor descriptor = new(create.IndexName, create.Columns.ToArray());
+        await datumProvider.AddCompositeIndexAsync(descriptor).ConfigureAwait(false);
+
+        // Update catalog state and persist.
+        if (!_persistentTableIndexes.TryGetValue(create.TableName, out List<IndexDescriptor>? list))
+        {
+            list = new List<IndexDescriptor>();
+            _persistentTableIndexes[create.TableName] = list;
+        }
+        list.Add(descriptor);
+        _indexNameToTable[descriptor.Name] = create.TableName;
+        _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    /// <summary>
+    /// Applies a <c>DROP INDEX</c> statement: locates the owning table,
+    /// asks the provider to dispose the tree and delete the
+    /// <c>.datum-cindex-{name}</c> sidecar, removes the catalog entry, and
+    /// persists.
+    /// </summary>
+    private void ApplyDropIndex(DropIndexStatement drop)
+    {
+        if (!_indexNameToTable.TryGetValue(drop.IndexName, out string? tableName))
+        {
+            if (drop.IfExists) return;
+            throw new InvalidOperationException(
+                $"Index '{drop.IndexName}' is not registered in the catalog.");
+        }
+
+        if (!Tables.TryGetValue(tableName, out ITableProvider? provider))
+        {
+            // Catalog state is inconsistent — the table got dropped without
+            // cleaning up the index map. Defensively remove the stale entry
+            // and persist.
+            _indexNameToTable.Remove(drop.IndexName);
+            _catalogStore?.Save(_udfs, _procedures);
+            if (drop.IfExists) return;
+            throw new InvalidOperationException(
+                $"Index '{drop.IndexName}' references missing table '{tableName}'.");
+        }
+
+        if (provider is Providers.DatumFileTableProviderV2 datumProvider)
+        {
+            datumProvider.DropCompositeIndex(drop.IndexName);
+        }
+
+        _indexNameToTable.Remove(drop.IndexName);
+        if (_persistentTableIndexes.TryGetValue(tableName, out List<IndexDescriptor>? list))
+        {
+            list.RemoveAll(idx => string.Equals(idx.Name, drop.IndexName, StringComparison.OrdinalIgnoreCase));
+            if (list.Count == 0)
+            {
+                _persistentTableIndexes.Remove(tableName);
+            }
+        }
+        _catalogStore?.Save(_udfs, _procedures);
     }
 
     /// <summary>
@@ -1462,6 +1663,48 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 "Drop the dependent column(s) first, or alter their expression to remove the reference.");
         }
 
+        // PG-style index cascade: any composite index that covers the
+        // dropped column is silently dropped along with it (Postgres
+        // behavior — indexes aren't user-visible "dependent objects" the
+        // way views and triggers are). Reads-only access to the index map
+        // here; mutation is gated on provider being the persistent
+        // .datum variant.
+        if (_persistentTableIndexes.TryGetValue(alter.TableName, out List<IndexDescriptor>? indexList) &&
+            indexList.Count > 0 &&
+            provider is Providers.DatumFileTableProviderV2 datumProvider)
+        {
+            List<IndexDescriptor>? indexesToDrop = null;
+            foreach (IndexDescriptor index in indexList)
+            {
+                foreach (string col in index.Columns)
+                {
+                    if (string.Equals(col, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        indexesToDrop ??= new List<IndexDescriptor>();
+                        indexesToDrop.Add(index);
+                        break;
+                    }
+                }
+            }
+            if (indexesToDrop is not null)
+            {
+                foreach (IndexDescriptor index in indexesToDrop)
+                {
+                    datumProvider.DropCompositeIndex(index.Name);
+                    indexList.Remove(index);
+                    _indexNameToTable.Remove(index.Name);
+                }
+                if (indexList.Count == 0)
+                {
+                    _persistentTableIndexes.Remove(alter.TableName);
+                }
+                // Persist the index removals before DropColumn runs — if
+                // DropColumn fails, we've already lost the index files,
+                // and the catalog json should reflect that.
+                _catalogStore?.Save(_udfs, _procedures);
+            }
+        }
+
         DropColumn(alter.TableName, alter.ColumnName);
     }
 
@@ -1533,7 +1776,21 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         List<CatalogFileTableEntry> result = new(_persistentTableEntries.Count);
         foreach ((string name, string path) in _persistentTableEntries)
         {
-            result.Add(new CatalogFileTableEntry { Name = name, FilePath = path });
+            CatalogFileTableEntry entry = new() { Name = name, FilePath = path };
+            if (_persistentTableIndexes.TryGetValue(name, out List<IndexDescriptor>? indexes) && indexes.Count > 0)
+            {
+                List<CatalogFileIndexEntry> indexEntries = new(indexes.Count);
+                foreach (IndexDescriptor index in indexes)
+                {
+                    indexEntries.Add(new CatalogFileIndexEntry
+                    {
+                        Name = index.Name,
+                        Columns = new List<string>(index.Columns),
+                    });
+                }
+                entry.Indexes = indexEntries;
+            }
+            result.Add(entry);
         }
         return result;
     }

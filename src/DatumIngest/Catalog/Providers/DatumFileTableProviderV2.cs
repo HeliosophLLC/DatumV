@@ -174,6 +174,35 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     private Dictionary<string, MutableBPlusTreeColumnIndex> _columnIndexes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// User-defined secondary indexes (one bytes-keyed tree per
+    /// <c>CREATE INDEX</c>). Backed by <c>.datum-cindex-{Name}</c> sidecars
+    /// alongside the data file. Multi-value (<c>allowDuplicates: true</c>)
+    /// because composite secondary indexes are not uniqueness constraints.
+    /// Opened from <see cref="TableDescriptor.Indexes"/> at construction;
+    /// extended by <see cref="AddCompositeIndexAsync"/>; closed in
+    /// <see cref="Dispose"/>.
+    /// </summary>
+    private readonly Dictionary<string, Indexing.BTree.MutableBytes.MutableBPlusTreeBytes> _compositeIndexTrees =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Ordered list of schema-column indices for each composite index. Used
+    /// by the append session to extract tuples per row. Keyed by index name
+    /// (matches <see cref="_compositeIndexTrees"/>).
+    /// </summary>
+    private readonly Dictionary<string, int[]> _compositeIndexColumnIndices =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The declaration of each composite index (the descriptor handed in at
+    /// <c>CREATE INDEX</c> time). Retained so that we can answer "which
+    /// columns?" without re-resolving names against the schema on every
+    /// INSERT.
+    /// </summary>
+    private readonly Dictionary<string, IndexDescriptor> _compositeIndexDescriptors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
     /// the v2 <c>.datum</c> file, parses its footer, and (when the file
     /// declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>)
@@ -193,6 +222,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         (_mappedIndexSet, _sourceIndex) = TryLoadSourceIndex(descriptor);
         TryOpenPrimaryKeyIndex();
         OpenColumnIndexes();
+        OpenCompositeIndexes();
     }
 
     /// <summary>
@@ -310,6 +340,169 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// </summary>
     internal static string GetPrimaryKeyIndexPath(string datumPath) =>
         Path.ChangeExtension(datumPath, ".datum-pkindex");
+
+    // ──────────────────── Composite index lifecycle ────────────────────
+
+    /// <summary>
+    /// Returns the <c>.datum-cindex-{indexName}</c> path companion for the
+    /// given <c>.datum</c> file. Index name characters are sanitized so
+    /// non-alphanumeric chars don't collide with the path separator.
+    /// </summary>
+    internal static string GetCompositeIndexPath(string datumPath, string indexName)
+    {
+        string sanitized = SanitizeColumnNameForPath(indexName);
+        return Path.ChangeExtension(datumPath, $".datum-cindex-{sanitized}");
+    }
+
+    /// <summary>
+    /// Opens every composite-index sidecar declared in
+    /// <see cref="TableDescriptor.Indexes"/> at provider construction. Files
+    /// that don't open cleanly (torn write, version mismatch) are skipped
+    /// silently — the index degrades to "not loaded" until <c>DROP INDEX</c>
+    /// and <c>CREATE INDEX</c> rebuild it. Schema mismatches (a referenced
+    /// column no longer exists) likewise skip the load and leave the
+    /// descriptor entry intact for a future REPAIR pass.
+    /// </summary>
+    private void OpenCompositeIndexes()
+    {
+        if (_descriptor.Indexes is not { Count: > 0 } declared) return;
+        Schema schema = _snapshot.Schema;
+
+        foreach (IndexDescriptor descriptor in declared)
+        {
+            string treePath = GetCompositeIndexPath(_descriptor.FilePath, descriptor.Name);
+            if (!File.Exists(treePath)) continue;
+
+            // Resolve column ordinals; skip the index entirely if any column
+            // is missing (e.g. ALTER DROP COLUMN ran in a prior session
+            // without cascading the index drop).
+            int[]? ordinals = TryResolveCompositeIndexOrdinals(schema, descriptor);
+            if (ordinals is null) continue;
+
+            try
+            {
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
+                    Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Open(treePath);
+                _compositeIndexTrees[descriptor.Name] = tree;
+                _compositeIndexColumnIndices[descriptor.Name] = ordinals;
+                _compositeIndexDescriptors[descriptor.Name] = descriptor;
+            }
+            catch
+            {
+                // Skip — caller has no other recovery surface; REINDEX once
+                // it learns about composite indexes will rebuild.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Closes every composite-index tree and clears the dictionaries.
+    /// Called from <see cref="Dispose"/>. Callers holding stale references
+    /// after Dispose is undefined behavior (matches the rest of the
+    /// provider's disposal contract).
+    /// </summary>
+    private void CloseCompositeIndexes()
+    {
+        foreach (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree in _compositeIndexTrees.Values)
+        {
+            try { tree.Dispose(); } catch { /* best-effort */ }
+        }
+        _compositeIndexTrees.Clear();
+        _compositeIndexColumnIndices.Clear();
+        _compositeIndexDescriptors.Clear();
+    }
+
+    /// <summary>
+    /// Resolves each column name in <paramref name="descriptor"/> to its
+    /// schema ordinal. Returns <see langword="null"/> if any column is
+    /// missing — the caller treats that as "skip this index for now".
+    /// </summary>
+    private static int[]? TryResolveCompositeIndexOrdinals(Schema schema, IndexDescriptor descriptor)
+    {
+        int[] result = new int[descriptor.Columns.Count];
+        for (int i = 0; i < descriptor.Columns.Count; i++)
+        {
+            int ordinal = -1;
+            for (int j = 0; j < schema.Columns.Count; j++)
+            {
+                if (string.Equals(schema.Columns[j].Name, descriptor.Columns[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    ordinal = j;
+                    break;
+                }
+            }
+            if (ordinal < 0) return null;
+            result[i] = ordinal;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Creates a new composite-index sidecar (<c>.datum-cindex-{Name}</c>),
+    /// registers it for INSERT maintenance, and (if the table is non-empty)
+    /// rejects — backfill of existing rows is not yet supported in v1.
+    /// </summary>
+    /// <remarks>
+    /// v1 limitation: composite indexes must be created before any data is
+    /// inserted. The error message points the user at the workaround
+    /// (<c>DROP TABLE</c> → <c>CREATE TABLE</c> → <c>CREATE INDEX</c> →
+    /// <c>INSERT</c>). Backfill via <c>ScanAsync</c> + per-row tuple
+    /// encoding lands in a follow-up.
+    /// </remarks>
+    internal Task AddCompositeIndexAsync(IndexDescriptor descriptor)
+    {
+        if (_compositeIndexTrees.ContainsKey(descriptor.Name))
+        {
+            throw new InvalidOperationException(
+                $"Composite index '{descriptor.Name}' is already open on table '{_descriptor.Name}'.");
+        }
+
+        if (GetRowCount() > 0)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{descriptor.Name}' on a populated table is not yet supported. " +
+                "v1 limitation: composite indexes must be created before any rows are inserted. " +
+                "Workaround: DROP TABLE, recreate, CREATE INDEX, then INSERT.");
+        }
+
+        int[]? ordinals = TryResolveCompositeIndexOrdinals(_snapshot.Schema, descriptor);
+        if (ordinals is null)
+        {
+            // Caller (TableCatalog.ApplyCreateIndexAsync) already validated
+            // column existence; this is a defense-in-depth check.
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{descriptor.Name}': one or more columns no longer exist on the schema.");
+        }
+
+        string treePath = GetCompositeIndexPath(_descriptor.FilePath, descriptor.Name);
+        Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(treePath, allowDuplicates: true);
+
+        _compositeIndexTrees[descriptor.Name] = tree;
+        _compositeIndexColumnIndices[descriptor.Name] = ordinals;
+        _compositeIndexDescriptors[descriptor.Name] = descriptor;
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Disposes the named composite-index tree and removes its sidecar
+    /// file. Idempotent — DROP INDEX IF EXISTS may reach here with the
+    /// tree already disposed if an earlier session crashed mid-cleanup.
+    /// </summary>
+    internal void DropCompositeIndex(string indexName)
+    {
+        if (_compositeIndexTrees.TryGetValue(indexName, out Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? tree))
+        {
+            try { tree.Dispose(); } catch { /* best-effort */ }
+            _compositeIndexTrees.Remove(indexName);
+            _compositeIndexColumnIndices.Remove(indexName);
+            _compositeIndexDescriptors.Remove(indexName);
+        }
+
+        string treePath = GetCompositeIndexPath(_descriptor.FilePath, indexName);
+        try { if (File.Exists(treePath)) File.Delete(treePath); } catch { /* best-effort */ }
+    }
 
     /// <summary>
     /// Opens a fresh <see cref="DatumFileReaderV2"/> + sidecar for
@@ -890,6 +1083,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         _pkIndexBytes?.Dispose();
         _pkIndexBytes = null;
         CloseColumnIndexes();
+        CloseCompositeIndexes();
 
         // Dispose whichever snapshot is current; in-flight scans hold
         // their own refs so they remain safe until they finish.
@@ -1978,6 +2172,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         private readonly List<byte[]>? _pendingPkBytes;
         private readonly IReadOnlyList<int> _pkColumnIndices;
 
+        // User-defined composite indexes (CREATE INDEX). One queue per
+        // index, keyed by index name. Each entry carries the encoded key
+        // plus the (chunkIndex, rowOffsetInChunk) where the row lands —
+        // captured pre-AddRow so future point/range probes can seek back.
+        // Empty (null) when the table has no composite indexes; otherwise
+        // mirrors the snapshot of <c>_compositeIndexTrees</c> at session
+        // start. Re-resolution against the live provider state happens
+        // at flush time in CommitAsync.
+        private readonly Dictionary<string, CompositeIndexState>? _compositeIndexStates;
+
         // Phase 3a-wide: per-row in-line index build. Eliminates the
         // post-commit scan that ExtendAsync used to do — the append session
         // already has the rows in hand, so we mirror them into an
@@ -2026,7 +2230,34 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             {
                 _pkColumnIndices = Array.Empty<int>();
             }
+
+            // Composite index state. Snapshot the provider's open indexes
+            // so the session has stable per-index queues + column ordinals.
+            // ALTER DROP COLUMN that affects a covered column drops the
+            // dependent index, so the ordinals are guaranteed stable for the
+            // session's lifetime.
+            if (provider._compositeIndexTrees.Count > 0)
+            {
+                _compositeIndexStates = new Dictionary<string, CompositeIndexState>(
+                    StringComparer.OrdinalIgnoreCase);
+                foreach ((string indexName, _) in provider._compositeIndexTrees)
+                {
+                    int[] ordinals = provider._compositeIndexColumnIndices[indexName];
+                    _compositeIndexStates[indexName] = new CompositeIndexState(
+                        ColumnIndices: ordinals,
+                        PendingEntries: new List<Indexing.BTree.MutableBytes.BytesIndexEntry>());
+                }
+            }
         }
+
+        /// <summary>
+        /// Per-index state captured at the start of an append session: the
+        /// schema column indices to extract per row plus the queue of
+        /// encoded entries waiting for CommitAsync to flush into the tree.
+        /// </summary>
+        private sealed record CompositeIndexState(
+            int[] ColumnIndices,
+            List<Indexing.BTree.MutableBytes.BytesIndexEntry> PendingEntries);
 
         public IdentityState? IdentityState => _initialIdentityState is null
             ? null
@@ -2136,6 +2367,25 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         if (value.IsInSidecar) continue;
                         _pendingColumnEntries![columnName].Add(
                             new ValueIndexEntry(value, chunkIndex, rowOffsetInChunk));
+                    }
+                }
+
+                // Composite indexes: encode this row's tuple once per index.
+                // Encoded bytes outlive the source batch's arena (Encode
+                // returns a fresh byte[]), so the queue is safe to hold.
+                if (_compositeIndexStates is { } compositeStates)
+                {
+                    foreach (CompositeIndexState state in compositeStates.Values)
+                    {
+                        DataValue[] tuple = new DataValue[state.ColumnIndices.Length];
+                        for (int p = 0; p < state.ColumnIndices.Length; p++)
+                        {
+                            tuple[p] = row[state.ColumnIndices[p]];
+                        }
+                        byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
+                        state.PendingEntries.Add(
+                            new Indexing.BTree.MutableBytes.BytesIndexEntry(
+                                encoded, chunkIndex, rowOffsetInChunk));
                     }
                 }
             }
@@ -2269,6 +2519,30 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                                 encoded, ChunkIndex: 0, RowOffsetInChunk: 0L));
                     }
                     _pendingPkBytes.Clear();
+                }
+
+                // Flush queued composite-index entries. Same crash-window
+                // contract as the PK queue: if the process dies between
+                // this loop and the next commit, the affected indexes go
+                // slightly stale — rebuild via DROP / CREATE INDEX, or
+                // (future) REINDEX once it learns about composite trees.
+                if (_compositeIndexStates is { } compositeStates)
+                {
+                    foreach ((string indexName, CompositeIndexState state) in compositeStates)
+                    {
+                        if (!_provider._compositeIndexTrees.TryGetValue(
+                                indexName, out Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? tree))
+                        {
+                            // Index was dropped mid-session — nothing to flush.
+                            state.PendingEntries.Clear();
+                            continue;
+                        }
+                        foreach (Indexing.BTree.MutableBytes.BytesIndexEntry entry in state.PendingEntries)
+                        {
+                            tree.Insert(entry);
+                        }
+                        state.PendingEntries.Clear();
+                    }
                 }
 
                 _committed = true;

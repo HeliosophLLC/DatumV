@@ -37,8 +37,28 @@ public enum TableMutability
 /// Column names that form the primary key, in declaration order.
 /// When non-null and non-empty, INSERT operations enforce uniqueness.
 /// </param>
+/// <param name="Indexes">
+/// User-defined secondary indexes built via <c>CREATE INDEX</c>. Maintained
+/// in <c>.datum-cindex-{name}</c> sidecar files. Each entry names the index
+/// and the ordered list of columns it covers. <see langword="null"/> means
+/// no user-defined indexes (the auto-generated per-column acceleration trees
+/// in <c>.datum-bptree-*</c> are a separate concern).
+/// </param>
 public sealed record TableDescriptor(
     string Name,
     string FilePath,
     TableMutability Mutability = TableMutability.ReadOnly,
-    IReadOnlyList<string>? PrimaryKeyColumns = null);
+    IReadOnlyList<string>? PrimaryKeyColumns = null,
+    IReadOnlyList<IndexDescriptor>? Indexes = null);
+
+/// <summary>
+/// A user-defined secondary index built via <c>CREATE INDEX</c>. Persisted in
+/// the catalog and materialised on disk as a <c>.datum-cindex-{Name}</c>
+/// sidecar (a bytes-keyed mutable B+Tree backed by
+/// <see cref="DatumIngest.Indexing.CompositeKeyEncoder"/>).
+/// </summary>
+/// <param name="Name">Index name (unique within the table; used as the sidecar filename).</param>
+/// <param name="Columns">Ordered list of column names covered by the index.</param>
+public sealed record IndexDescriptor(
+    string Name,
+    IReadOnlyList<string> Columns);

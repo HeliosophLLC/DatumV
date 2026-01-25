@@ -355,6 +355,7 @@ internal static class KeywordRegistry
         [SqlToken.Delete] = ["DELETE"],
         [SqlToken.Analyze] = ["ANALYZE"],
         [SqlToken.Reindex] = ["REINDEX"],
+        [SqlToken.Index] = ["INDEX"],
         [SqlToken.Alter] = ["ALTER"],
         [SqlToken.Add] = ["ADD"],
         [SqlToken.Column] = ["COLUMN"],
