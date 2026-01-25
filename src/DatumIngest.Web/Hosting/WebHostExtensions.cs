@@ -1,5 +1,7 @@
+using System.Text.Json.Serialization;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Hubs;
+using DatumIngest.Web.Settings;
 
 namespace DatumIngest.Web.Hosting;
 
@@ -28,11 +30,24 @@ public static class WebHostExtensions
             return factory.ForNode(ctx.Node);
         });
 
+        // Per-user settings. Scoped because the file path resolves from the
+        // request's principal/catalog. Today a single LocalUser; tomorrow
+        // each user gets their own settings.json under their compute node.
+        services.AddScoped<ISettingsService, LocalSettingsService>();
+
         // AddApplicationPart so controllers are discovered when DatumIngest.Web
         // is referenced by a non-MVC entry assembly (e.g. DatumIngest.Client).
         // Without this, MVC's default scan only sees the entry assembly's controllers.
         services.AddControllers()
-            .AddApplicationPart(typeof(WebHostExtensions).Assembly);
+            .AddApplicationPart(typeof(WebHostExtensions).Assembly)
+            .AddJsonOptions(o =>
+            {
+                // Serialize enums as their camelCase string names so the
+                // wire format is human-readable and NSwag can emit TS string
+                // unions instead of opaque numeric enums.
+                o.JsonSerializerOptions.Converters.Add(
+                    new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
+            });
         services.AddSignalR();
         services.AddOpenApiDocument(s =>
         {
