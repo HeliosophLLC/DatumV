@@ -1124,6 +1124,38 @@ public sealed record DropTableStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
+/// <c>CREATE INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c> — creates
+/// a maintained secondary index over one or more columns of a table. v1 is
+/// single-column or composite over scalar / temporal / Uuid / String kinds;
+/// the encoder rejects array / Decimal / Point columns. UNIQUE indexes,
+/// expression indexes, and partial indexes are not supported in v1.
+/// </summary>
+/// <param name="IndexName">The name of the index (used in DROP INDEX and as the sidecar filename).</param>
+/// <param name="TableName">The table the index is built on.</param>
+/// <param name="Columns">
+/// Ordered list of columns covered by the index. Leftmost-prefix matching
+/// applies at query time (Postgres semantics).
+/// </param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the index already exists.</param>
+public sealed record CreateIndexStatement(
+    string IndexName,
+    string TableName,
+    IReadOnlyList<string> Columns,
+    bool IfNotExists = false) : Statement;
+
+/// <summary>
+/// <c>DROP INDEX [IF EXISTS] name</c> — removes a maintained secondary index.
+/// The backing <c>.datum-cindex-{name}</c> sidecar is deleted and the
+/// catalog descriptor is updated. Multi-name DROP and CASCADE are not
+/// supported in v1.
+/// </summary>
+/// <param name="IndexName">The name of the index to drop.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the index does not exist.</param>
+public sealed record DropIndexStatement(
+    string IndexName,
+    bool IfExists = false) : Statement;
+
+/// <summary>
 /// <c>INSERT INTO name [(cols)] {VALUES (...) | SELECT ...} [RETURNING expr [, expr]*]</c>
 /// — inserts rows into an existing table, optionally surfacing a projection of the
 /// resolved (post-DEFAULT, post-IDENTITY) inserted rows. Mirrors PostgreSQL's INSERT

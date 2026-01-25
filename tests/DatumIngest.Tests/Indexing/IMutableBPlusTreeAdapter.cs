@@ -15,6 +15,11 @@ namespace DatumIngest.Tests.Indexing;
 /// implementations expose an adapter that single-encodes the DataValue
 /// to bytes internally. That keeps the contract tests value-shape
 /// agnostic and lets a single test suite cover both implementations.
+/// Read-side results from the bytes tree carry <c>default(DataValue)</c>
+/// in the <see cref="ValueIndexEntry.Key"/> slot because raw bytes can't
+/// be decoded back without a per-kind decoder; contract tests assert on
+/// <see cref="ValueIndexEntry.ChunkIndex"/> /
+/// <see cref="ValueIndexEntry.RowOffsetInChunk"/> instead.
 /// </remarks>
 public interface IMutableBPlusTreeAdapter : IDisposable
 {
@@ -25,4 +30,10 @@ public interface IMutableBPlusTreeAdapter : IDisposable
 
     void Insert(ValueIndexEntry entry);
     bool TryFind(DataValue key, out ValueIndexEntry entry);
+
+    IReadOnlyList<ValueIndexEntry> FindAll(DataValue key);
+    IReadOnlyList<ValueIndexEntry> FindRange(DataValue low, DataValue high);
+    IEnumerable<ValueIndexEntry> TraverseForward();
+    IEnumerable<ValueIndexEntry> TraverseBackward();
+    bool Delete(ValueIndexEntry entry);
 }

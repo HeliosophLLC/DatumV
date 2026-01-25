@@ -13,17 +13,17 @@ namespace DatumIngest.Tests.Indexing;
 /// adapter — the same encoder production composite-PK callers will use.
 /// </summary>
 /// <remarks>
-/// Every contract test (14 of them) runs against the new tree
-/// unchanged — if any behavior diverges from <see cref="MutableBPlusTree"/>,
-/// the same test that passes on the typed tree will fail here. That's
-/// the value of the contract base.
+/// Every contract test runs against the new tree unchanged — if any
+/// behavior diverges from <see cref="MutableBPlusTree"/>, the same test
+/// that passes on the typed tree will fail here. That's the value of the
+/// contract base.
 /// </remarks>
 public sealed class MutableBPlusTreeBytesContractTests : BPlusTreeContractTests
 {
     protected override string FileExtension => ".datum-bytespkindex";
 
-    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind) =>
-        new BytesAdapter(MutableBPlusTreeBytes.Create(path));
+    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false) =>
+        new BytesAdapter(MutableBPlusTreeBytes.Create(path, allowDuplicates));
 
     protected override IMutableBPlusTreeAdapter OpenTree(string path) =>
         new BytesAdapter(MutableBPlusTreeBytes.Open(path));
@@ -31,9 +31,10 @@ public sealed class MutableBPlusTreeBytesContractTests : BPlusTreeContractTests
     /// <summary>
     /// Adapts <see cref="MutableBPlusTreeBytes"/> to the test-side
     /// <see cref="IMutableBPlusTreeAdapter"/> surface. Each DataValue key
-    /// is single-encoded via <see cref="CompositeKeyEncoder.EncodeSingle"/>;
-    /// the original DataValue is replayed back to the caller on TryFind
-    /// because the contract tests assert on the DataValue shape.
+    /// is single-encoded via <see cref="CompositeKeyEncoder.EncodeSingle"/>.
+    /// Read results carry <c>default(DataValue)</c> in the Key slot — the
+    /// tree only stores raw bytes and has no decoder. Contract tests assert
+    /// on (ChunkIndex, RowOffsetInChunk) instead.
     /// </summary>
     private sealed class BytesAdapter : IMutableBPlusTreeAdapter
     {
@@ -76,6 +77,54 @@ public sealed class MutableBPlusTreeBytesContractTests : BPlusTreeContractTests
             return false;
         }
 
+        public IReadOnlyList<ValueIndexEntry> FindAll(DataValue key)
+        {
+            byte[] encoded = CompositeKeyEncoder.EncodeSingle(key);
+            IReadOnlyList<BytesIndexEntry> hits = _tree.FindAll(encoded);
+            return ProjectToValueEntries(hits);
+        }
+
+        public IReadOnlyList<ValueIndexEntry> FindRange(DataValue low, DataValue high)
+        {
+            byte[] lowEncoded = CompositeKeyEncoder.EncodeSingle(low);
+            byte[] highEncoded = CompositeKeyEncoder.EncodeSingle(high);
+            IReadOnlyList<BytesIndexEntry> hits = _tree.FindRange(lowEncoded, highEncoded);
+            return ProjectToValueEntries(hits);
+        }
+
+        public IEnumerable<ValueIndexEntry> TraverseForward()
+        {
+            foreach (BytesIndexEntry e in _tree.TraverseForward())
+            {
+                yield return new ValueIndexEntry(default, e.ChunkIndex, e.RowOffsetInChunk);
+            }
+        }
+
+        public IEnumerable<ValueIndexEntry> TraverseBackward()
+        {
+            foreach (BytesIndexEntry e in _tree.TraverseBackward())
+            {
+                yield return new ValueIndexEntry(default, e.ChunkIndex, e.RowOffsetInChunk);
+            }
+        }
+
+        public bool Delete(ValueIndexEntry entry)
+        {
+            byte[] encoded = CompositeKeyEncoder.EncodeSingle(entry.Key);
+            return _tree.Delete(new BytesIndexEntry(encoded, entry.ChunkIndex, entry.RowOffsetInChunk));
+        }
+
         public void Dispose() => _tree.Dispose();
+
+        private static IReadOnlyList<ValueIndexEntry> ProjectToValueEntries(IReadOnlyList<BytesIndexEntry> hits)
+        {
+            if (hits.Count == 0) return Array.Empty<ValueIndexEntry>();
+            ValueIndexEntry[] projected = new ValueIndexEntry[hits.Count];
+            for (int i = 0; i < hits.Count; i++)
+            {
+                projected[i] = new ValueIndexEntry(default, hits[i].ChunkIndex, hits[i].RowOffsetInChunk);
+            }
+            return projected;
+        }
     }
 }

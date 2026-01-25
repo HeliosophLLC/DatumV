@@ -226,9 +226,342 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Returns all entries whose key falls in the inclusive range
+    /// [<paramref name="low"/>, <paramref name="high"/>]. Walks via internal-page
+    /// navigation (no leaf-chain pointers — those become stale under page-COW
+    /// splits; the standard COW B+Tree approach is parent-page navigation).
+    /// </summary>
+    internal IReadOnlyList<BytesIndexEntry> FindRange(ReadOnlySpan<byte> low, ReadOnlySpan<byte> high)
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            return Array.Empty<BytesIndexEntry>();
+        }
+
+        // ROS arguments can't be captured by the descent helpers; copy once.
+        byte[] lowKey = low.ToArray();
+        byte[] highKey = high.ToArray();
+
+        List<BytesIndexEntry> results = new();
+        DescentPath path = DescendForKey(lowKey);
+
+        // FindChildSlot uses ≤ semantics — for `low` matching a separator, we land on
+        // the right child. The previous leaf might still contain entries with key=low.
+        while (true)
+        {
+            DescentPath? prevPath = path.TryStepLeft();
+            if (prevPath is null) break;
+            MutableBytesLeafPage prevLeaf = ReadLeafPage(prevPath.Value.LeafPageId);
+            if (prevLeaf.EntryCount == 0)
+            {
+                path = prevPath.Value;
+                continue;
+            }
+            if (((ReadOnlySpan<byte>)prevLeaf.Entries[prevLeaf.EntryCount - 1].Key)
+                    .SequenceCompareTo(lowKey) < 0)
+            {
+                break;
+            }
+            path = prevPath.Value;
+        }
+
+        // Scan forward.
+        while (true)
+        {
+            MutableBytesLeafPage leaf = ReadLeafPage(path.LeafPageId);
+
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                BytesIndexEntry e = leaf.Entries[i];
+                ReadOnlySpan<byte> keySpan = e.Key;
+                if (keySpan.SequenceCompareTo(highKey) > 0) return results;
+
+                if (keySpan.SequenceCompareTo(lowKey) >= 0)
+                {
+                    results.Add(e);
+                }
+            }
+
+            DescentPath? nextPath = path.TryStepRight();
+            if (nextPath is null) break;
+            path = nextPath.Value;
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Returns all entries whose key equals <paramref name="key"/>. In
+    /// acceleration (multi-value) mode, multiple entries can share a key —
+    /// they may even straddle adjacent leaves after a split.
+    /// <see cref="FindRange"/> handles both cases.
+    /// </summary>
+    internal IReadOnlyList<BytesIndexEntry> FindAll(ReadOnlySpan<byte> key) => FindRange(key, key);
+
+    /// <summary>
+    /// Enumerates all entries in ascending key order via leftmost-leaf descent
+    /// and then internal-navigation forward stepping.
+    /// </summary>
+    internal IEnumerable<BytesIndexEntry> TraverseForward()
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            yield break;
+        }
+
+        DescentPath? cursor = DescendLeftmost();
+        while (cursor is not null)
+        {
+            MutableBytesLeafPage leaf = ReadLeafPage(cursor.Value.LeafPageId);
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                yield return leaf.Entries[i];
+            }
+            cursor = cursor.Value.TryStepRight();
+        }
+    }
+
+    /// <summary>
+    /// Enumerates all entries in descending key order via rightmost-leaf
+    /// descent and internal-navigation backward stepping.
+    /// </summary>
+    internal IEnumerable<BytesIndexEntry> TraverseBackward()
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            yield break;
+        }
+
+        DescentPath? cursor = DescendRightmost();
+        while (cursor is not null)
+        {
+            MutableBytesLeafPage leaf = ReadLeafPage(cursor.Value.LeafPageId);
+            for (int i = leaf.EntryCount - 1; i >= 0; i--)
+            {
+                yield return leaf.Entries[i];
+            }
+            cursor = cursor.Value.TryStepLeft();
+        }
+    }
+
+    /// <summary>
+    /// Removes the entry matching <paramref name="entry"/> by composite
+    /// (Key, ChunkIndex, RowOffsetInChunk). Returns <see langword="true"/> if
+    /// an entry was found and removed, <see langword="false"/> otherwise.
+    /// Lazy deletion: the leaf may end up under-full or empty; rebalancing /
+    /// merging is deferred. An empty single-leaf root collapses to height-0
+    /// (no root); empty leaves under a multi-level tree are tolerated and
+    /// skipped on traversal.
+    /// </summary>
+    internal bool Delete(BytesIndexEntry entry)
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            return false;
+        }
+
+        List<PathStep> path = new(_activeHeader.TreeHeight);
+        uint pageId = _activeHeader.RootPageId;
+
+        for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
+        {
+            MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.FindChildSlot(entry.Key);
+            path.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        MutableBytesLeafPage leaf = ReadLeafPage(pageId);
+        int idx = FindEntryIndex(leaf, entry);
+
+        if (idx < 0)
+        {
+            // With multi-value duplicates spanning leaves, the entry could live
+            // in the previous leaf. Try one step left.
+            DescentPath descent = new(this, path, pageId);
+            DescentPath? prev = descent.TryStepLeft();
+            if (prev is not null)
+            {
+                MutableBytesLeafPage prevLeaf = ReadLeafPage(prev.Value.LeafPageId);
+                int prevIdx = FindEntryIndex(prevLeaf, entry);
+                if (prevIdx >= 0)
+                {
+                    return DeleteFromLeafAndPropagate(prevLeaf, prevIdx, prev.Value.PathSteps);
+                }
+            }
+            return false;
+        }
+
+        return DeleteFromLeafAndPropagate(leaf, idx, path);
+    }
+
+    private bool DeleteFromLeafAndPropagate(MutableBytesLeafPage leaf, int entryIndex, IReadOnlyList<PathStep> path)
+    {
+        BytesIndexEntry[] newEntries = new BytesIndexEntry[leaf.EntryCount - 1];
+        leaf.Entries[..entryIndex].CopyTo(newEntries.AsSpan(0, entryIndex));
+        leaf.Entries[(entryIndex + 1)..].CopyTo(newEntries.AsSpan(entryIndex));
+
+        uint newPageCount = _activeHeader.PageCount;
+
+        if (newEntries.Length == 0 && _activeHeader.TreeHeight == 1)
+        {
+            CommitNewHeader(
+                rootPageId: MutableBPlusTreeConstants.NoLinkedPage,
+                pageCount: newPageCount,
+                treeHeight: 0,
+                entryCount: 0);
+            return true;
+        }
+
+        uint newLeafId = AllocatePage(ref newPageCount);
+        byte[] leafBytes = MutableBPlusTreeBytesPageCodec.EncodeLeafPage(
+            newEntries, leaf.PreviousLeafPageId, leaf.NextLeafPageId);
+        WritePage(newLeafId, leafBytes);
+
+        List<PathStep> mutablePath = new(path);
+        uint newRootId = PropagateChildReplacement(mutablePath, newLeafId, ref newPageCount);
+
+        CommitNewHeader(
+            rootPageId: newRootId,
+            pageCount: newPageCount,
+            treeHeight: _activeHeader.TreeHeight,
+            entryCount: _activeHeader.EntryCount - 1);
+        return true;
+    }
+
+    private static int FindEntryIndex(MutableBytesLeafPage leaf, BytesIndexEntry target)
+    {
+        int firstKeyMatch = leaf.BinarySearchFirst(target.Key);
+        if (firstKeyMatch < 0) return -1;
+
+        ReadOnlySpan<byte> targetKey = target.Key;
+        for (int i = firstKeyMatch; i < leaf.EntryCount; i++)
+        {
+            BytesIndexEntry e = leaf.Entries[i];
+            if (((ReadOnlySpan<byte>)e.Key).SequenceCompareTo(targetKey) != 0) break;
+            if (e.ChunkIndex == target.ChunkIndex && e.RowOffsetInChunk == target.RowOffsetInChunk)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public void Dispose()
     {
         _file.Dispose();
+    }
+
+    // ───── Descent / navigation helpers ─────
+
+    /// <summary>
+    /// Descent state: the path from root to a leaf, plus the leaf's page id.
+    /// Supports stepping left or right via internal-page navigation.
+    /// </summary>
+    private readonly struct DescentPath
+    {
+        internal readonly MutableBPlusTreeBytes Tree;
+        internal readonly List<PathStep> PathSteps;
+        internal readonly uint LeafPageId;
+
+        internal DescentPath(MutableBPlusTreeBytes tree, List<PathStep> pathSteps, uint leafPageId)
+        {
+            Tree = tree;
+            PathSteps = pathSteps;
+            LeafPageId = leafPageId;
+        }
+
+        internal DescentPath? TryStepRight()
+        {
+            int level = PathSteps.Count - 1;
+            while (level >= 0)
+            {
+                PathStep step = PathSteps[level];
+                if (step.SlotIndex + 1 < step.Page.ChildCount)
+                {
+                    List<PathStep> newPath = new(PathSteps.Count);
+                    for (int i = 0; i < level; i++) newPath.Add(PathSteps[i]);
+                    newPath.Add(new PathStep(step.Page, step.SlotIndex + 1));
+                    uint childId = step.Page.GetChildPageId(step.SlotIndex + 1);
+                    return Tree.DescendLeftmostFrom(childId, newPath);
+                }
+                level--;
+            }
+            return null;
+        }
+
+        internal DescentPath? TryStepLeft()
+        {
+            int level = PathSteps.Count - 1;
+            while (level >= 0)
+            {
+                PathStep step = PathSteps[level];
+                if (step.SlotIndex > 0)
+                {
+                    List<PathStep> newPath = new(PathSteps.Count);
+                    for (int i = 0; i < level; i++) newPath.Add(PathSteps[i]);
+                    newPath.Add(new PathStep(step.Page, step.SlotIndex - 1));
+                    uint childId = step.Page.GetChildPageId(step.SlotIndex - 1);
+                    return Tree.DescendRightmostFrom(childId, newPath);
+                }
+                level--;
+            }
+            return null;
+        }
+    }
+
+    private DescentPath DescendForKey(ReadOnlySpan<byte> key)
+    {
+        List<PathStep> path = new(_activeHeader.TreeHeight);
+        uint pageId = _activeHeader.RootPageId;
+
+        for (int level = 0; level < _activeHeader.TreeHeight - 1; level++)
+        {
+            MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.FindChildSlot(key);
+            path.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        return new DescentPath(this, path, pageId);
+    }
+
+    private DescentPath DescendLeftmost() =>
+        DescendLeftmostFrom(_activeHeader.RootPageId, new List<PathStep>(_activeHeader.TreeHeight));
+
+    private DescentPath DescendRightmost() =>
+        DescendRightmostFrom(_activeHeader.RootPageId, new List<PathStep>(_activeHeader.TreeHeight));
+
+    private DescentPath DescendLeftmostFrom(uint subtreeRoot, List<PathStep> pathPrefix)
+    {
+        int remainingInternalLevels = _activeHeader.TreeHeight - 1 - pathPrefix.Count;
+        uint pageId = subtreeRoot;
+
+        for (int i = 0; i < remainingInternalLevels; i++)
+        {
+            MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
+            pathPrefix.Add(new PathStep(internalPage, 0));
+            pageId = internalPage.GetChildPageId(0);
+        }
+
+        return new DescentPath(this, pathPrefix, pageId);
+    }
+
+    private DescentPath DescendRightmostFrom(uint subtreeRoot, List<PathStep> pathPrefix)
+    {
+        int remainingInternalLevels = _activeHeader.TreeHeight - 1 - pathPrefix.Count;
+        uint pageId = subtreeRoot;
+
+        for (int i = 0; i < remainingInternalLevels; i++)
+        {
+            MutableBytesInternalPage internalPage = ReadInternalPage(pageId);
+            int slot = internalPage.ChildCount - 1;
+            pathPrefix.Add(new PathStep(internalPage, slot));
+            pageId = internalPage.GetChildPageId(slot);
+        }
+
+        return new DescentPath(this, pathPrefix, pageId);
     }
 
     // ───── Insert internals ─────

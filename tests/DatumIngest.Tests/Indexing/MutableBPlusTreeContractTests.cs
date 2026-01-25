@@ -15,8 +15,8 @@ public sealed class MutableBPlusTreeContractTests : BPlusTreeContractTests
 {
     protected override string FileExtension => ".datum-pkindex";
 
-    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind) =>
-        new TypedAdapter(MutableBPlusTree.Create(path, keyKind));
+    protected override IMutableBPlusTreeAdapter CreateTree(string path, DataKind keyKind, bool allowDuplicates = false) =>
+        new TypedAdapter(MutableBPlusTree.Create(path, keyKind, allowDuplicates));
 
     protected override IMutableBPlusTreeAdapter OpenTree(string path) =>
         new TypedAdapter(MutableBPlusTree.Open(path));
@@ -45,6 +45,17 @@ public sealed class MutableBPlusTreeContractTests : BPlusTreeContractTests
 
         public bool TryFind(DataValue key, out ValueIndexEntry entry) =>
             _tree.TryFind(key, out entry);
+
+        public IReadOnlyList<ValueIndexEntry> FindAll(DataValue key) => _tree.FindAll(key);
+
+        public IReadOnlyList<ValueIndexEntry> FindRange(DataValue low, DataValue high) =>
+            _tree.FindRange(low, high);
+
+        public IEnumerable<ValueIndexEntry> TraverseForward() => _tree.TraverseForward();
+
+        public IEnumerable<ValueIndexEntry> TraverseBackward() => _tree.TraverseBackward();
+
+        public bool Delete(ValueIndexEntry entry) => _tree.Delete(entry);
 
         public void Dispose() => _tree.Dispose();
     }

@@ -286,6 +286,9 @@ public enum SqlToken
     /// <summary>The REINDEX keyword (rebuild a table's <c>.datum-index</c> sidecar).</summary>
     Reindex,
 
+    /// <summary>The INDEX keyword (CREATE INDEX / DROP INDEX).</summary>
+    Index,
+
     /// <summary>The ALTER keyword (DDL table modification).</summary>
     Alter,
 

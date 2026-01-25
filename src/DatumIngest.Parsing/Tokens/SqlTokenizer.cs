@@ -379,6 +379,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("DELETE"), SqlToken.Delete, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ANALYZE"), SqlToken.Analyze, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("REINDEX"), SqlToken.Reindex, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("INDEX"), SqlToken.Index, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ALTER"), SqlToken.Alter, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ADD"), SqlToken.Add, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("COLUMN"), SqlToken.Column, requireDelimiters: true)

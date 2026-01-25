@@ -861,6 +861,61 @@ public class DdlParsingTests : ServiceTestBase
         Assert.IsType<ReindexTableStatement>(statements[1]);
     }
 
+    // ───────────────────── CREATE INDEX / DROP INDEX ─────────────────────
+
+    [Fact]
+    public void CreateIndexSingleColumn()
+    {
+        Statement statement = SqlParser.ParseStatement("CREATE INDEX idx_uid ON users (user_id)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("idx_uid", create.IndexName);
+        Assert.Equal("users", create.TableName);
+        Assert.Equal(new[] { "user_id" }, create.Columns);
+        Assert.False(create.IfNotExists);
+    }
+
+    [Fact]
+    public void CreateIndexCompositeColumns()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_order ON orders (customer_id, order_date, product_id)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("idx_order", create.IndexName);
+        Assert.Equal("orders", create.TableName);
+        Assert.Equal(new[] { "customer_id", "order_date", "product_id" }, create.Columns);
+    }
+
+    [Fact]
+    public void CreateIndexIfNotExists()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX IF NOT EXISTS idx_uid ON users (user_id)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.True(create.IfNotExists);
+    }
+
+    [Fact]
+    public void DropIndex()
+    {
+        Statement statement = SqlParser.ParseStatement("DROP INDEX idx_uid");
+
+        DropIndexStatement drop = Assert.IsType<DropIndexStatement>(statement);
+        Assert.Equal("idx_uid", drop.IndexName);
+        Assert.False(drop.IfExists);
+    }
+
+    [Fact]
+    public void DropIndexIfExists()
+    {
+        Statement statement = SqlParser.ParseStatement("DROP INDEX IF EXISTS idx_uid");
+
+        DropIndexStatement drop = Assert.IsType<DropIndexStatement>(statement);
+        Assert.True(drop.IfExists);
+    }
+
     // ───────────────────── Backward compatibility ─────────────────────
 
     [Fact]

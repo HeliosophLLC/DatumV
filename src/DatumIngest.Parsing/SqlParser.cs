@@ -2682,6 +2682,35 @@ public static class SqlParser
         select (Statement)new DropTableStatement(tableName, ifExists);
 
     /// <summary>
+    /// Parses <c>CREATE INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c>.
+    /// The prefix (<c>CREATE INDEX</c>) is wrapped in <c>.Try()</c> at the
+    /// dispatcher so sibling <c>CREATE</c> parsers can backtrack; the rest of
+    /// the body runs without an outer <c>.Try()</c> so body-shape failures
+    /// surface with deep Remainder positions.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateIndexParser =
+        from createKw in Token.EqualTo(SqlToken.Create)
+        from indexKw in Token.EqualTo(SqlToken.Index)
+        from ifNotExists in IfNotExistsParser
+        from indexName in IdentifierOrKeywordAsName
+        from onKw in Token.EqualTo(SqlToken.On)
+        from tableName in IdentifierOrKeywordAsName
+        from openParen in Token.EqualTo(SqlToken.LeftParen)
+        from columns in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from closeParen in Token.EqualTo(SqlToken.RightParen)
+        select (Statement)new CreateIndexStatement(indexName, tableName, columns, ifNotExists);
+
+    /// <summary>
+    /// Parses <c>DROP INDEX [IF EXISTS] name</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropIndexParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from indexKw in Token.EqualTo(SqlToken.Index)
+        from ifExists in IfExistsParser
+        from indexName in IdentifierOrKeywordAsName
+        select (Statement)new DropIndexStatement(indexName, ifExists);
+
+    /// <summary>
     /// Parses a single UDF parameter declaration:
     /// <c>@name TYPE [IS NOT NULL] [= default-expr]</c>. The <c>@</c>-prefix
     /// matches how the parameter is referenced inside the body and lines up
@@ -3578,6 +3607,8 @@ public static class SqlParser
             .Or(SetStatementParser.Try())
             .Or(CreateTableParser)
             .Or(DropTableParser.Try())
+            .Or(CreateIndexParser.Try())
+            .Or(DropIndexParser.Try())
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())
             .Or(DeleteParser.Try())
