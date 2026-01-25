@@ -1,4 +1,5 @@
 import { useSnapshot } from 'valtio';
+import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close, startDrag } from '@/state/window';
 import { cn } from '@/lib/utils';
@@ -8,22 +9,26 @@ import { cn } from '@/lib/utils';
 // global rounded-xs rule.
 export function LinuxTitleBar() {
   const { maximized } = useSnapshot(windowState);
+  const { t } = useTranslation();
   const MaxIcon = maximized ? Copy : Square;
 
   return (
     <header className="app-drag relative flex h-9 items-center bg-background select-none">
       <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-        DatumIngest
+        {t('app.name')}
       </div>
       <div className="app-no-drag relative z-10 ml-auto flex">
-        <LinuxButton onClick={minimize} aria-label="Minimize">
+        <LinuxButton onClick={minimize} aria-label={t('window.minimize')}>
           <Minus className="size-3.5" />
         </LinuxButton>
-        <LinuxButton onClick={toggleMaximize} aria-label={maximized ? 'Restore' : 'Maximize'}>
+        <LinuxButton
+          onClick={toggleMaximize}
+          aria-label={maximized ? t('window.restore') : t('window.maximize')}
+        >
           <MaxIcon className="size-3" />
         </LinuxButton>
-        <LinuxButton onClick={close} aria-label="Close" closeStyle>
+        <LinuxButton onClick={close} aria-label={t('window.close')} closeStyle>
           <X className="size-3.5" />
         </LinuxButton>
       </div>

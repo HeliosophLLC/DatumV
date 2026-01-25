@@ -1,0 +1,8 @@
+{
+  "greeting": "{tod, select, morning {Good morning, {name}} afternoon {Good afternoon, {name}} evening {Good evening, {name}} other {Hello, {name}}}",
+  "greetingGuest": "{tod, select, morning {Good morning} afternoon {Good afternoon} evening {Good evening} other {Hello}}",
+  "tagline": "Ask anything about your data.",
+  "placeholder": "Ask a question or write SQL…",
+  "submit": "Send",
+  "hint": "Press Enter to send · Shift+Enter for a new line"
+}

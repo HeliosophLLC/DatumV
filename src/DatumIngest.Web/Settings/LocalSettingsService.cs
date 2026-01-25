@@ -10,9 +10,14 @@ namespace DatumIngest.Web.Settings;
 // temp-file + rename so a torn write can't corrupt the document.
 internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsService
 {
+    // Locale is a BCP 47 tag (e.g. "en", "en-US") or the sentinel "system",
+    // which tells the client to resolve from navigator.language. Server
+    // doesn't enumerate supported tags — that's driven by which locale
+    // bundles the client ships.
     private static readonly SettingsDto Defaults = new(
         Theme: ThemePreference.System,
-        ChromeStyle: ChromeStyle.Auto);
+        ChromeStyle: ChromeStyle.Auto,
+        Locale: "system");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,7 +45,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         var current = await GetAsync(ct);
         var merged = new SettingsDto(
             Theme: patch.Theme ?? current.Theme,
-            ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle);
+            ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle,
+            Locale: patch.Locale ?? current.Locale);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

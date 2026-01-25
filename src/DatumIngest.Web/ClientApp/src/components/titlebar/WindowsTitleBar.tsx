@@ -1,4 +1,5 @@
 import { useSnapshot } from 'valtio';
+import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close, startDrag } from '@/state/window';
 import { cn } from '@/lib/utils';
@@ -13,20 +14,24 @@ import { cn } from '@/lib/utils';
 // host to start a native OS drag.
 export function WindowsTitleBar() {
   const { maximized } = useSnapshot(windowState);
+  const { t } = useTranslation();
   const MaxIcon = maximized ? Copy : Square;
 
   return (
     <header className="app-drag relative flex h-8 items-center bg-background select-none">
       <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
-      <div className="relative z-10 px-3 text-xs text-muted-foreground">DatumIngest</div>
+      <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
       <div className="app-no-drag relative z-10 ml-auto flex">
-        <WinButton onClick={minimize} aria-label="Minimize">
+        <WinButton onClick={minimize} aria-label={t('window.minimize')}>
           <Minus className="size-3.5" />
         </WinButton>
-        <WinButton onClick={toggleMaximize} aria-label={maximized ? 'Restore' : 'Maximize'}>
+        <WinButton
+          onClick={toggleMaximize}
+          aria-label={maximized ? t('window.restore') : t('window.maximize')}
+        >
           <MaxIcon className="size-3" />
         </WinButton>
-        <WinButton onClick={close} aria-label="Close" closeStyle>
+        <WinButton onClick={close} aria-label={t('window.close')} closeStyle>
           <X className="size-3.5" />
         </WinButton>
       </div>

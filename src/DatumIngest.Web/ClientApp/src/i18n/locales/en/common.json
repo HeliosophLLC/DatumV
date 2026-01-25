@@ -1,0 +1,27 @@
+{
+  "app": {
+    "name": "DatumIngest"
+  },
+  "window": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close",
+    "zoom": "Zoom"
+  },
+  "settings": {
+    "theme": {
+      "label": "Theme",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "chrome": {
+      "label": "Chrome",
+      "auto": "Auto",
+      "windows": "Windows",
+      "macos": "macOS",
+      "linux": "Linux"
+    }
+  }
+}

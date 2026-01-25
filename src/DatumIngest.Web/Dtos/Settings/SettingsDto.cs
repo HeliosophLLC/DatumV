@@ -5,11 +5,13 @@ namespace DatumIngest.Web.Dtos.Settings;
 // a field is unset, so clients never see nulls here.
 public sealed record SettingsDto(
     ThemePreference Theme,
-    ChromeStyle ChromeStyle);
+    ChromeStyle ChromeStyle,
+    string Locale);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
 // writes the result atomically.
 public sealed record SettingsPatchDto(
     ThemePreference? Theme = null,
-    ChromeStyle? ChromeStyle = null);
+    ChromeStyle? ChromeStyle = null,
+    string? Locale = null);

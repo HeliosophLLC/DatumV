@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
 import { Moon, Sun, Monitor, AppWindow } from 'lucide-react';
-import { healthState, refreshHealth } from './state/health';
+import { refreshHealth } from './state/health';
 import {
   settingsState,
   refreshSettings,
@@ -10,19 +10,17 @@ import {
   type ChromeStyle,
 } from './state/settings';
 import { themeState, setTheme } from './state/theme';
-import { hostState } from './state/host';
 import { TitleBar } from '@/components/titlebar/TitleBar';
 import { ResizeFrame } from '@/components/window/ResizeFrame';
+import { HomePage } from '@/components/home/HomePage';
 import { Button } from '@/components/ui/button';
 
 const themeCycle: ThemePreference[] = ['system', 'light', 'dark'];
 const chromeCycle: ChromeStyle[] = ['auto', 'windows', 'macos', 'linux'];
 
 export default function App() {
-  const { data } = useSnapshot(healthState);
   const { theme: themePref, chromeStyle } = useSnapshot(settingsState);
   const { resolved } = useSnapshot(themeState);
-  const { os } = useSnapshot(hostState);
 
   useEffect(() => {
     refreshHealth();
@@ -34,31 +32,23 @@ export default function App() {
   const nextChrome = chromeCycle[(chromeCycle.indexOf(chromeStyle) + 1) % chromeCycle.length];
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="bg-background text-foreground flex h-screen flex-col">
       <TitleBar />
       <ResizeFrame />
-      <main className="flex flex-1 flex-col items-center justify-center gap-6">
-        <div className="flex flex-col items-center gap-2">
-          <h1 className="text-3xl font-semibold">
-            DatumIngest {data ? `(${data.status} ${data.version})` : '(loading…)'}
-          </h1>
-          {data && (
-            <p className="text-muted-foreground text-sm">
-              {data.displayName} ({data.userId}) · node:{data.nodeId} · {data.catalogPath}
-            </p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setTheme(nextTheme)}>
-            <ThemeIcon />
-            {themePref} ({resolved})
-          </Button>
-          <Button variant="outline" onClick={() => setChromeStyle(nextChrome)}>
-            <AppWindow />
-            chrome: {chromeStyle} (os: {os})
-          </Button>
-        </div>
+      <main className="flex flex-1 flex-col">
+        <HomePage />
       </main>
+      {/* Temporary dev controls — replaced by the real settings UI later. */}
+      <div className="fixed right-3 bottom-3 z-40 flex gap-1.5">
+        <Button variant="ghost" size="sm" onClick={() => setTheme(nextTheme)}>
+          <ThemeIcon />
+          {themePref} ({resolved})
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setChromeStyle(nextChrome)}>
+          <AppWindow />
+          {chromeStyle}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -14,11 +14,15 @@ import type {
 interface SettingsState {
   theme: ThemePreference;
   chromeStyle: ChromeStyle;
+  // BCP 47 tag (e.g. 'en', 'en-US') or the sentinel 'system'. Resolved into
+  // a concrete supported locale by state/locale.ts.
+  locale: string;
 }
 
 export const settingsState = proxy<SettingsState>({
   theme: 'system',
   chromeStyle: 'auto',
+  locale: 'system',
 });
 
 export async function refreshSettings(): Promise<void> {
