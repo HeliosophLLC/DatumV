@@ -1,6 +1,6 @@
 import { useSnapshot } from 'valtio';
 import { Minus, Square, Copy, X } from 'lucide-react';
-import { windowState, minimize, toggleMaximize, close } from '@/state/window';
+import { windowState, minimize, toggleMaximize, close, startDrag } from '@/state/window';
 import { cn } from '@/lib/utils';
 
 // GNOME-flavored: 36px tall, title centered, controls right. GNOME tends to
@@ -11,11 +11,12 @@ export function LinuxTitleBar() {
   const MaxIcon = maximized ? Copy : Square;
 
   return (
-    <header className="app-drag relative flex h-9 items-center border-border bg-background select-none">
+    <header className="app-drag relative flex h-9 items-center bg-background select-none">
+      <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         DatumIngest
       </div>
-      <div className="app-no-drag ml-auto flex">
+      <div className="app-no-drag relative z-10 ml-auto flex">
         <LinuxButton onClick={minimize} aria-label="Minimize">
           <Minus className="size-3.5" />
         </LinuxButton>
@@ -28,6 +29,12 @@ export function LinuxTitleBar() {
       </div>
     </header>
   );
+}
+
+function onTitleBarMouseDown(event: React.MouseEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  startDrag();
 }
 
 function LinuxButton({

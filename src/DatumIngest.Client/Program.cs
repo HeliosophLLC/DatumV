@@ -7,9 +7,9 @@ namespace DatumIngest.Client;
 internal static class Program
 {
     // Hardcoded in dev mode so Vite's proxy config has a stable target. If
-    // these ever conflict on a dev machine, swap both here and in vite.config.ts.
+    // this ever conflicts on a dev machine, swap here and in vite.config.ts.
+    // Vite's URL (http://localhost:5173) is hardcoded in Splash.cs's JS.
     private const string DevKestrelUrl = "http://127.0.0.1:5050";
-    private const string DevViteUrl = "http://localhost:5173";
 
     // WebView2 on Windows requires the host thread to be STA. Top-level statements
     // with `await` would resume on a thread-pool (MTA) thread after the first await,
@@ -43,76 +43,63 @@ internal static class Program
         // hosting startup only fires when Web is the entry assembly; Client is).
         Process? vite = isDev ? ViteDevServer.Start() : null;
 
-        // Chromeless windows require explicit size *and* location at startup
-        // (Photino's StartupParameters validator rejects UseOsDefaultLocation /
-        // UseOsDefaultSize when Chromeless = true). SetSize/SetLocation don't
-        // flip those flags on their own — the explicit SetUseOsDefault*(false)
-        // calls do. Center() then refines positioning after window creation.
+        // Chromeless + custom React title bar is Windows-only today. Mac/Linux
+        // keep OS chrome until those platforms get the native drag/resize
+        // integrations they need (NSWindow.performDrag on Mac, X11/Wayland
+        // move-resize protocols on Linux). The chromeless-only validator also
+        // requires explicit size *and* location at startup, so SetUseOsDefault*
+        // (false) + explicit values gate together on the Windows branch.
         //
         // In dev, we open on a branded splash and navigate to Vite when it
-        // responds (SpaProxy launches Vite asynchronously; navigating before
-        // it's reachable would surface WebView2's chrome-error page).
+        // responds; navigating before Vite is reachable would surface WebView2's
+        // chrome-error page.
         var initialWindow = new PhotinoWindow()
             .SetTitle("DatumIngest")
-            .SetUseOsDefaultSize(false)
-            .SetUseOsDefaultLocation(false)
-            .SetSize(new System.Drawing.Size(1280, 800))
-            .SetLocation(new System.Drawing.Point(100, 100))
-            .SetResizable(true)
-            .Center()
-            .SetChromeless(true)
             .SetDevToolsEnabled(true)
             .SetContextMenuEnabled(true);
+
+        if (OperatingSystem.IsWindows())
+        {
+            initialWindow = initialWindow
+                .SetUseOsDefaultSize(false)
+                .SetUseOsDefaultLocation(false)
+                .SetSize(new System.Drawing.Size(1280, 800))
+                .SetLocation(new System.Drawing.Point(100, 100))
+                .SetResizable(true)
+                .Center()
+                .SetChromeless(true);
+        }
 
         var window = isDev
             ? initialWindow.LoadRawString(Splash.Html)
             : initialWindow.Load(host.Url);
 
-        // Wire JS↔C# IPC. Window controls today; future modules (dialogs,
-        // file pickers, native menus, Lua applet bridges) register through
-        // the same HostBridge surface. See HostBridge.cs.
-        _ = new HostBridge(window);
-
-        if (isDev)
+        // Defer HostBridge construction (RegisterWebMessageReceivedHandler +
+        // window event subscriptions) until after the native window actually
+        // exists. The bridge reference is kept on Program (not discarded) so
+        // GC can't unwire its event subscriptions.
+        //
+        // We do NOT send C# → JS messages during startup — calling
+        // SendWebMessage before WebView2's inner IPC channel is wired up
+        // produced an access-violation crash in Photino's native layer.
+        // Splash polls Vite itself (see Splash.cs) and navigates when ready.
+        HostBridge? bridge = null;
+        window.WindowCreated += (_, _) =>
         {
-            _ = Task.Run(() => WaitForViteAndNavigateAsync(window));
-        }
+            bridge = new HostBridge(window);
+        };
 
-        window.WaitForClose();
-
-        if (vite is not null) ViteDevServer.Stop(vite);
-        host.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    }
-
-    // Polls Vite's URL until it responds (or times out), then tells the splash
-    // page to navigate. The splash listens for splash:navigate:<url> and sets
-    // window.location.href; that's a top-level navigation so cross-origin CORS
-    // doesn't apply.
-    private static async Task WaitForViteAndNavigateAsync(PhotinoWindow window)
-    {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-        var deadline = DateTime.UtcNow.AddSeconds(60);
-
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            try
-            {
-                var response = await http.GetAsync(DevViteUrl);
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine($"[Client] Vite ready at {DevViteUrl} — navigating splash");
-                    window.SendWebMessage(Splash.NavigateKind + DevViteUrl);
-                    return;
-                }
-            }
-            catch
-            {
-                // Not ready; HttpClient throws on connection-refused.
-            }
-            await Task.Delay(250);
+            window.WaitForClose();
         }
-
-        Console.Error.WriteLine($"[Client] Vite did not respond at {DevViteUrl} within 60s");
-        window.SendWebMessage("splash:error:Vite did not start within 60s. Check 'npm run dev' output.");
+        finally
+        {
+            // Always run cleanup, even if WaitForClose throws — otherwise the
+            // Vite child process leaks and the next launch can't bind :5173.
+            GC.KeepAlive(bridge);
+            if (vite is not null) ViteDevServer.Stop(vite);
+            host.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 }

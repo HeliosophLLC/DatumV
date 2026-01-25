@@ -1,5 +1,5 @@
 import { proxy } from 'valtio';
-import { host } from '../host';
+import { host, type ResizeSide } from '../host';
 
 // Window state pushed from the host process. We optimistically flip on click
 // for snappy UI; the host echoes the real state via WindowMaximized/Restored
@@ -30,3 +30,13 @@ export function toggleMaximize(): void {
 export function close(): void {
   host.close();
 }
+
+export function startDrag(): void {
+  host.startDrag();
+}
+
+export function startResize(side: ResizeSide): void {
+  host.startResize(side);
+}
+
+export type { ResizeSide };

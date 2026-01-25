@@ -19,10 +19,12 @@ export function TitleBar() {
   const { chromeStyle } = useSnapshot(settingsState);
   const { os, runtime } = useSnapshot(hostState);
 
-  // The browser owns its own chrome (tab + URL bar + controls); rendering
-  // ours on top would be redundant and visually awful. Photino is where
-  // our custom chrome belongs.
-  if (runtime !== 'photino') return null;
+  // Browser owns its own chrome. Mac/Linux use OS chrome until those
+  // platforms get the same polish (native drag/resize integration);
+  // chromeless is Windows-only today. The component code for all three
+  // styles stays in the repo so cycling on a Windows host previews how
+  // Mac/Linux *will* look once we wire them up.
+  if (runtime !== 'photino' || os !== 'windows') return null;
 
   const resolved = resolve(chromeStyle, os);
   if (resolved === 'macos') return <MacTitleBar />;

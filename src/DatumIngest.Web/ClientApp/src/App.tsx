@@ -12,6 +12,7 @@ import {
 import { themeState, setTheme } from './state/theme';
 import { hostState } from './state/host';
 import { TitleBar } from '@/components/titlebar/TitleBar';
+import { ResizeFrame } from '@/components/window/ResizeFrame';
 import { Button } from '@/components/ui/button';
 
 const themeCycle: ThemePreference[] = ['system', 'light', 'dark'];
@@ -35,6 +36,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <TitleBar />
+      <ResizeFrame />
       <main className="flex flex-1 flex-col items-center justify-center gap-6">
         <div className="flex flex-col items-center gap-2">
           <h1 className="text-3xl font-semibold">

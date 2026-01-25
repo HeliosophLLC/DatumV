@@ -9,10 +9,26 @@ export type HostRuntime = 'photino' | 'browser';
 
 export type HostMessageHandler = (message: string) => void;
 
+export type ResizeSide =
+  | 'top'
+  | 'right'
+  | 'bottom'
+  | 'left'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right';
+
 export interface HostBridge {
   minimize(): void;
   toggleMaximize(): void;
   close(): void;
+  // Hands the drag/resize gesture to the OS native window manager (Windows
+  // only today; Mac/Linux no-op). Called from mousedown on the drag layer /
+  // resize zones so the OS takes over from there — snap-to-edge, Aero Snap,
+  // Win+arrow handling all flow through naturally.
+  startDrag(): void;
+  startResize(side: ResizeSide): void;
   // Subscribe to messages pushed from the host (C#). Photino's
   // `window.external.receiveMessage` is a single-callback API; this fanout
   // lets multiple state slices listen to the same channel.
@@ -64,6 +80,8 @@ function createPhotinoBridge(): HostBridge {
     minimize: () => send('host:window.minimize'),
     toggleMaximize: () => send('host:window.toggleMaximize'),
     close: () => send('host:window.close'),
+    startDrag: () => send('host:window.drag'),
+    startResize: (side) => send(`host:window.resize.${side}`),
     onMessage: (handler) => handlers.push(handler),
   };
 }
@@ -73,6 +91,8 @@ function createBrowserBridge(): HostBridge {
     minimize: () => {},
     toggleMaximize: () => {},
     close: () => window.close(),
+    startDrag: () => {},
+    startResize: () => {},
     onMessage: () => {}, // No host to push messages from.
   };
 }

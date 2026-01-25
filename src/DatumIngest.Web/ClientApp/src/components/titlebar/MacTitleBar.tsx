@@ -1,4 +1,4 @@
-import { minimize, toggleMaximize, close } from '@/state/window';
+import { minimize, toggleMaximize, close, startDrag } from '@/state/window';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
@@ -7,8 +7,9 @@ import { minimize, toggleMaximize, close } from '@/state/window';
 // identify as Mac.
 export function MacTitleBar() {
   return (
-    <header className="app-drag relative flex h-7 items-center border-border bg-background px-3 select-none">
-      <div className="app-no-drag z-10 flex items-center gap-2">
+    <header className="app-drag relative flex h-7 items-center bg-background px-3 select-none">
+      <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
+      <div className="app-no-drag relative z-10 flex items-center gap-2">
         <button
           type="button"
           onClick={close}
@@ -33,4 +34,10 @@ export function MacTitleBar() {
       </div>
     </header>
   );
+}
+
+function onTitleBarMouseDown(event: React.MouseEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  startDrag();
 }
