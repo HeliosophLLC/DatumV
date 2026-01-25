@@ -42,7 +42,7 @@ Column types use the kind names from the type system: `Int8`, `Int16`, `Int32`, 
 | Modifier | Behavior |
 |----------|----------|
 | `NOT NULL` | Column rejects NULL values on `INSERT`. |
-| `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on `INSERT` — duplicate key values are rejected with `PrimaryKeyViolationException`. PK columns must be fixed-size kinds (Int*, UInt*, Float*, Boolean, Date/Time/DateTime/Duration, Uuid); the total key size must be ≤ 16 bytes. |
+| `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on `INSERT` — duplicate key values are rejected with `PrimaryKeyViolationException`. Permitted kinds are scalar primitives (Int*, UInt*, Float*, Boolean), temporal kinds (Date/Time/DateTime/Duration), `Uuid`, and `String` of any length. Array columns (including `UInt8[]`), `Decimal`, and `Point2D` / `Point3D` are rejected — they have no canonical sort encoding. |
 | `DEFAULT <expr>` | Column receives the value of `<expr>` when omitted from an `INSERT`. Any tableless expression is accepted — literals, arithmetic (`1 + 2`), string concatenation (`'a' \|\| 'b'`), function calls (`now()`, `uuidv4()`), array literals (`[1, 2, 3]`), `CASE` expressions, casts. The expression is evaluated per row, so `DEFAULT now()` captures a fresh timestamp for each row and `DEFAULT uuidv4()` produces a distinct UUID per row. Column references, subqueries, and window functions are rejected — there's no source row in scope at `DEFAULT`-evaluation time. |
 | `IDENTITY` / `IDENTITY(seed, step)` | T-SQL-flavored alias for `GENERATED ALWAYS AS IDENTITY`. Auto-generates an integer value on each `INSERT`; explicit values are rejected. Bare form defaults to `seed=1, step=1`. Step may be negative. At most one `IDENTITY` column per table. The column kind must be a signed or unsigned integer (Int8/16/32/64, UInt8/16/32/64); 128-bit integers are not supported. |
 | `GENERATED ALWAYS AS IDENTITY` / `GENERATED ALWAYS AS IDENTITY(seed, step)` | PG-canonical syntax for `IDENTITY`. Same semantics as bare `IDENTITY` — explicit values rejected on `INSERT`. |
@@ -64,7 +64,9 @@ CREATE TABLE order_products (
 
 #### PRIMARY KEY enforcement
 
-Single-column `PRIMARY KEY` is backed by a maintained mutable B+Tree in a `.datum-pkindex` sidecar — uniqueness checks probe the tree in `O(log table_size)` per row. Composite `PRIMARY KEY` falls back to a scan-based check (loads existing PK values into a `HashSet` at `INSERT` start). Both paths reject within-batch duplicates and `NULL` in any PK column.
+Both single-column and composite `PRIMARY KEY` are backed by a maintained mutable B+Tree in a `.datum-pkindex` sidecar. Each row's PK tuple is encoded into a memcmp-orderable byte sequence (sign-flipped big-endian integers, IEEE-to-sortable floats, escape-encoded strings) and probed against the tree in `O(log table_size)` per row. Within-batch duplicates and `NULL` in any PK column are rejected before the tree is consulted. TEMP / InMemory tables don't maintain a tree — they fall back to a scan-based check that loads existing PK values into a `HashSet` at `INSERT` start.
+
+See [Source Indexes — Mutable B+Trees](../indexes.md#mutable-btrees) for the on-disk layout and the rationale behind the bytes-keyed tree.
 
 #### IF NOT EXISTS
 

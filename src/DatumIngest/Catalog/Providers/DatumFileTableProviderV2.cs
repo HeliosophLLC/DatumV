@@ -143,28 +143,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <see cref="DatumAppendSession"/> on commit; closed at provider
     /// dispose. Single-writer through <see cref="_mutationLock"/>.
     /// </summary>
-    private MutableBPlusTree? _pkIndex;
-
     /// <summary>
-    /// On-disk composite-PK index for tables with two or more PK columns.
-    /// Mutually exclusive with <see cref="_pkIndex"/> — a table has either
-    /// a typed single-column tree or a bytes-keyed composite tree, never
-    /// both. Opens at construction when the <c>.datum-pkindex</c> file
-    /// is the bytes-keyed format; otherwise <see langword="null"/>.
+    /// On-disk PK index for tables with a PRIMARY KEY. Bytes-keyed for
+    /// every PK shape (single-column or composite) — single-column keys
+    /// go through <see cref="Indexing.CompositeKeyEncoder.EncodeSingle"/>,
+    /// composite keys through <see cref="Indexing.CompositeKeyEncoder.Encode"/>.
+    /// Opens on construction when the <c>.datum-pkindex</c> file exists;
+    /// <see langword="null"/> for tables without a PK or with no sidecar.
     /// </summary>
     private Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? _pkIndexBytes;
 
     /// <summary>
-    /// Schema column index of the single-column PK when <see cref="_pkIndex"/>
-    /// is non-null. -1 otherwise. Captured at provider construction; the
-    /// schema-build pipeline guarantees it doesn't move (ALTER DROP COLUMN of
-    /// a PK column is rejected by the catalog).
-    /// </summary>
-    private int _pkColumnIndex = -1;
-
-    /// <summary>
-    /// Schema column indices of the composite PK when <see cref="_pkIndexBytes"/>
-    /// is non-null. Empty otherwise. Captured at provider construction.
+    /// Schema column indices of the PRIMARY KEY when <see cref="_pkIndexBytes"/>
+    /// is non-null. Empty otherwise. Captured at provider construction;
+    /// the catalog rejects ALTER DROP COLUMN of a PK column, so the
+    /// indices don't move.
     /// </summary>
     private IReadOnlyList<int> _pkColumnIndices = Array.Empty<int>();
 
@@ -307,19 +300,8 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         string pkIndexPath = GetPrimaryKeyIndexPath(_descriptor.FilePath);
         if (!File.Exists(pkIndexPath)) return;
 
-        // Schema decides which tree format to expect; the on-disk magic
-        // is the firewall if the schema and file disagree.
-        bool useBytesTree = TableCatalog.ShouldUseBytesPrimaryKeyTree(_snapshot.Schema);
-        if (useBytesTree)
-        {
-            _pkIndexBytes = Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Open(pkIndexPath);
-            _pkColumnIndices = pkIndices.ToArray();
-        }
-        else
-        {
-            _pkIndex = MutableBPlusTree.Open(pkIndexPath);
-            _pkColumnIndex = pkIndices[0];
-        }
+        _pkIndexBytes = Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Open(pkIndexPath);
+        _pkColumnIndices = pkIndices.ToArray();
     }
 
     /// <summary>
@@ -905,8 +887,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     public void Dispose()
     {
         _mappedIndexSet?.Dispose();
-        _pkIndex?.Dispose();
-        _pkIndex = null;
         _pkIndexBytes?.Dispose();
         _pkIndexBytes = null;
         CloseColumnIndexes();
@@ -932,11 +912,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     /// <inheritdoc/>
     public IPrimaryKeyLookup? GetPrimaryKeyLookup()
-    {
-        if (_pkIndex is not null) return new MutableBPlusTreePrimaryKeyLookup(_pkIndex);
-        if (_pkIndexBytes is not null) return new MutableBPlusTreeBytesPrimaryKeyLookup(_pkIndexBytes);
-        return null;
-    }
+        => _pkIndexBytes is null ? null : new MutableBPlusTreeBytesPrimaryKeyLookup(_pkIndexBytes);
 
     // ──────────────────── Helpers ────────────────────
 
@@ -1993,19 +1969,13 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         private long _identityNextValue;
         private bool _identityReserved;
 
-        // PK keys queued for index commit. Populated per WriteAsync row
-        // when the parent provider has an open PK index; flushed into
-        // the tree on CommitAsync (after the data commit succeeds).
-        // null when there's no on-disk PK index — InsertExecutor's
-        // scan-based fallback path handles uniqueness for those tables.
-        //
-        // Single-column PK: _pendingPkKeys carries the typed DataValue
-        // for each row. Composite PK: _pendingPkBytes carries the
-        // composite-encoded byte tuple for each row. Mutually exclusive
-        // — at most one of the two lists is non-null per session.
-        private readonly List<DataValue>? _pendingPkKeys;
+        // Composite-encoded PK key bytes queued per WriteAsync row when
+        // the parent provider has an open PK index. Flushed into the
+        // bytes tree on CommitAsync after the data commit succeeds.
+        // <see langword="null"/> when there's no on-disk PK index —
+        // InsertExecutor's scan-based fallback handles uniqueness for
+        // those tables (TEMP / InMemoryProvider).
         private readonly List<byte[]>? _pendingPkBytes;
-        private readonly int _pkColumnIndex;
         private readonly IReadOnlyList<int> _pkColumnIndices;
 
         // Phase 3a-wide: per-row in-line index build. Eliminates the
@@ -2045,23 +2015,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 provider.ReleaseSnapshot(snapshot);
             }
 
-            // PK index state. Captured once; the column index can't move
-            // because ALTER DROP COLUMN of a PK column is rejected.
-            if (provider._pkIndex is not null)
-            {
-                _pendingPkKeys = new List<DataValue>();
-                _pkColumnIndex = provider._pkColumnIndex;
-                _pkColumnIndices = Array.Empty<int>();
-            }
-            else if (provider._pkIndexBytes is not null)
+            // PK index state. Captured once; the column indices can't
+            // move because ALTER DROP COLUMN of a PK column is rejected.
+            if (provider._pkIndexBytes is not null)
             {
                 _pendingPkBytes = new List<byte[]>();
-                _pkColumnIndex = -1;
                 _pkColumnIndices = provider._pkColumnIndices;
             }
             else
             {
-                _pkColumnIndex = -1;
                 _pkColumnIndices = Array.Empty<int>();
             }
         }
@@ -2118,25 +2080,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             ValidateBatchSchema(batch);
 
-            // Capture PK keys before WriteRowBatch streams to the writer —
-            // the row reads need to happen against the live batch values,
-            // and the batch may be released back to the pool after commit.
-            // Stabilise each value into a fresh DataValue so the queued
-            // key survives any arena lifecycle the source batch had.
-            if (_pendingPkKeys is not null)
+            // Capture PK keys per row, encoding them to bytes before the
+            // batch potentially returns to the pool. The encoded bytes
+            // are fresh byte[] arrays so they survive the batch's
+            // arena lifecycle.
+            if (_pendingPkBytes is not null)
             {
-                for (int r = 0; r < batch.Count; r++)
-                {
-                    Row row = batch[r];
-                    DataValue key = row[_pkColumnIndex];
-                    _pendingPkKeys.Add(key);
-                }
-            }
-            else if (_pendingPkBytes is not null)
-            {
-                // Composite PK: encode the tuple to bytes per row. The
-                // bytes are arena-independent (they're a fresh byte[])
-                // so they survive the batch's pool return.
                 DataValue[] tuple = new DataValue[_pkColumnIndices.Count];
                 for (int r = 0; r < batch.Count; r++)
                 {
@@ -2306,23 +2255,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // from index). The latter only widens the window for a
                 // duplicate to slip past on the next INSERT — caught at
                 // REINDEX (PR12) until we add a 2-phase commit.
-                if (_pendingPkKeys is not null && _provider._pkIndex is not null)
+                if (_pendingPkBytes is not null && _provider._pkIndexBytes is not null)
                 {
-                    foreach (DataValue key in _pendingPkKeys)
+                    foreach (byte[] encoded in _pendingPkBytes)
                     {
                         // ChunkIndex / RowOffset are placeholder zeros —
                         // the lookup is uniqueness-only; the actual
                         // (chunk, row) addressing for "find me the row"
                         // is a follow-up PR. Storing 0/0 keeps the entry
                         // shape compatible.
-                        _provider._pkIndex.Insert(new ValueIndexEntry(key, ChunkIndex: 0, RowOffsetInChunk: 0L));
-                    }
-                    _pendingPkKeys.Clear();
-                }
-                else if (_pendingPkBytes is not null && _provider._pkIndexBytes is not null)
-                {
-                    foreach (byte[] encoded in _pendingPkBytes)
-                    {
                         _provider._pkIndexBytes.Insert(
                             new Indexing.BTree.MutableBytes.BytesIndexEntry(
                                 encoded, ChunkIndex: 0, RowOffsetInChunk: 0L));

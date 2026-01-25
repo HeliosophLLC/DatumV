@@ -245,17 +245,6 @@ public sealed class SortedIndexKeyEncoderTests : ServiceTestBase
         Assert.Equal(uuid, decoded.AsUuid());
     }
 
-    [Fact]
-    public void RoundTrip_StringReference()
-    {
-        byte[] buffer = new byte[8];
-        SortedIndexKeyEncoder.EncodeStringReference(1234, 567, buffer);
-        (int offset, int length) = SortedIndexKeyEncoder.DecodeStringReference(buffer);
-
-        Assert.Equal(1234, offset);
-        Assert.Equal(567, length);
-    }
-
     // ──────────────── Sort-order preservation tests ────────────────
 
     [Fact]

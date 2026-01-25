@@ -104,17 +104,17 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Provider_CompositePk_GetPrimaryKeyLookupReturnsCompositeLookup()
+    public void Provider_CompositePk_GetPrimaryKeyLookupNonNull()
     {
+        // Post-Phase-4: every PK shape (single-column or composite) routes
+        // through the bytes-keyed tree; the provider exposes a non-null
+        // lookup whenever the table has a PK and the index file exists.
         Pool pool = new(new PoolBacking());
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, PRIMARY KEY (a, b))");
 
         ITableProvider provider = catalog["t"];
-        IPrimaryKeyLookup? lookup = provider.GetPrimaryKeyLookup();
-
-        Assert.NotNull(lookup);
-        Assert.True(lookup.IsComposite, "Composite PK provider must return a composite-mode lookup.");
+        Assert.NotNull(provider.GetPrimaryKeyLookup());
     }
 
     [Fact]

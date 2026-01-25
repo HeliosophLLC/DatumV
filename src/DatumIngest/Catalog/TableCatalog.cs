@@ -509,33 +509,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         DatumFileWriterV2.CreateEmpty(
             targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices, columnComputeds);
 
-        // Create the on-disk PK index sidecar. The choice between typed and
-        // bytes-keyed trees is per-PK-shape:
-        // - Single-column fixed-size kind (Int*, UInt*, Float*, Bool, Date,
-        //   DateTime, Time, Duration, Uuid) → typed B+Tree (DataValue-keyed,
-        //   no encoder overhead, no inline-budget concerns)
-        // - Single-column String → bytes-keyed B+Tree (the typed tree's
-        //   inline-only limit caps strings to ~12 bytes; bytes tree handles
-        //   any length, which the COCO-style "filename as PK" case needs)
-        // - Composite PK → bytes-keyed B+Tree (stores composite-encoded
-        //   byte tuples produced by CompositeKeyEncoder)
+        // Create the on-disk PK index sidecar. Single bytes-keyed tree for
+        // any PK shape — single-column or composite, fixed-size or variable.
+        // Per-component values are normalised by CompositeKeyEncoder into a
+        // memcmp-orderable byte sequence; the tree stores those bytes.
         if (schema.PrimaryKeyColumnIndices.Count >= 1)
         {
             string pkIndexPath = Catalog.Providers.DatumFileTableProviderV2.GetPrimaryKeyIndexPath(targetPath);
-            bool useBytesTree = ShouldUseBytesPrimaryKeyTree(schema);
-            if (useBytesTree)
-            {
-                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes pkTree =
-                    Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(pkIndexPath);
-                pkTree.Dispose();
-            }
-            else
-            {
-                DataKind pkKind = schema.Columns[schema.PrimaryKeyColumnIndices[0]].Kind;
-                Indexing.BTree.Mutable.MutableBPlusTree pkTree =
-                    Indexing.BTree.Mutable.MutableBPlusTree.Create(pkIndexPath, pkKind);
-                pkTree.Dispose();
-            }
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes pkTree =
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(pkIndexPath);
+            pkTree.Dispose();
         }
 
         Add(new TableDescriptor(create.TableName, targetPath));
@@ -899,28 +882,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             or DataKind.Uuid
             or DataKind.String;
 
-    /// <summary>
-    /// Decides whether a table's PRIMARY KEY index should use the
-    /// bytes-keyed B+Tree (variable-length, composite-encoded) versus the
-    /// typed B+Tree (DataValue-keyed, inline-only). Bytes tree for:
-    /// <list type="bullet">
-    ///   <item>Composite PKs (Count &gt; 1) — only the bytes tree handles
-    ///         multi-column encoded keys</item>
-    ///   <item>Single-column String PKs — the typed tree's inline budget
-    ///         caps strings at ~12 bytes; bytes tree handles any length</item>
-    /// </list>
-    /// Typed tree for single-column fixed-size kinds (Int*, UInt*, Float*,
-    /// Bool, Date, DateTime, Time, Duration, Uuid) — those fit inline and
-    /// benefit from the typed compare's fast path.
-    /// </summary>
-    internal static bool ShouldUseBytesPrimaryKeyTree(Schema schema)
-    {
-        IReadOnlyList<int> pkIndices = schema.PrimaryKeyColumnIndices;
-        if (pkIndices.Count > 1) return true;
-        if (pkIndices.Count == 0) return false;
-        DataKind kind = schema.Columns[pkIndices[0]].Kind;
-        return kind == DataKind.String;
-    }
 
     /// <summary>
     /// Returns the byte size for a fixed-size scalar <paramref name="kind"/>.

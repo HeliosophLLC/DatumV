@@ -43,11 +43,10 @@ internal static class SortedIndexKeyEncoder
     /// <summary>
     /// Encodes a non-string <see cref="DataValue"/> key into the destination span using
     /// sort-preserving binary encoding. The destination must be at least <see cref="GetKeyWidth"/> bytes.
-    /// For <see cref="DataKind.String"/> keys, use <see cref="EncodeStringReference"/> instead.
     /// </summary>
     /// <param name="key">The value to encode. Must not be null.</param>
     /// <param name="destination">Span to write the encoded key into.</param>
-    /// <exception cref="InvalidOperationException">The key is a string (use <see cref="EncodeStringReference"/>).</exception>
+    /// <exception cref="InvalidOperationException">The key is a string.</exception>
     /// <exception cref="NotSupportedException">The key kind is not supported for sorted index keys.</exception>
     public static void Encode(DataValue key, Span<byte> destination)
     {
@@ -136,40 +135,12 @@ internal static class SortedIndexKeyEncoder
     }
 
     /// <summary>
-    /// Encodes a string-table reference as a fixed-width 8-byte key.
-    /// The encoded form is NOT sort-preserving; binary search on string columns must
-    /// dereference the string table for comparison.
-    /// </summary>
-    /// <param name="offset">Byte offset into the string table.</param>
-    /// <param name="length">Byte length of the UTF-8 string in the string table.</param>
-    /// <param name="destination">Span to write the 8-byte reference into.</param>
-    public static void EncodeStringReference(int offset, int length, Span<byte> destination)
-    {
-        BinaryPrimitives.WriteInt32BigEndian(destination, offset);
-        BinaryPrimitives.WriteInt32BigEndian(destination[4..], length);
-    }
-
-    /// <summary>
-    /// Decodes a string-table reference from an 8-byte key.
-    /// </summary>
-    /// <param name="source">The 8-byte encoded reference.</param>
-    /// <returns>The byte offset and byte length into the string table.</returns>
-    public static (int Offset, int Length) DecodeStringReference(ReadOnlySpan<byte> source)
-    {
-        int offset = BinaryPrimitives.ReadInt32BigEndian(source);
-        int length = BinaryPrimitives.ReadInt32BigEndian(source[4..]);
-        return (offset, length);
-    }
-
-    /// <summary>
     /// Decodes a fixed-width key from the source span back into a <see cref="DataValue"/>.
-    /// For <see cref="DataKind.String"/> keys, use <see cref="DecodeStringReference"/> and
-    /// resolve the string from the string table before calling <see cref="DataValue.FromString(string)"/>.
     /// </summary>
     /// <param name="kind">The data kind to decode as.</param>
     /// <param name="source">The encoded key bytes.</param>
     /// <returns>The decoded value.</returns>
-    /// <exception cref="InvalidOperationException">The kind is a string (use <see cref="DecodeStringReference"/>).</exception>
+    /// <exception cref="InvalidOperationException">The kind is a string.</exception>
     /// <exception cref="NotSupportedException">The kind is not supported for sorted index keys.</exception>
     public static DataValue Decode(DataKind kind, ReadOnlySpan<byte> source)
     {

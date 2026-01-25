@@ -941,12 +941,12 @@ internal static class InsertExecutor
         /// </summary>
         public void EnsureUnique(DataValue[] targetRow, IReadOnlyList<ColumnInfo> columns, Arena? arena = null)
         {
-            // Bytes-keyed lookup path: encode the tuple via CompositeKeyEncoder
+            // Lookup-backed path: encode the PK tuple via CompositeKeyEncoder
             // and use the encoded bytes for BOTH within-batch dedup (HashSet
-            // keyed on base64-of-encoded-bytes) AND the on-disk probe. Handles
-            // arbitrary-length strings / composite tuples without going through
-            // ToObject() on non-inline DataValues.
-            if (_lookup is not null && _lookup.IsComposite)
+            // keyed on base64-of-encoded-bytes) AND the on-disk probe.
+            // Handles arbitrary-length strings / composite tuples without
+            // going through ToObject() on non-inline DataValues.
+            if (_lookup is not null)
             {
                 DataValue[] tuple = new DataValue[_pkIndices.Count];
                 for (int p = 0; p < _pkIndices.Count; p++)
@@ -965,7 +965,7 @@ internal static class InsertExecutor
                     throw new PrimaryKeyViolationException(
                         BuildDuplicateMessage(_pkIndices, columns, targetRow));
                 }
-                if (_lookup.TryFindComposite(encoded, out _))
+                if (_lookup.TryFind(encoded, out _))
                 {
                     throw new PrimaryKeyViolationException(
                         BuildDuplicateMessage(_pkIndices, columns, targetRow));
@@ -973,23 +973,15 @@ internal static class InsertExecutor
                 return;
             }
 
-            // Single-column typed lookup or scan-based fallback. NULL-in-PK
-            // check + within-batch dedup is shared between both paths.
+            // Scan-based fallback (TEMP / InMemoryProvider, no on-disk index).
+            // BuildKeyFromArray includes NULL-in-PK check and uses ToObject()
+            // for the seen-set hash — works for inline-only PK values, which
+            // is the practical case for in-memory tables.
             string key = BuildKeyFromArray(targetRow, _pkIndices, columns);
             if (!_seenKeys.Add(key))
             {
                 throw new PrimaryKeyViolationException(
                     BuildDuplicateMessage(_pkIndices, columns, targetRow));
-            }
-
-            if (_lookup is not null)
-            {
-                DataValue pkValue = targetRow[_pkIndices[0]];
-                if (_lookup.TryFind(pkValue, out _))
-                {
-                    throw new PrimaryKeyViolationException(
-                        BuildDuplicateMessage(_pkIndices, columns, targetRow));
-                }
             }
         }
 

@@ -553,22 +553,45 @@ Auto-indexing uses `autoIndexColumns: true`, which selects columns for sorted in
 
 When a `.datum` file is mutated via `INSERT` / `DELETE` / `ALTER TABLE ADD COLUMN` / `ALTER TABLE DROP COLUMN`, the `.datum-index` sidecar's stored fingerprint no longer matches the data file's fingerprint. The provider detects the mismatch at open time and discards the stale index — queries fall back to scan-based execution until the index is rebuilt by re-running the indexer.
 
-## Mutable B+Tree (PRIMARY KEY index)
+## Mutable B+Trees
 
-When a table has a single-column `PRIMARY KEY`, the catalog maintains a separate `.datum-pkindex` sidecar — a mutable B+Tree updated on every `INSERT` rather than rebuilt on mutation. Distinct from the bulk-loaded B+Tree sections in `.datum-index`:
+In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, the engine maintains two families of *mutable* B+Tree sidecars that survive `INSERT` / `DELETE` / `UPDATE` without a rebuild. They share a page layout (8 KiB pages, dual-slot CRC32 header, COW commits, bump-only allocation) but use different key shapes — and that key-shape split is why two implementations coexist rather than one.
 
-| Property | `.datum-index` B+Tree | `.datum-pkindex` |
-|----------|----------------------|------------------|
-| Build | Bulk load on `index` build pass | Created at `CREATE TABLE`, maintained on every `INSERT` |
-| Leaf compression | Zstd | Uncompressed |
-| Crash safety | Whole-file fingerprint; rebuild on mismatch | Dual-slot CRC32 header; torn writes recover to previous commit |
-| Allocation | Bottom-up bulk pack | Bump-only (free-list reserved for future) |
-| Lifetime | Invalidated on data mutation | Updated atomically with each `INSERT` commit |
-| Query surface | Point + range + chunk pruning | Point lookup only (PK uniqueness check) |
-| Composite keys | Yes | Single column only |
+| | `.datum-pkindex` (bytes-keyed) | `.datum-bptree-{col}` (typed) |
+|---|---|---|
+| File magic | `BKBT` | `PKBT` |
+| Key shape | Variable-length `byte[]` (memcmp-orderable) | Fixed-width typed `DataValue` |
+| Backing class | `MutableBPlusTreeBytes` | `MutableBPlusTree` |
+| Purpose | `PRIMARY KEY` uniqueness enforcement | Per-column WHERE / range acceleration |
+| Composite keys | Yes (encoded via `CompositeKeyEncoder`) | No (single column only) |
+| Duplicates | Rejected (UNIQUE invariant) | Allowed |
+| Query surface | Point lookup only | Point + range + forward/backward traversal + chunk pruning |
+| Maintained by | `DatumFileTableProviderV2` at `CommitAsync` | `IncrementalIndexBuilder` / `Indexer` |
+| Lifetime | Created at `CREATE TABLE`, dropped at `DROP TABLE` | Built/extended on indexer passes; invalidated on schema change |
+| Long keys | Supported (variable-length leaves) | Limited to what fits inline in a `DataValue` (≤ 16 UTF-8 bytes for strings, ≤ 16 bytes for byte arrays) |
 
-The PK index is owned by the provider, not the indexer. `CREATE TABLE` with a single-column PK creates the file via `MutableBPlusTree.Create`; `DatumFileTableProviderV2` opens it at provider construction; each `INSERT` extracts PK keys at `WriteAsync` and flushes them into the tree at `CommitAsync` after the data commit succeeds. `DROP TABLE` deletes it alongside the other sidecars.
+### Why two trees instead of one
 
-`InsertExecutor`'s PK uniqueness check probes the tree directly when the provider exposes one, turning per-INSERT enforcement from `O(table_size)` (preload all existing PK values into a `HashSet`) into `O(insert_size × log table_size)` (per-row tree probe).
+The typed tree ([`MutableBPlusTree`](../src/DatumIngest/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
+
+The trade-off is the inline-payload budget. A `DataValue` inlines up to 16 bytes of string or byte-array content; longer values would have to be stored out-of-line in an `IValueStore`, which doesn't survive across process restarts the way the tree file does. That makes the typed tree a non-starter for long-string primary keys — a 25-character COCO filename like `test2017/000000290551.jpg` overflows the inline budget, and neither does any composite tuple encoded as a single key.
+
+The bytes-keyed tree ([`MutableBPlusTreeBytes`](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. `CompositeKeyEncoder` produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column PKs are just the degenerate "tuple of one" case.
+
+In principle the bytes tree could subsume the typed tree — every typed key can be byte-encoded. We didn't collapse them because the typed tree's `DataValue`-shaped surface is what `IColumnIndex` consumers already expect, and switching would mean decoding bytes back into typed values on every range scan / chunk-pruning probe. The PK index doesn't need that — it only does point lookups and never returns the key — so the bytes tree's point-only surface fits cleanly there.
+
+### Limitations
+
+- **Typed tree** — keys must fit a `DataValue`. Strings and byte arrays longer than the inline budget are rejected at column-index build time (the column gets no acceleration index). No composite keys.
+- **Bytes tree** — point lookup only. No range scans, no forward/backward traversal, no chunk-set pruning. `CompositeKeyEncoder` rejects `NULL`, `Decimal`, and `Point2D` / `Point3D` (no canonical sort order for the latter two). Composite primary keys with these kinds are not supported.
+- **Both** — single-writer per file (`FileShare.None`); a `.datum-pkindex` cannot be open by two `TableCatalog` instances simultaneously.
+- **Both** — torn writes recover to the previous committed slot via the dual-slot header. The active slot is whichever has a valid CRC and the higher commit counter.
+- Distinct from the bulk-loaded B+Tree sections in `.datum-index`: those are Zstd-compressed, immutable, fingerprint-validated, and invalidated on any data mutation. The mutable trees are uncompressed and updated in place on each `INSERT` commit.
+
+### PK enforcement integration
+
+The PK index is owned by the provider, not the indexer. `CREATE TABLE` with a `PRIMARY KEY` (single-column or composite) creates the file via `MutableBPlusTreeBytes.Create`; `DatumFileTableProviderV2` opens it at provider construction; each `INSERT` extracts PK keys at `WriteAsync` and flushes them into the tree at `CommitAsync` after the data commit succeeds. `DROP TABLE` deletes it alongside the other sidecars.
+
+`InsertExecutor`'s PK uniqueness check encodes each row's PK tuple via `CompositeKeyEncoder` and probes the tree directly when the provider exposes an `IPrimaryKeyLookup`, turning per-INSERT enforcement from `O(table_size)` (preload all existing PK values into a `HashSet`) into `O(insert_size × log table_size)` (per-row tree probe). TEMP / InMemory providers don't maintain a tree and fall back to the scan-based pre-load path.
 
 See [.datum format — `.datum-pkindex`](datum-format.md#optional-sidecar-datum-pkindex) for the on-disk layout.
