@@ -243,12 +243,22 @@ public sealed class ModelStreamingTests : ServiceTestBase
         public int CompletedCount { get; private set; }
         public Exception? FailureException { get; private set; }
 
-        public void OnChunk(string modelName, ValueRef chunk)
-            => Chunks.Add(chunk.AsString());
+        public ValueTask OnChunkAsync(string modelName, ValueRef chunk)
+        {
+            Chunks.Add(chunk.AsString());
+            return ValueTask.CompletedTask;
+        }
 
-        public void OnCompleted(string modelName) => CompletedCount++;
+        public ValueTask OnCompletedAsync(string modelName)
+        {
+            CompletedCount++;
+            return ValueTask.CompletedTask;
+        }
 
-        public void OnFailed(string modelName, Exception exception)
-            => FailureException = exception;
+        public ValueTask OnFailedAsync(string modelName, Exception exception)
+        {
+            FailureException = exception;
+            return ValueTask.CompletedTask;
+        }
     }
 }

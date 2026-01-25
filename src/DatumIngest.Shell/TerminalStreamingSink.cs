@@ -36,7 +36,7 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
     private bool _midLine;
 
     /// <summary>
-    /// Number of chunks delivered to <see cref="OnChunk"/> across all
+    /// Number of chunks delivered to <see cref="OnChunkAsync"/> across all
     /// dispatches observed by this sink. Zero when the EXEC target was a
     /// non-streaming function (e.g. <c>EXEC upper('hi')</c>); the shell
     /// uses this to decide whether to print a fallback row summary.
@@ -59,19 +59,19 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
     }
 
     /// <inheritdoc />
-    public void OnChunk(string modelName, ValueRef chunk)
+    public ValueTask OnChunkAsync(string modelName, ValueRef chunk)
     {
         ChunksReceived++;
 
         if (chunk.IsNull)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         if (chunk.Kind == DataKind.String)
         {
             string text = chunk.AsString();
-            if (text.Length == 0) return;
+            if (text.Length == 0) return ValueTask.CompletedTask;
 
             _writer.Write(text);
             _midLine = !text.EndsWith('\n');
@@ -84,10 +84,11 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
             _writer.Write($"<{chunk.Kind}>");
             _midLine = true;
         }
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public void OnCompleted(string modelName)
+    public ValueTask OnCompletedAsync(string modelName)
     {
         if (_midLine)
         {
@@ -99,10 +100,11 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
         // Use AnsiConsole here (no untrusted markup to escape) so the colour
         // honours the terminal's theme.
         AnsiConsole.MarkupLine($"[grey](streamed from models.{Markup.Escape(modelName)})[/]");
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public void OnFailed(string modelName, Exception exception)
+    public ValueTask OnFailedAsync(string modelName, Exception exception)
     {
         if (_midLine)
         {
@@ -112,5 +114,6 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
         // The exception itself propagates and the shell's error handler
         // renders it; no need to print here. Just terminate the partial
         // line so the error message starts on a clean row.
+        return ValueTask.CompletedTask;
     }
 }

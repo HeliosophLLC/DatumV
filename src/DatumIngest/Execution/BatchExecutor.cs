@@ -50,7 +50,7 @@ public sealed record CellFailedBatchEvent(string CellId, Exception Error) : Batc
 
 /// <summary>
 /// One chunk of streaming model output produced inside a query/exec
-/// cell. Fired live as the underlying <see cref="IModelStreamingSink.OnChunk"/>
+/// cell. Fired live as the underlying <see cref="IModelStreamingSink.OnChunkAsync"/>
 /// hook fires, before the row that ultimately carries the collected
 /// value lands. For non-LLM models these never fire — only LLMs (and
 /// future streaming-capable backends) emit multi-chunk output.
@@ -1547,30 +1547,22 @@ internal sealed class BatchEventStreamingSink : IModelStreamingSink
         _onEvent = onEvent;
     }
 
-    public void OnChunk(string modelName, ValueRef chunk)
+    public ValueTask OnChunkAsync(string modelName, ValueRef chunk)
     {
-        if (chunk.IsNull || chunk.Kind != DataKind.String) return;
+        if (chunk.IsNull || chunk.Kind != DataKind.String) return ValueTask.CompletedTask;
         string text = chunk.AsString();
-        if (text.Length == 0) return;
+        if (text.Length == 0) return ValueTask.CompletedTask;
 
-        ValueTask vt = _onEvent(new CellChunkBatchEvent(_cellId, modelName, text));
-        if (!vt.IsCompletedSuccessfully)
-        {
-            vt.AsTask().GetAwaiter().GetResult();
-        }
+        return _onEvent(new CellChunkBatchEvent(_cellId, modelName, text));
     }
 
-    public void OnCompleted(string modelName)
-    {
-        // Per-cell completion is signalled by CellCompletedBatchEvent
-        // emitted from the executor; nothing to do here.
-    }
+    public ValueTask OnCompletedAsync(string modelName) => ValueTask.CompletedTask;
+    // Per-cell completion is signalled by CellCompletedBatchEvent emitted
+    // from the executor; nothing to do here.
 
-    public void OnFailed(string modelName, Exception exception)
-    {
-        // Per-cell failure is signalled by CellFailedBatchEvent emitted
-        // from the executor's catch handler; nothing to do here.
-    }
+    public ValueTask OnFailedAsync(string modelName, Exception exception) => ValueTask.CompletedTask;
+    // Per-cell failure is signalled by CellFailedBatchEvent emitted from
+    // the executor's catch handler; nothing to do here.
 }
 
 /// <summary>

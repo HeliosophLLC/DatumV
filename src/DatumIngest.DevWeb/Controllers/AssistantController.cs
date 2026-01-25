@@ -70,13 +70,6 @@ public sealed class AssistantController : ControllerBase
         [FromQuery] string model = "llama31_8b",
         CancellationToken ct = default)
     {
-        // Allow blocking writes on Response.Body so the model
-        // streaming sink (sync IModelStreamingSink) can flush bytes
-        // immediately, matching the /api/query/stream path.
-        Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature? bodyControl =
-            HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature>();
-        if (bodyControl is not null) bodyControl.AllowSynchronousIO = true;
-
         UploadInput? upload = null;
         if (file is not null && file.Length > 0)
         {

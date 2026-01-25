@@ -342,7 +342,10 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
                 catch (Exception ex)
                 {
-                    streamingSink?.OnFailed(_modelName, ex);
+                    if (streamingSink is not null)
+                    {
+                        await streamingSink.OnFailedAsync(_modelName, ex).ConfigureAwait(false);
+                    }
                     tracer?.OnDispatchFailed(
                         _modelName,
                         chunkSize,
@@ -351,7 +354,10 @@ public sealed class ModelInvocationOperator : IQueryOperator
                     throw;
                 }
 
-                streamingSink?.OnCompleted(_modelName);
+                if (streamingSink is not null)
+                {
+                    await streamingSink.OnCompletedAsync(_modelName).ConfigureAwait(false);
+                }
                 tracer?.OnDispatchCompleted(
                     _modelName,
                     chunkSize,
@@ -471,7 +477,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
             .InferStreamingAsync(rowInputs, rowOverrides, cancellationToken)
             .ConfigureAwait(false))
         {
-            sink.OnChunk(_modelName, chunk);
+            await sink.OnChunkAsync(_modelName, chunk).ConfigureAwait(false);
             chunks.Add(chunk);
         }
 

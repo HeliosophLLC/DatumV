@@ -257,14 +257,6 @@ app.MapPost("/api/query", async (HttpRequest request, CancellationToken ct) =>
 //     groups will appear, separated by interleaved events.
 app.MapPost("/api/query/stream", async (HttpContext httpCtx) =>
 {
-    // The streaming sink writes chunk lines synchronously from inside the
-    // operator's await chain (the IModelStreamingSink interface is sync).
-    // Allow blocking writes on Response.Body so the sink can flush bytes
-    // immediately rather than marshalling through a channel.
-    Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature? bodyControl =
-        httpCtx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature>();
-    if (bodyControl is not null) bodyControl.AllowSynchronousIO = true;
-
     CancellationToken ct = httpCtx.RequestAborted;
 
     QueryRequestEnvelope envelope;
