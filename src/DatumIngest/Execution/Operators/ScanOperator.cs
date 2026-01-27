@@ -1096,6 +1096,15 @@ public sealed class ScanOperator : IQueryOperator
         List<(string Column, DataValue Value)> equalities = new();
         ExtractTopLevelEqualities(filterHint, equalities, arena);
 
+        // Schema needed to coerce equality literals to the column kind
+        // before probing indexes. The parser narrows numeric literals
+        // (sbyte → short → int → long) so `WHERE a = 1` on an Int32
+        // column lands here with an Int8 literal; without coercion the
+        // index probe sees a kind mismatch and returns 0 results, which
+        // would then incorrectly become "bestPositions" under the
+        // fewest-wins rule.
+        Schema providerSchema = provider.GetSchema();
+
         foreach ((string column, DataValue value) in equalities)
         {
             if (!provider.TryGetColumnIndex(column, out IColumnIndex? index))
@@ -1103,7 +1112,10 @@ public sealed class ScanOperator : IQueryOperator
                 continue;
             }
 
-            IReadOnlyList<ValueIndexEntry> entries = index.FindExact(value);
+            DataValue coercedValue = CoerceLiteralToColumnKind(value, column, providerSchema);
+            if (coercedValue.IsNull) continue;
+
+            IReadOnlyList<ValueIndexEntry> entries = index.FindExact(coercedValue);
             List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
 
             if (bestPositions is null || positions.Count < bestPositions.Count)
@@ -1158,6 +1170,84 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
+        // Composite indexes: pick any user-defined composite index whose
+        // declared column list is fully covered by the equality predicates,
+        // build the tuple in the index's declared order, and probe via
+        // FindExact. Typically far more selective than any single-column
+        // strategy when applicable. v1 only matches full-prefix exact
+        // equalities; partial-prefix range probes are a follow-up.
+        //
+        // Each tuple value is coerced to the column's declared schema kind
+        // before encoding. The parser narrows numeric literals to their
+        // smallest representable type (sbyte → short → int → …), so a query
+        // like `WHERE a = 1` produces an Int8 literal even when `a` is
+        // Int32; the index entries were encoded against the column kind at
+        // INSERT time, so the probe key must match.
+        IReadOnlyList<Indexing.ICompositeIndex> compositeIndexes = provider.GetCompositeIndexes();
+        if (compositeIndexes.Count > 0 && equalities.Count > 0)
+        {
+            // Build a case-insensitive lookup of equality column → value once.
+            Dictionary<string, DataValue> equalityByColumn = new(StringComparer.OrdinalIgnoreCase);
+            foreach ((string col, DataValue val) in equalities)
+            {
+                equalityByColumn[col] = val;
+            }
+
+            foreach (Indexing.ICompositeIndex compositeIndex in compositeIndexes)
+            {
+                if (compositeIndex.Columns.Count > equalityByColumn.Count) continue;
+
+                DataValue[] tuple = new DataValue[compositeIndex.Columns.Count];
+                bool fullyCovered = true;
+                for (int i = 0; i < compositeIndex.Columns.Count; i++)
+                {
+                    string indexedCol = compositeIndex.Columns[i];
+                    if (!equalityByColumn.TryGetValue(indexedCol, out DataValue v))
+                    {
+                        fullyCovered = false;
+                        break;
+                    }
+
+                    // Coerce to the schema kind so the encoded probe key
+                    // matches the encoded entry key. FindColumn is
+                    // case-insensitive; null means the index references a
+                    // column that no longer exists (schema drift), which
+                    // should be impossible because ALTER DROP COLUMN
+                    // cascades — defensive skip just in case.
+                    ColumnInfo? column = providerSchema.FindColumn(indexedCol);
+                    if (column is null)
+                    {
+                        fullyCovered = false;
+                        break;
+                    }
+
+                    DataValue coerced = v.Kind == column.Kind
+                        ? v
+                        : TypeCoercion.CoerceValue(v, column.Kind);
+
+                    // Coercion can produce a null when no path exists
+                    // (e.g. a non-parseable string into an int). The
+                    // probe would never match such a value — skip the
+                    // index for this predicate set.
+                    if (coerced.IsNull)
+                    {
+                        fullyCovered = false;
+                        break;
+                    }
+                    tuple[i] = coerced;
+                }
+                if (!fullyCovered) continue;
+
+                IReadOnlyList<ValueIndexEntry> entries = compositeIndex.FindExact(tuple);
+                List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
+
+                if (bestPositions is null || positions.Count < bestPositions.Count)
+                {
+                    bestPositions = positions;
+                }
+            }
+        }
+
         if (bestPositions is null || bestPositions.Count == 0)
         {
             return bestPositions;
@@ -1165,6 +1255,21 @@ public sealed class ScanOperator : IQueryOperator
 
         bestPositions.Sort();
         return bestPositions;
+    }
+
+    /// <summary>
+    /// Coerces a literal value to the schema kind of <paramref name="columnName"/>
+    /// so an index probe doesn't see a kind mismatch. Returns a typed null when
+    /// no coercion path exists (the caller should treat this as "skip this
+    /// strategy" rather than "matched zero rows").
+    /// </summary>
+    private static DataValue CoerceLiteralToColumnKind(
+        DataValue value, string columnName, Schema schema)
+    {
+        ColumnInfo? column = schema.FindColumn(columnName);
+        if (column is null) return DataValue.Null(value.Kind);
+        if (value.Kind == column.Kind) return value;
+        return TypeCoercion.CoerceValue(value, column.Kind);
     }
 
     /// <summary>

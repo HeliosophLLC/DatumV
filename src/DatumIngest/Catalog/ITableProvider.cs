@@ -73,6 +73,23 @@ public interface ITableProvider : IDisposable
     }
 
     /// <summary>
+    /// Returns the user-defined composite indexes (created via
+    /// <c>CREATE INDEX</c>) registered on this provider. The query planner
+    /// consults this list when matching AND-chained equality predicates
+    /// against composite-index column tuples.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation returns an empty list. Providers that
+    /// maintain <c>.datum-cindex-*</c> sidecars (the persistent
+    /// <c>.datum</c> provider) override and return adapters around the
+    /// open trees.
+    /// </remarks>
+    IReadOnlyList<Indexing.ICompositeIndex> GetCompositeIndexes()
+    {
+        return Array.Empty<Indexing.ICompositeIndex>();
+    }
+
+    /// <summary>
     /// Streams all rows from the table, optionally applying an advisory filter hint for
     /// statistics-based partition pruning. The caller is responsible for applying the
     /// filter for correctness — the stream may still contain non-matching rows.

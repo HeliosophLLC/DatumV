@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.BTree.MutableBytes;
 using DatumIngest.Model;
@@ -347,6 +348,139 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // After reopen, the dropped index name is gone from the catalog.
         Assert.Throws<InvalidOperationException>(() =>
             reopened.Plan("DROP INDEX idx_t_b"));
+    }
+
+    // ──────────────────── Phase 3: planner uses composite index ────────────────────
+
+    [Fact]
+    public async Task Select_FullCompositeMatch_ReturnsCorrectRow()
+    {
+        // Mixed-kind composite index (Int32 + Int32, payload Float64).
+        // Avoid Date columns here — scan-side filter coercion for
+        // `Date col = 'string literal'` is a pre-existing limitation
+        // upstream of Phase 3; conflating the two would mask whether
+        // the index-seek path itself works.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE orders (customer_id Int32, product_id Int32, amount Float64)");
+        catalog.Plan("CREATE INDEX idx_orders_cust_prod ON orders (customer_id, product_id)");
+        catalog.Plan(
+            "INSERT INTO orders VALUES " +
+            "(1, 100, 10.0), " +
+            "(1, 200, 20.0), " +
+            "(2, 100, 30.0), " +
+            "(2, 200, 40.0)");
+
+        IQueryPlan plan = catalog.Plan(
+            "SELECT amount FROM orders WHERE customer_id = 2 AND product_id = 200");
+        List<double> amounts = await CollectFirstColumnDoubles(plan);
+
+        Assert.Single(amounts);
+        Assert.Equal(40.0, amounts[0]);
+    }
+
+    [Fact]
+    public async Task Select_FullCompositeMatch_PredicateOrderInvariant()
+    {
+        // Equality predicates can appear in any order in the WHERE — the
+        // planner must rebuild the tuple in the index's declared order.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300), (2, 20, 400)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20 AND a = 1");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Single(values);
+        Assert.Equal(200, values[0]);
+    }
+
+    [Fact]
+    public async Task Select_PartialPredicateCoverage_FallsBackToScan_StillCorrect()
+    {
+        // v1 only handles full-prefix matches. Predicate covers only some
+        // of the index's columns — the planner skips this index but the
+        // query still returns the right rows via scan.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        values.Sort();
+        Assert.Equal(new[] { 100, 200 }, values);
+    }
+
+    [Fact]
+    public async Task Select_CompositeIndexMatchesRowAcrossCatalogReopen()
+    {
+        Pool pool = new(new PoolBacking());
+
+        using (TableCatalog catalog = new(pool, CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+            catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+            catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300)");
+        }
+
+        // Reopen and probe — the rehydrated provider must expose the
+        // composite index so the planner can use it.
+        using TableCatalog reopened = new(pool, CatalogPath);
+        IQueryPlan plan = reopened.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Single(values);
+        Assert.Equal(200, values[0]);
+    }
+
+    [Fact]
+    public async Task Select_NoMatchingRow_ReturnsEmpty()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 99 AND b = 99");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Empty(values);
+    }
+
+    private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
+    {
+        List<int> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0].AsInt32());
+            }
+        }
+        return values;
+    }
+
+    private static async Task<List<double>> CollectFirstColumnDoubles(IQueryPlan plan)
+    {
+        List<double> values = new();
+        await foreach (RowBatch batch in plan.ExecuteAsync(CancellationToken.None))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][0].AsFloat64());
+            }
+        }
+        return values;
     }
 
     [Fact]

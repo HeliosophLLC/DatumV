@@ -294,6 +294,21 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         return false;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<Indexing.ICompositeIndex> GetCompositeIndexes()
+    {
+        if (_compositeIndexTrees.Count == 0) return Array.Empty<Indexing.ICompositeIndex>();
+
+        Indexing.ICompositeIndex[] result = new Indexing.ICompositeIndex[_compositeIndexTrees.Count];
+        int i = 0;
+        foreach ((string name, Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree) in _compositeIndexTrees)
+        {
+            IndexDescriptor descriptor = _compositeIndexDescriptors[name];
+            result[i++] = new MutableBPlusTreeBytesCompositeIndex(tree, descriptor);
+        }
+        return result;
+    }
+
     /// <summary>
     /// Closes every per-column tree and clears the dictionary. Called from
     /// REINDEX (before a rebuild rewrites the files) and from
