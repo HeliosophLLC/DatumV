@@ -293,16 +293,25 @@ two-stage OCR pipeline.
 - **Memory**: V1 runs whole-image inference, no tiling. The float NCHW
   intermediates cost `3 × H × W × 4` bytes for input plus
   `3 × (H·4) × (W·4) × 4` bytes for output — a 1024×1024 input at 4×
-  spends ~210 MB on intermediates. Tile-based inference (with overlap)
-  is the right follow-up if you start running this on multi-megapixel
-  photos. For typical phone-camera thumbnails (≤512×512), whole-image
-  is fine.
+  spends ~210 MB on intermediates. For typical phone-camera thumbnails
+  (≤512×512), whole-image is fine. See the **tile_size follow-up** below
+  for the planned escape hatch when this matters.
 - **Architecture**: SRVGGNetCompact — a stack of 3×3 conv + ReLU blocks
   feeding a final pixel-shuffle 4× upsample. Preprocessing is raw
   `pixel / 255` in NCHW RGB; no per-channel mean/std. Output is also
-  `[0, 1]` floats; the model class clips, scales to `[0, 255]`, and PNG-
-  encodes the result (PNG, not JPEG — JPEG-compressing a super-resolved
-  image defeats the purpose).
+  `[0, 1]` floats; the model class clips, scales to `[0, 255]`, and
+  hands a live `SKBitmap` to the consumer (no PNG round-trip — the
+  downstream renderer or follow-up model gets pixels directly).
+- **Per-call overrides**:
+  - `[0] outscale` (Float64) — output size relative to the input.
+    Default is the native `4.0`. Valid range is `[1.0, 4.0]`; values
+    above 4 are rejected because the model can't produce more pixels
+    than its architecture supports. Internally the model always infers
+    at native 4× and then SkiaSharp-resizes the result to match
+    `outscale` when it isn't 4 — useful when you want a non-power-of-4
+    target resolution (e.g. `outscale=2.5` to upscale a 512px thumbnail
+    to 1280px). `outscale=1.0` runs the model purely for its baked-in
+    denoising and returns the result at the input's original size.
 - **Demo**:
   ```sql
   -- Upscale a folder of thumbnails to 4× their size.
@@ -310,7 +319,23 @@ two-stage OCR pipeline.
     photo_id,
     models.realesrgan_general_x4(thumb) AS hi_res
   FROM thumbnails LIMIT 10;
+
+  -- 2.5× upscale instead of the native 4×.
+  SELECT models.realesrgan_general_x4(thumb, 2.5) AS hi_res
+  FROM thumbnails LIMIT 10;
   ```
+- **Follow-up — `tile_size`**: not yet implemented. Tile-based inference
+  slices the input into overlapping `tile_size × tile_size` patches,
+  runs the model on each, and stitches the upscaled tiles back into
+  the full output. The motivating use case is multi-megapixel inputs
+  where whole-image inference is impractical: a 3840×2160 4K photo at
+  4× costs ~1.6 GB of intermediate floats and won't fit in typical
+  consumer VRAM. With `tile_size=512, tile_pad=10`, the same input
+  runs as ~40 independent 512×512 patches sharing one bounded working
+  set. The reference is upstream's `RealESRGANer.tile_process`
+  ([github.com/xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)).
+  Until this lands, stick to inputs ≤2048×2048 for the safest VRAM
+  budget on a 12 GB card.
 
 ### `u2net`, `u2netp` — salient-object segmentation (background masking)
 

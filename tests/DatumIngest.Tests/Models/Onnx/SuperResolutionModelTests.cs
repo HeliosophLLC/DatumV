@@ -92,6 +92,69 @@ public sealed class SuperResolutionModelTests : ServiceTestBase
     }
 
     /// <summary>
+    /// <c>outscale</c> override: when set to 2.0 on a 64×64 input the
+    /// model still infers at native 4× internally but post-resizes to
+    /// 128×128 instead of 256×256.
+    /// </summary>
+    [Fact]
+    public async Task InferBatch_OutscaleTwo_ReturnsTwoXImage()
+    {
+        if (!ModelAvailable) return;
+
+        Pool pool = GetService<Pool>();
+        Arena inputArena = pool.Backing.RentArena();
+
+        try
+        {
+            using SuperResolutionModel model = new(name: "realesrgan_general_x4", modelFilePath: ModelPath);
+
+            byte[] png = MakeSolidPng(64, 64, SKColors.SteelBlue);
+
+            DatumIngest.Functions.ValueRef[][] inputs =
+                [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
+            DatumIngest.Functions.ValueRef[][] overrides =
+                [[DatumIngest.Functions.ValueRef.FromFloat32(2.0f)]];
+            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
+                inputs,
+                overrides,
+                cancellationToken: CancellationToken.None);
+
+            DatumIngest.Functions.ValueRef result = Assert.Single(outputs);
+            Assert.False(result.IsNull);
+            SKBitmap downscaled = result.AsImage();
+            Assert.NotNull(downscaled);
+            Assert.Equal(128, downscaled.Width);
+            Assert.Equal(128, downscaled.Height);
+        }
+        finally
+        {
+            pool.Backing.TryReturn(inputArena);
+        }
+    }
+
+    /// <summary>
+    /// <c>outscale</c> outside the valid <c>[1.0, scaleFactor]</c> range
+    /// is rejected. The model can't produce more pixels than its native
+    /// 4× architecture supports.
+    /// </summary>
+    [Fact]
+    public async Task InferBatch_OutscaleAboveNative_Throws()
+    {
+        if (!ModelAvailable) return;
+
+        using SuperResolutionModel model = new(name: "realesrgan_general_x4", modelFilePath: ModelPath);
+
+        byte[] png = MakeSolidPng(16, 16, SKColors.Gray);
+        DatumIngest.Functions.ValueRef[][] inputs =
+            [[DatumIngest.Functions.ValueRef.FromBytes(DataKind.Image, png)]];
+        DatumIngest.Functions.ValueRef[][] overrides =
+            [[DatumIngest.Functions.ValueRef.FromFloat32(8.0f)]];
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await model.InferBatchAsync(inputs, overrides, CancellationToken.None));
+    }
+
+    /// <summary>
     /// Catalog round-trip: registering Real-ESRGAN-General x4 via
     /// <see cref="BuiltinModels"/> resolves to a usable
     /// <see cref="SuperResolutionModel"/>.

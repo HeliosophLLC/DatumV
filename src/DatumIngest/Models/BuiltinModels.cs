@@ -2130,6 +2130,12 @@ public static class BuiltinModels
                 string modelPath = Path.Combine(ctx.ModelDirectory, modelFilename);
                 return new SuperResolutionModel(modelName, modelPath, scaleFactor: 4);
             },
+            // Per-call hyperparameter override:
+            //   [0] outscale (Float64) — output scale relative to input.
+            //   Defaults to the native 4× scale. Valid range [1.0, 4.0];
+            //   values above 4 are rejected (the model can't produce more
+            //   pixels than its architecture supports).
+            OptionalArgKinds: [DataKind.Float64],
             DisplayName: "Real-ESRGAN General x4 (Compact)",
             Parameters: "1.2M",
             License: "BSD-3-Clause",

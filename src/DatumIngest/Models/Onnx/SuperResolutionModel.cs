@@ -55,18 +55,39 @@ public sealed class SuperResolutionModel : OnnxModel
 
     private readonly string _onnxInputName;
     private readonly int _scaleFactor;
+    private readonly float _defaultOutscale;
+
+    /// <summary>
+    /// Construction-time default output-scale factor. Per-row callers can
+    /// override via the optional <c>outscale</c> argument. Must lie in
+    /// <c>[1.0, scaleFactor]</c>; values above the native scale are
+    /// rejected because the model can't produce more pixels than its
+    /// architecture supports.
+    /// </summary>
+    public float DefaultOutscale => _defaultOutscale;
 
     /// <summary>
     /// Loads a Real-ESRGAN-Compact-style ONNX from <paramref name="modelFilePath"/>.
     /// Validates that the graph has a single image input with dynamic
-    /// spatial dims and a single image output, and records the upscale
-    /// factor declared by <paramref name="scaleFactor"/> (4 for the
-    /// realesr-general-x4v3 export).
+    /// spatial dims and a single image output, and records the native
+    /// upscale factor declared by <paramref name="scaleFactor"/> (4 for
+    /// the realesr-general-x4v3 export).
     /// </summary>
+    /// <param name="name">Catalog-visible model name.</param>
+    /// <param name="modelFilePath">Absolute path to the ONNX file.</param>
+    /// <param name="scaleFactor">
+    /// The model's native upscale factor. 4 for realesr-general-x4v3.
+    /// </param>
+    /// <param name="defaultOutscale">
+    /// Default per-call output scale. <c>null</c> means "use the native
+    /// scale factor" (i.e. don't resize). Must be in
+    /// <c>[1.0, scaleFactor]</c>.
+    /// </param>
     public SuperResolutionModel(
         string name,
         string modelFilePath,
-        int scaleFactor = 4)
+        int scaleFactor = 4,
+        float? defaultOutscale = null)
         : base(
             name,
             modelFilePath,
@@ -83,6 +104,14 @@ public sealed class SuperResolutionModel : OnnxModel
         }
 
         _scaleFactor = scaleFactor;
+        _defaultOutscale = defaultOutscale ?? scaleFactor;
+        if (_defaultOutscale < 1f || _defaultOutscale > scaleFactor)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(defaultOutscale),
+                _defaultOutscale,
+                $"defaultOutscale must be in [1.0, {scaleFactor}]; got {_defaultOutscale}.");
+        }
 
         if (Session.InputMetadata.Count != 1)
         {
@@ -113,7 +142,6 @@ public sealed class SuperResolutionModel : OnnxModel
         IReadOnlyList<IReadOnlyList<ValueRef>> overrides,
         CancellationToken cancellationToken)
     {
-        _ = overrides;
         cancellationToken.ThrowIfCancellationRequested();
         if (inputs.Count == 0) return [];
 
@@ -130,11 +158,33 @@ public sealed class SuperResolutionModel : OnnxModel
                     $"SuperResolutionModel received a null image at row {row}; filter nulls upstream before invoking the model.");
             }
 
+            // Optional per-row hyperparameter:
+            //   [0] outscale (Float64) — output scale relative to input.
+            // Defaults to the construction-time DefaultOutscale (typically
+            // the native scale factor). Must be in [1.0, scaleFactor]:
+            // values above scaleFactor would require upsampling beyond the
+            // network's native resolution, which defeats the purpose.
+            IReadOnlyList<ValueRef> rowOverrides = overrides.Count > row
+                ? overrides[row]
+                : [];
+            float rowOutscale = rowOverrides.Count > 0 && !rowOverrides[0].IsNull
+                ? rowOverrides[0].ToFloat()
+                : _defaultOutscale;
+            if (rowOutscale < 1f || rowOutscale > _scaleFactor)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(overrides),
+                    rowOutscale,
+                    $"outscale must be in [1.0, {_scaleFactor}] (got {rowOutscale} at row {row}). "
+                    + $"The model produces at most {_scaleFactor}× pixels — values above that would upsample beyond the network's native resolution.");
+            }
+
             SKBitmap decoded = image.AsImage();
+            float capturedOutscale = rowOutscale;
             results[row] = await Task.Run<ValueRef>(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return UpscaleSingleImage(decoded);
+                return UpscaleSingleImage(decoded, capturedOutscale);
             }, cancellationToken).ConfigureAwait(false);
         }
 
@@ -154,7 +204,7 @@ public sealed class SuperResolutionModel : OnnxModel
         => throw new InvalidOperationException(
             "SuperResolutionModel overrides InferBatchAsync directly. ParseBatchOutputs is not used.");
 
-    private ValueRef UpscaleSingleImage(SKBitmap decoded)
+    private ValueRef UpscaleSingleImage(SKBitmap decoded, float outscale)
     {
         int width = decoded.Width;
         int height = decoded.Height;
@@ -220,10 +270,9 @@ public sealed class SuperResolutionModel : OnnxModel
         ReadOnlySpan<float> flat = outTensor.Buffer.Span;
         int outPlaneSize = expectedW * expectedH;
 
-        // Ownership transfers to the ValueRef — no `using` here.
         SKImageInfo info = new(expectedW, expectedH, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        SKBitmap bitmap = new(info);
-        nint outPixelPtr = bitmap.GetPixels();
+        SKBitmap nativeScale = new(info);
+        nint outPixelPtr = nativeScale.GetPixels();
         unsafe
         {
             byte* dest = (byte*)outPixelPtr;
@@ -240,7 +289,26 @@ public sealed class SuperResolutionModel : OnnxModel
             }
         }
 
-        return ValueRef.FromImage(bitmap);
+        // Common case: caller wants the native scale — hand the bitmap
+        // off without an intermediate resize. Ownership transfers to the
+        // ValueRef, so no `using` here.
+        if (MathF.Abs(outscale - _scaleFactor) < 1e-4f)
+        {
+            return ValueRef.FromImage(nativeScale);
+        }
+
+        // outscale < native scale: downsample via SkiaSharp (bicubic-ish).
+        // outscale is pre-validated to be in [1.0, scaleFactor] by the caller.
+        int targetW = Math.Max(1, (int)MathF.Round(width * outscale));
+        int targetH = Math.Max(1, (int)MathF.Round(height * outscale));
+        SKImageInfo targetInfo = new(targetW, targetH, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        using (nativeScale)
+        {
+            SKBitmap resized = nativeScale.Resize(targetInfo, SKSamplingOptions.Default)
+                ?? throw new InvalidOperationException(
+                    $"SkiaSharp failed to resize the {_scaleFactor}× output to outscale={outscale} ({targetW}×{targetH}).");
+            return ValueRef.FromImage(resized);
+        }
     }
 
     /// <summary>
