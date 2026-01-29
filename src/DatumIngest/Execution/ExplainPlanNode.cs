@@ -48,6 +48,14 @@ public sealed class ExplainPlanNode
     /// <summary>Additional runtime annotations (e.g. "buffered: 10,000 rows").</summary>
     public List<string> RuntimeAnnotations { get; init; } = [];
 
+    /// <summary>
+    /// Number of rows the exact-row-seek path fetched on a <c>ScanOperator</c>
+    /// (when predicate equalities resolved to point lookups via an index).
+    /// <see langword="null"/> when the operator wasn't a scan, or when the
+    /// scan ran without taking the seek path (chunked-scan fallback).
+    /// </summary>
+    public int? ExactSeekRowsFetched { get; set; }
+
     // ── Access strategy (populated for data-access operators) ──
 
     /// <summary>

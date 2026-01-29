@@ -501,6 +501,119 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <summary>
+    /// Drops every open composite-index tree, deletes its sidecar, and
+    /// rebuilds it from a full table scan. Used after UPDATE (which can
+    /// shift an indexed-column value into a new key) — the cheapest
+    /// correct path until incremental update-paths land. The (chunkIndex,
+    /// rowOffsetInChunk) positions stored in fresh entries match the live
+    /// <see cref="SourceIndex"/>'s chunk directory, so the planner's
+    /// seek path resolves them via the same arithmetic as INSERT-time
+    /// entries. Caller must hold <c>_mutationLock</c>.
+    /// </summary>
+    private async Task RebuildCompositeIndexesNoLockAsync(CancellationToken ct)
+    {
+        if (_compositeIndexTrees.Count == 0 && _compositeIndexDescriptors.Count == 0) return;
+
+        // Snapshot descriptors before tearing down — _compositeIndexDescriptors
+        // is the source of truth for "what indexes existed pre-rebuild."
+        List<IndexDescriptor> descriptors = new(_compositeIndexDescriptors.Values);
+
+        // Close handles and delete sidecars so Create can re-make them.
+        foreach (IndexDescriptor d in descriptors)
+        {
+            if (_compositeIndexTrees.TryGetValue(d.Name, out Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? oldTree))
+            {
+                try { oldTree.Dispose(); } catch { /* best-effort */ }
+            }
+            string path = GetCompositeIndexPath(_descriptor.FilePath, d.Name);
+            try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ }
+        }
+        _compositeIndexTrees.Clear();
+        _compositeIndexColumnIndices.Clear();
+        _compositeIndexDescriptors.Clear();
+
+        // Recreate empty trees. Schema-drift (column missing) drops the
+        // index — the catalog descriptor entry will be cleaned up by the
+        // next save (or by an explicit DROP INDEX); we just don't open
+        // the tree.
+        Schema schema = _snapshot.Schema;
+        foreach (IndexDescriptor d in descriptors)
+        {
+            int[]? ordinals = TryResolveCompositeIndexOrdinals(schema, d);
+            if (ordinals is null) continue;
+
+            string path = GetCompositeIndexPath(_descriptor.FilePath, d.Name);
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(path, allowDuplicates: true);
+            _compositeIndexTrees[d.Name] = tree;
+            _compositeIndexColumnIndices[d.Name] = ordinals;
+            _compositeIndexDescriptors[d.Name] = d;
+        }
+
+        if (_compositeIndexTrees.Count == 0) return;
+
+        // Scan + populate. Map absolute row positions to (chunkIndex,
+        // rowOffsetInChunk) via the live SourceIndex's chunk directory.
+        // Without a SourceIndex (rebuild swallowed the failure), fall back
+        // to default-chunk-size partitioning — entries point at the right
+        // chunk slot if a future rebuild produces matching chunks.
+        IReadOnlyList<Indexing.IndexChunk>? chunks = _sourceIndex?.Chunks;
+        int defaultChunkSize = Indexing.IndexConstants.DefaultChunkSize;
+        long absoluteRow = 0;
+        int currentChunk = 0;
+
+        await foreach (RowBatch batch in ScanAsync(
+            requiredColumns: null,
+            filterHint: null,
+            targetArena: null,
+            cancellationToken: ct).ConfigureAwait(false))
+        {
+            try
+            {
+                for (int r = 0; r < batch.Count; r++)
+                {
+                    int chunkIndex;
+                    long rowOffsetInChunk;
+                    if (chunks is not null && chunks.Count > 0)
+                    {
+                        while (currentChunk + 1 < chunks.Count &&
+                               absoluteRow >= chunks[currentChunk].RowOffset + chunks[currentChunk].RowCount)
+                        {
+                            currentChunk++;
+                        }
+                        chunkIndex = currentChunk;
+                        rowOffsetInChunk = absoluteRow - chunks[chunkIndex].RowOffset;
+                    }
+                    else
+                    {
+                        chunkIndex = (int)(absoluteRow / defaultChunkSize);
+                        rowOffsetInChunk = absoluteRow % defaultChunkSize;
+                    }
+
+                    Row row = batch[r];
+                    foreach ((string name, int[] ordinals) in _compositeIndexColumnIndices)
+                    {
+                        DataValue[] tuple = new DataValue[ordinals.Length];
+                        for (int p = 0; p < ordinals.Length; p++)
+                        {
+                            tuple[p] = row[ordinals[p]];
+                        }
+                        byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
+                        _compositeIndexTrees[name].Insert(
+                            new Indexing.BTree.MutableBytes.BytesIndexEntry(
+                                encoded, chunkIndex, rowOffsetInChunk));
+                    }
+                    absoluteRow++;
+                }
+            }
+            finally
+            {
+                batch.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
     /// Disposes the named composite-index tree and removes its sidecar
     /// file. Idempotent — DROP INDEX IF EXISTS may reach here with the
     /// tree already disposed if an earlier session crashed mid-cleanup.
@@ -1780,6 +1893,24 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // Swallowed — data commit stands. The catch above
                 // already invalidated the cache so GetSourceIndex
                 // returns null and queries fall back to scan.
+            }
+
+            // Composite indexes need a full rebuild after UPDATE: a row
+            // whose indexed-column value changed leaves a stale entry
+            // pointing at a key that no longer matches the underlying
+            // row's data. Cheapest correct path until an incremental
+            // delete-old/insert-new path lands. Best-effort to keep the
+            // failure-mode story consistent with the source-index rebuild
+            // above — the data commit stands even if composite-index
+            // rebuild fails (queries may return stale matches until the
+            // user re-issues DROP INDEX / CREATE INDEX).
+            try
+            {
+                await RebuildCompositeIndexesNoLockAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Swallowed — see above.
             }
         }
         finally

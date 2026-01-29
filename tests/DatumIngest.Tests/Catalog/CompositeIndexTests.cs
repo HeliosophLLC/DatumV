@@ -457,6 +457,166 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         Assert.Empty(values);
     }
 
+    // ──────────────────── Strategy assertions (EXPLAIN ANALYZE) ────────────────────
+
+    [Fact]
+    public async Task Select_FullCompositeMatch_FiresExactSeekPath_NotChunkedScan()
+    {
+        // Strategy proof — uses EXPLAIN ANALYZE's exact-seek counter to
+        // verify the seek path actually fired (correctness alone can't
+        // distinguish "seek returned 1 row" from "chunked scan filtered
+        // down to 1 row").
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (1, 20, 200), (2, 10, 300), (2, 20, 400)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
+        int? exactSeek = await GetScanExactSeekRowsAsync(plan);
+
+        Assert.True(exactSeek.HasValue, "Scan should report an exact-seek count when an index satisfies the predicate.");
+    }
+
+    [Fact]
+    public async Task Select_FullCompositeMatch_ProvesCompositePathWinsOverSingleColumn()
+    {
+        // Each individual column on its own would seek many rows (a=1
+        // appears in 3 rows; b=20 in 3 rows); only the composite key
+        // (a=1, b=20) resolves to a unique row. If the seek count is 1,
+        // the composite path won the selectivity contest.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 110), (1, 20, 120), (1, 30, 130), " +
+            "(2, 20, 220), (3, 20, 320)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 20");
+        int? exactSeek = await GetScanExactSeekRowsAsync(plan);
+
+        Assert.Equal(1, exactSeek);
+    }
+
+    [Fact]
+    public async Task Select_PartialPredicateCoverage_DoesNotUseCompositeIndex()
+    {
+        // Single-column predicate can't satisfy a multi-column composite
+        // index in v1 (no leftmost-prefix range scan yet). The auto-built
+        // per-column tree on `a` may still fire, so the seek count would
+        // reflect that — but it'll be 3 (count of a=1 rows), not 1
+        // (count of (a=1, b=20)).
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 110), (1, 20, 120), (1, 30, 130), " +
+            "(2, 20, 220)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        int? exactSeek = await GetScanExactSeekRowsAsync(plan);
+
+        // Strategy varies — the per-column auto-built tree on `a` may
+        // fire (seek count = 3 because three rows have a=1). What we
+        // care about: NOT 1 (which would mean the composite index
+        // incorrectly matched a partial-prefix predicate).
+        Assert.NotEqual(1, exactSeek);
+    }
+
+    // ──────────────────── Phase 4: mutation maintenance ────────────────────
+
+    [Fact]
+    public async Task Delete_RemovesRowFromCompositeIndexResults()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300)");
+
+        catalog.Plan("DELETE FROM t WHERE a = 2 AND b = 20");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Empty(values);
+    }
+
+    [Fact]
+    public async Task Delete_PreservesOtherRowsInCompositeIndexResults()
+    {
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300)");
+
+        catalog.Plan("DELETE FROM t WHERE a = 2 AND b = 20");
+
+        // Non-deleted rows must still be findable via the index.
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Single(values);
+        Assert.Equal(100, values[0]);
+    }
+
+    [Fact]
+    public async Task Update_NonIndexedColumn_PreservesIndexHits()
+    {
+        // UPDATE changes only the payload column; the composite key is
+        // unchanged. The index must still resolve the row to the right
+        // (post-update) value.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
+
+        catalog.Plan("UPDATE t SET v = 999 WHERE a = 2 AND b = 20");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        Assert.Single(values);
+        Assert.Equal(999, values[0]);
+    }
+
+    [Fact]
+    public async Task Update_IndexedColumn_NewKeyFindable_OldKeyMisses()
+    {
+        // UPDATE changes a column covered by the composite index.
+        // After the update: the new key (a=2, b=99) must be findable;
+        // the old key (a=2, b=20) must NOT match any rows.
+        Pool pool = new(new PoolBacking());
+        using TableCatalog catalog = new(pool, CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
+
+        catalog.Plan("UPDATE t SET b = 99 WHERE a = 2 AND b = 20");
+
+        IQueryPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 99");
+        List<int> newValues = await CollectFirstColumnInts(planNew);
+        Assert.Single(newValues);
+        Assert.Equal(200, newValues[0]);
+
+        IQueryPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+        List<int> oldValues = await CollectFirstColumnInts(planOld);
+        Assert.Empty(oldValues);
+    }
+
     private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)
     {
         List<int> values = new();
@@ -481,6 +641,30 @@ public sealed class CompositeIndexTests : IAsyncLifetime
             }
         }
         return values;
+    }
+
+    /// <summary>
+    /// Runs the query under EXPLAIN ANALYZE and returns the scan node's
+    /// exact-seek count — the count is set only when the seek path
+    /// (point lookup via an index) actually fired. Tests use this to
+    /// verify the composite index was consulted, not just that the
+    /// result rows were correct.
+    /// </summary>
+    private static async Task<int?> GetScanExactSeekRowsAsync(IQueryPlan plan)
+    {
+        ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
+        return FindScanNode(root)?.ExactSeekRowsFetched;
+    }
+
+    private static ExplainPlanNode? FindScanNode(ExplainPlanNode node)
+    {
+        if (node.OperatorName == "Scan") return node;
+        foreach (ExplainPlanNode child in node.Children)
+        {
+            ExplainPlanNode? found = FindScanNode(child);
+            if (found is not null) return found;
+        }
+        return null;
     }
 
     [Fact]

@@ -142,6 +142,16 @@ public sealed class InstrumentedOperator : IQueryOperator
             double percentage = (double)pruned / total * 100.0;
             planNode.RuntimeAnnotations.Add(
                 $"row groups: {total} total, {pruned} pruned ({percentage:F0}%)");
+
+            // Surface the exact-row-seek count so EXPLAIN ANALYZE — and
+            // tests — can distinguish "took the index seek path" from
+            // "fell through to a chunked scan". Null when the seek path
+            // was not used.
+            planNode.ExactSeekRowsFetched = scan.ExactSeekRowsFetched;
+            if (scan.ExactSeekRowsFetched is int seekRows)
+            {
+                planNode.RuntimeAnnotations.Add($"exact seek: {seekRows} rows");
+            }
         }
 
         // Compute rows consumed from children.
