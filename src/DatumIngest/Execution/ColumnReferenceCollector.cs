@@ -133,6 +133,47 @@ public static class ColumnReferenceCollector
                 }
                 break;
 
+            case ScanExpression scan:
+                // INIT, PARTITION BY, ORDER BY are evaluated against the source
+                // row only — they cannot see accumulators, so collect refs from
+                // them directly.
+                foreach (Expression init in scan.InitExpressions)
+                {
+                    Walk(init, references);
+                }
+                if (scan.Window.PartitionBy is not null)
+                {
+                    foreach (Expression partition in scan.Window.PartitionBy)
+                    {
+                        Walk(partition, references);
+                    }
+                }
+                if (scan.Window.OrderBy is not null)
+                {
+                    foreach (OrderByItem orderByItem in scan.Window.OrderBy)
+                    {
+                        Walk(orderByItem.Expression, references);
+                    }
+                }
+                // BODY expressions reference both source columns and accumulator
+                // names. The accumulator names are SCAN-scoped (not real columns)
+                // and must not leak into projection-pushdown's required-columns set.
+                HashSet<(string?, string)> bodyRefs = new();
+                foreach (Expression body in scan.BodyExpressions)
+                {
+                    Walk(body, bodyRefs);
+                }
+                foreach ((string? tableName, string columnName) bodyRef in bodyRefs)
+                {
+                    if (bodyRef.tableName is null
+                        && scan.AccumulatorNames.Contains(bodyRef.columnName))
+                    {
+                        continue;
+                    }
+                    references.Add(bodyRef);
+                }
+                break;
+
             case InExpression inExpression:
                 Walk(inExpression.Expression, references);
                 foreach (Expression value in inExpression.Values)
