@@ -187,8 +187,8 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
 
         Assert.Equal(3, rows.Count);
         // avg = 20.0, so deviations are -10, 0, 10.
-        Assert.Equal(-10f, rows.First(r => r["price"].AsFloat64() == 10f)["deviation"].AsFloat64());
-        Assert.Equal(0f, rows.First(r => r["price"].AsFloat64() == 20f)["deviation"].AsFloat64());
-        Assert.Equal(10f, rows.First(r => r["price"].AsFloat64() == 30f)["deviation"].AsFloat64());
+        Assert.Equal(-10f, rows.First(r => r["price"].AsFloat32() == 10f)["deviation"].AsFloat64());
+        Assert.Equal(0f, rows.First(r => r["price"].AsFloat32() == 20f)["deviation"].AsFloat64());
+        Assert.Equal(10f, rows.First(r => r["price"].AsFloat32() == 30f)["deviation"].AsFloat64());
     }
 }
