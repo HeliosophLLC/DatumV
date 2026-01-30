@@ -1,5 +1,5 @@
 using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 
 namespace DatumIngest.Execution.Operators;
 
@@ -57,114 +57,124 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        LocalBufferPool pool = context.LocalBufferPool;
-        string[]? outputNames = null;
-        Dictionary<string, int>? outputNameIndex = null;
+        Pool pool = context.Pool;
+        ColumnLookup? outputLookup = null;
         RowBatch? outputBatch = null;
 
-        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
+        try
         {
-            for (int i = 0; i < inputBatch.Count; i++)
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                Row outerRow = inputBatch[i];
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                // Execute the inner subquery with the current outer row as correlation context.
-                ExecutionContext innerContext = context.WithOuterRow(outerRow);
-
-                Row? firstRow = null;
-                bool hasMultipleRows = false;
-
-                await foreach (RowBatch innerBatch in _innerPlan.ExecuteAsync(innerContext).ConfigureAwait(false))
+                try
                 {
-                    for (int j = 0; j < innerBatch.Count; j++)
+                    for (int i = 0; i < inputBatch.Count; i++)
                     {
-                        Row innerRow = innerBatch[j];
-                        if (firstRow is not null)
+                        Row outerRow = inputBatch[i];
+                        context.CancellationToken.ThrowIfCancellationRequested();
+
+                        // Execute the inner subquery with the current outer row as correlation context.
+                        ExecutionContext innerContext = context.WithOuterRow(outerRow);
+
+                        // Extract scalar value: zero rows → NULL, one row → first column value.
+                        // The DataValue is copied out as a struct before the inner batch is
+                        // returned to the pool — the array backing the row would otherwise be
+                        // recycled and the slot overwritten. Arena-backed payloads (string
+                        // offsets, etc.) remain valid because the inner context shares
+                        // context.Store with the outer.
+                        DataValue scalarResult = DataValue.UnknownNull();
+                        bool foundRow = false;
+                        bool hasMultipleRows = false;
+
+                        await foreach (RowBatch innerBatch in _innerPlan.ExecuteAsync(innerContext).ConfigureAwait(false))
                         {
-                            hasMultipleRows = true;
-                            break;
+                            try
+                            {
+                                for (int j = 0; j < innerBatch.Count; j++)
+                                {
+                                    Row innerRow = innerBatch[j];
+                                    if (foundRow)
+                                    {
+                                        hasMultipleRows = true;
+                                        break;
+                                    }
+
+                                    if (innerRow.FieldCount != 1)
+                                    {
+                                        throw new InvalidOperationException(
+                                            $"Scalar subquery must return exactly one column, but returned {innerRow.FieldCount}.");
+                                    }
+
+                                    scalarResult = innerRow[0];
+                                    foundRow = true;
+                                }
+                            }
+                            finally
+                            {
+                                context.ReturnRowBatch(innerBatch);
+                            }
+
+                            if (hasMultipleRows)
+                            {
+                                break;
+                            }
                         }
 
-                        firstRow = innerRow;
-                    }
+                        if (hasMultipleRows)
+                        {
+                            throw new InvalidOperationException("Correlated scalar subquery returned more than one row.");
+                        }
 
-                    context.ReturnRowBatch(innerBatch);
+                        // Augment the outer row with the synthetic column.
+                        int outerFieldCount = outerRow.FieldCount;
 
-                    if (hasMultipleRows)
-                    {
-                        break;
-                    }
-                }
+                        if (outputLookup is null)
+                        {
+                            string[] outputNames = new string[outerFieldCount + 1];
+                            for (int index = 0; index < outerFieldCount; index++)
+                            {
+                                outputNames[index] = outerRow.ColumnNames[index];
+                            }
+                            outputNames[outerFieldCount] = _syntheticColumnName;
+                            outputLookup = new ColumnLookup(outputNames);
+                        }
 
-                if (hasMultipleRows)
-                {
-                    throw new InvalidOperationException("Correlated scalar subquery returned more than one row.");
-                }
+                        DataValue[] values = pool.RentDataValues(outerFieldCount + 1);
+                        for (int index = 0; index < outerFieldCount; index++)
+                        {
+                            values[index] = outerRow[index];
+                        }
+                        values[outerFieldCount] = scalarResult;
 
-                // Extract scalar value: zero rows → NULL, one row → first column value.
-                DataValue scalarResult;
-                if (firstRow is null)
-                {
-                    scalarResult = DataValue.UnknownNull();
-                }
-                else
-                {
-                    if (firstRow.Value.FieldCount != 1)
-                    {
-                        throw new InvalidOperationException(
-                            $"Scalar subquery must return exactly one column, but returned {firstRow.Value.FieldCount}.");
-                    }
+                        outputBatch ??= context.RentRowBatch(outputLookup);
+                        outputBatch.Add(values);
 
-                    scalarResult = firstRow.Value[0];
-                }
-
-                // Augment the outer row with the synthetic column.
-                int outerFieldCount = outerRow.FieldCount;
-
-                if (outputNames is null)
-                {
-                    outputNames = new string[outerFieldCount + 1];
-                    for (int index = 0; index < outerFieldCount; index++)
-                    {
-                        outputNames[index] = outerRow.ColumnNames[index];
-                    }
-
-                    outputNames[outerFieldCount] = _syntheticColumnName;
-
-                    outputNameIndex = new Dictionary<string, int>(
-                        outputNames.Length, StringComparer.OrdinalIgnoreCase);
-                    for (int index = 0; index < outputNames.Length; index++)
-                    {
-                        outputNameIndex[outputNames[index]] = index;
+                        if (outputBatch.IsFull)
+                        {
+                            RowBatch toYield = outputBatch;
+                            outputBatch = null;
+                            yield return toYield;
+                        }
                     }
                 }
-
-                DataValue[] values = pool.Rent(outerFieldCount + 1);
-
-                for (int index = 0; index < outerFieldCount; index++)
+                finally
                 {
-                    values[index] = outerRow[index];
-                }
-
-                values[outerFieldCount] = scalarResult;
-
-                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
-                outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
-
-                if (outputBatch.IsFull)
-                {
-                    yield return outputBatch;
-                    outputBatch = null;
+                    context.ReturnRowBatch(inputBatch);
                 }
             }
 
-            context.ReturnRowBatch(inputBatch);
+            if (outputBatch is not null)
+            {
+                RowBatch toYield = outputBatch;
+                outputBatch = null;
+                yield return toYield;
+            }
         }
-
-        if (outputBatch is not null)
+        finally
         {
-            yield return outputBatch;
+            if (outputBatch is not null)
+            {
+                context.ReturnRowBatch(outputBatch);
+            }
         }
     }
 }

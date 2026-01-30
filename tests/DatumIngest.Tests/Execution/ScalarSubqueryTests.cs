@@ -6,6 +6,7 @@ using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Pooling;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
@@ -622,6 +623,74 @@ public sealed class ScalarSubqueryTests : ServiceTestBase
         Assert.Equal(2, results.Count);
         Assert.Equal(10f, results[0]["active_total"].AsFloat32());  // active=0 row excluded
         Assert.Equal(20f, results[1]["active_total"].AsFloat32());
+    }
+
+    // ─────────────── Pool leak balance / use-after-return safety ───────────────
+
+    /// <summary>
+    /// Runs a correlated scalar subquery over many outer rows so the inner
+    /// subquery's small <see cref="DataValue"/>[] pool sees heavy rent/return
+    /// churn. Two invariants:
+    /// <list type="bullet">
+    ///   <item><description>Every output value matches the expected per-row
+    ///   result — a regression where the operator kept a <see cref="Row"/> reference
+    ///   instead of copying the scalar <see cref="DataValue"/> struct out before
+    ///   returning the inner batch would surface here as stale values once the
+    ///   inner array got re-rented for a later outer row.</description></item>
+    ///   <item><description>Pool rent/return counters balance — catches any
+    ///   forgotten <c>ReturnRowBatch</c> on the input / inner / output side.</description></item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    public async Task CorrelatedSubquery_ManyRows_NoStaleValues_PoolBalanced()
+    {
+        Pool pool = GetService<Pool>();
+        long dvRentBefore = pool.Backing.DataValueArrayRentCount;
+        long dvReturnBefore = pool.Backing.DataValueArrayReturnCount;
+        long rbRentBefore = pool.Backing.RowBatchRentCount;
+        long rbReturnBefore = pool.Backing.RowBatchReturnCount;
+        long arenaRentBefore = pool.Backing.ArenaRentCount;
+        long arenaReleasedBefore = pool.Backing.ArenaFullyReleasedCount;
+
+        const int rowCount = 200;
+        object?[][] outerRows = Enumerable.Range(0, rowCount)
+            .Select(i => (object?[])[(float)i])
+            .ToArray();
+        object?[][] innerRows = Enumerable.Range(0, rowCount)
+            .Select(i => (object?[])[(float)i, (float)(i * 7 + 1)])
+            .ToArray();
+
+        TableCatalog catalog = CreateCatalog();
+        catalog.Add(CreateProvider("outer_table", columns: ["id"], outerRows));
+        catalog.Add(CreateProvider("inner_table", columns: ["ref_id", "val"], innerRows));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT outer_table.id, " +
+            "(SELECT val FROM inner_table WHERE inner_table.ref_id = outer_table.id) AS v " +
+            "FROM outer_table",
+            catalog);
+
+        Assert.Equal(rowCount, results.Count);
+        for (int i = 0; i < rowCount; i++)
+        {
+            float id = results[i]["id"].AsFloat32();
+            float v = results[i]["v"].AsFloat32();
+            Assert.Equal((float)(id * 7 + 1), v);
+        }
+
+        long dvDelta = (pool.Backing.DataValueArrayRentCount - dvRentBefore)
+            - (pool.Backing.DataValueArrayReturnCount - dvReturnBefore);
+        long rbDelta = (pool.Backing.RowBatchRentCount - rbRentBefore)
+            - (pool.Backing.RowBatchReturnCount - rbReturnBefore);
+        long arenaDelta = (pool.Backing.ArenaRentCount - arenaRentBefore)
+            - (pool.Backing.ArenaFullyReleasedCount - arenaReleasedBefore);
+
+        Assert.True(
+            dvDelta == 0 && rbDelta == 0 && arenaDelta == 0,
+            $"Pool not balanced after correlated scalar subquery — "
+            + $"DataValue[] outstanding: {dvDelta}, "
+            + $"RowBatch outstanding: {rbDelta}, "
+            + $"Arena outstanding: {arenaDelta}.");
     }
 
     // ─────────────── Statement without subqueries (regression) ───────────────
