@@ -41,8 +41,8 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        Row row1 = CreateRow("id", DataValue.FromFloat32(1.0f));
-        Row row2 = CreateRow("id", DataValue.FromFloat32(2.0f));
+        Row row1 = MakeRow(["id"], DataValue.FromFloat32(1.0f));
+        Row row2 = MakeRow(["id"], DataValue.FromFloat32(2.0f));
         partition.AddBuildRow(row1, sourceArena: null);
         partition.AddBuildRow(row2, sourceArena: null);
 
@@ -64,7 +64,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        Row row = CreateRow("name", DataValue.FromString("test"));
+        Row row = MakeRow(["name"], DataValue.FromString("test"));
         partition.AddProbeRow(row, sourceArena: null);
 
         Assert.Equal(1, partition.InMemoryProbeRowCount);
@@ -84,8 +84,8 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        Row row1 = CreateRow("value", DataValue.FromFloat32(10.0f));
-        Row row2 = CreateRow("value", DataValue.FromFloat32(20.0f));
+        Row row1 = MakeRow(["value"], DataValue.FromFloat32(10.0f));
+        Row row2 = MakeRow(["value"], DataValue.FromFloat32(20.0f));
         partition.AddBuildRow(row1, sourceArena: null);
         partition.AddBuildRow(row2, sourceArena: null);
 
@@ -109,11 +109,11 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)), sourceArena: null);
+        partition.AddBuildRow(MakeRow(["id"], DataValue.FromFloat32(1.0f)), sourceArena: null);
         partition.SpillBuildToDisk();
 
         // This row should go directly to the spill file.
-        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(2.0f)), sourceArena: null);
+        partition.AddBuildRow(MakeRow(["id"], DataValue.FromFloat32(2.0f)), sourceArena: null);
 
         Assert.Equal(0, partition.InMemoryBuildRowCount);
         Assert.Equal(2, partition.TotalBuildRowCount);
@@ -132,8 +132,8 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        partition.AddProbeRow(CreateRow("label", DataValue.FromString("alpha")), sourceArena: null);
-        partition.AddProbeRow(CreateRow("label", DataValue.FromString("beta")), sourceArena: null);
+        partition.AddProbeRow(MakeRow(["label"], DataValue.FromString("alpha")), sourceArena: null);
+        partition.AddProbeRow(MakeRow(["label"], DataValue.FromString("beta")), sourceArena: null);
 
         partition.SpillProbeToDisk();
 
@@ -155,7 +155,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        partition.AddBuildRow(CreateRow("x", DataValue.FromFloat32(42.0f)), sourceArena: null);
+        partition.AddBuildRow(MakeRow(["x"], DataValue.FromFloat32(42.0f)), sourceArena: null);
         partition.SpillBuildToDisk();
         partition.SpillBuildToDisk();
 
@@ -174,9 +174,9 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)), sourceArena: null);
+        partition.AddBuildRow(MakeRow(["id"], DataValue.FromFloat32(1.0f)), sourceArena: null);
         partition.SpillBuildToDisk();
-        partition.AddProbeRow(CreateRow("id", DataValue.FromFloat32(2.0f)), sourceArena: null);
+        partition.AddProbeRow(MakeRow(["id"], DataValue.FromFloat32(2.0f)), sourceArena: null);
         partition.SpillProbeToDisk();
 
         // Verify files exist before dispose.
@@ -234,7 +234,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        Row row = new(
+        Row row = MakeRow(
             ["id", "name", "active"],
             [DataValue.FromFloat32(42.0f), DataValue.FromString("hello"), DataValue.FromBoolean(true)]);
 
@@ -256,7 +256,7 @@ public sealed class SpillPartitionTests : ServiceTestBase
     {
         using SpillPartition partition = new(_spillDirectory, 0, _pool, _ctx);
 
-        Row row = new(
+        Row row = MakeRow(
             ["value"],
             [DataValue.Null(DataKind.Float32)]);
 
@@ -277,8 +277,8 @@ public sealed class SpillPartitionTests : ServiceTestBase
         using SpillPartition partition0 = new(_spillDirectory, 0, _pool, _ctx);
         using SpillPartition partition1 = new(_spillDirectory, 1, _pool, _ctx);
 
-        partition0.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)), sourceArena: null);
-        partition1.AddBuildRow(CreateRow("id", DataValue.FromFloat32(2.0f)), sourceArena: null);
+        partition0.AddBuildRow(MakeRow(["id"], DataValue.FromFloat32(1.0f)), sourceArena: null);
+        partition1.AddBuildRow(MakeRow(["id"], DataValue.FromFloat32(2.0f)), sourceArena: null);
 
         partition0.SpillBuildToDisk();
         partition1.SpillBuildToDisk();
@@ -290,10 +290,5 @@ public sealed class SpillPartitionTests : ServiceTestBase
         Assert.Equal(1.0f, rows0[0]["id"].AsFloat32());
         Assert.Single(rows1);
         Assert.Equal(2.0f, rows1[0]["id"].AsFloat32());
-    }
-
-    private static Row CreateRow(string columnName, DataValue value)
-    {
-        return new Row([columnName], [value]);
     }
 }
