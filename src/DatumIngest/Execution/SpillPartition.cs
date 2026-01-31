@@ -156,7 +156,6 @@ internal sealed class SpillPartition : IDisposable
         if (_buildSpilled)
         {
             AppendToStaging(ref _buildStaging, row, sourceArena, BuildSlot);
-            _spilledBuildRowCount++;
         }
         else
         {
@@ -175,7 +174,6 @@ internal sealed class SpillPartition : IDisposable
         if (_probeSpilled)
         {
             AppendToStaging(ref _probeStaging, row, sourceArena, ProbeSlot);
-            _spilledProbeRowCount++;
         }
         else
         {
@@ -236,7 +234,10 @@ internal sealed class SpillPartition : IDisposable
 
         if (staging.IsFull)
         {
+            int flushed = staging.Count;
             _spiller!.Write(staging, spillSlot);
+            if (spillSlot == BuildSlot) _spilledBuildRowCount += flushed;
+            else _spilledProbeRowCount += flushed;
             staging = null;
         }
     }
@@ -395,7 +396,10 @@ internal sealed class SpillPartition : IDisposable
             return;
         }
 
+        int flushed = staging.Count;
         _spiller!.Write(staging, spillSlot);
+        if (spillSlot == BuildSlot) _spilledBuildRowCount += flushed;
+        else _spilledProbeRowCount += flushed;
         staging = null;
     }
 
