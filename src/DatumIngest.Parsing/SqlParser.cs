@@ -692,6 +692,93 @@ public static class SqlParser
         .Or(Token.EqualTo(SqlToken.LocalTimestamp)
             .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp)));
 
+    // ───────────────────── PG-style typed temporal literals ─────────────────────
+
+    /// <summary>
+    /// PostgreSQL-style typed string literal — <c>DATE 'YYYY-MM-DD'</c>,
+    /// <c>TIMESTAMP '...'</c>, <c>TIMESTAMPTZ '...'</c>,
+    /// <c>DATETIME '...'</c>, <c>TIME '...'</c>. Recognised in expression
+    /// position and lowered to <c>CAST('...' AS &lt;Kind&gt;)</c> so the
+    /// existing string→temporal coercion path produces the typed value at
+    /// runtime; no engine plumbing changes.
+    /// <para>
+    /// The PG forms that DatumIngest's type system doesn't yet represent —
+    /// <c>INTERVAL '...'</c> and <c>TIMETZ '...'</c> — are still recognised
+    /// by this combinator so that callers get an explicit "not yet
+    /// supported" <see cref="ParseException"/> instead of the misleading
+    /// "unexpected string literal after identifier" they would otherwise
+    /// see.
+    /// </para>
+    /// <para>
+    /// Semantic note: PG distinguishes <c>timestamp without time zone</c>
+    /// from <c>timestamp with time zone</c>, but DatumIngest's
+    /// <c>DateTime</c> kind is tz-aware (DateTimeOffset). Both
+    /// <c>TIMESTAMP</c> and <c>TIMESTAMPTZ</c> currently produce a
+    /// <c>DateTime</c>; an absent offset is interpreted by
+    /// <c>DateTimeOffset.TryParse</c>'s default rules.
+    /// </para>
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> TypedTemporalLiteral =
+        from prefix in Token.EqualTo(SqlToken.TypeKeyword)
+            .Or(Token.EqualTo(SqlToken.Time))
+            .Or(Token.EqualTo(SqlToken.Identifier))
+            .Where(t => IsTypedTemporalPrefixText(GetTokenText(t)),
+                "DATE / TIMESTAMP / TIMESTAMPTZ / DATETIME / TIME / INTERVAL / TIMETZ")
+        from literal in Token.EqualTo(SqlToken.StringLiteral)
+        select BuildTypedTemporalLiteral(prefix, literal);
+
+    /// <summary>
+    /// Recognises the set of PG-style temporal prefixes that this combinator
+    /// claims responsibility for, including the not-yet-supported forms.
+    /// Matching here means the combinator commits to producing either a
+    /// typed-literal expression or an explicit "not yet supported"
+    /// <see cref="ParseException"/>.
+    /// </summary>
+    private static bool IsTypedTemporalPrefixText(string text)
+    {
+        return text.Equals("DATE", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("DATETIME", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("TIMESTAMP", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("TIMESTAMPTZ", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("TIME", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("INTERVAL", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("TIMETZ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Lowers a matched <c>&lt;PREFIX&gt; 'literal'</c> pair to a typed
+    /// expression. Supported prefixes lower to a <see cref="CastExpression"/>;
+    /// unsupported prefixes throw <see cref="ParseException"/> anchored at
+    /// the prefix token's position.
+    /// </summary>
+    private static Expression BuildTypedTemporalLiteral(
+        Token<SqlToken> prefix,
+        Token<SqlToken> literal)
+    {
+        string text = UnquoteString(literal);
+        string kind = GetTokenText(prefix).ToUpperInvariant();
+        SourceSpan span = ToSpan(prefix, literal);
+        LiteralExpression inner = new(text);
+
+        return kind switch
+        {
+            "DATE" => new CastExpression(inner, "Date", span),
+            "TIMESTAMP" or "TIMESTAMPTZ" or "DATETIME" => new CastExpression(inner, "DateTime", span),
+            "TIME" => new CastExpression(inner, "Time", span),
+            "INTERVAL" => throw new ParseException(
+                "INTERVAL literals are not yet supported. " +
+                "Use a Duration column populated from a numeric value instead.",
+                prefix.Position),
+            "TIMETZ" => throw new ParseException(
+                "TIMETZ (TIME WITH TIME ZONE) literals are not yet supported. " +
+                "Use TIME 'literal' for time without time zone.",
+                prefix.Position),
+            _ => throw new InvalidOperationException(
+                $"Unhandled typed-temporal prefix '{kind}'. " +
+                $"{nameof(IsTypedTemporalPrefixText)} and {nameof(BuildTypedTemporalLiteral)} are out of sync."),
+        };
+    }
+
     /// <summary>Parenthesized expression or subquery.</summary>
     private static readonly TokenListParser<SqlToken, Expression> ParenExpression =
         from open in Token.EqualTo(SqlToken.LeftParen)
@@ -806,6 +893,7 @@ public static class SqlParser
             .Or(CurrentTimeExpr.Try())
             .Or(LocalTimestampExpr.Try())
             .Or(LocalTimeExpr.Try())
+            .Or(TypedTemporalLiteral.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
             .Or(TypeLiteral)

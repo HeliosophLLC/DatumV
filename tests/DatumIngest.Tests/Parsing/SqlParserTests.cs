@@ -1202,6 +1202,91 @@ public class SqlParserTests : ServiceTestBase
         Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
     }
 
+    // ───────────────────── PG-style typed temporal literals ─────────────────────
+
+    [Fact]
+    public void DateLiteral_LowersToCastToDate()
+    {
+        SelectStatement result = Parse("SELECT DATE '2026-01-02' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Date", cast.TargetType);
+        LiteralExpression inner = Assert.IsType<LiteralExpression>(cast.Expression);
+        Assert.Equal("2026-01-02", inner.Value);
+    }
+
+    [Fact]
+    public void TimestampLiteral_LowersToCastToDateTime()
+    {
+        SelectStatement result = Parse("SELECT TIMESTAMP '2026-01-02 10:00:00' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("DateTime", cast.TargetType);
+    }
+
+    [Fact]
+    public void TimestamptzLiteral_LowersToCastToDateTime()
+    {
+        SelectStatement result = Parse("SELECT TIMESTAMPTZ '2026-01-02 10:00:00+00' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("DateTime", cast.TargetType);
+    }
+
+    [Fact]
+    public void DateTimeLiteral_LowersToCastToDateTime()
+    {
+        SelectStatement result = Parse("SELECT DATETIME '2026-01-02 10:00:00' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("DateTime", cast.TargetType);
+    }
+
+    [Fact]
+    public void TimeLiteral_LowersToCastToTime()
+    {
+        SelectStatement result = Parse("SELECT TIME '10:00:00' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Time", cast.TargetType);
+    }
+
+    [Fact]
+    public void DateLiteral_InWhereClause()
+    {
+        // The motivating shape from FilterCoercionTests: ensure typed
+        // literal parses fine in predicate position.
+        SelectStatement result = Parse("SELECT v FROM t WHERE d = DATE '2026-01-02'");
+        Assert.NotNull(result.Where);
+    }
+
+    [Fact]
+    public void BareDateKeyword_StillParsesAsTypeLiteral()
+    {
+        // Without a trailing string literal, DATE must fall back to the
+        // existing type-literal form (used with typeof() comparisons).
+        SelectStatement result = Parse("SELECT typeof(d) = DATE FROM t");
+        Assert.NotNull(result.Columns[0].Expression);
+    }
+
+    [Fact]
+    public void IntervalLiteral_ThrowsNotYetSupported()
+    {
+        ParseException ex = Assert.Throws<ParseException>(
+            () => Parse("SELECT INTERVAL '1 day' FROM t"));
+        Assert.Contains("INTERVAL", ex.Message);
+        Assert.Contains("not yet supported", ex.Message);
+    }
+
+    [Fact]
+    public void TimetzLiteral_ThrowsNotYetSupported()
+    {
+        ParseException ex = Assert.Throws<ParseException>(
+            () => Parse("SELECT TIMETZ '10:00:00+00' FROM t"));
+        Assert.Contains("TIMETZ", ex.Message);
+        Assert.Contains("not yet supported", ex.Message);
+    }
+
     // ───────────────────── Complex queries ─────────────────────
 
     [Fact]
