@@ -1874,8 +1874,87 @@ public sealed class ExpressionEvaluator
             };
         }
 
+        // Cross-kind: PG-flavored implicit String → target-kind cast at
+        // comparison time. `WHERE date_col = '2026-01-02'` arrives here with
+        // one Date and one String because the parser doesn't know the
+        // target column kind. Try to parse the string as the other side's
+        // kind; on success, recurse to compare same-kind values. On
+        // parse failure return a non-zero result (unequal) — equality
+        // becomes false rather than throwing, mirroring how engines like
+        // MySQL handle implicit cast misses.
+        if (left.Kind == DataKind.String && TypeCoercion.CanCoerceStringTo(right.Kind))
+        {
+            if (TryCoerceStringRefTo(left, right.Kind, out ValueRef coerced))
+            {
+                return CompareValueRefs(coerced, right);
+            }
+            return 1;
+        }
+        if (right.Kind == DataKind.String && TypeCoercion.CanCoerceStringTo(left.Kind))
+        {
+            if (TryCoerceStringRefTo(right, left.Kind, out ValueRef coerced))
+            {
+                return CompareValueRefs(left, coerced);
+            }
+            return -1;
+        }
+
         throw new InvalidOperationException(
             $"Cannot compare {left.Kind} with {right.Kind}.");
+    }
+
+    /// <summary>
+    /// Parses a <see cref="DataKind.String"/> <see cref="ValueRef"/> into
+    /// the requested target kind. Mirrors <c>TypeCoercion.TryCoerceString</c>
+    /// but returns a <see cref="ValueRef"/> so callers don't need to round-trip
+    /// through a <see cref="DataValue"/> + arena. Used by <see cref="CompareValueRefs"/>
+    /// for cross-kind comparisons against string literals.
+    /// </summary>
+    private static bool TryCoerceStringRefTo(ValueRef value, DataKind targetKind, out ValueRef result)
+    {
+        string text = value.AsString();
+        switch (targetKind)
+        {
+            case DataKind.Float32 when float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out float f32):
+                result = ValueRef.FromFloat32(f32); return true;
+            case DataKind.Float64 when double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double f64):
+                result = ValueRef.FromFloat64(f64); return true;
+            case DataKind.UInt8 when byte.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out byte u8):
+                result = ValueRef.FromUInt8(u8); return true;
+            case DataKind.Int8 when sbyte.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out sbyte i8):
+                result = ValueRef.FromInt8(i8); return true;
+            case DataKind.Int16 when short.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out short i16):
+                result = ValueRef.FromInt16(i16); return true;
+            case DataKind.UInt16 when ushort.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out ushort u16):
+                result = ValueRef.FromUInt16(u16); return true;
+            case DataKind.Int32 when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int i32):
+                result = ValueRef.FromInt32(i32); return true;
+            case DataKind.UInt32 when uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint u32):
+                result = ValueRef.FromUInt32(u32); return true;
+            case DataKind.Int64 when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long i64):
+                result = ValueRef.FromInt64(i64); return true;
+            case DataKind.UInt64 when ulong.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong u64):
+                result = ValueRef.FromUInt64(u64); return true;
+            case DataKind.Boolean:
+                if (string.Equals(text, "true", StringComparison.OrdinalIgnoreCase) || text == "1")
+                { result = ValueRef.FromBoolean(true); return true; }
+                if (string.Equals(text, "false", StringComparison.OrdinalIgnoreCase) || text == "0")
+                { result = ValueRef.FromBoolean(false); return true; }
+                result = default; return false;
+            case DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date):
+                result = ValueRef.FromDate(date); return true;
+            case DataKind.DateTime when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset dtOffset):
+                result = ValueRef.FromDateTime(dtOffset); return true;
+            case DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time):
+                result = ValueRef.FromTime(time); return true;
+            case DataKind.Duration when TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out TimeSpan duration):
+                result = ValueRef.FromDuration(duration); return true;
+            case DataKind.Uuid when Guid.TryParse(text, out Guid uuid):
+                result = ValueRef.FromUuid(uuid); return true;
+            default:
+                result = default;
+                return false;
+        }
     }
 
     private static ValueRef CompareValuesValueRef(ValueRef left, ValueRef right, int expectedSign, bool negate = false)

@@ -92,10 +92,42 @@ internal static class DataValueComparer
         DataValue left,  IValueStore leftStore,  SidecarRegistry? leftRegistry,
         DataValue right, IValueStore rightStore, SidecarRegistry? rightRegistry)
     {
-        // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
-        // original per-class implementations and handles cases like INT column vs FLOAT literal.
+        // Cross-kind:
+        //  1) Try implicit String → other-kind cast (PG-flavored). When one
+        //     side is a String literal and the other is Date / Uuid / etc.,
+        //     parse the string into the target kind and recurse same-kind.
+        //     This is what lets `WHERE date_col = '2026-01-02'` work via
+        //     statistics pruning / B+Tree key compare. Use store-aware
+        //     string extraction so non-inline string literals (Uuid-shaped
+        //     strings, long date strings) resolve correctly.
+        //  2) Fall through to double widening for cross-numeric pairs
+        //     (e.g. Int32 column vs Float64 literal) — the historical
+        //     behavior preserved for all non-String pairings.
         if (left.Kind != right.Kind)
         {
+            if (left.Kind == DataKind.String && TypeCoercion.CanCoerceStringTo(right.Kind))
+            {
+                string text = left.AsString(leftStore, leftRegistry);
+                DataValue coerced = TypeCoercion.TryCoerceString(text, right.Kind);
+                if (!coerced.IsNull)
+                {
+                    return Compare(coerced, leftStore, leftRegistry, right, rightStore, rightRegistry);
+                }
+                // Unparseable string vs typed value: treat as not-equal.
+                // Equality returns false (nonzero); ordering is arbitrary but
+                // consistent.
+                return 1;
+            }
+            if (right.Kind == DataKind.String && TypeCoercion.CanCoerceStringTo(left.Kind))
+            {
+                string text = right.AsString(rightStore, rightRegistry);
+                DataValue coerced = TypeCoercion.TryCoerceString(text, left.Kind);
+                if (!coerced.IsNull)
+                {
+                    return Compare(left, leftStore, leftRegistry, coerced, rightStore, rightRegistry);
+                }
+                return -1;
+            }
             return ToDouble(left).CompareTo(ToDouble(right));
         }
 

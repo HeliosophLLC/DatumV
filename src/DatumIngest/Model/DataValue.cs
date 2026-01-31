@@ -2792,8 +2792,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the text string payload, resolving arena-backed values from the
-    /// given <see cref="Arena"/>.  Falls back to the reference store for
-    /// non-arena values.
+    /// given <see cref="Arena"/>.
     /// </summary>
     /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
     /// <returns>The decoded string.</returns>
@@ -2817,17 +2816,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         return arena.GetSpan(_p0, _p1);
     }
 
-
-    /// <summary>
-    /// Returns the encoded image byte array payload.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore, SidecarRegistry?)"/> instead.</remarks>
-    public byte[] AsImage()
-    {
-        ThrowIfNullOrWrongKind(DataKind.Image);
-        throw new InvalidOperationException("Use AsImage(store). ReferenceStore is no longer available.");
-    }
 
     /// <summary>
     /// Returns the encoded image byte array. For arena-backed values, reads from
@@ -2984,15 +2972,6 @@ public readonly struct DataValue : IEquatable<DataValue>
             }
             return _kind;
         }
-    }
-
-    /// <summary>Returns the positional field-value array for a struct value.</summary>
-    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsStruct(IValueStore)"/> instead.</remarks>
-    public DataValue[] AsStruct()
-    {
-        ThrowIfNullOrWrongKind(DataKind.Struct);
-        throw new InvalidOperationException("Use AsStruct(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the positional field-value array from an explicit <see cref="IValueStore"/>.</summary>

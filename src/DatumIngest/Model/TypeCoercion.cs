@@ -181,9 +181,13 @@ public static class TypeCoercion
     }
 
     /// <summary>
-    /// Attempts to parse a string into the target kind. Returns a typed null on failure.
+    /// Attempts to parse a string into the target kind. Returns a typed null
+    /// on failure. Exposed so callers that already have the raw <c>string</c>
+    /// (e.g. extracted from a non-inline <see cref="DataValue"/> via
+    /// <see cref="DataValue.AsString(IValueStore)"/>) can coerce without
+    /// round-tripping through a fresh <see cref="DataValue"/> construction.
     /// </summary>
-    private static DataValue TryCoerceString(string text, DataKind targetKind)
+    public static DataValue TryCoerceString(string text, DataKind targetKind)
     {
         return targetKind switch
         {

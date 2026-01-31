@@ -516,13 +516,31 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// Coerces a lookup value to match the <see cref="DataKind"/> of keys stored in this
     /// index, ensuring dictionary lookups succeed even when the caller's literal type differs
     /// from the column's storage type (e.g. <see cref="DataKind.Float64"/> literal against
-    /// a <see cref="DataKind.Boolean"/> bitmap key).
+    /// a <see cref="DataKind.Boolean"/> bitmap key, or a <see cref="DataKind.String"/> literal
+    /// like <c>'2026-01-02'</c> against a <see cref="DataKind.Date"/> bitmap key).
     /// </summary>
+    /// <remarks>
+    /// Two coercion paths: numeric widening (via <see cref="DataValue.CoerceToKind"/>) and
+    /// String-parsing (via <see cref="DatumIngest.Model.TypeCoercion.TryCoerceString"/>). The
+    /// String path is what lets a query like <c>WHERE date_col = '2026-01-02'</c> hit the
+    /// bitmap pruner — the parsed literal is a String DataValue, but the bitmap dictionary
+    /// is keyed on Date. When the string can't be parsed as the target kind, the original
+    /// value is returned — the dictionary lookup will miss, producing a correct "not in
+    /// chunk" answer (the row can't possibly match an unparseable literal).
+    /// </remarks>
     private DataValue NormalizeKey(DataValue value)
     {
         if (_keyKind is null || value.Kind == _keyKind.Value)
         {
             return value;
+        }
+
+        if (value.Kind == DataKind.String && Model.TypeCoercion.CanCoerceStringTo(_keyKind.Value))
+        {
+            // Inline string only: ChunkContainsValue callers gate on
+            // literalValue.IsInline before invoking us, so AsString() is safe.
+            DataValue coerced = Model.TypeCoercion.TryCoerceString(value.AsString(), _keyKind.Value);
+            if (!coerced.IsNull) return coerced;
         }
 
         return value.CoerceToKind(_keyKind.Value);
