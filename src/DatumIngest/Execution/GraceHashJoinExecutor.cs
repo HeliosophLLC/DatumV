@@ -120,7 +120,6 @@ internal sealed class GraceHashJoinExecutor
         ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
 
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
@@ -131,7 +130,7 @@ internal sealed class GraceHashJoinExecutor
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
-        SpillPartition[] partitions = CreatePartitions(partitionCount, pool, bufferPool, context);
+        SpillPartition[] partitions = CreatePartitions(partitionCount, pool, context);
 
         ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
@@ -501,7 +500,6 @@ internal sealed class GraceHashJoinExecutor
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
 
@@ -561,7 +559,7 @@ internal sealed class GraceHashJoinExecutor
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                 }
 
-                yield return table.JoinSchema!.CombinePooled(leftRow, rightRow, bufferPool);
+                yield return table.JoinSchema!.CombinePooled(leftRow, rightRow, pool);
             }
         }
 
@@ -601,7 +599,7 @@ internal sealed class GraceHashJoinExecutor
                     Row leftRow = _flipped ? nullBuild.Value : probeRow;
                     Row rightRow = _flipped ? probeRow : nullBuild.Value;
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return table.JoinSchema.CombinePooled(leftRow, rightRow, bufferPool);
+                    yield return table.JoinSchema.CombinePooled(leftRow, rightRow, pool);
                 }
                 else
                 {
@@ -622,7 +620,6 @@ internal sealed class GraceHashJoinExecutor
         bool skipInMemory = false)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         RowBatch? outputBatch = null;
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool buildKeyIsRight = !_flipped;
@@ -837,7 +834,7 @@ internal sealed class GraceHashJoinExecutor
                         }
 
                         outputBatch ??= context.RentRowBatch(schema!.ColumnLookup);
-                        outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, pool));
                         if (outputBatch.IsFull)
                         {
                             RowBatch toYield = outputBatch;
@@ -881,7 +878,7 @@ internal sealed class GraceHashJoinExecutor
                         Row rightRow = _flipped ? probeRow : nullBuild.Value;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                         if (outputBatch.IsFull)
                         {
                             RowBatch toYield = outputBatch;
@@ -920,7 +917,7 @@ internal sealed class GraceHashJoinExecutor
                             Row rightRow = _flipped ? nullPad.Value : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                             outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
-                            outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, pool));
                             if (outputBatch.IsFull)
                             {
                                 RowBatch toYield = outputBatch;
@@ -970,7 +967,7 @@ internal sealed class GraceHashJoinExecutor
 
         for (int index = 0; index < subPartitionCount; index++)
         {
-            subPartitions[index] = new SpillPartition(subSpillDir, index, context.Pool, context, pool: context.LocalBufferPool);
+            subPartitions[index] = new SpillPartition(subSpillDir, index, context.Pool, context);
         }
 
         DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
@@ -1118,7 +1115,7 @@ internal sealed class GraceHashJoinExecutor
         return 0;
     }
 
-    private SpillPartition[] CreatePartitions(int count, Pool arenaPool, LocalBufferPool pool, ExecutionContext context)
+    private SpillPartition[] CreatePartitions(int count, Pool arenaPool, ExecutionContext context)
     {
         int perPartitionEstimate = _estimatedBuildRows.HasValue
             ? (int)Math.Min(_estimatedBuildRows.Value / count, int.MaxValue)
@@ -1127,7 +1124,7 @@ internal sealed class GraceHashJoinExecutor
         SpillPartition[] partitions = new SpillPartition[count];
         for (int index = 0; index < count; index++)
         {
-            partitions[index] = new SpillPartition(_spillDirectory, index, arenaPool, context, perPartitionEstimate, pool);
+            partitions[index] = new SpillPartition(_spillDirectory, index, arenaPool, context, perPartitionEstimate);
         }
 
         return partitions;

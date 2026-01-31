@@ -361,7 +361,6 @@ public sealed class JoinOperator : IQueryOperator
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
@@ -609,7 +608,7 @@ public sealed class JoinOperator : IQueryOperator
                                 }
 
                                 outputBatch ??= context.RentRowBatch(schema!.ColumnLookup);
-                                outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                outputBatch.Add(schema!.CombinePooledValues(leftRow, rightRow, pool));
                                 if (outputBatch.IsFull)
                                 {
                                     RowBatch toYield = outputBatch;
@@ -643,7 +642,7 @@ public sealed class JoinOperator : IQueryOperator
                                 Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                                 schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                                 outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                                 if (outputBatch.IsFull)
                                 {
                                     RowBatch toYield = outputBatch;
@@ -690,7 +689,7 @@ public sealed class JoinOperator : IQueryOperator
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
-                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, pool));
                         if (outputBatch.IsFull)
                         {
                             RowBatch toYield = outputBatch;
@@ -842,11 +841,6 @@ public sealed class JoinOperator : IQueryOperator
                 compositeKeyLookup = compositeKeyTable.GetAlternateLookup<ReadOnlySpan<DataValue>>();
             }
 
-            // Shared buffer pool from the execution context. Workers rent from
-            // the pool when producing combined rows; the downstream consumer
-            // (e.g. GroupByOperator) returns buffers after processing each row.
-            LocalBufferPool bufferPool = context.LocalBufferPool;
-
             Task[] workers = new Task[workerCount];
             for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
             {
@@ -944,7 +938,7 @@ public sealed class JoinOperator : IQueryOperator
                                 }
 
                                 await output.Writer.WriteAsync(
-                                    workerSchema!.CombinePooled(leftRow, rightRow, bufferPool), cancellationToken).ConfigureAwait(false);
+                                    workerSchema!.CombinePooled(leftRow, rightRow, pool), cancellationToken).ConfigureAwait(false);
                             }
                         }
 
@@ -964,7 +958,7 @@ public sealed class JoinOperator : IQueryOperator
                                 Row rightRow = _flipped ? probeRow : nullBuildRow.Value;
                                 workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                                 await output.Writer.WriteAsync(
-                                    workerSchema.CombinePooled(leftRow, rightRow, bufferPool), cancellationToken).ConfigureAwait(false);
+                                    workerSchema.CombinePooled(leftRow, rightRow, pool), cancellationToken).ConfigureAwait(false);
                             }
                             else
                             {
@@ -1081,7 +1075,6 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
@@ -1174,7 +1167,7 @@ public sealed class JoinOperator : IQueryOperator
                             }
 
                             outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                             if (outputBatch.IsFull)
                             {
                                 RowBatch toYield = outputBatch;
@@ -1207,7 +1200,7 @@ public sealed class JoinOperator : IQueryOperator
                                 Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                                 schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                                 outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                                 if (outputBatch.IsFull)
                                 {
                                     RowBatch toYield = outputBatch;
@@ -1254,7 +1247,7 @@ public sealed class JoinOperator : IQueryOperator
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         outputBatch ??= context.RentRowBatch(buildUnmatchedSchema.ColumnLookup);
-                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooledValues(leftRow, rightRow, pool));
                         if (outputBatch.IsFull)
                         {
                             RowBatch toYield = outputBatch;
@@ -1316,7 +1309,6 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<RowBatch> ExecuteCrossJoinAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         CombinedRowSchema? schema = null;
         RowBatch? outputBatch = null;
 
@@ -1358,7 +1350,7 @@ public sealed class JoinOperator : IQueryOperator
                         {
                             schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                             outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
                             if (outputBatch.IsFull)
                             {
                                 RowBatch toYield = outputBatch;
@@ -1654,12 +1646,12 @@ public sealed class JoinOperator : IQueryOperator
 
         /// <summary>
         /// Combines two rows, renting the backing <see cref="DataValue"/> array from
-        /// <paramref name="bufferPool"/> to avoid per-row heap allocation. The downstream
-        /// consumer returns the array via <see cref="LocalBufferPool.Return"/> when it
+        /// <paramref name="pool"/> to avoid per-row heap allocation. The downstream
+        /// consumer returns the array via <see cref="Pool.ReturnDataValues"/> when it
         /// is no longer needed.
         /// </summary>
-        internal Row CombinePooled(Row left, Row right, LocalBufferPool bufferPool)
-            => new(_columnLookup, CombinePooledValues(left, right, bufferPool));
+        internal Row CombinePooled(Row left, Row right, Pool pool)
+            => new(_columnLookup, CombinePooledValues(left, right, pool));
 
         /// <summary>
         /// Same as <see cref="CombinePooled"/> but returns the underlying
@@ -1669,9 +1661,9 @@ public sealed class JoinOperator : IQueryOperator
         /// lifecycle matches the one CombinePooled uses — the downstream
         /// consumer (typically the batch itself) returns it to the pool.
         /// </summary>
-        internal DataValue[] CombinePooledValues(Row left, Row right, LocalBufferPool bufferPool)
+        internal DataValue[] CombinePooledValues(Row left, Row right, Pool pool)
         {
-            DataValue[] values = bufferPool.Rent(_names.Length);
+            DataValue[] values = pool.RentDataValues(_names.Length);
 
             for (int index = 0; index < _leftFieldCount; index++)
             {

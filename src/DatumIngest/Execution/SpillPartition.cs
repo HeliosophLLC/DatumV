@@ -70,7 +70,6 @@ internal sealed class SpillPartition : IDisposable
     private List<RowBatch>? _replayBatches;
 
     private readonly string _spillDirectory;
-    private readonly LocalBufferPool? _pool;
     private readonly Pool _arenaPool;
     private readonly ExecutionContext _context;
     private Arena? _retentionArena;
@@ -87,24 +86,17 @@ internal sealed class SpillPartition : IDisposable
     /// Estimated number of build-side rows. Used to pre-size the in-memory list and avoid
     /// LOH-crossing list doublings. Zero or negative falls back to default capacity.
     /// </param>
-    /// <param name="pool">
-    /// Optional buffer pool for renting <see cref="DataValue"/> array copies. When provided,
-    /// <see cref="AddBuildRow"/> / <see cref="AddProbeRow"/> rent each in-memory row's value
-    /// array from this pool; otherwise they allocate.
-    /// </param>
     internal SpillPartition(
         string spillDirectory,
         int partitionIndex,
         Pool arenaPool,
         ExecutionContext context,
-        int estimatedBuildRows = 0,
-        LocalBufferPool? pool = null)
+        int estimatedBuildRows = 0)
     {
         _ = partitionIndex;
         _spillDirectory = spillDirectory;
         _arenaPool = arenaPool;
         _context = context;
-        _pool = pool;
         if (estimatedBuildRows > 0)
         {
             _buildRows = new List<Row>(estimatedBuildRows);
@@ -184,9 +176,7 @@ internal sealed class SpillPartition : IDisposable
     private Row StabilizeRow(Row row, Arena? sourceArena)
     {
         ReadOnlySpan<DataValue> source = row.RawValues;
-        DataValue[] copy = _pool is not null
-            ? _pool.Rent(source.Length)
-            : new DataValue[source.Length];
+        DataValue[] copy = _arenaPool.RentDataValues(source.Length);
 
         if (sourceArena is null)
         {
@@ -325,7 +315,7 @@ internal sealed class SpillPartition : IDisposable
             }
 
             // Spiller.Write returns the batch (releasing the retention-arena reference rented above).
-            // Each Row's RawValues array was rented from _pool; the spiller's pool returns it via
+            // Each Row's RawValues array was rented from _arenaPool; the spiller's pool returns it via
             // pool.ReturnRowBatch → PoolBacking.ReturnRowBatch. Both LocalBufferPool.Rent and
             // PoolBacking.RentDataValues hand out arrays from the same backing PoolBacking, so the
             // return path is symmetric.
@@ -337,7 +327,7 @@ internal sealed class SpillPartition : IDisposable
 
     private void ReturnInMemoryArrays(List<Row>? rows)
     {
-        if (rows is null || _pool is null)
+        if (rows is null || _arenaPool is null)
         {
             return;
         }
@@ -461,19 +451,19 @@ internal sealed class SpillPartition : IDisposable
             _replayBatches = null;
         }
 
-        if (_buildRows is not null && _pool is not null)
+        if (_buildRows is not null && _arenaPool is not null)
         {
             foreach (Row row in _buildRows)
             {
-                _pool.ReturnValues(row);
+                _arenaPool.ReturnRow(row);
             }
         }
 
-        if (_probeRows is not null && _pool is not null)
+        if (_probeRows is not null && _arenaPool is not null)
         {
             foreach (Row row in _probeRows)
             {
-                _pool.ReturnValues(row);
+                _arenaPool.ReturnRow(row);
             }
         }
 
@@ -483,7 +473,7 @@ internal sealed class SpillPartition : IDisposable
         _spiller?.Dispose();
         _spiller = null;
 
-        if (_retentionArena is not null)
+        if (_retentionArena is not null && _arenaPool is not null)
         {
             _arenaPool.Backing.TryReturn(_retentionArena);
             _retentionArena = null;

@@ -48,14 +48,13 @@ internal sealed class QueryPlan : IQueryPlan
     {
         InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(_operator);
 
-        using LocalBufferPool localBufferPool = new(_backing);
         // Plumb the hoist store as context.Store so any operator that needs to
         // resolve a hoisted-literal DataValue's payload (offsets reference
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
+            cancellationToken, _functions, _catalog, _catalog.Pool,
             store: _hoistStore)
         {
             // Pull the catalog-level tracer (if any) into the per-query
@@ -80,14 +79,13 @@ internal sealed class QueryPlan : IQueryPlan
         IModelStreamingSink? streamingSink,
         BatchContext? batchContext)
     {
-        using LocalBufferPool localBufferPool = new(_backing);
         // Plumb the hoist store as context.Store so any operator that needs to
         // resolve a hoisted-literal DataValue's payload (offsets reference
         // _hoistStore) can do so via the well-known ExecutionContext.Store handle.
         // Without this, hoisted string literals >16 bytes are stranded in
         // _hoistStore and unreachable to operators downstream of the planner.
         DatumIngest.Execution.ExecutionContext context = new(
-            cancellationToken, _functions, _catalog, localBufferPool, _catalog.Pool,
+            cancellationToken, _functions, _catalog, _catalog.Pool,
             store: _hoistStore,
             types: batchContext?.Types)
         {

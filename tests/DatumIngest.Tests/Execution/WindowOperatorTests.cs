@@ -301,7 +301,6 @@ public class WindowOperatorTests : ServiceTestBase
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             pool,
             meter);
 
@@ -341,7 +340,6 @@ public class WindowOperatorTests : ServiceTestBase
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             pool);
 
         await Assert.ThrowsAsync<OperationCanceledException>(

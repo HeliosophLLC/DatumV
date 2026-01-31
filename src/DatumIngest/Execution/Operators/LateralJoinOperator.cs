@@ -85,7 +85,6 @@ public sealed class LateralJoinOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         JoinOperator.CombinedRowSchema? schema = null;
         Row? residualCheckRow = null;
@@ -134,7 +133,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                                     matched = true;
                                     cachedNullRight ??= JoinOperator.CreateNullRow(rightRow, pool);
                                     outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                    outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, bufferPool));
+                                    outputBatch.Add(schema.CombinePooledValues(leftRow, rightRow, pool));
 
                                     if (outputBatch.IsFull)
                                     {
@@ -156,7 +155,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                             if (schema is not null && cachedNullRight is not null)
                             {
                                 outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                                outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                                outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
                             }
                             else
                             {

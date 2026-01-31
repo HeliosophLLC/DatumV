@@ -170,7 +170,6 @@ public abstract class ServiceTestBase : IDisposable
             cancellationToken,
             functionRegistry ?? FunctionRegistry.CreateDefault(),
             catalog ?? new TableCatalog(pool),
-            new LocalBufferPool(),
             pool,
             queryMeter: meter,
             memoryBudgetBytes: memoryBudgetBytes,

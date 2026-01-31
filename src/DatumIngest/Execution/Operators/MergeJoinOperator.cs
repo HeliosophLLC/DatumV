@@ -106,7 +106,6 @@ public sealed class MergeJoinOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
         Expression leftKeyExpression = _extraction.KeyPairs[0].Left;
         Expression rightKeyExpression = _extraction.KeyPairs[0].Right;
@@ -236,7 +235,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         cachedNullRight ??= CreateNullRow(rightRow, pool);
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
 
@@ -251,7 +250,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         cachedNullLeft ??= CreateNullRow(leftRow, pool);
                         schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
 
@@ -269,7 +268,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         cachedNullRight ??= CreateNullRow(rightRow, pool);
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
 
@@ -283,7 +282,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         cachedNullLeft ??= CreateNullRow(leftRow, pool);
                         schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
 
@@ -348,7 +347,7 @@ public sealed class MergeJoinOperator : IQueryOperator
 
                             leftRowMatched = true;
                             outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, matchedRight, bufferPool));
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, matchedRight, pool));
                             if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                         }
 
@@ -358,7 +357,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                             cachedNullRight ??= CreateNullRow(rightGroup[0], pool);
                             schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                             outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                            outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                            outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
                             if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                         }
 
@@ -394,7 +393,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                     {
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(leftRow, cachedNullRight.Value, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
                     else
@@ -424,7 +423,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                     {
                         schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                         outputBatch ??= context.RentRowBatch(schema.ColumnLookup);
-                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, bufferPool));
+                        outputBatch.Add(schema.CombinePooledValues(cachedNullLeft.Value, rightRow, pool));
                         if (outputBatch.IsFull) { RowBatch b = outputBatch; outputBatch = null; yield return b; }
                     }
                     else

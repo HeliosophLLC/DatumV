@@ -121,7 +121,6 @@ internal sealed class IndexNestedLoopJoinExecutor
 
         RowBatch? outputBatch = null;
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
 
         // Reusable scratch buffer for residual evaluation — allocated once, filled by CombineInto.
         DataValue[]? residualScratchBuffer = null;
@@ -200,7 +199,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     foreach (ValueIndexEntry entry in matches)
                     {
-                        Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, context, cancellationToken)
+                        Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, pool, context, cancellationToken)
                             .ConfigureAwait(false);
 
                         if (rawBuildRow is null)
@@ -208,8 +207,8 @@ internal sealed class IndexNestedLoopJoinExecutor
                             continue;
                         }
 
-                        Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
-                        if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
+                        Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, pool);
+                        if (_buildAlias is not null) pool.ReturnDataValues(rawBuildRow.Value.RawValues);
 
                         combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
                         if (residualScratchBuffer is null)
@@ -218,7 +217,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                         }
 
                         combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
-                        bufferPool.Return(buildRow.RawValues);
+                        pool.ReturnDataValues(buildRow.RawValues);
 
                         if (await EvaluateResidualAsync(residual, residualScratchRow, cancellationToken).ConfigureAwait(false))
                         {
@@ -240,7 +239,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, bufferPool, context, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(seekSession, entry, pool, context, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (rawBuildRow is null)
@@ -248,8 +247,8 @@ internal sealed class IndexNestedLoopJoinExecutor
                         continue;
                     }
 
-                    Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
-                    if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
+                    Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, pool);
+                    if (_buildAlias is not null) pool.ReturnDataValues(rawBuildRow.Value.RawValues);
 
                     combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
 
@@ -264,13 +263,13 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                         if (!await EvaluateResidualAsync(residual, residualScratchRow, cancellationToken).ConfigureAwait(false))
                         {
-                            bufferPool.Return(buildRow.RawValues);
+                            pool.ReturnDataValues(buildRow.RawValues);
                             continue;
                         }
                     }
 
-                    DataValue[] combinedValues = combinedSchema.CombinePooledValues(probeRow, buildRow, bufferPool);
-                    bufferPool.Return(buildRow.RawValues);
+                    DataValue[] combinedValues = combinedSchema.CombinePooledValues(probeRow, buildRow, pool);
+                    pool.ReturnDataValues(buildRow.RawValues);
                     totalMatches++;
 
                     outputBatch ??= context.RentRowBatch(combinedSchema.ColumnLookup);
@@ -303,7 +302,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     private async Task<Row?> FetchBuildRowAsync(
         ISeekSession seekSession,
         ValueIndexEntry entry,
-        LocalBufferPool bufferPool,
+        Pool pool,
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
@@ -316,7 +315,7 @@ internal sealed class IndexNestedLoopJoinExecutor
             if (batch.Count > 0)
             {
                 Row src = batch[0];
-                DataValue[] owned = bufferPool.Rent(src.FieldCount);
+                DataValue[] owned = pool.RentDataValues(src.FieldCount);
                 Array.Copy(src.RawValues, owned, src.FieldCount);
                 Row row = new(src.ColumnLookup, owned);
                 context.ReturnRowBatch(batch);
@@ -332,7 +331,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// provider, producing a row with qualified column names (e.g. <c>table.column</c>).
     /// The schema is built once from the first row and reused for all subsequent rows.
     /// </summary>
-    private Row ApplyBuildAlias(Row row, ref BuildAliasSchema? schema, LocalBufferPool bufferPool)
+    private Row ApplyBuildAlias(Row row, ref BuildAliasSchema? schema, Pool pool)
     {
         if (_buildAlias is null)
         {
@@ -340,7 +339,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         }
 
         schema ??= BuildAliasSchema.Create(_buildAlias, row);
-        return schema.Apply(row, bufferPool);
+        return schema.Apply(row, pool);
     }
 
     /// <summary>
@@ -385,13 +384,13 @@ internal sealed class IndexNestedLoopJoinExecutor
 
         /// <summary>
         /// Applies the alias schema to a raw build-side row, renting the backing
-        /// <see cref="DataValue"/> array from <paramref name="bufferPool"/> rather
+        /// <see cref="DataValue"/> array from <paramref name="pool"/> rather
         /// than allocating. The caller must return the array via
-        /// <see cref="LocalBufferPool.Return(DataValue[])"/> when the row is no longer needed.
+        /// <see cref="Pool.ReturnDataValues(DataValue[])"/> when the row is no longer needed.
         /// </summary>
-        internal Row Apply(Row sourceRow, LocalBufferPool bufferPool)
+        internal Row Apply(Row sourceRow, Pool pool)
         {
-            DataValue[] values = bufferPool.Rent(_fieldCount);
+            DataValue[] values = pool.RentDataValues(_fieldCount);
 
             for (int index = 0; index < _fieldCount; index++)
             {

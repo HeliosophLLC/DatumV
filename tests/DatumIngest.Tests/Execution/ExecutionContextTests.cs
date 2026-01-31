@@ -25,7 +25,6 @@ public sealed class ExecutionContextTests : ServiceTestBase
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             GetService<Pool>(),
             memoryBudgetBytes: 512)
         {

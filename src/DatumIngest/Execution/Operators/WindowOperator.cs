@@ -73,7 +73,6 @@ public sealed class WindowOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         Pool pool = context.Pool;
-        LocalBufferPool bufferPool = context.LocalBufferPool;
         ExpressionEvaluator evaluator = new(context);
 
         // Window is a blocking operator: every input row must be materialised
@@ -171,7 +170,7 @@ public sealed class WindowOperator : IQueryOperator
             {
                 Row sourceRow = allRows[rowIndex];
 
-                DataValue[] values = bufferPool.Rent(totalFieldCount);
+                DataValue[] values = pool.RentDataValues(totalFieldCount);
                 for (int field = 0; field < inputFieldCount; field++)
                 {
                     values[field] = sourceRow[field];

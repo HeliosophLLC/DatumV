@@ -29,7 +29,7 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
 
     /// <summary>
     /// The ProjectOperator creates a new <see cref="DataValue"/> array for each output
-    /// row via <see cref="LocalBufferPool.Rent"/>. The consumer returns the output arrays.
+    /// row via <see cref="LocalBufferPool.RentDataValues"/>. The consumer returns the output arrays.
     ///
     /// Input row arrays are NOT yet returned by ProjectOperator (deferred to Part C of
     /// the buffer return plan — requires conditional return based on whether the projection
@@ -69,9 +69,9 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Verifies that the ProjectOperator's output arrays use <see cref="LocalBufferPool.Rent"/>
+    /// Verifies that the ProjectOperator's output arrays use <see cref="LocalBufferPool.RentDataValues"/>
     /// (not <see cref="LocalBufferPool.RentOwned"/>), so they are NOT registered in the
-    /// owned-array queue. The source (PooledMockOperator) also uses <see cref="LocalBufferPool.Rent"/>.
+    /// owned-array queue. The source (PooledMockOperator) also uses <see cref="LocalBufferPool.RentDataValues"/>.
     /// Therefore the owned-array queue should be empty.
     /// </summary>
     [Fact]

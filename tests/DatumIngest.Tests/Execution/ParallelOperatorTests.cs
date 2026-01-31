@@ -30,7 +30,6 @@ public sealed class ParallelOperatorTests : ServiceTestBase
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             pool)
         {
             DegreeOfParallelism = degreeOfParallelism,
@@ -564,7 +563,6 @@ public sealed class ParallelOperatorTests : ServiceTestBase
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             pool)
         {
             DegreeOfParallelism = 2,
@@ -605,7 +603,6 @@ public sealed class ParallelOperatorTests : ServiceTestBase
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             CreateCatalog(),
-            new LocalBufferPool(),
             pool)
         {
             DegreeOfParallelism = 2,

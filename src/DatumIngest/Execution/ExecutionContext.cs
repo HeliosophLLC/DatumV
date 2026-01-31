@@ -22,7 +22,6 @@ public sealed class ExecutionContext
         CancellationToken = context.CancellationToken;
         FunctionRegistry = context.FunctionRegistry;
         Catalog = context.Catalog;
-        LocalBufferPool = context.LocalBufferPool;
         Pool = context.Pool;
         Store = context.Store;
         QueryMeter = context.QueryMeter;
@@ -47,10 +46,6 @@ public sealed class ExecutionContext
   /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
   /// and materialised CTEs.
   /// </param>
-  /// <param name="localBufferPool">
-  /// Pool for reusing <see cref="Model.Row"/> objects and their backing
-  /// <see cref="Model.DataValue"/> arrays in join operators.
-  /// </param>
   /// <param name="pool">Pool for reusing buffers during query execution.</param>
   /// <param name="store">
   /// Optional value store for reference-type payloads. Defaults to a new <see cref="Model.Arena"/>
@@ -65,7 +60,6 @@ public sealed class ExecutionContext
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
-        LocalBufferPool localBufferPool,
         Pool pool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null,
@@ -75,7 +69,6 @@ public sealed class ExecutionContext
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
-        LocalBufferPool = localBufferPool;
         Pool = pool;
         if (store is null)
         {
@@ -279,14 +272,6 @@ public sealed class ExecutionContext
     public int BatchSize { get; init; } = DatumFormatV2.DefaultPageSize;
 
     /// <summary>
-    /// Pool for reusing <see cref="Model.Row"/> objects and their backing
-    /// <see cref="Model.DataValue"/> arrays in join operators. Join operators
-    /// rent rows from this pool instead of allocating, and downstream consumers
-    /// (e.g. GROUP BY) return rows after extracting values.
-    /// </summary>
-    public LocalBufferPool LocalBufferPool { get; }
-
-    /// <summary>
     /// Pool for reusing buffers during query execution.
     /// </summary>
     public Pool Pool { get; }
@@ -303,7 +288,6 @@ public sealed class ExecutionContext
             CancellationToken,
             FunctionRegistry,
             Catalog,
-            LocalBufferPool,
             Pool,
             QueryMeter,
             MemoryBudgetBytes,
