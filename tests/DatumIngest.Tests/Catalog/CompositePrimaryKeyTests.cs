@@ -37,8 +37,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_DistinctRows_AllAccepted()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, c Int64, PRIMARY KEY (a, b))");
 
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha', 100), (1, 'beta', 200), (2, 'alpha', 300)");
@@ -49,8 +48,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_DuplicateTuple_Rejected()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha'), (2, 'beta')");
@@ -62,8 +60,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_PartialOverlap_NotADuplicate()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha')");
@@ -78,8 +75,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_WithinBatchDuplicate_Rejected()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         Assert.Throws<PrimaryKeyViolationException>(() =>
@@ -91,8 +87,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void ThreeColumnComposite_MixedKinds_Works()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan(
             "CREATE TABLE t (id Int64, day Date, tag Uuid, value Float64, " +
             "PRIMARY KEY (id, day, tag))");
@@ -119,8 +114,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // The COCO2017 filename motivation: PRIMARY KEY on a 25-byte
         // ASCII filename. Previously rejected by the 16-byte cap; now
         // routes through the bytes-keyed tree.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE images (filename String PRIMARY KEY, width Int32, height Int32)");
 
         catalog.Plan(
@@ -141,16 +135,14 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void CompositePk_PersistsAcrossReopen()
     {
-        Pool pool = CreatePool();
-
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
             catalog.Plan("INSERT INTO t VALUES (1, 'alpha'), (2, 'beta')");
         }
 
         // Reopen — composite PK index must be loaded and enforce.
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
 
         Assert.Throws<PrimaryKeyViolationException>(() =>
             reopened.Plan("INSERT INTO t VALUES (1, 'alpha')"));
@@ -162,15 +154,13 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void SingleColumnStringPk_PersistsAcrossReopen()
     {
-        Pool pool = CreatePool();
-
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (id String PRIMARY KEY, value Int32)");
             catalog.Plan("INSERT INTO t VALUES ('test2017/000000290551.jpg', 42)");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         Assert.Throws<PrimaryKeyViolationException>(() =>
             reopened.Plan("INSERT INTO t VALUES ('test2017/000000290551.jpg', 99)"));
     }
@@ -180,8 +170,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void CompositePk_ScrambledOrder_AllLookupsHit()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         // Insert tuples in random-ish order, then probe each.
@@ -211,8 +200,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // UPDATE on any PK column is rejected at validation time —
         // PK columns are immutable, callers must DELETE + INSERT.
         // Confirms the rule fires for composite PK component too.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, payload Int64, PRIMARY KEY (a, b))");
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha', 100)");
 
@@ -237,8 +225,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // does NOT rebuild .datum-pkindex. After REINDEX, composite PK
         // enforcement must still work (the bytes tree's tree handle
         // must survive the rebuild flow).
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, payload Int64, PRIMARY KEY (a, b))");
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha', 100), (2, 'beta', 200)");
 
@@ -258,8 +245,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void Probe_NullInCompositePkComponent_Rejected_PersistentTable()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         // Set b to NULL via a column-list INSERT with NULL literal.
@@ -274,8 +260,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     {
         // TEMP table → InMemoryProvider falls back to scan-path
         // PrimaryKeyChecker (no on-disk lookup). NULL must reject there too.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
         Exception ex = Assert.ThrowsAny<Exception>(() =>
@@ -289,8 +274,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // INSERT … SELECT is a different code path than VALUES (streams
         // batches from the source plan instead of building one in memory).
         // Composite PK enforcement must still work.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE src (a Int32, b String, payload Int64)");
         catalog.Plan(
             "INSERT INTO src VALUES " +
@@ -306,8 +290,7 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void Probe_InsertSelectIntoCompositePk_DistinctRows_AllAccepted()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE src (a Int32, b String, payload Int64)");
         catalog.Plan(
             "INSERT INTO src VALUES " +

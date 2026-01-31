@@ -39,7 +39,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public void Catalog_AddColumn_InMemory_AppendsNullableColumnAndBackfillsExistingRows()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b"],
             rows: [[1, 10], [2, 20]]);
@@ -70,7 +70,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public void Catalog_AddColumn_NotNullableColumn_Throws()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         catalog.Add(new InMemoryTableProvider(pool, "t", columns: ["a"], rows: [[1], [2]]));
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
@@ -82,7 +82,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public void Catalog_DropColumn_InMemory_RemovesFromSchemaAndRows()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b", "c"],
             rows: [[1, 10, 100], [2, 20, 200]]);
@@ -112,7 +112,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public async Task Catalog_AppendRowsAsync_InMemory_GrowsRowCountAndScanReturnsAppended()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b"],
             rows: [[1, "one"]]);
@@ -148,7 +148,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public void Catalog_DeleteRows_InMemory_SkipsDeletedRows()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"],
             rows: [[1], [2], [3], [4], [5]]);
@@ -177,7 +177,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         // and must be read-only — its provider doesn't override the
         // capability flags so the catalog refuses the mutation.
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.AddColumn("information_schema.tables",
@@ -189,7 +189,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     public void Catalog_DropColumn_OnUnknownTable_ThrowsKeyNotFound()
     {
         Pool pool = CreatePool();
-        TableCatalog catalog = new(pool);
+        TableCatalog catalog = CreateCatalog(pool);
         Assert.Throws<KeyNotFoundException>(() => catalog.DropColumn("nope", "x"));
     }
 
@@ -200,7 +200,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     {
         string path = WriteSimpleDatumFile("add_col.datum");
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
         catalog.AddColumn("t", new ColumnInfo("note", DataKind.String, nullable: true));
@@ -227,7 +227,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     {
         string path = WriteSimpleDatumFile("drop_col.datum");
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
         catalog.DropColumn("t", "b");
@@ -241,7 +241,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     {
         string path = WriteSimpleDatumFile("append.datum");
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
         long beforeCount = catalog["t"].GetRowCount();
@@ -271,7 +271,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     {
         string path = WriteSimpleDatumFile("delete.datum");
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
         catalog.DeleteRows("t", [1L]); // soft-delete middle row

@@ -113,7 +113,7 @@ public sealed class IndexerV2Tests : ServiceTestBase, IAsyncLifetime
 
         // Open via catalog → v2 provider should auto-discover the
         // .datum-index alongside.
-        using DatumIngest.Catalog.TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
         DatumIngest.Catalog.ITableProvider provider = catalog.Add(
             new DatumIngest.Catalog.TableDescriptor("indexed", datumPath));
         Assert.NotNull(provider.GetSourceIndex());

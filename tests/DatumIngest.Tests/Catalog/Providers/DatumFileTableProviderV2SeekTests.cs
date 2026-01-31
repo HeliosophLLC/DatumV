@@ -37,7 +37,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
         // 100 rows of values 0..99 with pageSize 32 → 4 pages.
         string path = WriteSequentialFile("single.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         Assert.True(provider.Seekable);
 
@@ -54,7 +54,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
     {
         string path = WriteSequentialFile("within.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -68,7 +68,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
     {
         string path = WriteSequentialFile("span.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -82,7 +82,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
     {
         string path = WriteSequentialFile("clamp.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -99,7 +99,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
     {
         string path = WriteSequentialFile("eof.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -112,7 +112,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
     {
         string path = WriteSequentialFile("zero.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -128,7 +128,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
         // the requested row.
         string path = WriteSequentialFile("repeat.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession session = provider.OpenSeekSession(requiredColumns: null);
 
@@ -149,7 +149,7 @@ public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncL
         // race on FileStream.Position.
         string path = WriteSequentialFile("concurrent.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         using ISeekSession a = provider.OpenSeekSession(requiredColumns: null);
         using ISeekSession b = provider.OpenSeekSession(requiredColumns: null);

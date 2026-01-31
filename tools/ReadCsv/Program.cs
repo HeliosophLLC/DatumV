@@ -25,7 +25,7 @@ PoolBacking backing = new();
 Pool pool = new(backing);
 
 FileFormatDescriptor source = new(sourcePath);
-SerializationContext context = new(pool);
+SerializationContext context = CreateCatalog(pool);
 IFormatDeserializer deserializer = registry.CreateDeserializer(source);
 
 long beforeGen0 = GC.CollectionCount(0);

@@ -36,7 +36,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task Returning_SingleColumn_YieldsOneRowOneColumn()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
         IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING id");
@@ -51,7 +51,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task Returning_StarExpansion_YieldsAllResolvedColumns()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String DEFAULT 'pending')");
 
         IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice') RETURNING *");
@@ -68,7 +68,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task Returning_MultiRowValues_YieldsAllInsertedRows()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
         IQueryPlan plan = catalog.Plan(
@@ -85,7 +85,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task Returning_ComputedExpression_EvaluatesAgainstInsertedRow()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 IDENTITY(100, 5), name String)");
 
         IQueryPlan plan = catalog.Plan(
@@ -104,7 +104,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // RETURNING reads the resolved value, not the literal the user
         // typed (because they didn't type one).
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan(
             "CREATE TEMP TABLE t (id Int64 IDENTITY, name String, label String DEFAULT 'unset')");
 
@@ -125,7 +125,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // Confirms the existing side-effect-only INSERT path is unchanged
         // — Plan() returns a plan that iterates as zero rows.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
         IQueryPlan plan = catalog.Plan("INSERT INTO t (name) VALUES ('alice')");
@@ -142,7 +142,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task Returning_OnPersistentTable_RoundTripsIdentity()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool, CatalogPath);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE conversations (id Int64 IDENTITY, title String)");
 
         IQueryPlan plan = catalog.Plan(
@@ -162,7 +162,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // The natural pattern: copy source rows into a target with IDENTITY,
         // RETURNING surfaces the assigned ids.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, name String)");
         catalog.Plan("INSERT INTO src VALUES ('alice'), ('bob'), ('carol')");
@@ -181,7 +181,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task ReturningSelect_StarYieldsAllResolvedColumns()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32, status String DEFAULT 'new')");
         catalog.Plan("INSERT INTO src VALUES (10), (20)");
@@ -205,7 +205,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // INSERT … SELECT against an empty source is a no-op (no commit
         // even fires); RETURNING yields zero rows.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
 
@@ -220,7 +220,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task ReturningSelect_WhereFiltered_OnlyYieldsAcceptedRows()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, src_id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')");
@@ -243,7 +243,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // pulls from it. The INSERT side effect runs at plan time; the
         // outer query then projects from the captured RETURNING rows.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE conversations (id Int64 IDENTITY, title String)");
 
         IQueryPlan plan = catalog.Plan(
@@ -264,7 +264,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     {
         // Verify the outer SELECT can filter the CTE's RETURNING rows.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, n Int32)");
 
         IQueryPlan plan = catalog.Plan(
@@ -285,7 +285,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     public async Task ModifyingCte_StarReturning_ProjectsAllColumns()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String, status String DEFAULT 'new')");
 
         IQueryPlan plan = catalog.Plan(
@@ -306,7 +306,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
         // An INSERT without RETURNING has no rows to project — reject
         // explicitly at plan time so the user gets a clear error.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int64 IDENTITY, name String)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -321,7 +321,7 @@ public sealed class InsertReturningTests : ServiceTestBase, IAsyncLifetime
     {
         // INSERT … SELECT … RETURNING inside a CTE is also valid.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int64 IDENTITY, n Int32)");
         catalog.Plan("INSERT INTO src VALUES (1), (2), (3)");

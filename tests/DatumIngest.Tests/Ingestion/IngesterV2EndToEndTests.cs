@@ -146,7 +146,7 @@ public sealed class IngesterV2EndToEndTests : ServiceTestBase, IAsyncLifetime
 
         // Open via TableCatalog to exercise the version-dispatch factory
         // and sidecar registration path.
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("scan", datumPath));
         Assert.IsType<DatumFileTableProviderV2>(provider);
         Assert.Equal(3L, provider.GetRowCount());

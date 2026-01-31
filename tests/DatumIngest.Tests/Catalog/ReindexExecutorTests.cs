@@ -48,7 +48,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("after_append.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -76,7 +76,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("fresh.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();
@@ -94,7 +94,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("after_delete.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -110,7 +110,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
     public void Reindex_MissingTable_Throws()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
             () => catalog.Plan("REINDEX missing"));
@@ -123,7 +123,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         // In-memory tables have no .datum-index — REINDEX must surface a
         // clear error rather than silently no-op.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
@@ -141,7 +141,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("analyze_after_append.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 
@@ -160,7 +160,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
     public void Analyze_TempTable_Rejected()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
@@ -181,7 +181,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         Assert.False(File.Exists(manifestPath));
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -198,7 +198,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("analyze_mean.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -218,7 +218,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("analyze_valid_flag.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -240,7 +240,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("staleness_after_insert.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -264,7 +264,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("staleness_restored_by_analyze.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -290,7 +290,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("staleness_after_update.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("ANALYZE t");
@@ -313,7 +313,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("after_update.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 

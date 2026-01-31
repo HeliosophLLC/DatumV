@@ -37,8 +37,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task Delete_NoWhere_RemovesAllRows()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
         catalog.Plan("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')");
 
@@ -51,8 +50,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void Delete_NoWhere_OnEmptyTable_NoOp()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         // Should not throw.
@@ -66,8 +64,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task Delete_WhereNumericPredicate_RemovesOnlyMatching()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
         catalog.Plan("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
 
@@ -81,8 +78,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task Delete_WhereStringPredicate_RemovesOnlyMatching()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
         catalog.Plan("INSERT INTO t VALUES (1, 'keep'), (2, 'drop'), (3, 'keep')");
 
@@ -96,8 +92,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task Delete_WhereMatchesNothing_NoOp()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (1), (2), (3)");
 
@@ -113,8 +108,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         // subsequent queries. DELETE is one of those queries — the
         // predicate runs over rows that already have their DEFAULT-filled
         // values stamped in.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, status String DEFAULT 'pending')");
         catalog.Plan("INSERT INTO t (id) VALUES (1), (2)");
         catalog.Plan("INSERT INTO t (id, status) VALUES (3, 'shipped')");
@@ -134,8 +128,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         // sequence, post-tombstone from previous deletes"). A second
         // DELETE must re-walk the live sequence — confirms the running
         // counter in DeleteExecutor doesn't pre-cache stale indices.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (1), (2), (3), (4), (5)");
 
@@ -157,8 +150,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         // Sanity: after a DELETE, subsequent INSERTs append cleanly and
         // the live row sequence renumbers without leaking tombstoned
         // rows back into scans.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
         catalog.Plan("INSERT INTO t VALUES (1), (2), (3)");
 
@@ -180,15 +172,14 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         // returns the gross row count (tombstones included). That's
         // a separate gap; the user-visible scan path is what
         // matters.
-        Pool pool = CreatePool();
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, name String)");
             catalog.Plan("INSERT INTO users VALUES (1, 'alice'), (2, 'bob'), (3, 'carol')");
             catalog.Plan("DELETE FROM users WHERE id = 2");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         List<(int id, string name)> rows = await ScanAsTuples(reopened["users"]);
         Assert.Equal([(1, "alice"), (3, "carol")], rows);
     }
@@ -198,8 +189,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public void Delete_OnMissingTable_Throws()
     {
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("DELETE FROM nope"));
@@ -210,8 +200,7 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     {
         // system.tables and similar built-in providers report
         // CanDeleteRows = false; the executor should refuse.
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("DELETE FROM system_schemas"));

@@ -48,7 +48,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
     {
         string path = WriteSimpleFile("subset.datum");
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         HashSet<string> required = new(StringComparer.OrdinalIgnoreCase) { "id" };
@@ -65,7 +65,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
     {
         string path = WriteSimpleFile("nullreq.datum");
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, requiredColumns: null);
@@ -83,7 +83,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
     {
         string path = WriteSimpleFile("contract.datum");
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         HashSet<string> required = new(StringComparer.OrdinalIgnoreCase) { "id", "phantom" };
@@ -109,7 +109,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
     {
         string path = WriteSimpleFile("let_e2e.datum");
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         catalog.Add(new TableDescriptor("t", path));
 
         QueryExpression query = SqlParser.Parse(
@@ -134,7 +134,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
     {
         string path = WriteSimpleFile("let_chained.datum");
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         catalog.Add(new TableDescriptor("t", path));
 
         QueryExpression query = SqlParser.Parse(

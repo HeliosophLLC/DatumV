@@ -37,7 +37,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
     {
         string path = WriteSequentialIntFile("nofilter.datum", rowCount: 100, pageSize: 32);
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
         Assert.IsType<DatumFileTableProviderV2>(provider);
 
@@ -63,7 +63,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
             BinaryOperator.LessThan,
             new LiteralExpression(50L));
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, filterHint: filter);
@@ -83,7 +83,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
             BinaryOperator.LessThan,
             new LiteralExpression(0L));
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, filterHint: filter);
@@ -101,7 +101,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
             BinaryOperator.GreaterThan,
             new LiteralExpression(1000L));
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, filterHint: filter);
@@ -119,7 +119,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
             BinaryOperator.Equal,
             new LiteralExpression(70L));
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, filterHint: filter);
@@ -139,7 +139,7 @@ public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsy
             BinaryOperator.Equal,
             new LiteralExpression(42L));
 
-        using TableCatalog catalog = new(new Pool(new PoolBacking()));
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", path));
 
         int rowsRead = await CountRowsAsync(provider, filterHint: filter);

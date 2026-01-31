@@ -45,7 +45,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("baseline.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -70,7 +70,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
 
         // First open: append a row, dispose. The append's commit path
         // auto-refreshes .datum-index (PR13a-2 two-phase commit).
-        using (TableCatalog firstCatalog = new(pool))
+        using (TableCatalog firstCatalog = CreateCatalog(pool))
         {
             ITableProvider firstProvider = firstCatalog.Add(new TableDescriptor("t", datumPath));
             Schema schema = firstProvider.GetSchema();
@@ -83,7 +83,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
 
         // Second open: provider sees the freshly-rebuilt index, not a
         // torn / stale one.
-        using TableCatalog secondCatalog = new(pool);
+        using TableCatalog secondCatalog = CreateCatalog(pool);
         ITableProvider provider = secondCatalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -102,7 +102,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("same_provider.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -124,7 +124,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("after_add_col.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 
@@ -139,7 +139,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("after_delete.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 

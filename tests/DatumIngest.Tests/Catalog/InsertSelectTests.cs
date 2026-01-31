@@ -39,7 +39,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_TablelessLiterals_VisibleViaScan()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         // No source table — SELECT projects literals only.
@@ -54,7 +54,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_TablelessExpressions_AreEvaluatedThenStored()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE t (sum Int32)");
 
         // 1 + 2 isn't a literal — so this is rejected by VALUES but
@@ -71,7 +71,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_FromTable_PositionalCopy()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'alice'), (2, 'bob')");
@@ -87,7 +87,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_NamedColumnList_ReordersTargetColumns()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32, b String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'alice')");
@@ -105,7 +105,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_PartialColumnList_FillsOmittedWithDefault()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, status String DEFAULT 'imported')");
         catalog.Plan("INSERT INTO src VALUES (1), (2)");
@@ -120,7 +120,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_PartialColumnList_FillsOmittedNullableWithNull()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, note String)");
         catalog.Plan("INSERT INTO src VALUES (1)");
@@ -136,7 +136,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public void InsertSelect_OmittedNotNullWithoutDefault_Throws()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 NOT NULL, name String NOT NULL)");
         catalog.Plan("INSERT INTO src VALUES (1)");
@@ -153,7 +153,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_WidensInt8ProjectionToInt32Column()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int8)");
         catalog.Plan("CREATE TEMP TABLE dst (n Int32)");
         catalog.Plan("INSERT INTO src VALUES (5), (-7)");
@@ -168,7 +168,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public void InsertSelect_OverflowOnNarrow_AbortsBeforeCommit()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int16)");
         catalog.Plan("CREATE TEMP TABLE dst (n Int8)");
 
@@ -188,7 +188,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public void InsertSelect_ProjectionArityMismatch_Throws()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32, b String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32)");
         catalog.Plan("INSERT INTO src VALUES (1, 'x')");
@@ -204,7 +204,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public void InsertSelect_ColumnListArityMismatch_Throws()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1)");
@@ -219,7 +219,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_FromEmptySource_NoOp()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32)");
         // src has no rows.
@@ -234,7 +234,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_WithFilter_RespectsWhereClause()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
         catalog.Plan("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')");
@@ -252,7 +252,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     public async Task InsertSelect_ImageColumn_RoundTripsBytes()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, img Image)");
 
@@ -300,7 +300,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
         // the only one with a literal-producing scalar function in the
         // standard library.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE j (id Int32, data Json)");
 
         catalog.Plan("INSERT INTO j VALUES (1, json_parse('{\"x\":1}'))");
@@ -325,7 +325,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
         // Image source → String target should error clearly; no implicit
         // blob coercion.
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, blob String)");
 
@@ -353,8 +353,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
     [Fact]
     public async Task InsertSelect_OnPersistentTable_VisibleAcrossReopen()
     {
-        Pool pool = CreatePool();
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, name String)");
             catalog.Plan("INSERT INTO users VALUES (1, 'alice')");
@@ -363,7 +362,7 @@ public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("INSERT INTO users SELECT id + 1, 'bob' FROM users");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
         Assert.Equal(2, reopened["users"].GetRowCount());
         List<(int id, string name)> rows = await ScanAsTuples(reopened["users"]);
         Assert.Equal([(1, "alice"), (2, "bob")], rows);

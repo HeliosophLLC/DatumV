@@ -258,7 +258,7 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
     {
         string path = WriteSimpleDatumFile("catalog_session.datum");
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
         long before = catalog["t"].GetRowCount();
@@ -274,7 +274,7 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
     public void Datum_Session_OnReadOnlyTable_ThrowsInvalidOperation()
     {
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         Assert.Throws<InvalidOperationException>(() =>
             catalog.BeginAppend("information_schema.tables"));
     }

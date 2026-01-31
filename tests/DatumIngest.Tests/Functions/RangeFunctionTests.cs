@@ -243,7 +243,7 @@ public class RangeFunctionTests : ServiceTestBase
 
     private ExecutionContext CreateContextWithToken(CancellationToken token)
     {
-        Pool pool = GetService<Pool>();
-        return new(token, FunctionRegistry.CreateDefault(), new TableCatalog(pool), pool);
+        Pool pool = CreatePool();
+        return new(token, FunctionRegistry.CreateDefault(), CreateCatalog(pool), pool);
     }
 }

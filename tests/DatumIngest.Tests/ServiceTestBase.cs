@@ -88,11 +88,21 @@ public abstract class ServiceTestBase : IDisposable
     /// Creates a <see cref="TableCatalog"/> from the provided <paramref name="path"/>
     /// </summary>
     /// <param name="path">The path to the catalog.</param>
-    protected TableCatalog CreateCatalog(string path)
+    protected TableCatalog CreateCatalog(string path, bool allowExplicitTablePaths = false)
     {
-        return new TableCatalog(CreatePool(), path);
+        return new TableCatalog(CreatePool(), path, allowExplicitTablePaths: allowExplicitTablePaths);
     }
 
+    /// <summary>
+    /// Creates a <see cref="TableCatalog"/> using the supplied <paramref name="pool"/>.
+    /// Use this overload when a test reopens the same catalog across multiple <c>using</c>
+    /// blocks and needs the pool's lifetime to outlive any individual catalog instance.
+    /// </summary>
+    protected TableCatalog CreateCatalog(Pool pool)
+    {
+        return new TableCatalog(pool);
+    }
+    
     /// <summary>
     /// Creates a <see cref="TableCatalog"/> bound to <paramref name="path"/>
     /// using the supplied <paramref name="pool"/>. Use this overload when a
@@ -100,9 +110,9 @@ public abstract class ServiceTestBase : IDisposable
     /// needs the pool's lifetime to outlive any individual catalog
     /// instance.
     /// </summary>
-    protected TableCatalog CreateCatalog(Pool pool, string path)
+    protected TableCatalog CreateCatalog(Pool pool, string path, bool allowExplicitTablePaths = false)
     {
-        return new TableCatalog(pool, path);
+        return new TableCatalog(pool, path, allowExplicitTablePaths: allowExplicitTablePaths);
     }
 
     /// <summary>

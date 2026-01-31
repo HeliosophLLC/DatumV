@@ -262,7 +262,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <param name="name">Optional override for the SQL table name.</param>
     public static TableCatalog FromFile(string path, string? name = null)
     {
-        TableCatalog catalog = new(new Pool(new PoolBacking()));
+        PoolBacking poolBacking = new();
+        Pool pool = new(poolBacking);
+        TableCatalog catalog = new(pool);
         catalog.AddFile(path, name);
         return catalog;
     }
@@ -279,7 +281,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public static TableCatalog FromDirectory(string path, bool recursive = false)
     {
         string catalogPath = Path.Combine(path, CatalogStore.DefaultFileName);
-        TableCatalog catalog = new(new Pool(new PoolBacking()), catalogPath);
+        PoolBacking poolBacking = new();
+        Pool pool = new(poolBacking);
+        TableCatalog catalog = new(pool, catalogPath);
         SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         foreach (string file in Directory.EnumerateFiles(path, "*.datum", searchOption))
         {

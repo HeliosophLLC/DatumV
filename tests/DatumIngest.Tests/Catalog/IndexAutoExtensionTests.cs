@@ -49,7 +49,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("auto_extend.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -74,7 +74,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         // user ever running REINDEX manually.
         Pool pool = CreatePool();
         string catalogPath = Path.Combine(_tempDir, ".datum-catalog.json");
-        using TableCatalog catalog = new(pool, catalogPath);
+        using TableCatalog catalog = CreateCatalog(catalogPath);
 
         catalog.Plan("CREATE TABLE t (id Int32, name String)");
         ITableProvider provider = catalog["t"];
@@ -98,8 +98,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         // spot the table that needs REINDEX.
         string datumPath = await IngestAndIndex("stale_sentinel.datum");
 
-        Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog();
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         // Force the in-memory cache invalid by simulating a torn write —
@@ -118,8 +117,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
 
         // Reopen — the provider's TryLoadSourceIndex sees the torn tail,
         // returns null, but the file still exists → IndexValidity.Stale.
-        Pool pool2 = CreatePool();
-        using TableCatalog reopened = new(pool2);
+        using TableCatalog reopened = CreateCatalog();
         ITableProvider reopenedProvider = reopened.Add(new TableDescriptor("t", datumPath));
 
         Assert.Equal(IndexValidity.Stale, reopenedProvider.GetIndexValidity());
@@ -158,7 +156,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("valid_after_append.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Schema schema = provider.GetSchema();
@@ -201,7 +199,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("chunk_growth.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();
@@ -232,7 +230,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("bitmap_preserve.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();
@@ -268,7 +266,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("bitmap_new_value.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();
@@ -309,7 +307,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("update_auto_refresh.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Assert.NotNull(provider.GetSourceIndex());
@@ -334,7 +332,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("update_bitmap.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();
@@ -365,7 +363,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("update_bloom.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         catalog.Plan("UPDATE t SET name = 'morphed' WHERE id = 3");
@@ -391,7 +389,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         string datumPath = await IngestAndIndex("bloom_preserve.datum");
 
         Pool pool = CreatePool();
-        using TableCatalog catalog = new(pool);
+        using TableCatalog catalog = CreateCatalog(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         SourceIndex? before = provider.GetSourceIndex();

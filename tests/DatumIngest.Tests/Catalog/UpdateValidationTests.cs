@@ -11,14 +11,12 @@ namespace DatumIngest.Tests.Catalog;
 /// in <c>UpdateExecutorTests</c>. <c>UPDATE … FROM</c> still goes through
 /// the PR11d-pending rejection path.
 /// </summary>
-public sealed class UpdateValidationTests
+public sealed class UpdateValidationTests : ServiceTestBase
 {
-    private static TableCatalog NewCatalog() => new(new Pool(new PoolBacking()));
-
     [Fact]
     public void Update_MissingTable_Throws()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
 
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
             () => catalog.Plan("UPDATE missing SET x = 1"));
@@ -28,7 +26,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_UnknownColumn_Throws()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
@@ -40,7 +38,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_DuplicateColumnInSetList_Throws()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
@@ -52,7 +50,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_DuplicateColumnInSetList_CaseInsensitive_Throws()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
@@ -63,7 +61,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_PrimaryKeyColumn_Rejected()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
         QueryPlanException ex = Assert.Throws<QueryPlanException>(
@@ -75,7 +73,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_PrimaryKeyColumn_Composite_Rejected()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE TEMP TABLE t (a Int32, b Int32, c String, PRIMARY KEY (a, b))");
 
@@ -91,7 +89,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_NonPkColumn_PassesValidation()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String, score Float32)");
 
         // No exception — validation passes, executor runs (empty table, no-op).
@@ -103,7 +101,7 @@ public sealed class UpdateValidationTests
     {
         // PR11d wired UPDATE … FROM end-to-end. Validation passes;
         // executor runs against empty target, no-op.
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE features (id Int32, score Float32)");
         catalog.Plan("CREATE TEMP TABLE raw (id Int32, value Float32)");
 
@@ -114,7 +112,7 @@ public sealed class UpdateValidationTests
     [Fact]
     public void Update_WithJoinInsideFrom_RejectedAsPending()
     {
-        using TableCatalog catalog = NewCatalog();
+        using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE features (id Int32, score Float32)");
         catalog.Plan("CREATE TEMP TABLE raw (id Int32, model_id Int32, value Float32)");
         catalog.Plan("CREATE TEMP TABLE model (id Int32, weight Float32)");

@@ -41,8 +41,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         }
     }
 
-    private TableCatalog OpenCatalog() =>
-        new TableCatalog(GetService<DatumIngest.Pooling.Pool>(), _catalogPath);
+    private TableCatalog OpenCatalog() => CreateCatalog(_catalogPath);
 
     // ───────────────────── Round-trip ─────────────────────
 
@@ -463,7 +462,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     {
         // Default constructor (no path) → in-memory only. No file should
         // be created when the catalog path is null.
-        TableCatalog catalog = new(GetService<DatumIngest.Pooling.Pool>());
+        TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         Assert.False(File.Exists(_catalogPath));
@@ -479,7 +478,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         string nestedPath = Path.Combine(nestedDir, CatalogStore.DefaultFileName);
         Assert.False(Directory.Exists(nestedDir));
 
-        TableCatalog catalog = new(GetService<DatumIngest.Pooling.Pool>(), nestedPath);
+        TableCatalog catalog = CreateCatalog(nestedPath);
         catalog.Plan("CREATE FUNCTION shout(@name STRING) AS upper(@name)");
 
         Assert.True(File.Exists(nestedPath));
