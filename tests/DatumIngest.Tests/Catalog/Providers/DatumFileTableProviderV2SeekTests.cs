@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Catalog.Providers;
 /// single-row seeks, ranges within one page, ranges spanning pages, and
 /// boundary cases (clamped end, beyond EOF, empty count).
 /// </summary>
-public sealed class DatumFileTableProviderV2SeekTests : IAsyncLifetime
+public sealed class DatumFileTableProviderV2SeekTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"v2_seek_{Guid.NewGuid():N}");
 
@@ -169,7 +169,7 @@ public sealed class DatumFileTableProviderV2SeekTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, fileName);
         ColumnDescriptorV2 column = new("id", DataKind.Int64, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);

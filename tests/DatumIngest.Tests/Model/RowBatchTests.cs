@@ -8,9 +8,6 @@ namespace DatumIngest.Tests.Model;
 /// </summary>
 public class RowBatchTests : ServiceTestBase
 {
-    private static Pool pool = new(new PoolBacking());
-
-
     /// <summary>
     /// Verifies that <see cref="RowBatch.Add(DataValue[])"/> increments the count and
     /// stores the row so it can be retrieved by the indexer.
@@ -18,6 +15,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void AddIncrementsCountAndStoresRow()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["value"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 4);
 
@@ -36,6 +34,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IsFullReturnsTrueWhenCountEqualsCapacity()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 2);
 
@@ -57,6 +56,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IndexerReturnsCorrectRows()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["name", "age"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 3);
 
@@ -78,6 +78,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IndexerThrowsForNegativeIndex()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 4);
         batch.Add([DataValue.FromFloat32(1.0f)]);
@@ -96,6 +97,7 @@ public class RowBatchTests : ServiceTestBase
     [InlineData(5)]
     public void IndexerThrowsForOutOfRangeIndex(int index)
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 8);
         batch.Add([DataValue.FromFloat32(1.0f)]);
@@ -112,6 +114,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void AddThrowsWhenBatchIsFull()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 1);
         batch.Add([DataValue.FromFloat32(1.0f)]);
@@ -128,6 +131,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void ReturnResetsCountToZero()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 4);
         batch.Add([DataValue.FromFloat32(1.0f)]);
@@ -147,6 +151,7 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void DoubleReturnThrowsDisposedException()
     {
+        Pool pool = CreatePool();
         ColumnLookup columnLookup = new(["x"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 4);
         batch.Add([DataValue.FromFloat32(1.0f)]);

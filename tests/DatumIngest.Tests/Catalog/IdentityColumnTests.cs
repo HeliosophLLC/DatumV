@@ -256,7 +256,7 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(4, reader.Footer.Prologue.IdentityNextValue);
 
         // Independent verify: scan back and count rows.
-        Pool pool2 = new(new PoolBacking());
+        Pool pool2 = CreatePool();
         using TableCatalog reopened = new(pool2, CatalogPath);
         List<(long id, string name)> rows = await ScanLongFirstString(reopened["users"]);
         Assert.Equal([(1L, "a"), (2L, "b"), (3L, "c")], rows);

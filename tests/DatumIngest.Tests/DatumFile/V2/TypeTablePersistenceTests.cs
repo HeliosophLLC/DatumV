@@ -15,7 +15,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// proves the runtime↔on-disk translation actually carries field names
 /// across two independent <see cref="TypeRegistry"/> instances.
 /// </summary>
-public sealed class TypeTablePersistenceTests : IAsyncLifetime
+public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v5_typetable_{Guid.NewGuid():N}");
 
@@ -235,7 +235,7 @@ public sealed class TypeTablePersistenceTests : IAsyncLifetime
             new StructFieldDescriptor("y", writerRegistry.InternScalarType(DataKind.String)),
         ]);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new([column.Name]);
         Arena arena = new();
 
@@ -280,7 +280,7 @@ public sealed class TypeTablePersistenceTests : IAsyncLifetime
             new StructFieldDescriptor("score", writerRegistry.InternScalarType(DataKind.Float32)),
         ]);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new([column.Name]);
         Arena arena = new();
 

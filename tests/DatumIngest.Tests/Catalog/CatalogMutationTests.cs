@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Catalog;
 /// rejection for system tables and the snapshot-readers semantics
 /// that keeps in-flight scans alive across a mutation.
 /// </summary>
-public sealed class CatalogMutationTests : IAsyncLifetime
+public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr8_{Guid.NewGuid():N}");
 
@@ -38,7 +38,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public void Catalog_AddColumn_InMemory_AppendsNullableColumnAndBackfillsExistingRows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b"],
@@ -69,7 +69,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public void Catalog_AddColumn_NotNullableColumn_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         catalog.Add(new InMemoryTableProvider(pool, "t", columns: ["a"], rows: [[1], [2]]));
 
@@ -81,7 +81,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public void Catalog_DropColumn_InMemory_RemovesFromSchemaAndRows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b", "c"],
@@ -111,7 +111,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public async Task Catalog_AppendRowsAsync_InMemory_GrowsRowCountAndScanReturnsAppended()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b"],
@@ -147,7 +147,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public void Catalog_DeleteRows_InMemory_SkipsDeletedRows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"],
@@ -176,7 +176,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
         // information_schema.tables is auto-registered by the catalog
         // and must be read-only — its provider doesn't override the
         // capability flags so the catalog refuses the mutation.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -188,7 +188,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     [Fact]
     public void Catalog_DropColumn_OnUnknownTable_ThrowsKeyNotFound()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         TableCatalog catalog = new(pool);
         Assert.Throws<KeyNotFoundException>(() => catalog.DropColumn("nope", "x"));
     }
@@ -199,7 +199,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     public void Catalog_AddColumn_DatumFile_RoundTripsThroughProvider()
     {
         string path = WriteSimpleDatumFile("add_col.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.AddFile(path, name: "t");
 
@@ -226,7 +226,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     public void Catalog_DropColumn_DatumFile_RemovesFromSchema()
     {
         string path = WriteSimpleDatumFile("drop_col.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.AddFile(path, name: "t");
 
@@ -240,7 +240,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     public async Task Catalog_AppendRowsAsync_DatumFile_GrowsRowCount()
     {
         string path = WriteSimpleDatumFile("append.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.AddFile(path, name: "t");
 
@@ -270,7 +270,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
     public void Catalog_DeleteRows_DatumFile_SkipsDeletedRows()
     {
         string path = WriteSimpleDatumFile("delete.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.AddFile(path, name: "t");
 
@@ -295,7 +295,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
         // continue to see the pre-mutation schema width because its
         // snapshot refcount keeps the old reader alive.
         string path = WriteSimpleDatumFile("concurrent.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using DatumFileTableProviderV2 provider = new(new TableDescriptor("t", path), pool);
 
         IAsyncEnumerator<RowBatch> scan = provider.ScanAsync(
@@ -388,7 +388,7 @@ public sealed class CatalogMutationTests : IAsyncLifetime
         ColumnDescriptorV2 colA = new("a", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 colB = new("b", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);

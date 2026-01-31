@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Catalog;
 /// scan-based pre-load; the bytes tree + CompositeKeyEncoder unlock
 /// proper O(log n) lookup-backed enforcement for arbitrary kinds.
 /// </summary>
-public sealed class CompositePrimaryKeyTests : IAsyncLifetime
+public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_composite_pk_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -37,7 +37,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_DistinctRows_AllAccepted()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, c Int64, PRIMARY KEY (a, b))");
 
@@ -49,7 +49,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_DuplicateTuple_Rejected()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -62,7 +62,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_PartialOverlap_NotADuplicate()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -78,7 +78,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void TwoColumnComposite_WithinBatchDuplicate_Rejected()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -91,7 +91,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void ThreeColumnComposite_MixedKinds_Works()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan(
             "CREATE TABLE t (id Int64, day Date, tag Uuid, value Float64, " +
@@ -119,7 +119,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
         // The COCO2017 filename motivation: PRIMARY KEY on a 25-byte
         // ASCII filename. Previously rejected by the 16-byte cap; now
         // routes through the bytes-keyed tree.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE images (filename String PRIMARY KEY, width Int32, height Int32)");
 
@@ -141,7 +141,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CompositePk_PersistsAcrossReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
@@ -162,7 +162,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void SingleColumnStringPk_PersistsAcrossReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
@@ -180,7 +180,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CompositePk_ScrambledOrder_AllLookupsHit()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -211,7 +211,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
         // UPDATE on any PK column is rejected at validation time —
         // PK columns are immutable, callers must DELETE + INSERT.
         // Confirms the rule fires for composite PK component too.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, payload Int64, PRIMARY KEY (a, b))");
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha', 100)");
@@ -237,7 +237,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
         // does NOT rebuild .datum-pkindex. After REINDEX, composite PK
         // enforcement must still work (the bytes tree's tree handle
         // must survive the rebuild flow).
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, payload Int64, PRIMARY KEY (a, b))");
         catalog.Plan("INSERT INTO t VALUES (1, 'alpha', 100), (2, 'beta', 200)");
@@ -258,7 +258,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void Probe_NullInCompositePkComponent_Rejected_PersistentTable()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -274,7 +274,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     {
         // TEMP table → InMemoryProvider falls back to scan-path
         // PrimaryKeyChecker (no on-disk lookup). NULL must reject there too.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32, b String, PRIMARY KEY (a, b))");
 
@@ -289,7 +289,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
         // INSERT … SELECT is a different code path than VALUES (streams
         // batches from the source plan instead of building one in memory).
         // Composite PK enforcement must still work.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE src (a Int32, b String, payload Int64)");
         catalog.Plan(
@@ -306,7 +306,7 @@ public sealed class CompositePrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void Probe_InsertSelectIntoCompositePk_DistinctRows_AllAccepted()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE src (a Int32, b String, payload Int64)");
         catalog.Plan(

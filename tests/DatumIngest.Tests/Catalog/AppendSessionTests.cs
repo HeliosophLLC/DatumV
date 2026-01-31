@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Catalog;
 /// serialization, and torn-tail recovery on the reader side
 /// (so a crashed-mid-session writer doesn't block reads).
 /// </summary>
-public sealed class AppendSessionTests : IAsyncLifetime
+public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr9_{Guid.NewGuid():N}");
 
@@ -34,7 +34,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_CommitMakesRowsVisible()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"], rows: [[1]]);
 
@@ -50,7 +50,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_DisposeWithoutCommitAborts()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"], rows: [[1]]);
 
@@ -66,7 +66,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_WriteAfterCommitThrows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"], rows: []);
 
@@ -81,7 +81,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_DoubleCommitThrows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"], rows: []);
 
@@ -94,7 +94,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_SchemaMismatchOnWriteThrows()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a", "b"], rows: []);
 
@@ -110,7 +110,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public async Task InMemory_Session_SecondBeginAppendBlocksUntilFirstReleases()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         InMemoryTableProvider provider = new(pool, "t",
             columns: ["a"], rows: []);
 
@@ -133,7 +133,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     public async Task Datum_Session_CommitWritesRowsAndAbortsKeepsOldFooter()
     {
         string path = WriteSimpleDatumFile("session_commit.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using DatumFileTableProviderV2 provider = new(new TableDescriptor("t", path), pool);
 
         long before = provider.GetRowCount();
@@ -162,7 +162,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
         // AppendRowsAsync, so this verifies the wrapper still works
         // end-to-end.
         string path = WriteSimpleDatumFile("session_wrapper.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using DatumFileTableProviderV2 provider = new(new TableDescriptor("t", path), pool);
 
         long before = provider.GetRowCount();
@@ -192,7 +192,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
             preSessionRowCount = r.TotalRowCount;
         }
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (DatumFileTableProviderV2 provider = new(new TableDescriptor("t", path), pool))
         {
             await using IAppendSession s = provider.BeginAppend();
@@ -257,7 +257,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     public async Task Datum_Session_CatalogBeginAppendDispatches()
     {
         string path = WriteSimpleDatumFile("catalog_session.datum");
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.AddFile(path, name: "t");
 
@@ -273,7 +273,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
     [Fact]
     public void Datum_Session_OnReadOnlyTable_ThrowsInvalidOperation()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         Assert.Throws<InvalidOperationException>(() =>
             catalog.BeginAppend("information_schema.tables"));
@@ -309,7 +309,7 @@ public sealed class AppendSessionTests : IAsyncLifetime
         ColumnDescriptorV2 colA = new("a", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 colB = new("b", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);

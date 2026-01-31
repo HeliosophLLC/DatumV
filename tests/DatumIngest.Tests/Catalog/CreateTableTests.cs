@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Catalog;
 /// catalog-file persistence (v2), and rehydration on catalog reopen.
 /// PRIMARY KEY enforcement (uniqueness, NULL rejection, 16-byte cap) ships in PR10f and is exercised in [PrimaryKeyTests](PrimaryKeyTests.cs).
 /// </summary>
-public sealed class CreateTableTests : IAsyncLifetime
+public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10a_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -39,7 +39,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_WithoutCatalogFile_RegistersInMemoryProvider()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool); // no catalog path
 
         catalog.Plan("CREATE TEMP TABLE staging (id Int32, name String)");
@@ -58,7 +58,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_RespectsNullability()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan("CREATE TEMP TABLE t (a Int32 NOT NULL, b String)");
@@ -71,7 +71,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_AlreadyExists_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32)");
 
@@ -82,7 +82,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_IfNotExists_NoOpOnSecondCreate()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32)");
         // Second create with IF NOT EXISTS is a no-op, no exception.
@@ -97,7 +97,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_WithoutCatalogFile_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool); // no catalog path
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -108,7 +108,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_WithCatalogFile_MaterialisesEmptyDatumFile()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
@@ -125,7 +125,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_PersistsToCatalogJson()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, name String)");
@@ -141,7 +141,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_ReopeningCatalog_RehydratesTable()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog firstCatalog = new(pool, CatalogPath))
         {
             firstCatalog.Plan("CREATE TABLE users (id Int32, name String)");
@@ -156,7 +156,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_ReopeningCatalog_StaleEntryWithMissingFile_IsSkipped()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog firstCatalog = new(pool, CatalogPath))
         {
             firstCatalog.Plan("CREATE TABLE users (id Int32)");
@@ -175,7 +175,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_AtClause_RequiresAllowExplicitTablePaths()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath); // production default: AllowExplicitTablePaths=false
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -186,7 +186,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_AtClause_AllowedInTestMode()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         string explicitPath = Path.Combine(_tempDir, "elsewhere.datum");
         using TableCatalog catalog = new(pool, CatalogPath, allowExplicitTablePaths: true);
 
@@ -201,7 +201,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void DropTempTable_RemovesFromCatalog()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32)");
         Assert.True(catalog.HasTable("t"));
@@ -214,7 +214,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void DropPersistentTable_RemovesCatalogEntryAndDeletesFile()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         string datumPath = Path.Combine(_tempDir, "users.datum");
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
@@ -232,7 +232,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void DropTable_WhenMissing_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP TABLE nope"));
     }
@@ -240,7 +240,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void DropTable_IfExists_NoOpWhenMissing()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         // Should not throw.
         catalog.Plan("DROP TABLE IF EXISTS nope");
@@ -251,7 +251,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_FullTypeSpec_ResolvesEachKind()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan(
@@ -278,7 +278,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_UnknownType_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (a NotARealType)"));
@@ -290,7 +290,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     {
         // SQL identifiers are conventionally case-insensitive. CREATE
         // TABLE Test must be reachable via SELECT * FROM TEST or test.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE Test (id Int32)");
 
@@ -308,7 +308,7 @@ public sealed class CreateTableTests : IAsyncLifetime
     {
         // Two CREATE TABLE statements differing only in case must collide;
         // otherwise the case-insensitive lookup couldn't pick a winner.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE foo (id Int32)");
 

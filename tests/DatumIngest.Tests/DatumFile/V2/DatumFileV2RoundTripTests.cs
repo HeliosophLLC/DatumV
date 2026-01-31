@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// <see cref="DatumFileReaderV2"/> + page decoders, and asserts that
 /// every value round-trips intact.
 /// </summary>
-public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
+public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v2_{Guid.NewGuid():N}");
 
@@ -250,7 +250,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         ColumnDescriptorV2 nameCol = new("name", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
         ColumnDescriptorV2 activeCol = new("active", DataKind.Boolean, EncoderKind.BitPackedBoolean, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name", "active"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
@@ -305,7 +305,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         const int pageSize = 32;
         const int rowCount = 100;
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);
@@ -355,7 +355,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
         ColumnDescriptorV2 column = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
         // 10 rows: values 1..10. Zone map should report min=1, max=10.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 10, arena: arena);
@@ -395,7 +395,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
     {
         ColumnDescriptorV2 column = new("s", DataKind.Struct, EncoderKind.VariableSlot, IsNullable: true);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["s"]);
         Arena writeArena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: writeArena);
@@ -488,7 +488,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
             IsNullable: true,
             IsArray: true);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["tags"]);
         Arena writeArena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 4, arena: writeArena);
@@ -548,7 +548,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
             IsNullable: false,
             IsArray: true);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["thumbs"]);
         Arena writeArena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
@@ -593,7 +593,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
             IsNullable: false,
             IsArray: true);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["boxes"]);
         Arena writeArena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: writeArena);
@@ -681,7 +681,7 @@ public sealed class DatumFileV2RoundTripTests : IAsyncLifetime
     /// </summary>
     private DataValue[] WriteAndRead(string fileName, ColumnDescriptorV2[] columns, DataValue[] values)
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new([columns[0].Name]);
         Arena arena = new();
 

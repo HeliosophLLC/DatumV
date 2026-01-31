@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Catalog.Providers;
 /// the metadata fields users care about, and reports <c>status</c>
 /// correctly for missing-vs-available files.
 /// </summary>
-public sealed class ModelsTableProviderTests : IDisposable
+public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
 {
     private readonly string _tempModelDir = Path.Combine(
         Path.GetTempPath(), $"models_provider_test_{Guid.NewGuid():N}");
@@ -21,8 +21,10 @@ public sealed class ModelsTableProviderTests : IDisposable
         Directory.CreateDirectory(_tempModelDir);
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
+        base.Dispose();
+        
         if (Directory.Exists(_tempModelDir))
         {
             try { Directory.Delete(_tempModelDir, recursive: true); } catch (IOException) { }
@@ -37,7 +39,7 @@ public sealed class ModelsTableProviderTests : IDisposable
     [Fact]
     public void GetSchema_ExposesExpectedColumns()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ModelCatalog catalog = new(_tempModelDir);
         using ModelsTableProvider provider = new(pool, catalog);
 
@@ -85,7 +87,7 @@ public sealed class ModelsTableProviderTests : IDisposable
         byte[] payload = new byte[1234];
         await File.WriteAllBytesAsync(filePath, payload);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ModelCatalog catalog = new(_tempModelDir);
         catalog.Register(new ModelCatalogEntry(
             Name: "fake",
@@ -143,7 +145,7 @@ public sealed class ModelsTableProviderTests : IDisposable
     [Fact]
     public async Task ScanAsync_FileMissing_ReportsMissingWithNullSize()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ModelCatalog catalog = new(_tempModelDir);
         catalog.Register(new ModelCatalogEntry(
             Name: "ghost",
@@ -172,7 +174,7 @@ public sealed class ModelsTableProviderTests : IDisposable
     [Fact]
     public async Task ScanAsync_MultipleEntries_RowsSortedByName()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ModelCatalog catalog = new(_tempModelDir);
 
         // Register out of alphabetical order.

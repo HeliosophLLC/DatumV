@@ -18,7 +18,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// <see cref="PageDescriptorV2.FileId"/> = 0 reads to the primary and
 /// non-zero ids to the corresponding pack reader.
 /// </summary>
-public sealed class DatumFileV2MultiFileReadTests : IAsyncLifetime
+public sealed class DatumFileV2MultiFileReadTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_packs_{Guid.NewGuid():N}");
 

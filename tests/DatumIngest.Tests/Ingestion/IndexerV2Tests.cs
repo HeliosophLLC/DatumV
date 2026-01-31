@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Ingestion;
 /// (1) opening the file via the version-aware factory and (2) skipping
 /// sidecar-bound values at the bloom-filter layer; both are covered here.
 /// </summary>
-public sealed class IndexerV2Tests : IAsyncLifetime
+public sealed class IndexerV2Tests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"indexer_v2_{Guid.NewGuid():N}");
 
@@ -131,7 +131,7 @@ public sealed class IndexerV2Tests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
         await ingester.IngestAsync(source, destination);
         return datumPath;

@@ -165,7 +165,7 @@ public sealed class RequiredColumnsContractTests : ServiceTestBase, IAsyncLifeti
         ColumnDescriptorV2 idColumn = new("id", DataKind.Int64, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 nameColumn = new("name", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 4, arena: arena);

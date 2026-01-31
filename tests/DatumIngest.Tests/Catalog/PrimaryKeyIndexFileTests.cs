@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Catalog;
 /// reopen. PR10f's scan-based path remains under
 /// <see cref="PrimaryKeyTests"/> for composite PK + InMemory cases.
 /// </summary>
-public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
+public sealed class PrimaryKeyIndexFileTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10h_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -41,7 +41,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void CreateTable_SingleColPk_PkIndexFileExists()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
@@ -53,7 +53,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void CreateTable_CompositePk_CreatesBytesPkIndex()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, c String, PRIMARY KEY (a, b))");
@@ -65,7 +65,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void CreateTable_NoPk_DoesNotCreatePkIndex()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (id Int32, name String)");
@@ -76,7 +76,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void DropTable_RemovesPkIndexFile()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
@@ -93,7 +93,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Provider_SingleColPk_GetPrimaryKeyLookupNonNull()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
 
@@ -109,7 +109,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
         // Post-Phase-4: every PK shape (single-column or composite) routes
         // through the bytes-keyed tree; the provider exposes a non-null
         // lookup whenever the table has a PK and the index file exists.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, PRIMARY KEY (a, b))");
 
@@ -120,7 +120,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Provider_NoPk_GetPrimaryKeyLookupNull()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE t (id Int32, name String)");
 
@@ -131,7 +131,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Provider_TempTable_GetPrimaryKeyLookupNull()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
@@ -144,7 +144,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Insert_LookupBacked_RejectsDuplicate()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
 
@@ -157,7 +157,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Insert_LookupBacked_AcceptsNonColliding()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
 
@@ -171,7 +171,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Insert_AcrossCatalogReopen_PkIndexPersists()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
@@ -203,7 +203,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Insert_ManyRowsInSingleSession_AllPkKeysFlushedToTree()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool, CatalogPath);
         catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
 
@@ -227,7 +227,7 @@ public sealed class PrimaryKeyIndexFileTests : IAsyncLifetime
     [Fact]
     public void Insert_WithIdentityAndPk_AutoFilledKeysTrackedInIndex()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
         using (TableCatalog catalog = new(pool, CatalogPath))
         {

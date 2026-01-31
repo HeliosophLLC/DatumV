@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// <see cref="DatumFileFlagsV2.HasTombstones"/> flag flipping on, and
 /// scan-via-provider visibility.
 /// </summary>
-public sealed class DatumFileV2SoftDeleteTests : IAsyncLifetime
+public sealed class DatumFileV2SoftDeleteTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_softdel_{Guid.NewGuid():N}");
 
@@ -168,7 +168,7 @@ public sealed class DatumFileV2SoftDeleteTests : IAsyncLifetime
 
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
             Arena arena = new();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 50, arena: arena);
@@ -205,7 +205,7 @@ public sealed class DatumFileV2SoftDeleteTests : IAsyncLifetime
 
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
             Arena arena = new();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 10, arena: arena);
@@ -256,7 +256,7 @@ public sealed class DatumFileV2SoftDeleteTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "delete_whole_page.datum");
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         const int rowCount = 64;
@@ -323,7 +323,7 @@ public sealed class DatumFileV2SoftDeleteTests : IAsyncLifetime
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         string path = Path.Combine(_tempDir, fileName);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);

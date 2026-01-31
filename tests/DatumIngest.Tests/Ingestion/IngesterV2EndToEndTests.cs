@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Ingestion;
 /// Verifies the v2 writer is correctly wired into the ingestion pipeline
 /// and that the resulting file is structurally valid and readable.
 /// </summary>
-public sealed class IngesterV2EndToEndTests : IAsyncLifetime
+public sealed class IngesterV2EndToEndTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"ingest_v2_{Guid.NewGuid():N}");
 
@@ -51,7 +51,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
 
         IngestionResult result = await ingester.IngestAsync(source, destination);
@@ -104,7 +104,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
 
         IngestionResult result = await ingester.IngestAsync(source, destination);
@@ -140,7 +140,7 @@ public sealed class IngesterV2EndToEndTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
         await ingester.IngestAsync(source, destination);
 

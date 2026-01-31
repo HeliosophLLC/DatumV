@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// across drop, and that the dropped column's data stays in the footer
 /// (still addressable for compaction-time reclamation in a future PR).
 /// </summary>
-public sealed class DatumFileV2DropColumnTests : IAsyncLifetime
+public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_drop_{Guid.NewGuid():N}");
 
@@ -177,7 +177,7 @@ public sealed class DatumFileV2DropColumnTests : IAsyncLifetime
         ColumnDescriptorV2 nameCol = new("name", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
         ColumnDescriptorV2 dropMeCol = new("drop_me", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "name", "drop_me"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
@@ -280,7 +280,7 @@ public sealed class DatumFileV2DropColumnTests : IAsyncLifetime
         ColumnDescriptorV2 colB = new("b", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 colC = new("c", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b", "c"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);

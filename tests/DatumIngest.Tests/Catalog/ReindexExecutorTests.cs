@@ -16,7 +16,7 @@ namespace DatumIngest.Tests.Catalog;
 /// PR9.5 introduced: after a mutation the cached index is dropped and
 /// <c>GetSourceIndex</c> returns null until the user runs REINDEX.
 /// </summary>
-public sealed class ReindexExecutorTests : IAsyncLifetime
+public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr12_{Guid.NewGuid():N}");
 
@@ -47,7 +47,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         // UPDATE still go through the invalidate-on-mutate path.
         string datumPath = await IngestAndIndex("after_append.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -75,7 +75,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         // valid and queries continue to use it.
         string datumPath = await IngestAndIndex("fresh.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -93,7 +93,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("after_delete.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -109,7 +109,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     [Fact]
     public void Reindex_MissingTable_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
@@ -122,7 +122,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         // In-memory tables have no .datum-index — REINDEX must surface a
         // clear error rather than silently no-op.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
@@ -140,7 +140,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         // as Reindex_AfterAppend_StaysValid.
         string datumPath = await IngestAndIndex("analyze_after_append.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
@@ -159,7 +159,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     [Fact]
     public void Analyze_TempTable_Rejected()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
@@ -180,7 +180,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         string manifestPath = Path.ChangeExtension(datumPath, ".datum-manifest");
         Assert.False(File.Exists(manifestPath));
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -197,7 +197,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("analyze_mean.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -217,7 +217,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("analyze_valid_flag.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -239,7 +239,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         // expensive fields (top-K, quantiles, histogram, entropy).
         string datumPath = await IngestAndIndex("staleness_after_insert.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -263,7 +263,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("staleness_restored_by_analyze.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -289,7 +289,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("staleness_after_update.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -312,7 +312,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         // already-current file).
         string datumPath = await IngestAndIndex("after_update.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
@@ -342,7 +342,7 @@ public sealed class ReindexExecutorTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
         await ingester.IngestAsync(source, destination);
 

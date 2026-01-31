@@ -18,7 +18,7 @@ namespace DatumIngest.Tests.Catalog;
 /// new rows go missing from indexed queries, dropped columns produce
 /// undefined behaviour.
 /// </summary>
-public sealed class StaleIndexDetectionTests : IAsyncLifetime
+public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr95_{Guid.NewGuid():N}");
 
@@ -44,7 +44,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
         // .datum + .datum-index pair surfaces the index normally.
         string datumPath = await IngestAndIndex("baseline.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -66,7 +66,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
         string indexPath = Path.ChangeExtension(datumPath, ".datum-index");
         Assert.True(File.Exists(indexPath), "index sidecar should exist after IndexAsync");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
         // First open: append a row, dispose. The append's commit path
         // auto-refreshes .datum-index (PR13a-2 two-phase commit).
@@ -101,7 +101,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
         // contract for AppendRows is now "rebuild on mutate").
         string datumPath = await IngestAndIndex("same_provider.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -123,7 +123,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
         // size + stripe hash differ → fingerprint mismatch.
         string datumPath = await IngestAndIndex("after_add_col.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
@@ -138,7 +138,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
     {
         string datumPath = await IngestAndIndex("after_delete.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
@@ -165,7 +165,7 @@ public sealed class StaleIndexDetectionTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
         await ingester.IngestAsync(source, destination);
 

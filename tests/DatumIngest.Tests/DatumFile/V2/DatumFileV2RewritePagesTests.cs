@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// re-opens the file via <see cref="DatumFileReaderV2"/>, and asserts the
 /// rewritten values are visible (and untouched rows are intact).
 /// </summary>
-public sealed class DatumFileV2RewritePagesTests : IAsyncLifetime
+public sealed class DatumFileV2RewritePagesTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_rewrite_{Guid.NewGuid():N}");
 
@@ -117,7 +117,7 @@ public sealed class DatumFileV2RewritePagesTests : IAsyncLifetime
         ColumnDescriptorV2 idCol = new("id", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 scoreCol = new("score", DataKind.Float64, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id", "score"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
@@ -165,7 +165,7 @@ public sealed class DatumFileV2RewritePagesTests : IAsyncLifetime
         ColumnDescriptorV2 column = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
         // Force two pages by setting page size to 4 and writing 7 rows.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 7, arena: arena);
@@ -479,7 +479,7 @@ public sealed class DatumFileV2RewritePagesTests : IAsyncLifetime
 
     private string WriteFile(string fileName, ColumnDescriptorV2[] columns, IReadOnlyList<RowSpec> rows)
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(columns.Select(c => c.Name).ToArray());
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rows.Count, arena: arena);

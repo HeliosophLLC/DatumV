@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// correctly under v4." This file is the dedicated coverage for the new
 /// metadata.
 /// </summary>
-public sealed class DatumFormatV4FieldTests : IAsyncLifetime
+public sealed class DatumFormatV4FieldTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_{Guid.NewGuid():N}");
 
@@ -271,7 +271,7 @@ public sealed class DatumFormatV4FieldTests : IAsyncLifetime
         ColumnDescriptorV2 colA = new("a", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 colB = new("b", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);

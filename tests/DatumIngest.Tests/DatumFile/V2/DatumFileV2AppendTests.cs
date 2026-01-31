@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// multi-cycle commits, generation counter monotonicity, sidecar
 /// growth, volume-zone-map threshold crossing, and torn-tail recovery.
 /// </summary>
-public sealed class DatumFileV2AppendTests : IAsyncLifetime
+public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_append_{Guid.NewGuid():N}");
 
@@ -196,7 +196,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         string sidecarPath = datumPath + DatumIngest.DatumFile.Sidecar.SidecarConstants.FileExtension;
 
         // Initial write: 5 long strings (each > 16 bytes → sidecar).
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["s"]);
         Arena writeArena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: writeArena);
@@ -223,7 +223,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         // Append: 3 more long strings.
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(datumPath, sidecarPath))
         {
-            Pool pool2 = new(new PoolBacking());
+            Pool pool2 = CreatePool();
             Arena appArena = new();
             RowBatch appBatch = pool2.RentRowBatch(lookup, capacity: 3, arena: appArena);
             for (int i = 5; i < 8; i++)
@@ -317,7 +317,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         string datumPath = Path.Combine(_tempDir, "append_sticky.datum");
         string sidecarPath = datumPath + DatumIngest.DatumFile.Sidecar.SidecarConstants.FileExtension;
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["s"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: arena);
@@ -346,7 +346,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         // session.
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(datumPath, sidecarPath))
         {
-            Pool pool2 = new(new PoolBacking());
+            Pool pool2 = CreatePool();
             Arena appArena = new();
             RowBatch appBatch = pool2.RentRowBatch(lookup, capacity: 1, arena: appArena);
             DataValue[] r = pool2.RentDataValues(1);
@@ -373,7 +373,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "append_colcount.datum");
 
         // Initial write: 2 columns.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["a", "b"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: arena);
@@ -394,7 +394,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
         // Append more rows — column count unchanged.
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
-            Pool pool2 = new(new PoolBacking());
+            Pool pool2 = CreatePool();
             Arena arena2 = new();
             RowBatch appBatch = pool2.RentRowBatch(lookup, capacity: 3, arena: arena2);
             for (int i = 5; i < 8; i++)
@@ -425,7 +425,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
 
     private void WriteRows(string path, ColumnDescriptorV2[] columns, int[] values)
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new([columns[0].Name]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: values.Length, arena: arena);
@@ -444,7 +444,7 @@ public sealed class DatumFileV2AppendTests : IAsyncLifetime
     private void AppendRows(string path, int[] values)
     {
         using DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: values.Length, arena: arena);

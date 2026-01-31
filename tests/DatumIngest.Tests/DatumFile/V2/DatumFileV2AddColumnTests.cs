@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// for the newly added column), name collision rejection,
 /// non-nullable rejection, and partial-page alignment.
 /// </summary>
-public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
+public sealed class DatumFileV2AddColumnTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_addcol_{Guid.NewGuid():N}");
 
@@ -113,7 +113,7 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
 
             // Now writer has 2 columns. Append 20 new rows providing
             // values for both.
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             ColumnLookup lookup = new(["v", "score"]);
             Arena arena = new();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 20, arena: arena);
@@ -238,7 +238,7 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "addcol_partial.datum");
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         const int rowCount = 100;  // 3 full pages of 32 + 1 partial of 4
@@ -307,7 +307,7 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
         using (DatumFileWriterV2 writer = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
             // Append one row first (1 column).
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
             Arena arena = new();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
@@ -361,7 +361,7 @@ public sealed class DatumFileV2AddColumnTests : IAsyncLifetime
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         string path = Path.Combine(_tempDir, fileName);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);

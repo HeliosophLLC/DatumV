@@ -202,7 +202,7 @@ public sealed class GzipSupportTests : ServiceTestBase
             OutputDescriptor destination = new(datumPath);
 
             FormatRegistry registry = new([new CsvFileFormat()]);
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             Ingester ingester = new(registry, pool);
 
             IngestionResult result = await ingester.IngestAsync(source, destination);

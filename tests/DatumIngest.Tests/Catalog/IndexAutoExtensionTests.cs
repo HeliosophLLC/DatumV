@@ -20,7 +20,7 @@ namespace DatumIngest.Tests.Catalog;
 /// index surfaces as <see cref="IndexValidity.Stale"/> via
 /// <c>datum_catalog.indexes.is_valid = false</c>.
 /// </summary>
-public sealed class IndexAutoExtensionTests : IAsyncLifetime
+public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr13a2_{Guid.NewGuid():N}");
 
@@ -48,7 +48,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // GetSourceIndex call returns a valid snapshot.
         string datumPath = await IngestAndIndex("auto_extend.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -72,7 +72,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // INSERT's two-phase commit creates the index from scratch.
         // After this, indexed queries get acceleration without the
         // user ever running REINDEX manually.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         string catalogPath = Path.Combine(_tempDir, ".datum-catalog.json");
         using TableCatalog catalog = new(pool, catalogPath);
 
@@ -98,7 +98,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // spot the table that needs REINDEX.
         string datumPath = await IngestAndIndex("stale_sentinel.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -118,7 +118,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
 
         // Reopen — the provider's TryLoadSourceIndex sees the torn tail,
         // returns null, but the file still exists → IndexValidity.Stale.
-        Pool pool2 = new(new PoolBacking());
+        Pool pool2 = CreatePool();
         using TableCatalog reopened = new(pool2);
         ITableProvider reopenedProvider = reopened.Add(new TableDescriptor("t", datumPath));
 
@@ -157,7 +157,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // entries appear with is_valid = true.
         string datumPath = await IngestAndIndex("valid_after_append.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -200,7 +200,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // somehow lost track of pre-INSERT chunks.
         string datumPath = await IngestAndIndex("chunk_growth.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -231,7 +231,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // verbatim into the new sidecar.
         string datumPath = await IngestAndIndex("bitmap_preserve.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -267,7 +267,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // chunk index past the prefix's last chunk.
         string datumPath = await IngestAndIndex("bitmap_new_value.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -308,7 +308,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // valid snapshot whose values reflect the rewrite.
         string datumPath = await IngestAndIndex("update_auto_refresh.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -333,7 +333,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // chunks" → indexed lookup misses the row.
         string datumPath = await IngestAndIndex("update_bitmap.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -364,7 +364,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // false negative that prunes the chunk from indexed scans.
         string datumPath = await IngestAndIndex("update_bloom.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -390,7 +390,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         // covered the original row.
         string datumPath = await IngestAndIndex("bloom_preserve.datum");
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
@@ -444,7 +444,7 @@ public sealed class IndexAutoExtensionTests : IAsyncLifetime
         OutputDescriptor destination = new(datumPath);
 
         FormatRegistry registry = new([new CsvFileFormat()]);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         Ingester ingester = new(registry, pool);
         await ingester.IngestAsync(source, destination);
 

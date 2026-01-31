@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.DatumFile.V2;
 /// FileShare changes (concurrent reader survives an in-flight writer
 /// session, in-process two-writer rejection).
 /// </summary>
-public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
+public sealed class DatumFileV2WriterCoordinationTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_v4_pr3_{Guid.NewGuid():N}");
 
@@ -58,7 +58,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
         ColumnDescriptorV2 col = new("v", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
 
         const ulong customId = 0xABCDEF0123456789UL;
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
@@ -90,7 +90,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
         const ulong appendId = 0x2222222222222222UL;
 
         // Initial write with one writer id.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 3, arena: arena);
@@ -112,7 +112,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
             appender.WriterId = appendId;
-            Pool pool2 = new(new PoolBacking());
+            Pool pool2 = CreatePool();
             Arena arena2 = new();
             RowBatch appBatch = pool2.RentRowBatch(lookup, capacity: 2, arena: arena2);
             for (int i = 3; i < 5; i++)
@@ -165,7 +165,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
         // captured. This simulates the multi-writer scenario where
         // another writer's commit changed the tail since we opened.
         using DatumFileWriterV2 writer = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
@@ -199,7 +199,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
 
         using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null))
         {
-            Pool pool = new(new PoolBacking());
+            Pool pool = CreatePool();
             ColumnLookup lookup = new(["v"]);
             Arena arena = new();
             RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: arena);
@@ -232,7 +232,7 @@ public sealed class DatumFileV2WriterCoordinationTests : IAsyncLifetime
         WriteSimpleFileTo(path, [col]);  // initial 3 rows committed
 
         using DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(path, sidecarPath: null);
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["v"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: 5, arena: arena);

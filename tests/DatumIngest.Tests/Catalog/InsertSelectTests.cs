@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Catalog;
 /// streaming through an <see cref="IAppendSession"/>, abort-on-error
 /// semantics, and persistent-table round-trip.
 /// </summary>
-public sealed class InsertSelectTests : IAsyncLifetime
+public sealed class InsertSelectTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10c_select_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -38,7 +38,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_TablelessLiterals_VisibleViaScan()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32, name String)");
 
@@ -53,7 +53,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_TablelessExpressions_AreEvaluatedThenStored()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (sum Int32)");
 
@@ -70,7 +70,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_FromTable_PositionalCopy()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
@@ -86,7 +86,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_NamedColumnList_ReordersTargetColumns()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32, b String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
@@ -104,7 +104,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_PartialColumnList_FillsOmittedWithDefault()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, status String DEFAULT 'imported')");
@@ -119,7 +119,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_PartialColumnList_FillsOmittedNullableWithNull()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, note String)");
@@ -135,7 +135,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_OmittedNotNullWithoutDefault_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 NOT NULL, name String NOT NULL)");
@@ -152,7 +152,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_WidensInt8ProjectionToInt32Column()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int8)");
         catalog.Plan("CREATE TEMP TABLE dst (n Int32)");
@@ -167,7 +167,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_OverflowOnNarrow_AbortsBeforeCommit()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (n Int16)");
         catalog.Plan("CREATE TEMP TABLE dst (n Int8)");
@@ -187,7 +187,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_ProjectionArityMismatch_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32, b String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32)");
@@ -203,7 +203,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_ColumnListArityMismatch_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
@@ -218,7 +218,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_FromEmptySource_NoOp()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (a Int32)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32)");
@@ -233,7 +233,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_WithFilter_RespectsWhereClause()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, name String)");
@@ -251,7 +251,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_ImageColumn_RoundTripsBytes()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, img Image)");
@@ -299,7 +299,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
         // target arena. Image/Audio/Video share the same arm — JSON is
         // the only one with a literal-producing scalar function in the
         // standard library.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE j (id Int32, data Json)");
 
@@ -324,7 +324,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     {
         // Image source → String target should error clearly; no implicit
         // blob coercion.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, img Image)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32, blob String)");
@@ -353,7 +353,7 @@ public sealed class InsertSelectTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_OnPersistentTable_VisibleAcrossReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32, name String)");

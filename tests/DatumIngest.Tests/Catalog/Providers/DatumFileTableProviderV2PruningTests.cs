@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Catalog.Providers;
 /// page, then issues a filter and asserts the scan yields only the rows
 /// from pages that survive pruning.
 /// </summary>
-public sealed class DatumFileTableProviderV2PruningTests : IAsyncLifetime
+public sealed class DatumFileTableProviderV2PruningTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"v2_pruning_{Guid.NewGuid():N}");
 
@@ -158,7 +158,7 @@ public sealed class DatumFileTableProviderV2PruningTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, fileName);
         ColumnDescriptorV2 column = new("id", DataKind.Int64, EncoderKind.FixedWidth, IsNullable: false);
 
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         ColumnLookup lookup = new(["id"]);
         Arena arena = new();
         RowBatch batch = pool.RentRowBatch(lookup, capacity: rowCount, arena: arena);

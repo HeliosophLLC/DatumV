@@ -14,7 +14,7 @@ namespace DatumIngest.Tests.Catalog;
 /// preserves the PK constraint; PK + IDENTITY interplay; ALTER DROP
 /// COLUMN of a PK column rejected.
 /// </summary>
-public sealed class PrimaryKeyTests : IAsyncLifetime
+public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr10f_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -39,7 +39,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_ColumnLevelPrimaryKey_SchemaCarriesPk()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
@@ -55,7 +55,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_TableLevelCompositePrimaryKey_PreservesOrder()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         // Table-level PK lists columns in (b, a) order — order matters
@@ -75,7 +75,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CreateTempTable_PrimaryKeyOnUnknownColumn_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -90,7 +90,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
         // bytes-keyed B+Tree (variable-length) rather than the typed
         // tree's inline-only path. The COCO-filename use case:
         // PRIMARY KEY (filename) for filenames >12 bytes.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan("CREATE TEMP TABLE t (id String PRIMARY KEY)");
@@ -101,7 +101,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     {
         // Byte-array PKs are still rejected — the bytes tree is for
         // *encoded* keys derived from scalar values, not raw byte arrays.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
@@ -114,7 +114,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     {
         // Composite PKs no longer have the 16-byte total cap — the
         // bytes-keyed tree handles arbitrary encoded sizes.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan("CREATE TEMP TABLE t (a Uuid, b Uuid, PRIMARY KEY (a, b))");
@@ -124,7 +124,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     public void CreateTempTable_SingleColumnUuidPk_FitsExactly()
     {
         // Uuid alone is 16 bytes — at the cap, not over.
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
 
         catalog.Plan("CREATE TEMP TABLE t (id Uuid PRIMARY KEY, label String)");
@@ -139,7 +139,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_DuplicatePk_AcrossInserts_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
         catalog.Plan("INSERT INTO t VALUES (1, 'alice')");
@@ -157,7 +157,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void InsertValues_DuplicatePk_WithinSameBatch_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
@@ -171,7 +171,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public async Task InsertValues_UniquePk_ManyRows_AllInserted()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
@@ -184,7 +184,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void InsertValues_CompositePk_DistinguishesByTuple()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int32, n String, PRIMARY KEY (a, b))");
 
@@ -201,7 +201,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void InsertValues_NullPk_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
@@ -221,7 +221,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void InsertSelect_DuplicatePkFromSource_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 PRIMARY KEY, name String)");
@@ -235,7 +235,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public async Task InsertSelect_UniquePkFromSource_AllRowsInserted()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE src (id Int32, name String)");
         catalog.Plan("CREATE TEMP TABLE dst (id Int32 PRIMARY KEY, name String)");
@@ -252,7 +252,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public async Task PkAndIdentity_Combined_AutoFillsAndStaysUnique()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         // Column-clause order in PR10f: NOT NULL → PRIMARY KEY → DEFAULT → IDENTITY.
         catalog.Plan("CREATE TEMP TABLE t (id Int64 PRIMARY KEY IDENTITY, name String)");
@@ -274,7 +274,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void CreatePersistentTable_PkInFooterPrologue()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
@@ -288,7 +288,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void InsertValues_OnPersistentTable_PkSurvivesReopenAndRejectsDup()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using (TableCatalog catalog = new(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
@@ -312,7 +312,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropPkColumn_Throws()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String)");
 
@@ -324,7 +324,7 @@ public sealed class PrimaryKeyTests : IAsyncLifetime
     [Fact]
     public async Task AlterTable_DropNonPkColumn_StillWorks()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
         using TableCatalog catalog = new(pool);
         catalog.Plan("CREATE TEMP TABLE t (id Int32 PRIMARY KEY, name String, score Int32)");
 
