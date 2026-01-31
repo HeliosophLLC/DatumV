@@ -21,17 +21,30 @@ public sealed class RowBatch : IDisposable
     private Row[]? _rows;
     private Arena? _arena;
     private ColumnLookup _columnLookup;
+    private int _rowCapacity;
 
-    internal RowBatch(ColumnLookup columnLookup, Row[] rows, Arena arena, int count = 0)
+    /// <summary>
+    /// Initializes a new <see cref="RowBatch" /> instance.
+    /// </summary>
+    /// <param name="columnLookup">The column lookup that indicates the column count and positions within the row.</param>
+    /// <param name="rows">An array of rows.</param>
+    /// <param name="rowCapacity">
+    /// The requested capacity of the rows. The capacity may differ from the actual row count because the rows are from
+    /// a shared buffer which may return more rows than necessary for performance reasons.
+    /// </param>
+    /// <param name="arena">The arena storing the inline row data.</param>
+    /// <param name="count">The number of preallocated rows in the batch.</param>
+    internal RowBatch(ColumnLookup columnLookup, Row[] rows, int rowCapacity, Arena arena, int count = 0)
     {
         _columnLookup = columnLookup;
         _rows = rows;
+        _rowCapacity = rowCapacity;
         _arena = arena;
         Count = count;
     }
 
     /// <summary>Maximum number of rows this batch can hold.</summary>
-    public int Capacity => _rows?.Length ?? 0;
+    public int Capacity => _rowCapacity;
 
     /// <summary>Current number of rows in this batch.</summary>
     public int Count { get; private set; }

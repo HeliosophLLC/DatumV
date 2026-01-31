@@ -215,7 +215,7 @@ public sealed class PoolBacking
         }
 
         Row[] rows = ArrayPool<Row>.Shared.Rent(capacity);
-        RowBatch rowBatch = new(columnLookup, rows, arena);
+        RowBatch rowBatch = new(columnLookup, rows, capacity, arena);
 
         DatumDiagnostics.RecordPoolRowBatchRent();
         return rowBatch;

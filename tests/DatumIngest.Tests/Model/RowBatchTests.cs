@@ -9,15 +9,6 @@ namespace DatumIngest.Tests.Model;
 public class RowBatchTests : ServiceTestBase
 {
     private static Pool pool = new(new PoolBacking());
-    private static Row MakeRow(string name, float value)
-    {
-        return new Row([name], [DataValue.FromFloat32(value)]);
-    }
-
-    private static Row MakeRow(string nameColumn, string nameValue, string ageColumn, float ageValue)
-    {
-        return new Row([nameColumn, ageColumn], [DataValue.FromString(nameValue), DataValue.FromFloat32(ageValue)]);
-    }
 
 
     /// <summary>
@@ -29,14 +20,13 @@ public class RowBatchTests : ServiceTestBase
     {
         ColumnLookup columnLookup = new(["value"]);
         RowBatch batch = pool.RentRowBatch(columnLookup, 4);
-        Row row = MakeRow("value", 42.0f);
 
-        batch.Add(row);
+        batch.Add([DataValue.FromFloat32(42.0f)]);
 
         Assert.Equal(1, batch.Count);
         Assert.Equal(42.0f, batch[0]["value"].AsFloat32());
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
 
     /// <summary>
@@ -46,17 +36,18 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IsFullReturnsTrueWhenCountEqualsCapacity()
     {
-        RowBatch batch = RowBatch.Rent(2);
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 2);
 
         Assert.False(batch.IsFull);
 
-        batch.Add(MakeRow("x", 1.0f));
+        batch.Add([DataValue.FromFloat32(1.0f)]);
         Assert.False(batch.IsFull);
 
-        batch.Add(MakeRow("x", 2.0f));
+        batch.Add([DataValue.FromFloat32(2.0f)]);
         Assert.True(batch.IsFull);
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
 
     /// <summary>
@@ -66,21 +57,18 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IndexerReturnsCorrectRows()
     {
-        RowBatch batch = RowBatch.Rent(3);
+        ColumnLookup columnLookup = new(["name", "age"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 3);
 
-        Row first = MakeRow("name", "Alice", "age", 30.0f);
-        Row second = MakeRow("name", "Bob", "age", 25.0f);
-        Row third = MakeRow("name", "Carol", "age", 28.0f);
-
-        batch.Add(first);
-        batch.Add(second);
-        batch.Add(third);
+        batch.Add([DataValue.FromString("Alice"), DataValue.FromFloat32(30.0f)]);
+        batch.Add([DataValue.FromString("Bob"), DataValue.FromFloat32(25.0f)]);
+        batch.Add([DataValue.FromString("Carol"), DataValue.FromFloat32(28.0f)]);
 
         Assert.Equal("Alice", batch[0]["name"].AsString());
         Assert.Equal("Bob", batch[1]["name"].AsString());
         Assert.Equal("Carol", batch[2]["name"].AsString());
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
 
     /// <summary>
@@ -90,14 +78,15 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void IndexerThrowsForNegativeIndex()
     {
-        RowBatch batch = RowBatch.Rent(4);
-        batch.Add(MakeRow("x", 1.0f));
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 4);
+        batch.Add([DataValue.FromFloat32(1.0f)]);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => batch[-1]);
+        Assert.Throws<IndexOutOfRangeException>(() => batch[-1]);
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
-
+    
     /// <summary>
     /// Verifies that the indexer throws <see cref="ArgumentOutOfRangeException"/>
     /// when the index equals or exceeds the current count.
@@ -107,12 +96,13 @@ public class RowBatchTests : ServiceTestBase
     [InlineData(5)]
     public void IndexerThrowsForOutOfRangeIndex(int index)
     {
-        RowBatch batch = RowBatch.Rent(8);
-        batch.Add(MakeRow("x", 1.0f));
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 8);
+        batch.Add([DataValue.FromFloat32(1.0f)]);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => batch[index]);
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
 
     /// <summary>
@@ -122,12 +112,13 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void AddThrowsWhenBatchIsFull()
     {
-        RowBatch batch = RowBatch.Rent(1);
-        batch.Add(MakeRow("x", 1.0f));
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 1);
+        batch.Add([DataValue.FromFloat32(1.0f)]);
 
-        Assert.Throws<InvalidOperationException>(() => batch.Add(MakeRow("x", 2.0f)));
+        Assert.Throws<InvalidOperationException>(() => batch.Add([DataValue.FromFloat32(2.0f)]));
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
     }
 
     /// <summary>
@@ -137,30 +128,31 @@ public class RowBatchTests : ServiceTestBase
     [Fact]
     public void ReturnResetsCountToZero()
     {
-        RowBatch batch = RowBatch.Rent(4);
-        batch.Add(MakeRow("x", 1.0f));
-        batch.Add(MakeRow("x", 2.0f));
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 4);
+        batch.Add([DataValue.FromFloat32(1.0f)]);
+        batch.Add([DataValue.FromFloat32(2.0f)]);
 
         Assert.Equal(2, batch.Count);
 
-        batch.Return();
+        pool.ReturnRowBatch(batch);
 
         Assert.Equal(0, batch.Count);
     }
 
     /// <summary>
-    /// Verifies that calling <see cref="RowBatch.Return"/> twice does not
-    /// throw — the operation is idempotent.
+    /// Verifies that calling <see cref="Pool.ReturnRowBatch"/> twice throws
+    /// and <see cref="ObjectDisposedException" />.
     /// </summary>
     [Fact]
-    public void ReturnIsIdempotent()
+    public void DoubleReturnThrowsDisposedException()
     {
-        RowBatch batch = RowBatch.Rent(4);
-        batch.Add(MakeRow("x", 1.0f));
+        ColumnLookup columnLookup = new(["x"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 4);
+        batch.Add([DataValue.FromFloat32(1.0f)]);
 
-        batch.Return();
-        batch.Return();
+        pool.ReturnRowBatch(batch);
 
-        Assert.Equal(0, batch.Count);
+        Assert.Throws<ObjectDisposedException>(() => pool.ReturnRowBatch(batch));
     }
 }

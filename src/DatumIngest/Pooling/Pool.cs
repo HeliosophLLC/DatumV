@@ -131,7 +131,7 @@ public sealed class Pool
             rows[i] = new Row(columnLookup, rows[i].RawValues);
         }
 
-        return new(columnLookup, rows, arena, count);
+        return new(columnLookup, rows, rows.Length, arena, count);
     }
 
     /// <summary>
