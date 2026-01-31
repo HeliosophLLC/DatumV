@@ -163,6 +163,8 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Json     => DataValue.FromJsonInSidecar(offset: 0, length: 4),
         DataKind.Struct   => DataValue.NullUntypedStruct(),
         DataKind.Type     => DataValue.FromType(DataKind.Int32),
+        DataKind.Point2D  => DataValue.FromPoint2D(4, 5),
+        DataKind.Point3D  => DataValue.FromPoint3D(1, 2, 3),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
             $"No sample value defined for DataKind.{kind}. Update CreateSampleValue."),
     };
@@ -240,6 +242,12 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 break;
             case DataKind.Type:
                 Assert.Equal(expected.AsType(), actual.AsType());
+                break;
+            case DataKind.Point2D:
+                Assert.Equal(expected.AsPoint2D(), actual.AsPoint2D());
+                break;
+            case DataKind.Point3D:
+                Assert.Equal(expected.AsPoint3D(), actual.AsPoint3D());
                 break;
             default:
                 Assert.Fail($"No assertion defined for DataKind.{kind}.");
