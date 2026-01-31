@@ -203,6 +203,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Brief-duration lock protecting the three composite-index dictionaries
+    /// (<see cref="_compositeIndexTrees"/>, <see cref="_compositeIndexColumnIndices"/>,
+    /// <see cref="_compositeIndexDescriptors"/>) against concurrent reader
+    /// enumeration during a mutation. Separate from <see cref="_mutationLock"/>:
+    /// writers acquire <c>_mutationLock</c> for the whole operation (which can be
+    /// long, e.g. a CREATE INDEX backfill) and only need this fast lock around the
+    /// final dict swap; readers (<see cref="GetCompositeIndexes"/>) take only this
+    /// fast lock to snapshot a consistent view without waiting on a slow writer.
+    /// </summary>
+    private readonly object _compositeIndexSync = new();
+
+    /// <summary>
     /// Initializes the provider with the given descriptor and pool. Opens
     /// the v2 <c>.datum</c> file, parses its footer, and (when the file
     /// declares <see cref="DatumFileFlagsV2.HasSidecarReferences"/>)
@@ -297,16 +309,23 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// <inheritdoc />
     public IReadOnlyList<Indexing.ICompositeIndex> GetCompositeIndexes()
     {
-        if (_compositeIndexTrees.Count == 0) return Array.Empty<Indexing.ICompositeIndex>();
-
-        Indexing.ICompositeIndex[] result = new Indexing.ICompositeIndex[_compositeIndexTrees.Count];
-        int i = 0;
-        foreach ((string name, Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree) in _compositeIndexTrees)
+        // Snapshot the dictionaries under the dict lock so a concurrent
+        // CREATE / DROP / UPDATE-rebuild can't tear the enumeration. Wrapping
+        // adapters around the captured tree handles is safe outside the lock
+        // — the adapters hold the handle, not the dict.
+        lock (_compositeIndexSync)
         {
-            IndexDescriptor descriptor = _compositeIndexDescriptors[name];
-            result[i++] = new MutableBPlusTreeBytesCompositeIndex(tree, descriptor);
+            if (_compositeIndexTrees.Count == 0) return Array.Empty<Indexing.ICompositeIndex>();
+
+            Indexing.ICompositeIndex[] result = new Indexing.ICompositeIndex[_compositeIndexTrees.Count];
+            int i = 0;
+            foreach ((string name, Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree) in _compositeIndexTrees)
+            {
+                IndexDescriptor descriptor = _compositeIndexDescriptors[name];
+                result[i++] = new MutableBPlusTreeBytesCompositeIndex(tree, descriptor);
+            }
+            return result;
         }
-        return result;
     }
 
     /// <summary>
@@ -492,28 +511,37 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             string treePath = GetCompositeIndexPath(_descriptor.FilePath, descriptor.Name);
             Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
-                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(treePath, allowDuplicates: true);
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(treePath, allowDuplicates: !descriptor.IsUnique);
 
             try
             {
                 // Backfill into the local tree handle BEFORE it's visible
                 // to readers / future append sessions. Empty tables yield
-                // no batches and the loop is a cheap no-op.
+                // no batches and the loop is a cheap no-op. For UNIQUE
+                // indexes a duplicate encountered during backfill bubbles
+                // up via DuplicateKeyException (translated by the
+                // helper) and the outer catch rolls back the partially
+                // built tree before any visible-state mutation.
                 if (GetRowCount() > 0)
                 {
-                    Dictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets = new(StringComparer.OrdinalIgnoreCase)
+                    Dictionary<string, CompositeIndexBuildTarget> targets = new(StringComparer.OrdinalIgnoreCase)
                     {
-                        [descriptor.Name] = (tree, ordinals),
+                        [descriptor.Name] = new CompositeIndexBuildTarget(tree, ordinals, descriptor.IsUnique, descriptor.Name),
                     };
                     await PopulateCompositeIndexesFromScanAsync(targets, CancellationToken.None).ConfigureAwait(false);
                 }
 
                 // Build succeeded — publish to visible state. After this
                 // point the planner picks up the index and any pending
-                // AppendSession will see it on its next start.
-                _compositeIndexTrees[descriptor.Name] = tree;
-                _compositeIndexColumnIndices[descriptor.Name] = ordinals;
-                _compositeIndexDescriptors[descriptor.Name] = descriptor;
+                // AppendSession will see it on its next start. The dict
+                // lock makes the three-dict update atomic from any
+                // concurrent GetCompositeIndexes() snapshot.
+                lock (_compositeIndexSync)
+                {
+                    _compositeIndexTrees[descriptor.Name] = tree;
+                    _compositeIndexColumnIndices[descriptor.Name] = ordinals;
+                    _compositeIndexDescriptors[descriptor.Name] = descriptor;
+                }
             }
             catch
             {
@@ -549,25 +577,37 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // is the source of truth for "what indexes existed pre-rebuild."
         List<IndexDescriptor> descriptors = new(_compositeIndexDescriptors.Values);
 
-        // Close handles and delete sidecars so Create can re-make them.
+        // Snapshot the existing tree handles under the dict lock, clear the
+        // dicts atomically (so concurrent GetCompositeIndexes sees either
+        // pre- or post-clear state), then dispose handles + delete files
+        // outside the lock — disposal is slow and shouldn't block readers.
+        List<Indexing.BTree.MutableBytes.MutableBPlusTreeBytes> oldHandles = new();
+        lock (_compositeIndexSync)
+        {
+            foreach (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes h in _compositeIndexTrees.Values)
+            {
+                oldHandles.Add(h);
+            }
+            _compositeIndexTrees.Clear();
+            _compositeIndexColumnIndices.Clear();
+            _compositeIndexDescriptors.Clear();
+        }
+        foreach (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes h in oldHandles)
+        {
+            try { h.Dispose(); } catch { /* best-effort */ }
+        }
         foreach (IndexDescriptor d in descriptors)
         {
-            if (_compositeIndexTrees.TryGetValue(d.Name, out Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? oldTree))
-            {
-                try { oldTree.Dispose(); } catch { /* best-effort */ }
-            }
             string path = GetCompositeIndexPath(_descriptor.FilePath, d.Name);
             try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ }
         }
-        _compositeIndexTrees.Clear();
-        _compositeIndexColumnIndices.Clear();
-        _compositeIndexDescriptors.Clear();
 
         // Recreate empty trees. Schema-drift (column missing) drops the
         // index — the catalog descriptor entry will be cleaned up by the
         // next save (or by an explicit DROP INDEX); we just don't open
-        // the tree.
+        // the tree. Republish under the dict lock.
         Schema schema = _snapshot.Schema;
+        Dictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals, IndexDescriptor Descriptor)> rebuilt = new();
         foreach (IndexDescriptor d in descriptors)
         {
             int[]? ordinals = TryResolveCompositeIndexOrdinals(schema, d);
@@ -575,38 +615,61 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
             string path = GetCompositeIndexPath(_descriptor.FilePath, d.Name);
             Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
-                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(path, allowDuplicates: true);
-            _compositeIndexTrees[d.Name] = tree;
-            _compositeIndexColumnIndices[d.Name] = ordinals;
-            _compositeIndexDescriptors[d.Name] = d;
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(path, allowDuplicates: !d.IsUnique);
+            rebuilt[d.Name] = (tree, ordinals, d);
+        }
+        lock (_compositeIndexSync)
+        {
+            foreach ((string name, (var tree, int[] ordinals, IndexDescriptor descriptor)) in rebuilt)
+            {
+                _compositeIndexTrees[name] = tree;
+                _compositeIndexColumnIndices[name] = ordinals;
+                _compositeIndexDescriptors[name] = descriptor;
+            }
         }
 
         if (_compositeIndexTrees.Count == 0) return;
 
-        Dictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets =
+        Dictionary<string, CompositeIndexBuildTarget> targets =
             new(StringComparer.OrdinalIgnoreCase);
         foreach ((string name, int[] ordinals) in _compositeIndexColumnIndices)
         {
-            targets[name] = (_compositeIndexTrees[name], ordinals);
+            IndexDescriptor d = _compositeIndexDescriptors[name];
+            targets[name] = new CompositeIndexBuildTarget(_compositeIndexTrees[name], ordinals, d.IsUnique, d.Name);
         }
         await PopulateCompositeIndexesFromScanAsync(targets, ct).ConfigureAwait(false);
     }
 
     /// <summary>
+    /// Per-target state for <see cref="PopulateCompositeIndexesFromScanAsync"/>.
+    /// Carries the open tree handle plus the metadata the scan loop needs to
+    /// extract row tuples, encode them, and translate duplicate violations
+    /// for UNIQUE indexes into a user-facing error.
+    /// </summary>
+    private readonly record struct CompositeIndexBuildTarget(
+        Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree,
+        int[] Ordinals,
+        bool IsUnique,
+        string IndexName);
+
+    /// <summary>
     /// Streams every live row through a scan and inserts entries into each
-    /// (tree, ordinals) pair in <paramref name="targets"/>. Absolute row
-    /// positions map to <c>(chunkIndex, rowOffsetInChunk)</c> via the live
-    /// <see cref="SourceIndex"/>'s chunk directory; the planner's seek
-    /// path resolves entries via the same arithmetic. Without a
+    /// target in <paramref name="targets"/>. Absolute row positions map to
+    /// <c>(chunkIndex, rowOffsetInChunk)</c> via the live
+    /// <see cref="SourceIndex"/>'s chunk directory; the planner's seek path
+    /// resolves entries via the same arithmetic. Without a
     /// <see cref="SourceIndex"/> the loop falls back to default-chunk-size
     /// partitioning. Caller holds <c>_mutationLock</c>. Trees are passed
     /// explicitly (not looked up from <c>_compositeIndexTrees</c>) so
     /// callers can populate a tree before it's published to the visible
     /// state dictionaries — e.g. CREATE INDEX backfill on a populated
     /// table works against the local handle until the scan completes.
+    /// UNIQUE-index duplicate violations during the scan throw
+    /// <see cref="UniqueIndexViolationException"/>; the caller is expected
+    /// to dispose the partial trees + delete sidecars in a catch.
     /// </summary>
     private async Task PopulateCompositeIndexesFromScanAsync(
-        IReadOnlyDictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets,
+        IReadOnlyDictionary<string, CompositeIndexBuildTarget> targets,
         CancellationToken ct)
     {
         if (targets.Count == 0) return;
@@ -645,12 +708,15 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     }
 
                     Row row = batch[r];
-                    foreach ((_, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree, int[] ordinals)) in targets)
+                    foreach ((_, CompositeIndexBuildTarget target) in targets)
                     {
                         // Skip rows with a NULL in any covered column —
                         // matches the AppendSession INSERT path. Indexes
                         // can't be probed by NULL equality anyway, and
-                        // `IS NULL` falls through to scan.
+                        // `IS NULL` falls through to scan. NULLS DISTINCT
+                        // (PG default) for UNIQUE indexes: NULL rows are
+                        // exempt from the uniqueness check.
+                        int[] ordinals = target.Ordinals;
                         DataValue[] tuple = new DataValue[ordinals.Length];
                         bool hasNull = false;
                         for (int p = 0; p < ordinals.Length; p++)
@@ -662,9 +728,24 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         if (hasNull) continue;
 
                         byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
-                        tree.Insert(
-                            new Indexing.BTree.MutableBytes.BytesIndexEntry(
-                                encoded, chunkIndex, rowOffsetInChunk));
+                        try
+                        {
+                            target.Tree.Insert(
+                                new Indexing.BTree.MutableBytes.BytesIndexEntry(
+                                    encoded, chunkIndex, rowOffsetInChunk));
+                        }
+                        catch (Indexing.BTree.MutableBytes.DuplicateKeyException)
+                        {
+                            // Backfill of a UNIQUE index across rows that
+                            // already contain duplicate tuples. Surface
+                            // a user-facing violation so CREATE INDEX
+                            // fails cleanly and the outer catch rolls
+                            // back the half-built tree before the
+                            // visible-state mutation.
+                            throw new UniqueIndexViolationException(
+                                $"CREATE UNIQUE INDEX '{target.IndexName}': duplicate key across rows " +
+                                $"on columns ({string.Join(", ", target.Ordinals.Select(o => _snapshot.Schema.Columns[o].Name))}).");
+                        }
                     }
                     absoluteRow++;
                 }
@@ -681,18 +762,53 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     /// file. Idempotent — DROP INDEX IF EXISTS may reach here with the
     /// tree already disposed if an earlier session crashed mid-cleanup.
     /// </summary>
+    /// <remarks>
+    /// Holds <see cref="_mutationLock"/> for the whole operation so
+    /// concurrent INSERT / UPDATE / CREATE-INDEX paths are serialised
+    /// against the drop. The dict-mutation step takes the short
+    /// <see cref="_compositeIndexSync"/> lock so a concurrent
+    /// <see cref="GetCompositeIndexes"/> snapshots a consistent view —
+    /// either with the index present, or without it, never half-removed.
+    /// <para>
+    /// Disposal of the tree handle happens AFTER both locks are released:
+    /// a reader that captured the <c>ICompositeIndex</c> reference before
+    /// the drop may still hold it and observe the disposal as an
+    /// <c>ObjectDisposedException</c> on the next call. This is the
+    /// captured-reference-after-drop race; a true fix needs refcounting
+    /// on the tree handle and is filed as a follow-up.
+    /// </para>
+    /// </remarks>
     internal void DropCompositeIndex(string indexName)
     {
-        if (_compositeIndexTrees.TryGetValue(indexName, out Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? tree))
+        _mutationLock.Wait();
+        try
         {
-            try { tree.Dispose(); } catch { /* best-effort */ }
-            _compositeIndexTrees.Remove(indexName);
-            _compositeIndexColumnIndices.Remove(indexName);
-            _compositeIndexDescriptors.Remove(indexName);
-        }
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes? toDispose;
+            lock (_compositeIndexSync)
+            {
+                if (_compositeIndexTrees.TryGetValue(indexName, out toDispose))
+                {
+                    _compositeIndexTrees.Remove(indexName);
+                    _compositeIndexColumnIndices.Remove(indexName);
+                    _compositeIndexDescriptors.Remove(indexName);
+                }
+            }
 
-        string treePath = GetCompositeIndexPath(_descriptor.FilePath, indexName);
-        try { if (File.Exists(treePath)) File.Delete(treePath); } catch { /* best-effort */ }
+            // Dispose outside the dict lock — closing a FileStream can be
+            // slow under fsync, no reason to block concurrent readers
+            // (they no longer see this entry anyway).
+            if (toDispose is not null)
+            {
+                try { toDispose.Dispose(); } catch { /* best-effort */ }
+            }
+
+            string treePath = GetCompositeIndexPath(_descriptor.FilePath, indexName);
+            try { if (File.Exists(treePath)) File.Delete(treePath); } catch { /* best-effort */ }
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
     }
 
     /// <summary>
@@ -2443,29 +2559,72 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // so the session has stable per-index queues + column ordinals.
             // ALTER DROP COLUMN that affects a covered column drops the
             // dependent index, so the ordinals are guaranteed stable for the
-            // session's lifetime.
+            // session's lifetime. Capturing the Tree handle here too lets
+            // unique-index pre-flight probe the existing keys without
+            // re-looking-up the dict on every row.
             if (provider._compositeIndexTrees.Count > 0)
             {
                 _compositeIndexStates = new Dictionary<string, CompositeIndexState>(
                     StringComparer.OrdinalIgnoreCase);
-                foreach ((string indexName, _) in provider._compositeIndexTrees)
+                foreach ((string indexName, Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree) in provider._compositeIndexTrees)
                 {
                     int[] ordinals = provider._compositeIndexColumnIndices[indexName];
+                    IndexDescriptor descriptor = provider._compositeIndexDescriptors[indexName];
+                    HashSet<byte[]>? seenUniqueKeys = descriptor.IsUnique
+                        ? new HashSet<byte[]>(ByteArraySequenceEqualityComparer.Instance)
+                        : null;
                     _compositeIndexStates[indexName] = new CompositeIndexState(
                         ColumnIndices: ordinals,
-                        PendingEntries: new List<Indexing.BTree.MutableBytes.BytesIndexEntry>());
+                        IsUnique: descriptor.IsUnique,
+                        Tree: tree,
+                        PendingEntries: new List<Indexing.BTree.MutableBytes.BytesIndexEntry>(),
+                        SeenUniqueKeys: seenUniqueKeys);
                 }
             }
         }
 
         /// <summary>
         /// Per-index state captured at the start of an append session: the
-        /// schema column indices to extract per row plus the queue of
-        /// encoded entries waiting for CommitAsync to flush into the tree.
+        /// schema column indices to extract per row, the open tree handle,
+        /// the queue of encoded entries waiting for CommitAsync to flush,
+        /// and (for UNIQUE indexes) the within-session "seen" set used by
+        /// the pre-flight uniqueness check to catch duplicates BEFORE the
+        /// data commit. The set survives the lifetime of one
+        /// <c>AppendSession</c> so a single INSERT batch can't smuggle a
+        /// pair of colliding rows past the tree's per-row check.
         /// </summary>
         private sealed record CompositeIndexState(
             int[] ColumnIndices,
-            List<Indexing.BTree.MutableBytes.BytesIndexEntry> PendingEntries);
+            bool IsUnique,
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree,
+            List<Indexing.BTree.MutableBytes.BytesIndexEntry> PendingEntries,
+            HashSet<byte[]>? SeenUniqueKeys);
+
+        /// <summary>
+        /// Value-equality + content-derived hash for byte arrays. Used by
+        /// the UNIQUE-index pre-flight <c>HashSet&lt;byte[]&gt;</c>; the
+        /// default reference-equality semantics would let two distinct
+        /// arrays with identical content slip past.
+        /// </summary>
+        private sealed class ByteArraySequenceEqualityComparer : IEqualityComparer<byte[]>
+        {
+            internal static readonly ByteArraySequenceEqualityComparer Instance = new();
+            public bool Equals(byte[]? x, byte[]? y) =>
+                x is null ? y is null : y is not null && x.AsSpan().SequenceEqual(y);
+            public int GetHashCode(byte[] obj)
+            {
+                // Simple FNV-1a 32-bit. Encoded composite keys are short
+                // (typically ≤ 40 bytes) and collisions only cost a few
+                // SequenceEqual probes inside the HashSet.
+                uint hash = 2166136261;
+                foreach (byte b in obj)
+                {
+                    hash ^= b;
+                    hash *= 16777619;
+                }
+                return (int)hash;
+            }
+        }
 
         public IdentityState? IdentityState => _initialIdentityState is null
             ? null
@@ -2593,10 +2752,18 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // column — Postgres-compatible equality semantics
                 // (`= NULL` never matches, so the missing entry can
                 // never cause a missed seek hit). `IS NULL` falls
-                // through to scan regardless.
+                // through to scan regardless. NULLS DISTINCT also exempts
+                // these rows from the UNIQUE check.
+                //
+                // For UNIQUE indexes, pre-flight check before queueing:
+                // probe the tree (existing rows) and the session-local
+                // seen-set (rows queued earlier in THIS batch). Throwing
+                // here, before the row reaches the writer, keeps INSERT
+                // all-or-nothing — a failed unique violation never
+                // commits half a batch.
                 if (_compositeIndexStates is { } compositeStates)
                 {
-                    foreach (CompositeIndexState state in compositeStates.Values)
+                    foreach ((string indexName, CompositeIndexState state) in compositeStates)
                     {
                         DataValue[] tuple = new DataValue[state.ColumnIndices.Length];
                         bool hasNull = false;
@@ -2609,6 +2776,23 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         if (hasNull) continue;
 
                         byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
+
+                        if (state.IsUnique)
+                        {
+                            // Probe existing entries on disk.
+                            if (state.Tree.TryFind(encoded, out _))
+                            {
+                                throw new UniqueIndexViolationException(
+                                    $"INSERT into '{_provider._descriptor.Name}' would violate UNIQUE INDEX '{indexName}': a row with the same key already exists.");
+                            }
+                            // Probe within-batch rows queued earlier.
+                            if (!state.SeenUniqueKeys!.Add(encoded))
+                            {
+                                throw new UniqueIndexViolationException(
+                                    $"INSERT into '{_provider._descriptor.Name}' would violate UNIQUE INDEX '{indexName}': two rows in this batch share the same key.");
+                            }
+                        }
+
                         state.PendingEntries.Add(
                             new Indexing.BTree.MutableBytes.BytesIndexEntry(
                                 encoded, chunkIndex, rowOffsetInChunk));
@@ -2752,6 +2936,12 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // this loop and the next commit, the affected indexes go
                 // slightly stale — rebuild via DROP / CREATE INDEX, or
                 // (future) REINDEX once it learns about composite trees.
+                //
+                // For UNIQUE indexes, the underlying tree throws
+                // DuplicateKeyException when an insert would create a
+                // second entry with the same encoded key. Translate into
+                // UniqueIndexViolationException so the INSERT statement
+                // surfaces a clean error.
                 if (_compositeIndexStates is { } compositeStates)
                 {
                     foreach ((string indexName, CompositeIndexState state) in compositeStates)
@@ -2765,7 +2955,16 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         }
                         foreach (Indexing.BTree.MutableBytes.BytesIndexEntry entry in state.PendingEntries)
                         {
-                            tree.Insert(entry);
+                            try
+                            {
+                                tree.Insert(entry);
+                            }
+                            catch (Indexing.BTree.MutableBytes.DuplicateKeyException)
+                            {
+                                throw new UniqueIndexViolationException(
+                                    $"INSERT violated UNIQUE INDEX '{indexName}' on table '{_provider._descriptor.Name}': " +
+                                    "a row with the same key already exists.");
+                            }
                         }
                         state.PendingEntries.Clear();
                     }

@@ -555,43 +555,55 @@ When a `.datum` file is mutated via `INSERT` / `DELETE` / `ALTER TABLE ADD COLUM
 
 ## Mutable B+Trees
 
-In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, the engine maintains two families of *mutable* B+Tree sidecars that survive `INSERT` / `DELETE` / `UPDATE` without a rebuild. They share a page layout (8 KiB pages, dual-slot CRC32 header, COW commits, bump-only allocation) but use different key shapes — and that key-shape split is why two implementations coexist rather than one.
+In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, the engine maintains three families of *mutable* B+Tree sidecars that survive `INSERT` / `DELETE` / `UPDATE` without a rebuild. They share a page layout (8 KiB pages, dual-slot CRC32 header, COW commits, bump-only allocation) but split along key shape and use case:
 
-| | `.datum-pkindex` (bytes-keyed) | `.datum-bptree-{col}` (typed) |
-|---|---|---|
-| File magic | `BKBT` | `PKBT` |
-| Key shape | Variable-length `byte[]` (memcmp-orderable) | Fixed-width typed `DataValue` |
-| Backing class | `MutableBPlusTreeBytes` | `MutableBPlusTree` |
-| Purpose | `PRIMARY KEY` uniqueness enforcement | Per-column WHERE / range acceleration |
-| Composite keys | Yes (encoded via `CompositeKeyEncoder`) | No (single column only) |
-| Duplicates | Rejected (UNIQUE invariant) | Allowed |
-| Query surface | Point lookup only | Point + range + forward/backward traversal + chunk pruning |
-| Maintained by | `DatumFileTableProviderV2` at `CommitAsync` | `IncrementalIndexBuilder` / `Indexer` |
-| Lifetime | Created at `CREATE TABLE`, dropped at `DROP TABLE` | Built/extended on indexer passes; invalidated on schema change |
-| Long keys | Supported (variable-length leaves) | Limited to what fits inline in a `DataValue` (≤ 16 UTF-8 bytes for strings, ≤ 16 bytes for byte arrays) |
+| | `.datum-pkindex` (bytes-keyed) | `.datum-cindex-{name}` (bytes-keyed) | `.datum-bptree-{col}` (typed) |
+|---|---|---|---|
+| File magic | `BKBT` | `BKBT` | `PKBT` |
+| Key shape | Variable-length `byte[]` (memcmp-orderable) | Variable-length `byte[]` (memcmp-orderable) | Fixed-width typed `DataValue` |
+| Backing class | `MutableBPlusTreeBytes` | `MutableBPlusTreeBytes` | `MutableBPlusTree` |
+| Purpose | `PRIMARY KEY` uniqueness enforcement | User-defined `CREATE INDEX` / `CREATE UNIQUE INDEX` | Per-column auto-built WHERE / range acceleration |
+| Composite keys | Yes (single or multi-column) | Yes (single or multi-column) | No (single column only) |
+| Duplicates | Rejected (PK invariant) | Allowed for `CREATE INDEX`; rejected for `CREATE UNIQUE INDEX` | Allowed |
+| Query surface | Point lookup (uniqueness) | Point lookup + prefix range (leftmost-prefix planner integration) | Point + range + forward/backward traversal + chunk pruning |
+| Maintained by | `DatumFileTableProviderV2` at `CommitAsync` | `DatumFileTableProviderV2` (INSERT queue + flush, UPDATE full rebuild) | `IncrementalIndexBuilder` / `Indexer` |
+| Lifetime | Created at `CREATE TABLE`, dropped at `DROP TABLE` | Created at `CREATE INDEX`, dropped at `DROP INDEX` or by `ALTER DROP COLUMN` cascade | Built/extended on indexer passes; invalidated on schema change |
+| Long keys | Supported (variable-length leaves) | Supported (variable-length leaves) | Limited to what fits inline in a `DataValue` (≤ 16 UTF-8 bytes for strings, ≤ 16 bytes for byte arrays) |
 
-### Why two trees instead of one
+### Why two implementations instead of one
 
 The typed tree ([`MutableBPlusTree`](../src/DatumIngest/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
 
-The trade-off is the inline-payload budget. A `DataValue` inlines up to 16 bytes of string or byte-array content; longer values would have to be stored out-of-line in an `IValueStore`, which doesn't survive across process restarts the way the tree file does. That makes the typed tree a non-starter for long-string primary keys — a 25-character COCO filename like `test2017/000000290551.jpg` overflows the inline budget, and neither does any composite tuple encoded as a single key.
+The trade-off is the inline-payload budget. A `DataValue` inlines up to 16 bytes of string or byte-array content; longer values would have to be stored out-of-line in an `IValueStore`, which doesn't survive across process restarts the way the tree file does. That makes the typed tree a non-starter for long-string primary keys — a 25-character COCO filename like `test2017/000000290551.jpg` overflows the inline budget, and so does any composite tuple encoded as a single key.
 
-The bytes-keyed tree ([`MutableBPlusTreeBytes`](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. `CompositeKeyEncoder` produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column PKs are just the degenerate "tuple of one" case.
+The bytes-keyed tree ([`MutableBPlusTreeBytes`](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. [`CompositeKeyEncoder`](../src/DatumIngest/Indexing/CompositeKeyEncoder.cs) produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column keys are just the degenerate "tuple of one" case. The PK index and user-defined composite indexes share the same tree implementation; they differ only in lifecycle, duplicate-allowance, and integration point.
 
-In principle the bytes tree could subsume the typed tree — every typed key can be byte-encoded. We didn't collapse them because the typed tree's `DataValue`-shaped surface is what `IColumnIndex` consumers already expect, and switching would mean decoding bytes back into typed values on every range scan / chunk-pruning probe. The PK index doesn't need that — it only does point lookups and never returns the key — so the bytes tree's point-only surface fits cleanly there.
+The bytes-keyed tree's read surface — `FindAll`, `FindRange`, `FindPrefix`, `TraverseForward/Backward`, `Delete` — is at parity with the typed tree's. Retiring the typed implementation is a planned future cleanup; what holds it now is that `IColumnIndex` consumers natively speak `DataValue`, and the bytes tree would force a per-call encode + decode that the typed tree skips.
 
 ### Limitations
 
-- **Typed tree** — keys must fit a `DataValue`. Strings and byte arrays longer than the inline budget are rejected at column-index build time (the column gets no acceleration index). No composite keys.
-- **Bytes tree** — point lookup only. No range scans, no forward/backward traversal, no chunk-set pruning. `CompositeKeyEncoder` rejects `NULL`, `Decimal`, and `Point2D` / `Point3D` (no canonical sort order for the latter two). Composite primary keys with these kinds are not supported.
-- **Both** — single-writer per file (`FileShare.None`); a `.datum-pkindex` cannot be open by two `TableCatalog` instances simultaneously.
-- **Both** — torn writes recover to the previous committed slot via the dual-slot header. The active slot is whichever has a valid CRC and the higher commit counter.
-- Distinct from the bulk-loaded B+Tree sections in `.datum-index`: those are Zstd-compressed, immutable, fingerprint-validated, and invalidated on any data mutation. The mutable trees are uncompressed and updated in place on each `INSERT` commit.
+- **Typed tree** — keys must fit a `DataValue`. Strings and byte arrays longer than the inline budget are rejected at column-index build time (the column gets no auto-acceleration index). No composite keys.
+- **Bytes tree** — `CompositeKeyEncoder` rejects `NULL`, `Decimal`, and `Point2D` / `Point3D` (no canonical sort order for the latter two). Indexes covering those kinds aren't supported. `NULL` in any covered column makes a row exempt from indexing (NULLS DISTINCT, PG default) — equality predicates can't match `NULL` anyway, so the row stays scan-only.
+- **All** — single-writer per file (`FileShare.None`); a sidecar cannot be open by two `TableCatalog` instances simultaneously.
+- **All** — torn writes recover to the previous committed slot via the dual-slot header. The active slot is whichever has a valid CRC and the higher commit counter.
+- **All** — distinct from the bulk-loaded B+Tree sections in `.datum-index`: those are Zstd-compressed, immutable, fingerprint-validated, and invalidated on any data mutation. The mutable trees are uncompressed and updated in place on each `INSERT` commit.
 
 ### PK enforcement integration
 
-The PK index is owned by the provider, not the indexer. `CREATE TABLE` with a `PRIMARY KEY` (single-column or composite) creates the file via `MutableBPlusTreeBytes.Create`; `DatumFileTableProviderV2` opens it at provider construction; each `INSERT` extracts PK keys at `WriteAsync` and flushes them into the tree at `CommitAsync` after the data commit succeeds. `DROP TABLE` deletes it alongside the other sidecars.
+The PK index is owned by the provider, not the indexer. `CREATE TABLE` with a `PRIMARY KEY` (single-column or composite) creates the file via `MutableBPlusTreeBytes.Create(allowDuplicates: false)`; `DatumFileTableProviderV2` opens it at provider construction; each `INSERT` extracts PK keys at `WriteAsync` and flushes them into the tree at `CommitAsync` after the data commit succeeds. `DROP TABLE` deletes it alongside the other sidecars.
 
 `InsertExecutor`'s PK uniqueness check encodes each row's PK tuple via `CompositeKeyEncoder` and probes the tree directly when the provider exposes an `IPrimaryKeyLookup`, turning per-INSERT enforcement from `O(table_size)` (preload all existing PK values into a `HashSet`) into `O(insert_size × log table_size)` (per-row tree probe). TEMP / InMemory providers don't maintain a tree and fall back to the scan-based pre-load path.
 
 See [.datum format — `.datum-pkindex`](datum-format.md#optional-sidecar-datum-pkindex) for the on-disk layout.
+
+### User-defined composite secondary indexes
+
+`CREATE INDEX [UNIQUE] name ON table (col1[, col2]*)` materialises a `.datum-cindex-{name}` sidecar — same bytes-keyed tree implementation as the PK index, differing only in:
+
+- **Lifecycle** — owned by `CREATE INDEX` / `DROP INDEX` rather than by `CREATE TABLE`. `DROP TABLE` glob-cleans every `.datum-cindex-*` sidecar belonging to the table; `ALTER TABLE DROP COLUMN` cascades to any dependent composite indexes.
+- **Duplicate policy** — `CREATE INDEX` opens the tree with `allowDuplicates: true`; `CREATE UNIQUE INDEX` opens with `allowDuplicates: false` and surfaces collisions as `UniqueIndexViolationException` at INSERT time. UNIQUE-index enforcement is *pre-flight*: the `AppendSession` probes the tree (and a within-batch seen-set) before queueing each row, so an INSERT batch that would violate uniqueness fails before any data is committed — atomic with the rest of the row write.
+- **Backfill** — `CREATE INDEX` on a populated table scans the existing rows under `_mutationLock`, builds the tree against a local handle, and only publishes the index to the provider's visible-state dictionaries after the scan completes. A `CREATE UNIQUE INDEX` whose backfill encounters duplicates fails atomically — the partial sidecar is deleted before any visible state changes.
+- **Planner integration** — the planner exposes composite indexes via `ITableProvider.GetCompositeIndexes()` (returns a `_compositeIndexSync`-snapshotted list). `ScanOperator`'s exact-row-seek path matches AND-chained equality predicates against the longest *leftmost prefix* of each index's columns: a full match uses `FindExact` (point lookup), a partial prefix uses `FindPrefix` (range scan over byte-encoded prefix). The seek-path's selectivity-based tiebreak picks the strategy that fewest positions back from among all candidates (composite, single-column, statistics-pruned chunk).
+- **Maintenance under mutation** — INSERT queues per-row entries during `WriteAsync` and flushes at `CommitAsync` (same pattern as PK). UPDATE rebuilds every composite index from scratch after the data commit (the indexed key may have changed; rebuild from the post-mutation table is simpler than trying to encode an incremental delta). DELETE doesn't currently touch the tree — tombstoned rows leave stale entries that get pruned at the next `DROP INDEX` / `CREATE INDEX` cycle, but the seek path still produces correct results because downstream filters reject the tombstoned rows.
+
+See the DDL surface in [DDL / DML — CREATE INDEX](sql/ddl-dml.md#create-index--create-unique-index) for the user-facing syntax.

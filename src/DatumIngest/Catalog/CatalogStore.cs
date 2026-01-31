@@ -665,6 +665,14 @@ public sealed class CatalogFileIndexEntry
 
     /// <summary>The ordered list of column names covered by the index.</summary>
     public List<string>? Columns { get; set; }
+
+    /// <summary>
+    /// <see langword="true"/> for indexes created via <c>CREATE UNIQUE INDEX</c>.
+    /// Absent on catalog files written before unique indexes existed; loaded
+    /// as <see langword="false"/> in that case, matching the legacy behavior
+    /// (a non-unique secondary index).
+    /// </summary>
+    public bool IsUnique { get; set; }
 }
 
 /// <summary>One UDF entry in the persisted catalog.</summary>

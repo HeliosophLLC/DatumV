@@ -1124,11 +1124,11 @@ public sealed record DropTableStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
-/// <c>CREATE INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c> — creates
-/// a maintained secondary index over one or more columns of a table. v1 is
-/// single-column or composite over scalar / temporal / Uuid / String kinds;
-/// the encoder rejects array / Decimal / Point columns. UNIQUE indexes,
-/// expression indexes, and partial indexes are not supported in v1.
+/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c> —
+/// creates a maintained secondary index over one or more columns of a table.
+/// Single-column or composite over scalar / temporal / Uuid / String kinds;
+/// the encoder rejects array / Decimal / Point columns. Expression indexes
+/// and partial indexes are not supported in v1.
 /// </summary>
 /// <param name="IndexName">The name of the index (used in DROP INDEX and as the sidecar filename).</param>
 /// <param name="TableName">The table the index is built on.</param>
@@ -1137,11 +1137,21 @@ public sealed record DropTableStatement(
 /// applies at query time (Postgres semantics).
 /// </param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the index already exists.</param>
+/// <param name="IsUnique">
+/// When <see langword="true"/> (<c>CREATE UNIQUE INDEX</c>), enforces that no
+/// two rows can share the encoded composite key. Violations on INSERT /
+/// UPDATE throw <c>UniqueIndexViolationException</c>; backfill on a populated
+/// table that already contains duplicates fails the CREATE INDEX statement
+/// before the index becomes visible. Unlike <c>PRIMARY KEY</c>, <c>NULL</c> in
+/// any covered column makes the row exempt from the uniqueness check (PG
+/// NULLS DISTINCT default).
+/// </param>
 public sealed record CreateIndexStatement(
     string IndexName,
     string TableName,
     IReadOnlyList<string> Columns,
-    bool IfNotExists = false) : Statement;
+    bool IfNotExists = false,
+    bool IsUnique = false) : Statement;
 
 /// <summary>
 /// <c>DROP INDEX [IF EXISTS] name</c> — removes a maintained secondary index.

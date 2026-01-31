@@ -98,7 +98,66 @@ DROP TABLE features
 DROP TABLE IF EXISTS features
 ```
 
-For a persistent table this deletes the `.datum` file plus all companion sidecars (`.datum-blob`, `.datum-index`, `.datum-manifest`, `.datum-pkindex`).
+For a persistent table this deletes the `.datum` file plus all companion sidecars (`.datum-blob`, `.datum-index`, `.datum-manifest`, `.datum-pkindex`, every `.datum-bptree-*`, and every `.datum-cindex-*`).
+
+### CREATE INDEX / CREATE UNIQUE INDEX
+
+Creates a maintained secondary index over one or more columns of a table. Single-column indexes are leftmost-prefix degenerate cases of composite indexes — the implementation, planner integration, and on-disk layout are uniform.
+
+```sql
+-- Single-column secondary index.
+CREATE INDEX idx_users_email ON users (email)
+
+-- Composite secondary index. Leftmost-prefix matching applies at query time:
+-- WHERE customer_id = X uses the index; WHERE order_date = Y alone does not.
+CREATE INDEX idx_orders_cust_date ON orders (customer_id, order_date)
+
+-- IF NOT EXISTS suppresses the error when an index with the same name already
+-- exists; the existing definition is not validated against the new one.
+CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)
+
+-- UNIQUE enforces that no two rows share the same encoded key. Violations
+-- on INSERT throw UniqueIndexViolationException before the data commit
+-- (the check is pre-flight, so the INSERT batch is atomic — no half-commit).
+CREATE UNIQUE INDEX idx_users_email_unique ON users (email)
+```
+
+Index names are catalog-global (Postgres semantics) — a name used on one table cannot be reused on another. Composite indexes back equality and leftmost-prefix-equality predicates only; range comparisons (`<`, `>`, `BETWEEN`) on indexed columns are served by the auto-built per-column `.datum-bptree-*` files instead.
+
+#### Permitted column kinds
+
+The composite-key encoder accepts the same scalar / temporal / Uuid / String kinds as `PRIMARY KEY`. Array columns (including `UInt8[]`), `Decimal`, and `Point2D` / `Point3D` are rejected — they have no canonical sort encoding. Long strings are supported (the bytes-keyed tree uses variable-length leaves, not the 16-byte inline `DataValue` budget).
+
+#### `NULL` handling
+
+Rows where any covered column is `NULL` are exempt from the index — they exist in the table but no entry is written to the tree. For equality predicates this is a no-op: `WHERE col = NULL` is always false in SQL, so the missing entry can never cause a missed seek hit. `IS NULL` / `IS NOT NULL` falls through to scan. For `UNIQUE` indexes the same NULLS DISTINCT semantics apply (PG default): two rows with `NULL` in the indexed column coexist freely.
+
+#### Backfill
+
+`CREATE INDEX` on a populated table scans the existing rows under the provider's mutation lock, builds the tree against a local handle, and only publishes the index to the planner after the scan completes. A `CREATE UNIQUE INDEX` whose backfill encounters duplicate keys fails atomically with `UniqueIndexViolationException` — the partial sidecar is deleted before any catalog state changes.
+
+#### Maintenance under mutation
+
+| Mutation | Composite-index behavior |
+|---|---|
+| `INSERT` | Per-row entries queued during `WriteAsync` and flushed at `CommitAsync`. Pre-flight uniqueness check for `UNIQUE` indexes runs before the data commit, so failed INSERTs commit no rows. |
+| `UPDATE` | After the data commit, every composite index on the table is rebuilt from a full scan. Indexed-column values may have changed; rebuild is simpler than encoding an incremental delta. |
+| `DELETE` | Tombstones do not currently update the index — stale entries point at tombstoned rows. Downstream scan filters still produce correct results because tombstoned rows are skipped in the read path. `DROP INDEX` + `CREATE INDEX` prunes the stale entries. |
+| `ALTER TABLE DROP COLUMN` | Cascades to every composite index whose column list covers the dropped column (PG semantics — indexes aren't user-visible dependent objects requiring explicit `CASCADE`). |
+| `DROP TABLE` | Glob-deletes every `.datum-cindex-*` sidecar alongside the data file. |
+
+#### Catalog persistence
+
+Composite indexes are persisted in `.datum-catalog.json` and rehydrated at provider construction. `IsUnique` survives the round-trip; catalog files written before unique indexes existed load with `IsUnique = false`.
+
+### DROP INDEX
+
+```sql
+DROP INDEX idx_users_email
+DROP INDEX IF EXISTS idx_users_email
+```
+
+Closes the tree handle, removes the `.datum-cindex-*` sidecar, and updates the catalog. The operation acquires the provider's mutation lock — concurrent `INSERT` / `UPDATE` / `CREATE INDEX` serialise against the drop. A concurrent reader that captured an `ICompositeIndex` reference *before* the drop and calls into it *after* gets an `ObjectDisposedException`; that captured-reference race is a known v1 limitation (refcounting the tree handle would close it).
 
 ### INSERT INTO
 

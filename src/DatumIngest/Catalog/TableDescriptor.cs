@@ -59,6 +59,14 @@ public sealed record TableDescriptor(
 /// </summary>
 /// <param name="Name">Index name (unique within the table; used as the sidecar filename).</param>
 /// <param name="Columns">Ordered list of column names covered by the index.</param>
+/// <param name="IsUnique">
+/// <see langword="true"/> for indexes created via <c>CREATE UNIQUE INDEX</c>.
+/// The backing tree is opened with <c>allowDuplicates: false</c>; INSERTs
+/// that would produce a second entry with the same encoded key throw a
+/// uniqueness violation. Rows where any covered column is <c>NULL</c> are
+/// exempt from the check (NULLS DISTINCT, PG default).
+/// </param>
 public sealed record IndexDescriptor(
     string Name,
-    IReadOnlyList<string> Columns);
+    IReadOnlyList<string> Columns,
+    bool IsUnique = false);

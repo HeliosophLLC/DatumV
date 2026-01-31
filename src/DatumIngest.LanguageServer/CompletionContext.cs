@@ -1207,7 +1207,7 @@ public enum CompletionZoneKind
 
     // ───────────────────── DDL / DML zones ─────────────────────
 
-    /// <summary>After CREATE — offer TEMP, TEMPORARY, TABLE, INDEX.</summary>
+    /// <summary>After CREATE — offer TEMP, TEMPORARY, TABLE, INDEX, UNIQUE INDEX, FUNCTION, PROCEDURE, OR REPLACE.</summary>
     AfterCreate,
 
     /// <summary>After DROP — offer TABLE, INDEX, IF EXISTS.</summary>

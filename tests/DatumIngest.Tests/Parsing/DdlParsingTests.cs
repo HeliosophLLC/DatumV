@@ -898,6 +898,40 @@ public class DdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateUniqueIndex()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE UNIQUE INDEX idx_users_email ON users (email)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("idx_users_email", create.IndexName);
+        Assert.Equal("users", create.TableName);
+        Assert.Equal(new[] { "email" }, create.Columns);
+        Assert.True(create.IsUnique);
+    }
+
+    [Fact]
+    public void CreateUniqueIndexWithIfNotExists()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.True(create.IsUnique);
+        Assert.True(create.IfNotExists);
+    }
+
+    [Fact]
+    public void CreateIndexWithoutUniqueIsNotUnique()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_users_email ON users (email)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.False(create.IsUnique);
+    }
+
+    [Fact]
     public void DropIndex()
     {
         Statement statement = SqlParser.ParseStatement("DROP INDEX idx_uid");

@@ -289,6 +289,9 @@ public enum SqlToken
     /// <summary>The INDEX keyword (CREATE INDEX / DROP INDEX).</summary>
     Index,
 
+    /// <summary>The UNIQUE keyword (CREATE UNIQUE INDEX).</summary>
+    Unique,
+
     /// <summary>The ALTER keyword (DDL table modification).</summary>
     Alter,
 

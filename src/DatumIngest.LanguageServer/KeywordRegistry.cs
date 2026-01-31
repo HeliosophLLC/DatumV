@@ -207,7 +207,7 @@ internal static class KeywordRegistry
             ["ALL", "SELECT"],
 
         [CompletionZoneKind.AfterCreate] =
-            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "FUNCTION", "PROCEDURE", "OR REPLACE"],
+            ["TEMP", "TEMPORARY", "TABLE", "INDEX", "UNIQUE INDEX", "FUNCTION", "PROCEDURE", "OR REPLACE"],
 
         [CompletionZoneKind.AfterDrop] =
             ["TABLE", "INDEX", "FUNCTION", "PROCEDURE", "IF EXISTS"],
@@ -356,6 +356,7 @@ internal static class KeywordRegistry
         [SqlToken.Analyze] = ["ANALYZE"],
         [SqlToken.Reindex] = ["REINDEX"],
         [SqlToken.Index] = ["INDEX"],
+        [SqlToken.Unique] = ["UNIQUE INDEX"],
         [SqlToken.Alter] = ["ALTER"],
         [SqlToken.Add] = ["ADD"],
         [SqlToken.Column] = ["COLUMN"],

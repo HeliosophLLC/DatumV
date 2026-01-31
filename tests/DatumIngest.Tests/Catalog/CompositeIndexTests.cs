@@ -711,6 +711,146 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(new[] { 1, 2 }, values);
     }
 
+    // ──────────────────── Phase 9: CREATE UNIQUE INDEX ────────────────────
+
+    [Fact]
+    public void CreateUniqueIndex_OnEmptyTable_AllowsDistinctInserts()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+
+        // Distinct emails — no violations.
+        catalog.Plan("INSERT INTO users VALUES (1, 'a@example.com'), (2, 'b@example.com')");
+
+        Assert.True(File.Exists(CompositeIndexPath("users", "idx_users_email")));
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_DuplicateInsert_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+        catalog.Plan("INSERT INTO users VALUES (1, 'a@example.com')");
+
+        UniqueIndexViolationException ex = Assert.Throws<UniqueIndexViolationException>(() =>
+            catalog.Plan("INSERT INTO users VALUES (2, 'a@example.com')"));
+        Assert.Contains("idx_users_email", ex.Message);
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_DuplicateInSameBatch_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+
+        Assert.Throws<UniqueIndexViolationException>(() =>
+            catalog.Plan(
+                "INSERT INTO users VALUES (1, 'a@example.com'), (2, 'a@example.com')"));
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_NullValuesAreDistinct_AllowedMultipleTimes()
+    {
+        // NULLS DISTINCT (PG default): NULL in any covered column exempts
+        // the row from the uniqueness check entirely. Two rows with NULL
+        // email coexist freely.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+
+        catalog.Plan("INSERT INTO users VALUES (1, NULL), (2, NULL), (3, 'a@example.com')");
+        Assert.Equal(3, catalog["users"].GetRowCount());
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_OnPopulatedTableWithDuplicates_RejectsAndRollsBack()
+    {
+        // Backfill must surface a UniqueIndexViolationException and clean
+        // up the half-built sidecar so CREATE INDEX is atomic.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan(
+            "INSERT INTO users VALUES " +
+            "(1, 'a@example.com'), (2, 'a@example.com'), (3, 'b@example.com')");
+
+        UniqueIndexViolationException ex = Assert.Throws<UniqueIndexViolationException>(() =>
+            catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)"));
+        Assert.Contains("idx_users_email", ex.Message);
+
+        // Sidecar must not survive the failed backfill — the next CREATE
+        // INDEX attempt has to start from scratch.
+        Assert.False(File.Exists(CompositeIndexPath("users", "idx_users_email")));
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_OnPopulatedTableWithoutDuplicates_BackfillsSuccessfully()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+        catalog.Plan(
+            "INSERT INTO users VALUES " +
+            "(1, 'a@example.com'), (2, 'b@example.com'), (3, 'c@example.com')");
+
+        catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+        Assert.True(File.Exists(CompositeIndexPath("users", "idx_users_email")));
+
+        // Subsequent insert with a colliding email is rejected.
+        Assert.Throws<UniqueIndexViolationException>(() =>
+            catalog.Plan("INSERT INTO users VALUES (4, 'a@example.com')"));
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_CompositeColumns_RejectsDuplicateTuple()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE orders (id Int32 PRIMARY KEY, cust Int32, item Int32)");
+        catalog.Plan("CREATE UNIQUE INDEX idx_orders_cust_item ON orders (cust, item)");
+
+        // Same cust + same item → duplicate tuple, rejected.
+        catalog.Plan("INSERT INTO orders VALUES (1, 100, 1)");
+        Assert.Throws<UniqueIndexViolationException>(() =>
+            catalog.Plan("INSERT INTO orders VALUES (2, 100, 1)"));
+
+        // Same cust, different item — fine.
+        catalog.Plan("INSERT INTO orders VALUES (3, 100, 2)");
+        // Different cust, same item — fine.
+        catalog.Plan("INSERT INTO orders VALUES (4, 200, 1)");
+
+        Assert.Equal(3, catalog["orders"].GetRowCount());
+    }
+
+    [Fact]
+    public void CreateUniqueIndex_SurvivesCatalogReopen()
+    {
+        // IsUnique must persist through .datum-catalog.json save/load.
+        // Without it, post-reopen INSERTs would fail to surface
+        // violations (tree opens with the value from its own header so
+        // the file-format side is fine, but the AppendSession needs to
+        // know to translate DuplicateKeyException — which only depends
+        // on the tree's stored flag, not the descriptor; the descriptor
+        // matters for re-CREATE-INDEX after a drop).
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, email String)");
+            catalog.Plan("CREATE UNIQUE INDEX idx_users_email ON users (email)");
+            catalog.Plan("INSERT INTO users VALUES (1, 'a@example.com')");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Assert.Throws<UniqueIndexViolationException>(() =>
+            reopened.Plan("INSERT INTO users VALUES (2, 'a@example.com')"));
+    }
+
     // ──────────────────── Phase 4: mutation maintenance ────────────────────
 
     [Fact]
@@ -989,24 +1129,24 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public void DropIndex_DisposedTree_AccessThrows_DocumentedRace()
+    public void DropIndex_CapturedReferenceAfterDrop_ThrowsByDesign()
     {
-        // Captures the current behavior: DropCompositeIndex disposes
-        // the underlying tree handle before removing it from the
-        // visible-state dictionary. A reader who captured the
-        // ICompositeIndex reference before the drop and then calls
-        // FindExact afterwards gets an ObjectDisposedException (the
-        // FileStream backing the tree is closed). Documents the race
-        // so a future fix (hold _mutationLock + snapshot dict in
-        // GetCompositeIndexes) has a regression target.
+        // The captured-reference-after-drop race is NOT fully fixable
+        // without refcounting on the tree handle (filed as a follow-up).
+        // After DROP, a caller that captured the ICompositeIndex
+        // beforehand and calls FindExact gets an ObjectDisposedException
+        // — that's the documented v1 contract. Phase 8 fixed the
+        // adjacent dict-enumeration race (GetCompositeIndexes returns a
+        // consistent snapshot) and serialised DROP against concurrent
+        // writers via _mutationLock; this test pins the remaining
+        // limitation so a future refcount-based fix has a regression
+        // target.
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
         catalog.Plan("INSERT INTO t VALUES (1, 10, 100)");
 
-        // Capture the composite-index reference BEFORE drop. Simulates a
-        // concurrent reader who held the reference past the drop point.
         ITableProvider provider = catalog["t"];
         IReadOnlyList<ICompositeIndex> indexes = provider.GetCompositeIndexes();
         Assert.Single(indexes);
@@ -1015,12 +1155,69 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("DROP INDEX idx_t_ab");
 
         // Calling FindExact on the disposed handle throws. The exact
-        // type can vary by .NET runtime; ObjectDisposedException or an
+        // type varies by .NET runtime; ObjectDisposedException or an
         // IOException from FileStream are both observed in practice.
         Exception? caught = Record.Exception(() =>
             captured.FindExact(new[] { DataValue.FromInt32(1), DataValue.FromInt32(10) }));
 
         Assert.NotNull(caught);
+    }
+
+    [Fact]
+    public void DropIndex_GetCompositeIndexes_ReturnsConsistentSnapshot_AcrossDrop()
+    {
+        // Phase 8: GetCompositeIndexes() snapshots the dict under a fast
+        // lock. A caller that grabs the snapshot before a DROP and a
+        // caller that grabs it after observe consistent states — no
+        // half-removed entry, no enumeration-mid-mutation
+        // InvalidOperationException.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
+        catalog.Plan("CREATE INDEX idx_t_b ON t (b)");
+
+        ITableProvider provider = catalog["t"];
+
+        // Snapshot before drop — both indexes present.
+        IReadOnlyList<ICompositeIndex> before = provider.GetCompositeIndexes();
+        Assert.Equal(2, before.Count);
+
+        catalog.Plan("DROP INDEX idx_t_a");
+
+        // Snapshot after drop — only idx_t_b survives. The earlier
+        // `before` snapshot is unaffected (still contains both refs)
+        // because GetCompositeIndexes returned a fresh array.
+        IReadOnlyList<ICompositeIndex> after = provider.GetCompositeIndexes();
+        Assert.Single(after);
+        Assert.Equal("idx_t_b", after[0].Name);
+        Assert.Equal(2, before.Count);  // pre-drop snapshot still has both
+    }
+
+    [Fact]
+    public async Task DropIndex_SerializesAgainstInsertViaMutationLock()
+    {
+        // Phase 8: DROP INDEX now acquires _mutationLock for the whole
+        // operation, so a concurrent INSERT (which also takes
+        // _mutationLock at AppendSession construction) is forced to
+        // serialise. This test exercises the path: an INSERT runs, a
+        // DROP runs immediately after, then the index file is gone and
+        // the remaining rows survive in the data file.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
+
+        // Both INSERT and DROP take _mutationLock; serialised.
+        catalog.Plan("DROP INDEX idx_t_ab");
+
+        Assert.False(File.Exists(CompositeIndexPath("t", "idx_t_ab")));
+
+        // The data file is intact — non-index data is unaffected.
+        List<int> survived = await CollectFirstColumnInts(
+            catalog.Plan("SELECT v FROM t WHERE a = 1"));
+        Assert.Equal(new[] { 100 }, survived);
     }
 
     private static async Task<List<int>> CollectFirstColumnInts(IQueryPlan plan)

@@ -150,7 +150,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         {
                             continue;
                         }
-                        indexes.Add(new IndexDescriptor(indexEntry.Name, indexEntry.Columns.ToArray()));
+                        indexes.Add(new IndexDescriptor(indexEntry.Name, indexEntry.Columns.ToArray(), indexEntry.IsUnique));
                     }
                 }
 
@@ -718,7 +718,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
         }
 
-        IndexDescriptor descriptor = new(create.IndexName, create.Columns.ToArray());
+        IndexDescriptor descriptor = new(create.IndexName, create.Columns.ToArray(), create.IsUnique);
         await datumProvider.AddCompositeIndexAsync(descriptor).ConfigureAwait(false);
 
         // Update catalog state and persist.
@@ -1790,6 +1790,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     {
                         Name = index.Name,
                         Columns = new List<string>(index.Columns),
+                        IsUnique = index.IsUnique,
                     });
                 }
                 entry.Indexes = indexEntries;
