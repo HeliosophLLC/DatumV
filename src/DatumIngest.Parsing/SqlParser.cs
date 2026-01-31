@@ -3694,45 +3694,94 @@ public static class SqlParser
          select tableName)
         .Try();
 
+    // Same order-independent alternation as CREATE TABLE columns, minus
+    // PRIMARY KEY — ALTER TABLE ADD COLUMN's AST has no PK slot, and
+    // ALTER-time PK addition isn't supported in v1. Bare `PRIMARY` will
+    // fall out as an unexpected token rather than being silently dropped.
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> AlterAddColumnConstraintParser =
+        NotNullConstraintParser
+            .Or(BareNullConstraintParser)
+            .Or(DefaultConstraintParser)
+            .Or(GeneratedConstraintParser)
+            .Or(BareAsComputedConstraintParser)
+            .Or(BareIdentityConstraintParser);
+
     /// <summary>
-    /// Parses the <c>[COLUMN] col type [NOT NULL] [DEFAULT expr | AS expr]</c>
-    /// body of an <c>ALTER TABLE name ADD</c> statement once the
-    /// <c>ADD</c> keyword has been consumed.
+    /// Parses the <c>[COLUMN] col type [column_constraint …]</c> body of an
+    /// <c>ALTER TABLE name ADD</c> statement once the <c>ADD</c> keyword
+    /// has been consumed. Constraints may appear in any order; duplicates
+    /// and conflicting nullability throw <see cref="ParseException"/> with
+    /// a position anchored at the offending token.
     /// </summary>
     private static TokenListParser<SqlToken, Statement> AlterTableAddColumnBody(string tableName) =>
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from colName in IdentifierOrKeywordAsName
         from typeName in TypeNameParser
-        from notNull in (
-            from notKw in Token.EqualTo(SqlToken.Not)
-            from nullKw in Token.EqualTo(SqlToken.Null)
-            select true
-        ).OptionalOrDefault()
-        from defaultValue in (
-            from defaultKw in Token.EqualTo(SqlToken.Default)
-            from expr in SP.Ref(() => ExpressionParser!)
-            select expr
-        ).AsNullable().OptionalOrDefault()
-        // PG-canonical `GENERATED …` clause — same shape as CREATE TABLE
-        // column definitions. Produces either a computed expression or
-        // an IDENTITY spec; one is non-null.
-        from generated in GeneratedClauseParser.AsNullable().OptionalOrDefault()
-        // Legacy bare `AS (expr)` — pre-dates the GENERATED clause.
-        // Won't fire when GENERATED already consumed AS.
-        from bareComputedExpression in (
-            from asKw in Token.EqualTo(SqlToken.As)
-            from open in Token.EqualTo(SqlToken.LeftParen)
-            from expr in SP.Ref(() => ExpressionParser!)
-            from close in Token.EqualTo(SqlToken.RightParen)
-            select expr
-        ).AsNullable().OptionalOrDefault()
-        // Legacy bare `IDENTITY[(seed, step)]` — equivalent to GENERATED
-        // ALWAYS AS IDENTITY.
-        from bareIdentity in IdentityClauseParser.AsNullable().OptionalOrDefault()
-        select (Statement)new AlterTableAddColumnStatement(
-            tableName, colName, typeName, defaultValue, Nullable: !notNull,
-            ComputedExpression: generated?.ComputedExpression ?? bareComputedExpression,
-            Identity: generated?.Identity ?? bareIdentity);
+        from clauses in AlterAddColumnConstraintParser.Many()
+        select FoldAlterAddColumnConstraints(tableName, colName, typeName, clauses);
+
+    /// <summary>
+    /// Folds the constraint-clause list into an
+    /// <see cref="AlterTableAddColumnStatement"/>. Mirrors
+    /// <see cref="FoldColumnConstraints"/> but without the PK slot since
+    /// ALTER TABLE ADD COLUMN doesn't carry one in v1.
+    /// </summary>
+    private static Statement FoldAlterAddColumnConstraints(
+        string tableName,
+        string colName,
+        string typeName,
+        ColumnConstraintClause[] clauses)
+    {
+        bool? nullable = null;
+        Expression? defaultValue = null;
+        GeneratedSlotConstraint? generatedSlot = null;
+
+        foreach (ColumnConstraintClause clause in clauses)
+        {
+            switch (clause)
+            {
+                case NullabilityConstraint nc:
+                    if (nullable.HasValue)
+                    {
+                        string prior = nullable.Value ? "NULL" : "NOT NULL";
+                        string current = nc.Nullable ? "NULL" : "NOT NULL";
+                        string detail = nullable.Value == nc.Nullable
+                            ? $"duplicate {current} constraint on column '{colName}'"
+                            : $"conflicting nullability constraints on column '{colName}': {prior} already specified, cannot also specify {current}";
+                        throw new ParseException(detail, nc.Position);
+                    }
+                    nullable = nc.Nullable;
+                    break;
+
+                case DefaultConstraint dc:
+                    if (defaultValue is not null)
+                    {
+                        throw new ParseException(
+                            $"duplicate DEFAULT constraint on column '{colName}'",
+                            dc.Position);
+                    }
+                    defaultValue = dc.Expression;
+                    break;
+
+                case GeneratedSlotConstraint gsc:
+                    if (generatedSlot is not null)
+                    {
+                        throw new ParseException(
+                            $"duplicate GENERATED / IDENTITY / computed-expression constraint on column '{colName}'",
+                            gsc.Position);
+                    }
+                    generatedSlot = gsc;
+                    break;
+            }
+        }
+
+        return new AlterTableAddColumnStatement(
+            tableName, colName, typeName,
+            DefaultValue: defaultValue,
+            Nullable: nullable ?? true,
+            ComputedExpression: generatedSlot?.ComputedExpression,
+            Identity: generatedSlot?.Identity);
+    }
 
     /// <summary>
     /// Parses the <c>[COLUMN] [IF EXISTS] col</c> body of an

@@ -254,7 +254,6 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
     {
         Pool pool = CreatePool();
         using TableCatalog catalog = CreateCatalog(pool);
-        // Column-clause order in PR10f: NOT NULL → PRIMARY KEY → DEFAULT → IDENTITY.
         catalog.Plan("CREATE TEMP TABLE t (id Int64 PRIMARY KEY IDENTITY, name String)");
 
         catalog.Plan("INSERT INTO t (name) VALUES ('a'), ('b'), ('c')");
