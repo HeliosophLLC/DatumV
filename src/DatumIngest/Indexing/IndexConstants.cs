@@ -21,6 +21,50 @@ public static class IndexConstants
     public const int DefaultChunkSize = 10_000;
 
     /// <summary>
+    /// Per-flow override for the index-build chunk size, scoped via
+    /// <see cref="AsyncLocal{T}"/> so concurrent tests don't race on it.
+    /// Production code paths leave this unset and fall through to
+    /// <see cref="DefaultChunkSize"/>. Tests can lower it (via
+    /// <see cref="OverrideChunkSizeForTest"/>) to force chunk-boundary
+    /// behavior without inserting millions of rows.
+    /// </summary>
+    private static readonly System.Threading.AsyncLocal<int?> _chunkSizeOverride = new();
+
+    /// <summary>
+    /// Returns the chunk size that should be used by index builders in the
+    /// current async flow: the test-scoped override if set, otherwise
+    /// <see cref="DefaultChunkSize"/>.
+    /// </summary>
+    public static int EffectiveChunkSize => _chunkSizeOverride.Value ?? DefaultChunkSize;
+
+    /// <summary>
+    /// Test-only: sets the index-build chunk size for the current async
+    /// flow. Returns a disposable that restores the previous value.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// using (IndexConstants.OverrideChunkSizeForTest(100))
+    /// {
+    ///     // inserts here split into chunks of 100 rows
+    /// }
+    /// </code>
+    /// </example>
+    public static IDisposable OverrideChunkSizeForTest(int chunkSize)
+    {
+        if (chunkSize <= 0) throw new ArgumentOutOfRangeException(nameof(chunkSize));
+        int? previous = _chunkSizeOverride.Value;
+        _chunkSizeOverride.Value = chunkSize;
+        return new RestoreOnDispose(previous);
+    }
+
+    private sealed class RestoreOnDispose : IDisposable
+    {
+        private readonly int? _previous;
+        internal RestoreOnDispose(int? previous) => _previous = previous;
+        public void Dispose() => _chunkSizeOverride.Value = _previous;
+    }
+
+    /// <summary>
     /// Entry count threshold for automatic B+Tree promotion. Columns with more
     /// entries than this value use a B+Tree index instead of a sorted value index.
     /// </summary>

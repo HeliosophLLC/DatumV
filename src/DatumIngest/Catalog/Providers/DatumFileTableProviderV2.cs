@@ -647,11 +647,20 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     Row row = batch[r];
                     foreach ((_, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree, int[] ordinals)) in targets)
                     {
+                        // Skip rows with a NULL in any covered column —
+                        // matches the AppendSession INSERT path. Indexes
+                        // can't be probed by NULL equality anyway, and
+                        // `IS NULL` falls through to scan.
                         DataValue[] tuple = new DataValue[ordinals.Length];
+                        bool hasNull = false;
                         for (int p = 0; p < ordinals.Length; p++)
                         {
-                            tuple[p] = row[ordinals[p]];
+                            DataValue v = row[ordinals[p]];
+                            if (v.IsNull) { hasNull = true; break; }
+                            tuple[p] = v;
                         }
+                        if (hasNull) continue;
+
                         byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
                         tree.Insert(
                             new Indexing.BTree.MutableBytes.BytesIndexEntry(
@@ -2395,7 +2404,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         private SourceIndex? _existingForMerge;
         private Dictionary<string, List<ValueIndexEntry>>? _pendingColumnEntries;
         private string[]? _indexableColumnNames;
-        private const int _indexBuildChunkSize = Indexing.IndexConstants.DefaultChunkSize;
 
         public DatumAppendSession(DatumFileTableProviderV2 provider)
         {
@@ -2581,15 +2589,25 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // Composite indexes: encode this row's tuple once per index.
                 // Encoded bytes outlive the source batch's arena (Encode
                 // returns a fresh byte[]), so the queue is safe to hold.
+                // Skip indexing any row that has a NULL in a covered
+                // column — Postgres-compatible equality semantics
+                // (`= NULL` never matches, so the missing entry can
+                // never cause a missed seek hit). `IS NULL` falls
+                // through to scan regardless.
                 if (_compositeIndexStates is { } compositeStates)
                 {
                     foreach (CompositeIndexState state in compositeStates.Values)
                     {
                         DataValue[] tuple = new DataValue[state.ColumnIndices.Length];
+                        bool hasNull = false;
                         for (int p = 0; p < state.ColumnIndices.Length; p++)
                         {
-                            tuple[p] = row[state.ColumnIndices[p]];
+                            DataValue v = row[state.ColumnIndices[p]];
+                            if (v.IsNull) { hasNull = true; break; }
+                            tuple[p] = v;
                         }
+                        if (hasNull) continue;
+
                         byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
                         state.PendingEntries.Add(
                             new Indexing.BTree.MutableBytes.BytesIndexEntry(
@@ -2653,7 +2671,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             // default IndexOptions).
             SourceIndexBuilder builder = new(
                 bloomAllColumns: true,
-                chunkSize: _indexBuildChunkSize,
+                chunkSize: Indexing.IndexConstants.EffectiveChunkSize,
                 computeCardinality: true);
             SourceFingerprint placeholder = new(0, new byte[32]);
             _indexBuilder = builder.CreateIncrementalBuilder(placeholder);
