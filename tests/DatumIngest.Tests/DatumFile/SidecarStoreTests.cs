@@ -30,6 +30,44 @@ public sealed class SidecarStoreTests : ServiceTestBase
     }
 
     [Fact]
+    public void OpenForAppend_WhileReaderHoldsMmap_Succeeds()
+    {
+        // Regression: SidecarReadStore previously held the mmap'd file with
+        // FileShare.Read (the default share mode for FileMode.Open). On
+        // Windows that blocks SidecarWriteStore.OpenForAppend's FileAccess.
+        // ReadWrite open with "the process cannot access the file" — which
+        // surfaces as the second back-to-back INSERT into a string column
+        // failing during chat persistence.
+        //
+        // The fix opens the underlying FileStream with FileShare.ReadWrite |
+        // FileShare.Delete so a concurrent appender can extend the file.
+        // Append-only growth means the reader's mmap'd view of the
+        // pre-append region remains valid; it just doesn't see the new
+        // bytes (and doesn't need to).
+        string path = Path.Combine(_tempDirectory, "concurrent_append.datum-blob");
+        ulong fingerprint;
+
+        using (SidecarWriteStore writer = new(path))
+        {
+            writer.Append("first payload"u8);
+            fingerprint = writer.Fingerprint;
+        }
+
+        using SidecarReadStore reader = new(path, fingerprint);
+
+        // Reader is alive; appender must still be able to open.
+        using (SidecarWriteStore appender = SidecarWriteStore.OpenForAppend(path))
+        {
+            appender.Append("second payload"u8);
+        }
+
+        // Existing reader's view of the pre-append region still works.
+        Assert.Equal(
+            "first payload"u8.ToArray(),
+            reader.Read(SidecarConstants.HeaderSize, "first payload"u8.Length).ToArray());
+    }
+
+    [Fact]
     public void RoundTrip_PayloadHashVerifies()
     {
         string path = Path.Combine(_tempDirectory, "round_trip.datum-blob");

@@ -54,8 +54,40 @@ public sealed class SidecarReadStore : IBlobSource
                 $"({length} < {SidecarConstants.HeaderSize}).");
         }
 
-        _mappedFile = MemoryMappedFile.CreateFromFile(
-            path, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
+        // Open the backing file explicitly with FileShare.ReadWrite | Delete
+        // so a concurrent SidecarWriteStore.OpenForAppend (which needs
+        // FileAccess.ReadWrite) is not blocked. The short-form
+        // MemoryMappedFile.CreateFromFile(path, ...) overload uses
+        // FileShare.Read internally, which Windows treats as "no writers,"
+        // and on a chat-style workload (two back-to-back appends with a
+        // read-side snapshot rebuild between them) it produces "the process
+        // cannot access the file" on the second append. Sidecars are
+        // strictly append-only, so the reader's pre-append mmap view stays
+        // valid even while a writer extends EOF — the existing region is
+        // immutable. FileShare.Delete keeps File.Replace / temp-rename
+        // patterns from snagging on an open mmap'd view.
+        FileStream fileStream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4096,
+            FileOptions.None);
+        try
+        {
+            _mappedFile = MemoryMappedFile.CreateFromFile(
+                fileStream,
+                mapName: null,
+                capacity: 0,
+                MemoryMappedFileAccess.Read,
+                HandleInheritability.None,
+                leaveOpen: false);
+        }
+        catch
+        {
+            fileStream.Dispose();
+            throw;
+        }
         _accessor = _mappedFile.CreateViewAccessor(
             0, 0, MemoryMappedFileAccess.Read);
         _fileLength = length;
