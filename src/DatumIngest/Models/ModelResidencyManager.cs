@@ -46,11 +46,16 @@ public sealed class ModelResidencyManager : IDisposable
 
     /// <summary>
     /// Per-resident-model bookkeeping. Mutable; protected by
-    /// <see cref="_lock"/>.
+    /// <see cref="_lock"/>. The model is held as a <see cref="Task{IModel}"/>
+    /// rather than a bare <see cref="IModel"/> so concurrent acquires of the
+    /// same not-yet-loaded entry can share one in-flight load instead of
+    /// racing: the loader publishes the placeholder task under the lock,
+    /// followers find it on lookup, bump the ref count, and <c>await</c> the
+    /// same task. Completed tasks satisfy cache hits without any awaiting.
     /// </summary>
     private sealed class Resident
     {
-        public required IModel Model { get; init; }
+        public required Task<IModel> ModelTask { get; init; }
         public required long Bytes { get; init; }
         public DateTimeOffset LastUsed { get; set; }
         public int ActiveRefs { get; set; }
@@ -131,59 +136,111 @@ public sealed class ModelResidencyManager : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IModel? loadedModel = null;
+            Task<IModel> modelTask;
+            TaskCompletionSource<IModel>? loaderTcs = null;
+
             lock (_lock)
             {
+                // Re-check under the lock — a Dispose() that races with our
+                // outside-lock check at method entry must not let us register
+                // a new Resident into a dead manager.
+                ObjectDisposedException.ThrowIf(_disposed, this);
+
                 if (_resident.TryGetValue(entry.Name, out Resident? cached))
                 {
                     cached.ActiveRefs++;
                     cached.LastUsed = DateTimeOffset.UtcNow;
-                    return new ModelLease(this, entry.Name, cached.Model);
+                    modelTask = cached.ModelTask;
                 }
-
-                if (TryFitNew(estimatedBytes))
+                else if (TryFitNew(estimatedBytes))
                 {
-                    // Reserve space accounting before loading; if loader throws
-                    // we'll roll back below. We can't load under the lock — the
-                    // load itself does I/O and CUDA init — so we publish a
-                    // placeholder Resident with a "loading" sentinel via
-                    // ActiveRefs-as-marker isn't viable. Simplest: drop lock,
-                    // load, then re-take lock to register.
+                    // Publish a placeholder Resident under the lock. Any
+                    // concurrent acquire for the same name from this point on
+                    // sees us in the cache, bumps the ref count, and awaits the
+                    // same TCS — no double-load, no orphaned IModel, no VRAM
+                    // double-counting.
+                    loaderTcs = new TaskCompletionSource<IModel>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    _resident[entry.Name] = new Resident
+                    {
+                        ModelTask = loaderTcs.Task,
+                        Bytes = estimatedBytes,
+                        LastUsed = DateTimeOffset.UtcNow,
+                        ActiveRefs = 1,
+                    };
                     _vramUsedBytes += estimatedBytes;
+                    modelTask = loaderTcs.Task;
                 }
                 else
                 {
-                    // Couldn't make room. Fall through to wait + retry.
                     goto WaitAndRetry;
                 }
             }
 
-            // Lock released. Load outside the lock.
+            if (loaderTcs is not null)
+            {
+                // ---- I'm the loader. Load outside the lock — the loader may
+                // do I/O and CUDA init and must not stall other acquires. ----
+                IModel loadedModel;
+                try
+                {
+                    loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory));
+                }
+                catch (Exception ex)
+                {
+                    lock (_lock)
+                    {
+                        _resident.Remove(entry.Name);
+                        _vramUsedBytes -= estimatedBytes;
+                    }
+                    loaderTcs.SetException(ex);
+                    _ = loaderTcs.Task.Exception; // observe so it cannot surface as UnobservedTaskException when no follower is waiting
+                    throw;
+                }
+
+                // Re-check disposal under the lock before publishing the
+                // result. If Dispose() ran while we were loading, the snapshot
+                // it took saw an incomplete ModelTask and skipped this entry —
+                // we own the cleanup of the freshly-loaded model.
+                lock (_lock)
+                {
+                    if (_disposed)
+                    {
+                        _resident.Remove(entry.Name);
+                        (loadedModel as IDisposable)?.Dispose();
+                        ObjectDisposedException disposedEx = new(nameof(ModelResidencyManager));
+                        loaderTcs.SetException(disposedEx);
+                        _ = loaderTcs.Task.Exception;
+                        throw disposedEx;
+                    }
+                    Console.Error.WriteLine(
+                        $"[residency] Loaded '{entry.Name}' (~{FormatBytes(estimatedBytes)}); " +
+                        $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
+                }
+                loaderTcs.SetResult(loadedModel);
+                return new ModelLease(this, entry.Name, loadedModel);
+            }
+
+            // ---- I'm a follower. The loader is or has been working on this
+            // entry; wait for its result. My ActiveRefs bump is already in
+            // place so the entry can't be evicted out from under me. ----
             try
             {
-                loadedModel = entry.Loader(new ModelLoadContext(entry, modelDirectory));
+                IModel model = await modelTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return new ModelLease(this, entry.Name, model);
             }
             catch
             {
-                // Roll back the speculative accounting under the lock.
-                lock (_lock) _vramUsedBytes -= estimatedBytes;
-                throw;
-            }
-
-            lock (_lock)
-            {
-                // Register the freshly-loaded model.
-                _resident[entry.Name] = new Resident
+                // Loader failed → its catch already removed the entry; my
+                // TryGetValue will miss and the decrement is a no-op.
+                // Cancellation → entry still exists, decrement my bump so
+                // the loader's own ref isn't stranded one above zero.
+                lock (_lock)
                 {
-                    Model = loadedModel,
-                    Bytes = estimatedBytes,
-                    LastUsed = DateTimeOffset.UtcNow,
-                    ActiveRefs = 1,
-                };
-                Console.Error.WriteLine(
-                    $"[residency] Loaded '{entry.Name}' (~{FormatBytes(estimatedBytes)}); " +
-                    $"used {FormatBytes(_vramUsedBytes)}/{FormatBudget()}.");
-                return new ModelLease(this, entry.Name, loadedModel);
+                    if (_resident.TryGetValue(entry.Name, out Resident? r) && r.ActiveRefs > 0)
+                        r.ActiveRefs--;
+                }
+                throw;
             }
 
         WaitAndRetry:
@@ -243,7 +300,11 @@ public sealed class ModelResidencyManager : IDisposable
 
         foreach (KeyValuePair<string, Resident> kv in evictionOrder)
         {
-            (kv.Value.Model as IDisposable)?.Dispose();
+            // An unpinned entry must have completed loading — the loader holds
+            // its own ref until the lease is disposed, and failures remove the
+            // entry entirely — so .Result is safe here. Guarded anyway.
+            if (kv.Value.ModelTask.IsCompletedSuccessfully)
+                (kv.Value.ModelTask.Result as IDisposable)?.Dispose();
             _resident.Remove(kv.Key);
             _vramUsedBytes -= kv.Value.Bytes;
             needed -= kv.Value.Bytes;
@@ -305,7 +366,12 @@ public sealed class ModelResidencyManager : IDisposable
             _disposed = true;
             foreach (Resident r in _resident.Values)
             {
-                (r.Model as IDisposable)?.Dispose();
+                // In-flight loads have a not-yet-completed ModelTask; the
+                // loader's own post-load lock block re-checks _disposed and
+                // disposes the freshly-loaded model itself, so we skip those
+                // here and only dispose models that are actually resident.
+                if (r.ModelTask.IsCompletedSuccessfully)
+                    (r.ModelTask.Result as IDisposable)?.Dispose();
             }
             _resident.Clear();
             _vramUsedBytes = 0;
