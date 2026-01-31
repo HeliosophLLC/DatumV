@@ -44,4 +44,20 @@ public interface ICompositeIndex
     /// <see cref="ValueIndexEntry.RowOffsetInChunk"/> for row seeks.
     /// </summary>
     IReadOnlyList<ValueIndexEntry> FindExact(IReadOnlyList<DataValue> tuple);
+
+    /// <summary>
+    /// Returns all entries whose composite key starts with
+    /// <paramref name="prefixTuple"/>. The prefix is a leftmost slice of
+    /// <see cref="Columns"/> — for an index on <c>(a, b, c)</c>, valid prefixes
+    /// are <c>[a]</c>, <c>[a, b]</c>, or the full <c>[a, b, c]</c>. The
+    /// adapter encodes only the prefix components and asks the underlying
+    /// tree for every entry whose key starts with the resulting byte sequence.
+    /// </summary>
+    /// <remarks>
+    /// This is the leftmost-prefix matching that lets <c>WHERE a = X</c> on a
+    /// <c>(a, b)</c> index reach the seek path. For full-tuple matches
+    /// prefer <see cref="FindExact"/> — it's a point lookup (cheaper)
+    /// where <see cref="FindPrefix"/> is a range scan.
+    /// </remarks>
+    IReadOnlyList<ValueIndexEntry> FindPrefix(IReadOnlyList<DataValue> prefixTuple);
 }

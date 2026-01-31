@@ -76,6 +76,18 @@ public sealed class ScanOperator : IQueryOperator
     public int? ExactSeekRowsFetched { get; private set; }
 
     /// <summary>
+    /// Number of positions the composite-index branch contributed during the
+    /// last execution. Set when at least one composite index produced a
+    /// non-empty result (full or prefix match); <see langword="null"/>
+    /// otherwise. Independent of which strategy ultimately won the
+    /// fewest-positions tiebreak — this counter records that the composite
+    /// path was *consulted*, which is what tests need to prove composite
+    /// indexes are doing the work and not just shadowed by single-column
+    /// auto-built trees that happen to return the same set.
+    /// </summary>
+    public int? CompositeIndexSeekHits { get; private set; }
+
+    /// <summary>
     /// Gets a value indicating whether this scan operator has the inputs needed to
     /// usefully apply index-based pruning. True when a source index is available and
     /// at least one pruning input is present: a filter hint, bloom pruning keys, or
@@ -253,6 +265,7 @@ public sealed class ScanOperator : IQueryOperator
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
         ExactSeekRowsFetched = null;
+        CompositeIndexSeekHits = null;
 
         // Build a set of non-pruned chunk row ranges and track active chunk indexes.
         List<(long Start, long End, int ChunkIndex)> activeRanges = new();
@@ -383,10 +396,11 @@ public sealed class ScanOperator : IQueryOperator
             // When the provider supports seeking and equality predicates have
             // index hits, seek directly to matching rows rather than reading entire chunks.
             if (_filterHint is not null
-                && CollectExactSeekPositions(_filterHint, provider, chunks, activeChunkIndexes, context.Store) is List<long> exactPositions)
+                && CollectExactSeekPositions(_filterHint, provider, chunks, activeChunkIndexes, context.Store, out int? compositeHits) is List<long> exactPositions)
             {
                 ExecutionTracer.Write($"SCAN exact seek  table={TableProvider.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
+                CompositeIndexSeekHits = compositeHits;
 
                 using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
 
@@ -1088,9 +1102,11 @@ public sealed class ScanOperator : IQueryOperator
         Expression filterHint,
         ITableProvider provider,
         IReadOnlyList<IndexChunk> chunks,
-        HashSet<int> activeChunkIndexes, Arena arena)
+        HashSet<int> activeChunkIndexes, Arena arena,
+        out int? compositeHits)
     {
         List<long>? bestPositions = null;
+        compositeHits = null;
 
         // Equality predicates: col = literal → FindExact
         List<(string Column, DataValue Value)> equalities = new();
@@ -1170,14 +1186,15 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
-        // Composite indexes: pick any user-defined composite index whose
-        // declared column list is fully covered by the equality predicates,
-        // build the tuple in the index's declared order, and probe via
-        // FindExact. Typically far more selective than any single-column
-        // strategy when applicable. v1 only matches full-prefix exact
-        // equalities; partial-prefix range probes are a follow-up.
+        // Composite indexes: for each one, find the longest leftmost prefix
+        // of declared columns covered by the equality predicates. If the
+        // prefix is the full column list, use the cheaper FindExact (point
+        // lookup); otherwise use FindPrefix (range scan over a byte-encoded
+        // prefix). Partial-prefix matching mirrors Postgres B-tree
+        // composite-index semantics — `WHERE a = X` on `(a, b)` is a valid
+        // leftmost-prefix query.
         //
-        // Each tuple value is coerced to the column's declared schema kind
+        // Each prefix value is coerced to the column's declared schema kind
         // before encoding. The parser narrows numeric literals to their
         // smallest representable type (sbyte → short → int → …), so a query
         // like `WHERE a = 1` produces an Int8 literal even when `a` is
@@ -1195,16 +1212,19 @@ public sealed class ScanOperator : IQueryOperator
 
             foreach (Indexing.ICompositeIndex compositeIndex in compositeIndexes)
             {
-                if (compositeIndex.Columns.Count > equalityByColumn.Count) continue;
-
-                DataValue[] tuple = new DataValue[compositeIndex.Columns.Count];
-                bool fullyCovered = true;
+                // Walk the index's columns from the left, collecting coerced
+                // values for each one covered by the equality predicates.
+                // Stop at the first uncovered column — leftmost-prefix
+                // semantics. A gap in the middle (e.g. predicate covers
+                // columns 0 and 2 of a 3-column index) yields a prefix of
+                // length 1, NOT a 3-tuple with a hole.
+                DataValue[] fullTuple = new DataValue[compositeIndex.Columns.Count];
+                int prefixLen = 0;
                 for (int i = 0; i < compositeIndex.Columns.Count; i++)
                 {
                     string indexedCol = compositeIndex.Columns[i];
                     if (!equalityByColumn.TryGetValue(indexedCol, out DataValue v))
                     {
-                        fullyCovered = false;
                         break;
                     }
 
@@ -1215,11 +1235,7 @@ public sealed class ScanOperator : IQueryOperator
                     // should be impossible because ALTER DROP COLUMN
                     // cascades — defensive skip just in case.
                     ColumnInfo? column = providerSchema.FindColumn(indexedCol);
-                    if (column is null)
-                    {
-                        fullyCovered = false;
-                        break;
-                    }
+                    if (column is null) break;
 
                     DataValue coerced = v.Kind == column.Kind
                         ? v
@@ -1227,19 +1243,39 @@ public sealed class ScanOperator : IQueryOperator
 
                     // Coercion can produce a null when no path exists
                     // (e.g. a non-parseable string into an int). The
-                    // probe would never match such a value — skip the
-                    // index for this predicate set.
-                    if (coerced.IsNull)
-                    {
-                        fullyCovered = false;
-                        break;
-                    }
-                    tuple[i] = coerced;
+                    // probe would never match — stop accumulating prefix.
+                    if (coerced.IsNull) break;
+                    fullTuple[i] = coerced;
+                    prefixLen++;
                 }
-                if (!fullyCovered) continue;
 
-                IReadOnlyList<ValueIndexEntry> entries = compositeIndex.FindExact(tuple);
+                if (prefixLen == 0) continue;
+
+                IReadOnlyList<ValueIndexEntry> entries;
+                if (prefixLen == compositeIndex.Columns.Count)
+                {
+                    // Full-tuple match → cheaper point lookup.
+                    entries = compositeIndex.FindExact(fullTuple);
+                }
+                else
+                {
+                    // Leftmost-prefix match → range scan over byte-encoded
+                    // prefix. Slice the tuple to the covered length so the
+                    // adapter encodes only the leading columns.
+                    DataValue[] prefixTuple = new DataValue[prefixLen];
+                    Array.Copy(fullTuple, prefixTuple, prefixLen);
+                    entries = compositeIndex.FindPrefix(prefixTuple);
+                }
                 List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
+
+                // Record that the composite path was consulted and produced
+                // these many positions, independent of whether it wins the
+                // fewest-positions tiebreak below. Tests use this to prove
+                // composite indexes are doing work that wouldn't be visible
+                // via the global ExactSeekRowsFetched counter (which could
+                // come from a single-column auto-built tree returning the
+                // same set).
+                compositeHits = (compositeHits ?? 0) + positions.Count;
 
                 if (bestPositions is null || positions.Count < bestPositions.Count)
                 {

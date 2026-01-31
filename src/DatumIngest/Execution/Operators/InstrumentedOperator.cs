@@ -152,6 +152,15 @@ public sealed class InstrumentedOperator : IQueryOperator
             {
                 planNode.RuntimeAnnotations.Add($"exact seek: {seekRows} rows");
             }
+
+            // Composite-index path contribution. Set when at least one
+            // composite index produced positions, regardless of which
+            // strategy won the planner's fewest-positions tiebreak.
+            planNode.CompositeIndexSeekHits = scan.CompositeIndexSeekHits;
+            if (scan.CompositeIndexSeekHits is int compositeHits)
+            {
+                planNode.RuntimeAnnotations.Add($"composite index hits: {compositeHits}");
+            }
         }
 
         // Compute rows consumed from children.

@@ -548,6 +548,169 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
         Assert.NotEqual(1, exactSeek);
     }
 
+    // ──────────────────── Phase 7: leftmost-prefix matching ────────────────────
+
+    [Fact]
+    public async Task LeftmostPrefix_SingleColumnOnTwoColumnIndex_MatchesAllRows()
+    {
+        // Index (a, b); query covers only `a`. PG-style leftmost prefix:
+        // the composite index should still fire and return every row with
+        // the matching `a`, then the filter (if any) refines further.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 110), (1, 20, 120), (1, 30, 130), " +
+            "(2, 10, 210), (2, 20, 220), " +
+            "(3, 30, 330)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        values.Sort();
+        Assert.Equal(new[] { 110, 120, 130 }, values);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_SingleColumnQuery_FiresCompositeSeekPath()
+    {
+        // Strategy proof — uses the composite-specific counter to verify the
+        // composite-index path was actually consulted. ExactSeekRowsFetched
+        // alone wouldn't prove this: for `WHERE a = X` on a `(a, b)` index,
+        // the auto-built single-column tree on `a` produces the same row
+        // count, so the global seek counter is ambiguous. CompositeIndexSeekHits
+        // is set only when the composite-index branch produced positions.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 110), (1, 20, 120), (1, 30, 130), (2, 10, 210)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1");
+        int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
+
+        Assert.Equal(3, compositeHits);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_NonLeftmost_DoesNotConsultComposite()
+    {
+        // `WHERE b = Y` on a `(a, b)` index has no leftmost-prefix coverage
+        // (the predicate skips column 0). The composite-index branch should
+        // never even produce positions — CompositeIndexSeekHits stays null.
+        // The auto-built single-column tree on `b` still handles the query
+        // correctly (seek path via ExactSeekRowsFetched may be non-null).
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan("INSERT INTO t VALUES (1, 10, 110), (2, 10, 210), (3, 20, 320)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 10");
+        int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
+
+        Assert.Null(compositeHits);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_TwoOfThree_CompositeWinsOnSelectivity()
+    {
+        // Index (a, b, c); predicate covers (a, b). Composite prefix matches
+        // 3 rows where (a=1, b=10). Auto-built single-column trees on `a` and
+        // `b` independently match 5 and 4 rows respectively (less selective).
+        // The fewest-positions tiebreak picks composite (3 < 4 < 5), and the
+        // composite counter reflects 3.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_abc ON t (a, b, c)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 100, 1), (1, 10, 200, 2), (1, 10, 300, 3), " +
+            "(1, 20, 100, 4), (1, 30, 100, 5), " +
+            "(2, 10, 100, 6)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        int? compositeHits = await GetScanCompositeSeekHitsAsync(plan);
+        int? exactSeek = await GetScanExactSeekRowsAsync(plan);
+
+        Assert.Equal(3, compositeHits);
+        // Composite is most selective → wins the global seek count too.
+        Assert.Equal(3, exactSeek);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_NonLeftmostColumn_DoesNotUseCompositeIndex()
+    {
+        // Index (a, b); query covers only `b`. PG-style: cannot use the
+        // (a, b) index because `b` isn't the leftmost. The auto-built
+        // per-column tree on `b` handles it, but the composite-specific
+        // path is skipped. Strategy: `b` isn't the leftmost column, so
+        // composite-index FindPrefix is never invoked.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 110), (1, 20, 120), (2, 20, 220)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE b = 20");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        values.Sort();
+        Assert.Equal(new[] { 120, 220 }, values);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_TwoOfThreeColumns_FiltersCorrectly()
+    {
+        // Index (a, b, c); query covers `a` and `b`. Prefix length 2;
+        // FindPrefix returns rows where (a, b) matches, regardless of c.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_abc ON t (a, b, c)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 100, 1), (1, 10, 200, 2), (1, 10, 300, 3), " +
+            "(1, 20, 100, 4), (2, 10, 100, 5)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        values.Sort();
+        Assert.Equal(new[] { 1, 2, 3 }, values);
+    }
+
+    [Fact]
+    public async Task LeftmostPrefix_GapInCoverage_StopsAtFirstUncovered()
+    {
+        // Index (a, b, c); query covers `a` and `c` (skips `b`).
+        // Leftmost-prefix semantics: prefix is just `[a]` (length 1),
+        // NOT `[a, ?, c]`. The result must still be correct — the
+        // FilterOperator's residual `c = X` evaluation drops the
+        // non-matching rows.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32, v Int32)");
+        catalog.Plan("CREATE INDEX idx_t_abc ON t (a, b, c)");
+        catalog.Plan(
+            "INSERT INTO t VALUES " +
+            "(1, 10, 100, 1), (1, 20, 100, 2), (1, 30, 200, 3), " +
+            "(2, 10, 100, 4)");
+
+        IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 1 AND c = 100");
+        List<int> values = await CollectFirstColumnInts(plan);
+
+        values.Sort();
+        Assert.Equal(new[] { 1, 2 }, values);
+    }
+
     // ──────────────────── Phase 4: mutation maintenance ────────────────────
 
     [Fact]
@@ -897,6 +1060,20 @@ public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
     {
         ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
         return FindScanNode(root)?.ExactSeekRowsFetched;
+    }
+
+    /// <summary>
+    /// Returns the count of positions the composite-index branch contributed
+    /// during execution, or <see langword="null"/> when no composite path
+    /// fired. Distinct from <see cref="GetScanExactSeekRowsAsync"/>: the
+    /// composite branch may run even when a single-column index wins the
+    /// fewest-positions tiebreak, so this counter is the precise signal that
+    /// the composite-index code path was consulted.
+    /// </summary>
+    private static async Task<int?> GetScanCompositeSeekHitsAsync(IQueryPlan plan)
+    {
+        ExplainPlanNode root = await plan.AnalyzeAsync(CancellationToken.None);
+        return FindScanNode(root)?.CompositeIndexSeekHits;
     }
 
     private static ExplainPlanNode? FindScanNode(ExplainPlanNode node)

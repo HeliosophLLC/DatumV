@@ -43,9 +43,35 @@ internal sealed class MutableBPlusTreeBytesCompositeIndex : ICompositeIndex
         }
 
         byte[] encoded = CompositeKeyEncoder.Encode(tuple);
-        IReadOnlyList<BytesIndexEntry> hits = _tree.FindAll(encoded);
-        if (hits.Count == 0) return Array.Empty<ValueIndexEntry>();
+        return ProjectHits(_tree.FindAll(encoded));
+    }
 
+    /// <inheritdoc/>
+    public IReadOnlyList<ValueIndexEntry> FindPrefix(IReadOnlyList<DataValue> prefixTuple)
+    {
+        if (prefixTuple.Count == 0)
+        {
+            // Empty prefix would match every entry — not useful for the planner
+            // and likely indicates a caller-side mistake. Refuse rather than
+            // returning the entire index.
+            throw new ArgumentException(
+                $"Composite index '{Name}': prefix tuple cannot be empty.",
+                nameof(prefixTuple));
+        }
+        if (prefixTuple.Count > Columns.Count)
+        {
+            throw new ArgumentException(
+                $"Composite index '{Name}' has {Columns.Count} columns; prefix tuple of length {prefixTuple.Count} overshoots.",
+                nameof(prefixTuple));
+        }
+
+        byte[] encodedPrefix = CompositeKeyEncoder.Encode(prefixTuple);
+        return ProjectHits(_tree.FindPrefix(encodedPrefix));
+    }
+
+    private static IReadOnlyList<ValueIndexEntry> ProjectHits(IReadOnlyList<BytesIndexEntry> hits)
+    {
+        if (hits.Count == 0) return Array.Empty<ValueIndexEntry>();
         ValueIndexEntry[] result = new ValueIndexEntry[hits.Count];
         for (int i = 0; i < hits.Count; i++)
         {

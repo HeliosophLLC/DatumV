@@ -56,6 +56,17 @@ public sealed class ExplainPlanNode
     /// </summary>
     public int? ExactSeekRowsFetched { get; set; }
 
+    /// <summary>
+    /// Number of positions a composite secondary index contributed during the
+    /// last execution. <see langword="null"/> when no composite-index branch
+    /// produced a result. Distinct from <see cref="ExactSeekRowsFetched"/>:
+    /// the latter is the total that the planner ultimately seeked to (winner
+    /// of all strategies under the fewest-positions tiebreak); this counter
+    /// records that the composite path was consulted at all, even if a
+    /// single-column index ended up winning with the same count.
+    /// </summary>
+    public int? CompositeIndexSeekHits { get; set; }
+
     // ── Access strategy (populated for data-access operators) ──
 
     /// <summary>

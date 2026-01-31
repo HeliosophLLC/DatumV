@@ -300,6 +300,99 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
     internal IReadOnlyList<BytesIndexEntry> FindAll(ReadOnlySpan<byte> key) => FindRange(key, key);
 
     /// <summary>
+    /// Returns all entries whose key starts with <paramref name="prefix"/>.
+    /// Used by the planner to satisfy leftmost-prefix composite-index queries
+    /// — <c>WHERE a = X</c> on a <c>(a, b)</c> index encodes just the <c>a</c>
+    /// component as the prefix and collects every key whose first bytes match.
+    /// </summary>
+    /// <remarks>
+    /// Equivalent to <c>FindRange(prefix, lex_next(prefix))</c> with an
+    /// exclusive upper bound, but skips the work of computing the lex-next
+    /// sequence — we just walk forward and check <c>StartsWith</c> on each
+    /// entry. The byte-level <c>SequenceCompareTo</c> ordering and our
+    /// length-prefixed component encoding guarantee that, once we hit an
+    /// entry whose key doesn't start with the prefix, every subsequent
+    /// entry will also not start with it. Empty prefix returns every entry.
+    /// </remarks>
+    internal IReadOnlyList<BytesIndexEntry> FindPrefix(ReadOnlySpan<byte> prefix)
+    {
+        if (_activeHeader.RootPageId == MutableBPlusTreeConstants.NoLinkedPage)
+        {
+            return Array.Empty<BytesIndexEntry>();
+        }
+
+        // Empty prefix is the trivial "everything" case; let TraverseForward
+        // handle it for free instead of running the descent + match loop.
+        if (prefix.Length == 0)
+        {
+            List<BytesIndexEntry> all = new();
+            foreach (BytesIndexEntry e in TraverseForward()) all.Add(e);
+            return all;
+        }
+
+        byte[] prefixCopy = prefix.ToArray();
+        List<BytesIndexEntry> results = new();
+        DescentPath path = DescendForKey(prefixCopy);
+
+        // FindChildSlot uses ≤ semantics — for `prefix` matching a separator
+        // we land on the right child, but the previous leaf might still
+        // contain entries whose key starts with `prefix` (same start-walk as
+        // FindRange).
+        while (true)
+        {
+            DescentPath? prevPath = path.TryStepLeft();
+            if (prevPath is null) break;
+            MutableBytesLeafPage prevLeaf = ReadLeafPage(prevPath.Value.LeafPageId);
+            if (prevLeaf.EntryCount == 0)
+            {
+                path = prevPath.Value;
+                continue;
+            }
+            if (((ReadOnlySpan<byte>)prevLeaf.Entries[prevLeaf.EntryCount - 1].Key)
+                    .SequenceCompareTo(prefixCopy) < 0)
+            {
+                break;
+            }
+            path = prevPath.Value;
+        }
+
+        // Scan forward. Once we see an entry whose key sorts > prefix and
+        // doesn't start with it, all subsequent entries are also greater —
+        // stop early.
+        while (true)
+        {
+            MutableBytesLeafPage leaf = ReadLeafPage(path.LeafPageId);
+
+            for (int i = 0; i < leaf.EntryCount; i++)
+            {
+                BytesIndexEntry e = leaf.Entries[i];
+                ReadOnlySpan<byte> keySpan = e.Key;
+
+                if (keySpan.StartsWith(prefixCopy))
+                {
+                    results.Add(e);
+                    continue;
+                }
+
+                // Either keySpan < prefix (we're still walking up) or
+                // keySpan > prefix without sharing it (we've passed the
+                // prefix range). Distinguish via SequenceCompareTo.
+                if (keySpan.SequenceCompareTo(prefixCopy) > 0)
+                {
+                    return results;
+                }
+                // else: keySpan < prefix — keep scanning.
+            }
+
+            DescentPath? nextPath = path.TryStepRight();
+            if (nextPath is null) break;
+            path = nextPath.Value;
+        }
+
+        return results;
+    }
+
+    /// <summary>
     /// Enumerates all entries in ascending key order via leftmost-leaf descent
     /// and then internal-navigation forward stepping.
     /// </summary>
