@@ -1303,11 +1303,18 @@ public sealed class QueryPlanner
         // `WHERE EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = customers.id)`
         // would be trimmed from the customers scan and the semi-join's key
         // evaluation would throw "Column 'customers.id' not found in row".
+        //
+        // The same trim happens to correlated scalar subqueries: the rewriter
+        // replaces `(SELECT ... WHERE inner.x = outer.y)` with a synthetic column
+        // reference, leaving the inner statement (with its `outer.y` ref) only
+        // reachable via the CorrelatedSubquery descriptor. Wrap each inner
+        // statement in a SubqueryExpression so ColumnReferenceCollector descends
+        // into it and surfaces the outer-scope refs for projection pushdown.
         List<Expression>? extraReferences = null;
-        if (allDecorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
+        if (allDecorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0 || allCorrelated.Count > 0)
         {
             extraReferences = new List<Expression>(
-                allDecorrelated.Count + semiJoinResult.SemiJoins.Count);
+                allDecorrelated.Count + semiJoinResult.SemiJoins.Count + allCorrelated.Count);
             foreach (SubqueryRewriter.DecorrelatedScalarJoin decorrelated in allDecorrelated)
             {
                 if (decorrelated.OnCondition is not null)
@@ -1321,6 +1328,10 @@ public sealed class QueryPlanner
                 {
                     extraReferences.Add(semiJoin.OnCondition);
                 }
+            }
+            foreach (SubqueryRewriter.CorrelatedSubquery correlated in allCorrelated)
+            {
+                extraReferences.Add(new SubqueryExpression(correlated.InnerQuery));
             }
         }
 

@@ -61,6 +61,106 @@ public static class ColumnReferenceCollector
         return references;
     }
 
+    /// <summary>
+    /// Walks every expression-bearing clause of a <see cref="SelectStatement"/>,
+    /// collecting column references. Used to surface correlated (outer-scoped)
+    /// refs when descending into subquery expressions.
+    /// </summary>
+    private static void WalkStatement(
+        SelectStatement statement,
+        HashSet<(string? TableName, string ColumnName)> references)
+    {
+        foreach (SelectColumn column in statement.Columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+            Walk(column.Expression, references);
+        }
+
+        if (statement.From?.Source is SubquerySource fromSubquery)
+        {
+            WalkStatement(fromSubquery.Query, references);
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                if (join.OnCondition is not null)
+                {
+                    Walk(join.OnCondition, references);
+                }
+                if (join.Source is SubquerySource joinSubquery)
+                {
+                    WalkStatement(joinSubquery.Query, references);
+                }
+            }
+        }
+
+        if (statement.Where is not null)
+        {
+            Walk(statement.Where, references);
+        }
+
+        if (statement.GroupBy is not null)
+        {
+            foreach (Expression expression in statement.GroupBy.Expressions)
+            {
+                Walk(expression, references);
+            }
+        }
+
+        if (statement.Having is not null)
+        {
+            Walk(statement.Having, references);
+        }
+
+        if (statement.Qualify is not null)
+        {
+            Walk(statement.Qualify, references);
+        }
+
+        if (statement.OrderBy is not null)
+        {
+            foreach (OrderByItem item in statement.OrderBy.Items)
+            {
+                Walk(item.Expression, references);
+            }
+        }
+
+        if (statement.LetBindings is not null)
+        {
+            foreach (LetBinding binding in statement.LetBindings)
+            {
+                Walk(binding.Expression, references);
+            }
+        }
+
+        if (statement.Assertions is not null)
+        {
+            foreach (AssertClause assertion in statement.Assertions)
+            {
+                Walk(assertion.Predicate, references);
+                if (assertion.Message is not null)
+                {
+                    Walk(assertion.Message, references);
+                }
+            }
+        }
+
+        if (statement.Limit is not null)
+        {
+            Walk(statement.Limit, references);
+        }
+
+        if (statement.Offset is not null)
+        {
+            Walk(statement.Offset, references);
+        }
+    }
+
     private static void Walk(
         Expression expression,
         HashSet<(string? TableName, string ColumnName)> references)
@@ -215,11 +315,21 @@ public static class ColumnReferenceCollector
 
                 break;
 
-            case SubqueryExpression:
-            case InSubqueryExpression:
-            case ExistsExpression:
-                // Subquery column references are scoped to the inner query;
-                // they do not reference the outer query's tables.
+            case SubqueryExpression subquery:
+                // Walk the inner statement so correlated (outer-scoped) refs
+                // surface for projection pushdown. Refs qualified to the
+                // subquery's own tables are still collected but get filtered
+                // out by ComputeRequiredColumns' per-alias filter.
+                WalkStatement(subquery.Query, references);
+                break;
+
+            case InSubqueryExpression inSubquery:
+                Walk(inSubquery.Expression, references);
+                WalkStatement(inSubquery.Query, references);
+                break;
+
+            case ExistsExpression exists:
+                WalkStatement(exists.Query, references);
                 break;
 
             case StructLiteralExpression structLiteral:
