@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using DatumIngest.Catalog;
+using DatumIngest.Pooling;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Hubs;
 using DatumIngest.Web.Settings;
@@ -10,6 +12,38 @@ public static class WebHostExtensions
     public static IServiceCollection AddDatumIngestWeb(this IServiceCollection services, WebHostOptions options)
     {
         services.AddSingleton(options);
+
+        // Local-catalog mode: open one TableCatalog on top of the configured
+        // root directory, run startup migrations, keep it alive for the
+        // process lifetime. SaaS mode skips both — ICatalogService would
+        // route to remote nodes and per-principal catalogs would be
+        // provisioned out-of-band.
+        if (options.ManageLocalCatalog)
+        {
+            if (string.IsNullOrWhiteSpace(options.CatalogRootPath))
+            {
+                throw new InvalidOperationException(
+                    $"{nameof(WebHostOptions)}.{nameof(WebHostOptions.ManageLocalCatalog)} is true but " +
+                    $"{nameof(WebHostOptions.CatalogRootPath)} is not set. Either set the root path or " +
+                    $"flip ManageLocalCatalog to false for SaaS-style provisioning.");
+            }
+
+            // Pulls in PoolBacking (singleton) + Pool (transient) +
+            // FunctionRegistry etc. that TableCatalog needs. Idempotent
+            // re-registration is safe but we only call it on the local path.
+            services.AddDatumIngest();
+
+            string catalogRootPath = options.CatalogRootPath;
+            services.AddSingleton<TableCatalog>(sp =>
+            {
+                Pool pool = sp.GetRequiredService<Pool>();
+                Directory.CreateDirectory(catalogRootPath);
+                string catalogFile = Path.Combine(catalogRootPath, CatalogStore.DefaultFileName);
+                return new TableCatalog(pool, catalogFile);
+            });
+
+            services.AddHostedService<CatalogInitializationService>();
+        }
 
         // Per-request context. CurrentContext is the writable concrete; ICurrentContext
         // is the read-only surface consumers inject. Both resolve to the same instance

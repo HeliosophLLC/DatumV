@@ -17,6 +17,18 @@
     <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
   </ItemGroup>
 
+  <!--
+    Catalog migrations. Each .sql file is named `NNN_description.sql` where
+    NNN is a zero-padded version number. MigrationRunner discovers these via
+    Assembly.GetManifestResourceNames(), sorts by version, applies any
+    versions higher than the catalog's current version, and records each in
+    __schema_migrations. Do not gate this under SkipClientApp — migrations
+    are pure server-side data, unrelated to the SPA build.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations\*.sql" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- OpenAPI document + Swagger UI middleware (runtime). -->
     <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />

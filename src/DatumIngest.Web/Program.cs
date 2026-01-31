@@ -45,7 +45,12 @@ internal sealed class NSwagDocumentStartup
 {
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddDatumIngestWeb(new WebHostOptions());
+        // NSwag's build-time scanner only walks the DI graph for the
+        // IDocumentProvider (reflection over controllers + DTOs). Real
+        // runtime services have no business firing — opt out of local
+        // catalog management so the migration runner doesn't try to open
+        // a catalog file during codegen.
+        services.AddDatumIngestWeb(new WebHostOptions { ManageLocalCatalog = false });
     }
 
     public void Configure(IApplicationBuilder app)
