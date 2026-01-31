@@ -2478,8 +2478,96 @@ public static class SqlParser
         select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
 
     /// <summary>
+    /// A single column-constraint clause captured during column parsing.
+    /// Clauses are folded into <see cref="ColumnDefinition"/> after collection
+    /// so duplicates / conflicts can be rejected with a token-anchored
+    /// <see cref="ParseException"/>. Postgres treats the constraint list as
+    /// order-independent — see
+    /// https://www.postgresql.org/docs/current/sql-createtable.html — so the
+    /// parser collects clauses with <c>.Many()</c> rather than imposing a
+    /// fixed sequence.
+    /// </summary>
+    private abstract record ColumnConstraintClause(Position Position);
+    private sealed record NullabilityConstraint(bool Nullable, Position Position) : ColumnConstraintClause(Position);
+    private sealed record PrimaryKeyConstraint(Position Position) : ColumnConstraintClause(Position);
+    private sealed record DefaultConstraint(Expression Expression, Position Position) : ColumnConstraintClause(Position);
+    /// <summary>
+    /// Holds whichever of (computed expression, identity spec) the clause
+    /// produced. Both <c>GENERATED</c> forms and the two legacy bare forms
+    /// (bare <c>AS (expr)</c>, bare <c>IDENTITY</c>) reduce to this single
+    /// "generated slot" so duplicate-clause detection treats them uniformly.
+    /// </summary>
+    private sealed record GeneratedSlotConstraint(
+        Expression? ComputedExpression,
+        IdentitySpec? Identity,
+        Position Position) : ColumnConstraintClause(Position);
+
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> NotNullConstraintParser =
+        from notKw in Token.EqualTo(SqlToken.Not)
+        from nullKw in Token.EqualTo(SqlToken.Null)
+        select (ColumnConstraintClause)new NullabilityConstraint(Nullable: false, notKw.Position);
+
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> BareNullConstraintParser =
+        from nullKw in Token.EqualTo(SqlToken.Null)
+        select (ColumnConstraintClause)new NullabilityConstraint(Nullable: true, nullKw.Position);
+
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> PrimaryKeyConstraintParser =
+        from primaryKw in Token.EqualTo(SqlToken.Primary)
+        from keyKw in Token.EqualTo(SqlToken.Key)
+        select (ColumnConstraintClause)new PrimaryKeyConstraint(primaryKw.Position);
+
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> DefaultConstraintParser =
+        from defaultKw in Token.EqualTo(SqlToken.Default)
+        from expr in SP.Ref(() => ExpressionParser!)
+        select (ColumnConstraintClause)new DefaultConstraint(expr, defaultKw.Position);
+
+    // PG-canonical `GENERATED …` clause. Disambiguation between the computed
+    // and IDENTITY forms is delegated to the GeneratedAlways / ByDefault arms.
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> GeneratedConstraintParser =
+        from generatedKw in Token.EqualTo(SqlToken.Generated)
+        from result in GeneratedAlwaysArm.Try().Or(GeneratedByDefaultArm)
+        select (ColumnConstraintClause)new GeneratedSlotConstraint(
+            result.ComputedExpression, result.Identity, generatedKw.Position);
+
+    // Legacy bare `AS (expr)` — computed-column shorthand that pre-dates the
+    // GENERATED clause. Kept for backward compatibility.
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> BareAsComputedConstraintParser =
+        from asKw in Token.EqualTo(SqlToken.As)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from expr in SP.Ref(() => ExpressionParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (ColumnConstraintClause)new GeneratedSlotConstraint(
+            ComputedExpression: expr, Identity: null, asKw.Position);
+
+    // Legacy bare `IDENTITY[(seed, step)]` — pre-dates the GENERATED clause.
+    // Equivalent to `GENERATED ALWAYS AS IDENTITY` (rejects explicit values).
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> BareIdentityConstraintParser =
+        from identityKw in Token.EqualTo(SqlToken.Identity)
+        from spec in IdentitySeedStepParser.AsNullable().OptionalOrDefault()
+        select (ColumnConstraintClause)new GeneratedSlotConstraint(
+            ComputedExpression: null,
+            Identity: spec ?? new IdentitySpec(1, 1),
+            identityKw.Position);
+
+    // All first tokens are unique (NOT / NULL / PRIMARY / DEFAULT / GENERATED
+    // / AS / IDENTITY) so plain `Or` is safe — no `.Try()` needed.
+    private static readonly TokenListParser<SqlToken, ColumnConstraintClause> ColumnConstraintParser =
+        NotNullConstraintParser
+            .Or(BareNullConstraintParser)
+            .Or(PrimaryKeyConstraintParser)
+            .Or(DefaultConstraintParser)
+            .Or(GeneratedConstraintParser)
+            .Or(BareAsComputedConstraintParser)
+            .Or(BareIdentityConstraintParser);
+
+    /// <summary>
     /// Parses a single column definition:
-    /// <c>name type [NOT NULL] [PRIMARY KEY] [DEFAULT literal] [IDENTITY[(seed, step)]]</c>.
+    /// <c>name type [column_constraint …]</c>.
+    /// Column constraints (<c>NULL</c> / <c>NOT NULL</c> / <c>PRIMARY KEY</c>
+    /// / <c>DEFAULT expr</c> / <c>GENERATED …</c> / legacy bare <c>AS (expr)</c>
+    /// / legacy bare <c>IDENTITY</c>) may appear in any order; duplicates and
+    /// conflicting nullability are rejected at parse time with a position
+    /// pointing at the offending token.
     /// The <c>DEFAULT</c> and <c>IDENTITY</c> clauses accept their inputs
     /// loosely here; the catalog enforces "literal only" / "integer column /
     /// at most one per table" at <c>CREATE TABLE</c> time so validation
@@ -2488,49 +2576,88 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
         from name in IdentifierOrKeywordAsName
         from typeName in TypeNameParser
-        from notNull in (
-            from notKw in Token.EqualTo(SqlToken.Not)
-            from nullKw in Token.EqualTo(SqlToken.Null)
-            select true
-        ).OptionalOrDefault()
-        from primaryKey in (
-            from primaryKw in Token.EqualTo(SqlToken.Primary)
-            from keyKw in Token.EqualTo(SqlToken.Key)
-            select true
-        ).OptionalOrDefault()
-        from defaultValue in (
-            from defaultKw in Token.EqualTo(SqlToken.Default)
-            from expr in SP.Ref(() => ExpressionParser!)
-            select expr
-        ).AsNullable().OptionalOrDefault()
-        // PG-canonical `GENERATED ...` clause: produces either a computed
-        // expression (GENERATED ALWAYS AS (expr)) or an IDENTITY spec
-        // (GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY [(seed,step)]). Tried
-        // before the legacy bare-AS and bare-IDENTITY arms below so the new
-        // syntax wins when both forms would match.
-        from generated in GeneratedClauseParser.AsNullable().OptionalOrDefault()
-        // Legacy bare `colname kind AS (expr)` — computed-column shorthand,
-        // pre-dates the GENERATED clause. Won't fire when GENERATED already
-        // consumed the AS keyword. Kept for backward compatibility.
-        from bareComputedExpression in (
-            from asKw in Token.EqualTo(SqlToken.As)
-            from open in Token.EqualTo(SqlToken.LeftParen)
-            from expr in SP.Ref(() => ExpressionParser!)
-            from close in Token.EqualTo(SqlToken.RightParen)
-            select expr
-        ).AsNullable().OptionalOrDefault()
-        // Legacy bare `IDENTITY[(seed, step)]` — pre-dates the GENERATED
-        // clause. Equivalent to `GENERATED ALWAYS AS IDENTITY` (rejects
-        // explicit values). Won't fire when GENERATED already consumed the
-        // IDENTITY keyword.
-        from bareIdentity in IdentityClauseParser.AsNullable().OptionalOrDefault()
-        select new ColumnDefinition(
+        from clauses in ColumnConstraintParser.Many()
+        select FoldColumnConstraints(name, typeName, clauses);
+
+    /// <summary>
+    /// Folds a collected list of column-constraint clauses into a
+    /// <see cref="ColumnDefinition"/>. Rejects duplicate / conflicting
+    /// clauses with a <see cref="ParseException"/> anchored at the second
+    /// occurrence so editors can pinpoint the user-fixable token.
+    /// </summary>
+    private static ColumnDefinition FoldColumnConstraints(
+        string name,
+        string typeName,
+        ColumnConstraintClause[] clauses)
+    {
+        bool? nullable = null;
+        Position nullabilityPosition = default;
+        bool primaryKey = false;
+        Expression? defaultValue = null;
+        GeneratedSlotConstraint? generatedSlot = null;
+
+        foreach (ColumnConstraintClause clause in clauses)
+        {
+            switch (clause)
+            {
+                case NullabilityConstraint nc:
+                    if (nullable.HasValue)
+                    {
+                        string prior = nullable.Value ? "NULL" : "NOT NULL";
+                        string current = nc.Nullable ? "NULL" : "NOT NULL";
+                        string detail = nullable.Value == nc.Nullable
+                            ? $"duplicate {current} constraint on column '{name}'"
+                            : $"conflicting nullability constraints on column '{name}': {prior} already specified, cannot also specify {current}";
+                        throw new ParseException(detail, nc.Position);
+                    }
+                    nullable = nc.Nullable;
+                    nullabilityPosition = nc.Position;
+                    break;
+
+                case PrimaryKeyConstraint pkc:
+                    if (primaryKey)
+                    {
+                        throw new ParseException(
+                            $"duplicate PRIMARY KEY constraint on column '{name}'",
+                            pkc.Position);
+                    }
+                    primaryKey = true;
+                    break;
+
+                case DefaultConstraint dc:
+                    if (defaultValue is not null)
+                    {
+                        throw new ParseException(
+                            $"duplicate DEFAULT constraint on column '{name}'",
+                            dc.Position);
+                    }
+                    defaultValue = dc.Expression;
+                    break;
+
+                case GeneratedSlotConstraint gsc:
+                    if (generatedSlot is not null)
+                    {
+                        throw new ParseException(
+                            $"duplicate GENERATED / IDENTITY / computed-expression constraint on column '{name}'",
+                            gsc.Position);
+                    }
+                    generatedSlot = gsc;
+                    break;
+            }
+        }
+
+        // Explicit NOT NULL wins. Otherwise PRIMARY KEY implies NOT NULL.
+        // Otherwise default to nullable (matches PG).
+        bool finalNullable = nullable ?? !primaryKey;
+
+        return new ColumnDefinition(
             name, typeName,
-            Nullable: !notNull && !primaryKey,
+            Nullable: finalNullable,
             PrimaryKey: primaryKey,
             DefaultValue: defaultValue,
-            Identity: generated?.Identity ?? bareIdentity,
-            ComputedExpression: generated?.ComputedExpression ?? bareComputedExpression);
+            Identity: generatedSlot?.Identity,
+            ComputedExpression: generatedSlot?.ComputedExpression);
+    }
 
     /// <summary>
     /// Parses the <c>IDENTITY[(seed, step)]</c> clause. Bare <c>IDENTITY</c>

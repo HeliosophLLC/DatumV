@@ -778,6 +778,182 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Null(create.PrimaryKeyColumns);
     }
 
+    // ───────────────────── Column constraint ordering (PG-compliant) ─────────────────────
+    //
+    // PostgreSQL accepts column constraints (NULL / NOT NULL / PRIMARY KEY /
+    // DEFAULT / GENERATED …) in any order and any number — see
+    // https://www.postgresql.org/docs/current/sql-createtable.html. These
+    // tests pin order-independence, bare NULL acceptance, and
+    // parser-level rejection of duplicate clauses with positional errors.
+
+    /// <summary>
+    /// The PG-canonical example that motivated this section:
+    /// <c>GENERATED ALWAYS AS IDENTITY PRIMARY KEY</c> (GENERATED before PK)
+    /// must parse identically to <c>PRIMARY KEY GENERATED ALWAYS AS IDENTITY</c>.
+    /// </summary>
+    [Fact]
+    public void CreateTable_GeneratedAlwaysAsIdentity_BeforePrimaryKey_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name STRING)");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        ColumnDefinition id = create.Columns[0];
+        Assert.True(id.PrimaryKey);
+        Assert.NotNull(id.Identity);
+        Assert.False(id.Identity!.AcceptUserValues);
+        Assert.False(id.Nullable, "PRIMARY KEY column should be implicitly NOT NULL.");
+    }
+
+    /// <summary>
+    /// All six permutations of {PRIMARY KEY, NOT NULL, DEFAULT 0} produce
+    /// the same ColumnDefinition shape — confirms the parser doesn't
+    /// depend on declaration order.
+    /// </summary>
+    [Theory]
+    [InlineData("PRIMARY KEY NOT NULL DEFAULT 0")]
+    [InlineData("PRIMARY KEY DEFAULT 0 NOT NULL")]
+    [InlineData("NOT NULL PRIMARY KEY DEFAULT 0")]
+    [InlineData("NOT NULL DEFAULT 0 PRIMARY KEY")]
+    [InlineData("DEFAULT 0 PRIMARY KEY NOT NULL")]
+    [InlineData("DEFAULT 0 NOT NULL PRIMARY KEY")]
+    public void CreateTable_ColumnConstraints_AnyOrder_ProducesSameShape(string constraints)
+    {
+        Statement statement = SqlParser.ParseStatement(
+            $"CREATE TABLE t (id Int32 {constraints})");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        ColumnDefinition col = create.Columns[0];
+        Assert.True(col.PrimaryKey);
+        Assert.False(col.Nullable);
+        Assert.NotNull(col.DefaultValue);
+    }
+
+    /// <summary>
+    /// GENERATED ALWAYS AS IDENTITY can precede or follow PRIMARY KEY.
+    /// </summary>
+    [Theory]
+    [InlineData("PRIMARY KEY GENERATED ALWAYS AS IDENTITY")]
+    [InlineData("GENERATED ALWAYS AS IDENTITY PRIMARY KEY")]
+    public void CreateTable_PrimaryKeyAndGenerated_AnyOrder(string constraints)
+    {
+        Statement statement = SqlParser.ParseStatement(
+            $"CREATE TABLE t (id Int64 {constraints})");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        ColumnDefinition col = create.Columns[0];
+        Assert.True(col.PrimaryKey);
+        Assert.NotNull(col.Identity);
+        Assert.False(col.Identity!.AcceptUserValues);
+    }
+
+    /// <summary>
+    /// Bare <c>NULL</c> is a column constraint in PG (the explicit
+    /// counterpart of <c>NOT NULL</c>). It must parse, leaving the
+    /// column nullable.
+    /// </summary>
+    [Fact]
+    public void CreateTable_BareNullConstraint_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TABLE t (id Int32 NULL, name STRING NULL)");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.True(create.Columns[0].Nullable);
+        Assert.True(create.Columns[1].Nullable);
+    }
+
+    /// <summary>
+    /// Bare <c>NULL</c> composes with other constraints regardless of order.
+    /// </summary>
+    [Theory]
+    [InlineData("NULL DEFAULT 0")]
+    [InlineData("DEFAULT 0 NULL")]
+    public void CreateTable_BareNull_WithOtherConstraints_Parses(string constraints)
+    {
+        Statement statement = SqlParser.ParseStatement(
+            $"CREATE TABLE t (x Int32 {constraints})");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.True(create.Columns[0].Nullable);
+        Assert.NotNull(create.Columns[0].DefaultValue);
+    }
+
+    /// <summary>
+    /// Duplicate <c>PRIMARY KEY</c> on the same column is rejected at
+    /// parse time so the error carries a token position.
+    /// </summary>
+    [Fact]
+    public void CreateTable_DuplicatePrimaryKey_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id Int32 PRIMARY KEY PRIMARY KEY)"));
+    }
+
+    /// <summary>
+    /// Duplicate <c>NOT NULL</c> on the same column is rejected at parse time.
+    /// </summary>
+    [Fact]
+    public void CreateTable_DuplicateNotNull_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id Int32 NOT NULL NOT NULL)"));
+    }
+
+    /// <summary>
+    /// Duplicate <c>DEFAULT</c> on the same column is rejected at parse time.
+    /// </summary>
+    [Fact]
+    public void CreateTable_DuplicateDefault_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id Int32 DEFAULT 1 DEFAULT 2)"));
+    }
+
+    /// <summary>
+    /// Conflicting <c>NULL</c> and <c>NOT NULL</c> on the same column is
+    /// rejected at parse time (both occupy the nullability slot).
+    /// </summary>
+    [Fact]
+    public void CreateTable_NullAndNotNull_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id Int32 NULL NOT NULL)"));
+    }
+
+    /// <summary>
+    /// Two <c>GENERATED</c> clauses on the same column are rejected at
+    /// parse time. Also covers the GENERATED + legacy bare IDENTITY combo
+    /// — both target the Identity slot.
+    /// </summary>
+    [Fact]
+    public void CreateTable_DuplicateGenerated_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement(
+                "CREATE TABLE t (id Int64 GENERATED ALWAYS AS IDENTITY GENERATED BY DEFAULT AS IDENTITY)"));
+    }
+
+    /// <summary>
+    /// Duplicate clauses report an error position pointing at the second
+    /// occurrence, not at end-of-input — so editors can pinpoint the
+    /// offending token.
+    /// </summary>
+    [Fact]
+    public void CreateTable_DuplicatePrimaryKey_ErrorPositionPointsAtSecondOccurrence()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id Int32 PRIMARY KEY PRIMARY KEY)"));
+
+        // The second `PRIMARY` token starts at column 38 (1-based).
+        // Allow some slack because Superpower may report at or just past
+        // the offending token; the key invariant is "not at EOF".
+        Assert.True(ex.ErrorPosition.HasValue);
+        Assert.True(
+            ex.ErrorPosition.Column >= 30 && ex.ErrorPosition.Column <= 50,
+            $"Expected error position near the duplicate PRIMARY KEY (col ~38), got column {ex.ErrorPosition.Column}.");
+    }
+
     // ───────────────────── ANALYZE ─────────────────────
 
     /// <summary>

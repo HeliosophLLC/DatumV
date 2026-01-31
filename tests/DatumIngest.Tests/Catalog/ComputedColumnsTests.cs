@@ -61,10 +61,13 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog();
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        // Bare `AS (expr)` and bare `IDENTITY` both occupy the column's
+        // "generated slot" (the parser folds GENERATED, legacy bare AS,
+        // and legacy bare IDENTITY together so duplicates are caught at
+        // parse time with a position pointing at the offending token).
+        DatumIngest.Parsing.ParseException ex = Assert.Throws<DatumIngest.Parsing.ParseException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int64 AS (a + 1) IDENTITY)"));
-        Assert.Contains("IDENTITY", ex.Message);
-        Assert.Contains("GENERATED", ex.Message);
+        Assert.Contains("duplicate", ex.Message);
     }
 
     // ──────────────────── INSERT materialisation ────────────────────
