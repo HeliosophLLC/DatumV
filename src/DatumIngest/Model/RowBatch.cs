@@ -138,16 +138,6 @@ public sealed class RowBatch : IDisposable
     /// <summary>
     /// Appends a row to this batch.
     /// </summary>
-    /// <param name="row">The row to add.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the batch is already full.</exception>
-    public void Add(Row row)
-    {
-        throw new NotImplementedException("DON'T USE THIS");
-    }
-
-    /// <summary>
-    /// Appends a row to this batch.
-    /// </summary>
     /// <param name="values">The array of data values for the new row.</param>
     /// <exception cref="InvalidOperationException">Thrown when the batch is already full.</exception>
     public void Add(DataValue[] values)
@@ -161,29 +151,6 @@ public sealed class RowBatch : IDisposable
 
         _rows[Count] = new Row(_columnLookup, values);
         Count++;
-    }
-
-    /// <summary>
-    /// Rents a new batch with the given capacity. The backing array is rented
-    /// from <see cref="ArrayPool{T}.Shared"/>.
-    /// Individual <see cref="Row"/> objects are not returned to any pool;
-    /// their lifecycle is managed separately by operators.
-    /// </summary>
-    /// <param name="capacity">The maximum number of rows the batch can hold.</param>
-    public static RowBatch Rent(int capacity)
-    {
-        throw new NotImplementedException("DON'T USE THIS");
-    }
-
-    /// <summary>
-    /// Returns the backing array to <see cref="ArrayPool{T}.Shared"/>.
-    /// The batch must not be used after calling this method.
-    /// Individual <see cref="Row"/> objects are not returned to any pool;
-    /// their lifecycle is managed separately by operators.
-    /// </summary>
-    public void Return()
-    {
-        throw new NotImplementedException("DON'T USE THIS");
     }
 
     /// <summary>

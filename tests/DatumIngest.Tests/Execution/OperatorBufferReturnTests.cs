@@ -25,111 +25,6 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     /// </summary>
     private const int RowCount = 10_000;
 
-    // ────────────────── RowBatch lifecycle ──────────────────
-
-    /// <summary>
-    /// Verifies that <see cref="RowBatch.ReturnBatch"/> returns all contained
-    /// <see cref="DataValue"/> arrays to the <see cref="LocalBufferPool"/>.
-    /// </summary>
-    [Fact]
-    public void ReturnBatch_ReturnsAllDataValueArrays()
-    {
-        LocalBufferPool pool = new();
-        int rowCount = 100;
-        int columnCount = 3;
-
-        RowBatch batch = pool.RentBatch(rowCount);
-
-        string[] names = ["c0", "c1", "c2"];
-        Dictionary<string, int> nameIndex = new() { ["c0"] = 0, ["c1"] = 1, ["c2"] = 2 };
-
-        for (int i = 0; i < rowCount; i++)
-        {
-            DataValue[] values = pool.Rent(columnCount);
-            values[0] = DataValue.FromFloat32(i);
-            values[1] = DataValue.FromFloat32(i * 10);
-            values[2] = DataValue.FromFloat32(i * 100);
-            batch.Add(new Row(names, values, nameIndex));
-        }
-
-        Assert.Equal(rowCount, pool.RentCount);
-        Assert.Equal(0, pool.ReturnCount);
-
-        pool.ReturnBatch(batch);
-
-        // All DataValue[] arrays should have been returned.
-        Assert.Equal(rowCount, pool.ReturnCount);
-    }
-
-    /// <summary>
-    /// Verifies that accessing a row's DataValue[] after the batch has been returned
-    /// throws under POOL_DIAGNOSTICS — the array was returned to the pool and may
-    /// have been re-rented by another consumer.
-    /// </summary>
-    [Fact]
-    public void ReturnBatch_AccessAfterReturn_Throws()
-    {
-        LocalBufferPool pool = new();
-
-        RowBatch batch = pool.RentBatch(10);
-        DataValue[] values = pool.Rent(2);
-        values[0] = DataValue.FromFloat32(1);
-        values[1] = DataValue.FromFloat32(2);
-        string[] names = ["a", "b"];
-        batch.Add(values);
-
-        // Capture the row before returning.
-        Row row = batch[0];
-
-        pool.ReturnBatch(batch);
-
-#if POOL_DIAGNOSTICS
-        // Under POOL_DIAGNOSTICS, accessing the returned array throws.
-        Assert.Throws<InvalidOperationException>(() => _ = row.RawValues);
-#endif
-    }
-
-    /// <summary>
-    /// Verifies that returning a batch twice throws — a double return is a bug,
-    /// not a no-op, because it indicates two code paths claiming ownership of the
-    /// same batch.
-    /// </summary>
-    [Fact]
-    public void ReturnBatch_ThrowsOnDoubleReturn()
-    {
-        LocalBufferPool pool = new();
-
-        RowBatch batch = pool.RentBatch(10);
-        DataValue[] values = pool.Rent(2);
-        values[0] = DataValue.FromFloat32(1);
-        values[1] = DataValue.FromFloat32(2);
-        batch.Add(values);
-
-        pool.ReturnBatch(batch);
-
-        Assert.Throws<InvalidOperationException>(() => pool.ReturnBatch(batch));
-    }
-
-    /// <summary>
-    /// Verifies that <see cref="RowBatch.Return"/> does NOT return
-    /// <see cref="DataValue"/> arrays — only <see cref="LocalBufferPool.ReturnBatch"/> does.
-    /// </summary>
-    [Fact]
-    public void LegacyReturn_DoesNotReturnDataValueArrays()
-    {
-        LocalBufferPool pool = new();
-
-        RowBatch batch = pool.RentBatch(10);
-        DataValue[] values = pool.Rent(2);
-        values[0] = DataValue.FromFloat32(1);
-        values[1] = DataValue.FromFloat32(2);
-        batch.Add(values);
-
-        batch.Return(); // Legacy path — should NOT return DataValue[] arrays.
-
-        Assert.Equal(0, pool.ReturnCount);
-    }
-
     // ────────────────── ProjectOperator ──────────────────
 
     /// <summary>
@@ -146,8 +41,8 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     [Fact]
     public async Task ProjectOperator_OutputArraysReturnedByConsumer()
     {
-        LocalBufferPool pool = new();
-        ExecutionContext context = CreateContext(pool);
+        Pool pool = CreatePool();
+        ExecutionContext context = CreateExecutionContext(pool: pool);
 
         // Source produces rows with pool-rented arrays (mimics ScanOperator).
         PooledMockOperator source = new(pool, RowCount, columnCount: 3);
@@ -163,20 +58,14 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         // Consume all output.
         await foreach (RowBatch batch in project.ExecuteAsync(context))
         {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                // Downstream consumer returns the output row (as GroupBy would).
-                context.LocalBufferPool.ReturnValues(batch[i]);
-            }
-
-            batch.Return();
+            context.ReturnRowBatch(batch);
         }
 
         // The consumer returned all N output arrays. Input arrays are not yet returned
         // by ProjectOperator (deferred to Part C).
-        Assert.True(pool.ReturnCount >= RowCount,
+        Assert.True(pool.Backing.DataValueArrayReturnCount >= RowCount,
             $"Expected at least {RowCount:N0} returns (output arrays from consumer), " +
-            $"but got {pool.ReturnCount:N0}.");
+            $"but got {pool.Backing.DataValueArrayReturnCount:N0}.");
     }
 
     /// <summary>
@@ -188,8 +77,8 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     [Fact]
     public async Task ProjectOperator_OwnedArrayQueueBounded()
     {
-        LocalBufferPool pool = new();
-        ExecutionContext context = CreateContext(pool);
+        Pool pool = CreatePool();
+        ExecutionContext context = CreateExecutionContext(pool: pool);
 
         PooledMockOperator source = new(pool, RowCount, columnCount: 3);
         ProjectOperator project = new(
@@ -201,12 +90,7 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
 
         await foreach (RowBatch batch in project.ExecuteAsync(context))
         {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                context.LocalBufferPool.ReturnValues(batch[i]);
-            }
-
-            batch.Return();
+            context.ReturnRowBatch(batch);
         }
 
         // Both the PooledMockOperator (source) and ProjectOperator use pool.Rent(),
@@ -230,8 +114,8 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     [Fact]
     public async Task FilterOperator_PassedRowsReturnedByConsumer()
     {
-        LocalBufferPool pool = new();
-        ExecutionContext context = CreateContext(pool);
+        Pool pool = CreatePool();
+        ExecutionContext context = CreateExecutionContext(pool: pool);
 
         // Source with 3 columns: c0 (int), c1 (int), c2 (int).
         // c0 alternates 0 and 1, so ~50% of rows pass the filter.
@@ -251,20 +135,14 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         {
             passedCount += batch.Count;
 
-            for (int i = 0; i < batch.Count; i++)
-            {
-                // Consumer returns passed rows.
-                context.LocalBufferPool.ReturnValues(batch[i]);
-            }
-
-            batch.Return();
+            context.ReturnRowBatch(batch);
         }
 
         // Consumer returned all passed rows. Filtered-out rows are not yet returned
         // (deferred to Part C).
-        Assert.True(pool.ReturnCount >= passedCount,
+        Assert.True(pool.Backing.DataValueArrayReturnCount >= passedCount,
             $"Expected at least {passedCount:N0} returns (passed rows from consumer), " +
-            $"but got {pool.ReturnCount:N0}.");
+            $"but got {pool.Backing.DataValueArrayReturnCount:N0}.");
     }
 
     // ────────────────── GraceHashJoin spill path ──────────────────
@@ -280,8 +158,8 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     {
         // Use a tiny budget to force spilling.
         const long tinyBudget = 256;
-        LocalBufferPool pool = new();
-        ExecutionContext context = CreateContext(pool, memoryBudgetBytes: tinyBudget);
+        Pool pool = CreatePool();
+        ExecutionContext context = CreateExecutionContext(memoryBudgetBytes: tinyBudget, pool: pool);
 
         // Build side: small table.
         object?[][] buildRows = Enumerable.Range(0, 50)
@@ -308,20 +186,15 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         {
             outputCount += batch.Count;
 
-            for (int i = 0; i < batch.Count; i++)
-            {
-                context.LocalBufferPool.ReturnValues(batch[i]);
-            }
-
-            batch.Return();
+            context.ReturnRowBatch(batch);
         }
 
         // Every join output row should have been returned by the consumer.
         // The join should have returned spilled probe rows internally.
         // Total returns should be at least the output count (consumer returns)
         // plus some fraction of probe rows (spill path returns).
-        Assert.True(pool.ReturnCount >= outputCount,
-            $"Expected at least {outputCount:N0} returns, but got {pool.ReturnCount:N0}. " +
+        Assert.True(pool.Backing.DataValueArrayReturnCount >= outputCount,
+            $"Expected at least {outputCount:N0} returns, but got {pool.Backing.DataValueArrayReturnCount:N0}. " +
             "Spilled probe row DataValue[] arrays may not be returned to the pool.");
     }
 
@@ -338,8 +211,8 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     [Fact]
     public async Task Pipeline_RentCountEqualsReturnCount()
     {
-        LocalBufferPool pool = new();
-        ExecutionContext context = CreateContext(pool);
+        Pool pool = CreatePool();
+        ExecutionContext context = CreateExecutionContext(pool: pool);
 
         PooledMockOperator source = new(pool, RowCount, columnCount: 3);
 
@@ -354,37 +227,17 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
         // Terminal consumer: clones and returns output batch.
         await foreach (RowBatch batch in project.ExecuteAsync(context))
         {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                batch[i].CloneForTest(); // Simulate reading values
-            }
-
-            pool.ReturnBatch(batch);
+            context.ReturnRowBatch(batch);
         }
 
-        long leaked = pool.RentCount - pool.ReturnCount;
+        long leaked = pool.Backing.DataValueArrayRentCount - pool.Backing.DataValueArrayReturnCount;
         Assert.True(leaked == 0,
-            $"Rent/Return imbalance: rented={pool.RentCount:N0} returned={pool.ReturnCount:N0} leaked={leaked:N0}. " +
+            $"Rent/Return imbalance: rented={pool.Backing.DataValueArrayRentCount:N0} " +
+            "returned={pool.Backing.DataValueArrayReturnCount:N0} leaked={leaked:N0}. " +
             "Every DataValue[] array rented from the pool should be returned.");
     }
 
     // ────────────────── Helpers ──────────────────
-
-    private ExecutionContext CreateContext(
-        LocalBufferPool pool, long? memoryBudgetBytes = null)
-    {
-        Pool dataPool = GetService<Pool>();
-        return new ExecutionContext(
-            CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
-            CreateCatalog(),
-            pool,
-            dataPool,
-            memoryBudgetBytes: memoryBudgetBytes)
-        {
-            BatchSize = 1024,
-        };
-    }
 
     /// <summary>
     /// A mock operator that produces rows with <see cref="DataValue"/> arrays rented
@@ -393,11 +246,11 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
     /// </summary>
     private sealed class PooledMockOperator : IQueryOperator
     {
-        private readonly LocalBufferPool _pool;
+        private readonly Pool _pool;
         private readonly int _rowCount;
         private readonly int _columnCount;
 
-        public PooledMockOperator(LocalBufferPool pool, int rowCount, int columnCount)
+        public PooledMockOperator(Pool pool, int rowCount, int columnCount)
         {
             _pool = pool;
             _rowCount = rowCount;
@@ -411,30 +264,34 @@ public sealed class OperatorBufferReturnTests : ServiceTestBase
             string[] names = Enumerable.Range(0, _columnCount)
                 .Select(i => $"c{i}")
                 .ToArray();
+            ColumnLookup columnLookup = new(names);
 
             RowBatch? batch = null;
 
             for (int row = 0; row < _rowCount; row++)
             {
-                DataValue[] values = _pool.Rent(_columnCount);
+                DataValue[] values = _pool.RentDataValues(_columnCount);
                 for (int col = 0; col < _columnCount; col++)
                 {
                     values[col] = DataValue.FromFloat32(row % (col + 2));
                 }
 
-                batch ??= RowBatch.Rent(context.BatchSize);
-                batch.Add(new Row(names, values));
+                batch ??= context.RentRowBatch(columnLookup);
+                batch.Add(values);
 
                 if (batch.IsFull)
                 {
-                    yield return batch;
+                    RowBatch toYield = batch;
                     batch = null;
+                    yield return toYield;
                 }
             }
 
             if (batch is not null)
             {
-                yield return batch;
+                RowBatch toYield = batch;
+                batch = null;
+                yield return toYield;
             }
 
             await Task.CompletedTask;

@@ -12,7 +12,7 @@ public class RowBatchTests : ServiceTestBase
 
 
     /// <summary>
-    /// Verifies that <see cref="RowBatch.Add"/> increments the count and
+    /// Verifies that <see cref="RowBatch.Add(DataValue[])"/> increments the count and
     /// stores the row so it can be retrieved by the indexer.
     /// </summary>
     [Fact]
@@ -106,7 +106,7 @@ public class RowBatchTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Verifies that <see cref="RowBatch.Add"/> throws
+    /// Verifies that <see cref="RowBatch.Add(DataValue[])"/> throws
     /// <see cref="InvalidOperationException"/> when the batch is already full.
     /// </summary>
     [Fact]
@@ -122,7 +122,7 @@ public class RowBatchTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Verifies that <see cref="RowBatch.Return"/> returns the backing array
+    /// Verifies that <see cref="Pool.ReturnRowBatch(RowBatch)"/> returns the backing array
     /// to the pool and resets the count to zero.
     /// </summary>
     [Fact]
@@ -154,5 +154,66 @@ public class RowBatchTests : ServiceTestBase
         pool.ReturnRowBatch(batch);
 
         Assert.Throws<ObjectDisposedException>(() => pool.ReturnRowBatch(batch));
+    }
+
+    
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.ReturnBatch"/> returns all contained
+    /// <see cref="DataValue"/> arrays to the <see cref="LocalBufferPool"/>.
+    /// </summary>
+    [Fact]
+    public void ReturnBatch_ReturnsAllDataValueArrays()
+    {
+        Pool pool = CreatePool();
+        int rowCount = 100;
+        int columnCount = 3;
+
+        ColumnLookup columnLookup = new(["c0", "c1", "c2"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, rowCount);
+
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue[] values = pool.RentDataValues(columnCount);
+            values[0] = DataValue.FromFloat32(i);
+            values[1] = DataValue.FromFloat32(i * 10);
+            values[2] = DataValue.FromFloat32(i * 100);
+            batch.Add(values);
+        }
+
+        Assert.Equal(rowCount, pool.Backing.DataValueArrayRentCount);
+        Assert.Equal(0, pool.Backing.DataValueArrayReturnCount);
+
+        pool.ReturnRowBatch(batch);
+
+        // All DataValue[] arrays should have been returned.
+        Assert.Equal(rowCount, pool.Backing.DataValueArrayReturnCount);
+    }
+
+    /// <summary>
+    /// Verifies that accessing a row's DataValue[] after the batch has been returned
+    /// throws under POOL_DIAGNOSTICS — the array was returned to the pool and may
+    /// have been re-rented by another consumer.
+    /// </summary>
+    [Fact]
+    public void ReturnBatch_AccessAfterReturn_Throws()
+    {
+        Pool pool = CreatePool();
+        ColumnLookup columnLookup = new(["a", "b"]);
+        RowBatch batch = pool.RentRowBatch(columnLookup, 10);
+        DataValue[] values = pool.RentDataValues(2);
+        values[0] = DataValue.FromFloat32(1);
+        values[1] = DataValue.FromFloat32(2);
+
+        batch.Add(values);
+
+        // Capture the row before returning.
+        Row row = batch[0];
+
+        pool.ReturnRowBatch(batch);
+
+#if POOL_DIAGNOSTICS
+        // Under POOL_DIAGNOSTICS, accessing the returned array throws.
+        Assert.Throws<InvalidOperationException>(() => _ = row.RawValues);
+#endif
     }
 }

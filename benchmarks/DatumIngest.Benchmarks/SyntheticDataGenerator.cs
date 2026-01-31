@@ -73,7 +73,7 @@ public static class SyntheticDataGenerator
         string[] categories = ["alpha", "beta", "gamma", "delta", "epsilon"];
         Row[] rows = new Row[rowCount];
 
-        string[] columnNames = ["id", "name", "value", "category", "score"];
+        ColumnLookup columnLookup = new(["id", "name", "value", "category", "score"]);
 
         for (int i = 0; i < rowCount; i++)
         {
@@ -85,7 +85,7 @@ public static class SyntheticDataGenerator
                 DataValue.FromString(categories[random.Next(categories.Length)]),
                 DataValue.FromFloat32((float)(random.NextDouble() * 100.0))
             ];
-            rows[i] = new Row(columnNames, values);
+            rows[i] = new Row(columnLookup, values);
         }
 
         return rows;
@@ -99,7 +99,7 @@ public static class SyntheticDataGenerator
         Random random = new(42);
         Row[] rows = new Row[rowCount];
 
-        string[] columnNames = ["lookup_id", "description", "weight"];
+        ColumnLookup columnLookup = new(["lookup_id", "description", "weight"]);
 
         for (int i = 0; i < rowCount; i++)
         {
@@ -109,7 +109,7 @@ public static class SyntheticDataGenerator
                 DataValue.FromString($"desc_{i:D6}"),
                 DataValue.FromFloat32((float)(random.NextDouble() * 50.0))
             ];
-            rows[i] = new Row(columnNames, values);
+            rows[i] = new Row(columnLookup, values);
         }
 
         return rows;

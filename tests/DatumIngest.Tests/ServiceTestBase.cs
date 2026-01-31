@@ -68,6 +68,12 @@ public abstract class ServiceTestBase : IDisposable
     }
 
     /// <summary>
+    /// Creates an empty <see cref="Pool"/>.
+    /// </summary>
+    /// <returns></returns>
+    protected Pool CreatePool() => GetService<Pool>();
+
+    /// <summary>
     /// Creates an empty <see cref="TableCatalog"/> backed by a <see cref="Pool"/>
     /// resolved from the test's DI container. Each test instance gets its own
     /// <see cref="PoolBacking"/> (ServiceCollection is per-test), so catalogs
@@ -75,7 +81,7 @@ public abstract class ServiceTestBase : IDisposable
     /// </summary>
     protected TableCatalog CreateCatalog()
     {
-        return new TableCatalog(GetService<Pool>());
+        return new TableCatalog(CreatePool());
     }
 
     /// <summary>
@@ -84,7 +90,7 @@ public abstract class ServiceTestBase : IDisposable
     /// <param name="path">The path to the catalog.</param>
     protected TableCatalog CreateCatalog(string path)
     {
-        return new TableCatalog(GetService<Pool>(), path);
+        return new TableCatalog(CreatePool(), path);
     }
 
     /// <summary>
@@ -98,14 +104,14 @@ public abstract class ServiceTestBase : IDisposable
 
         foreach ((string name, Row[] rows) in tables)
         {
-            catalog.Add(new InMemoryTableProvider(GetService<Pool>(), name, rows));
+            catalog.Add(new InMemoryTableProvider(CreatePool(), name, rows));
         }
 
         return catalog;
     }
 
     protected InMemoryTableProvider CreateInMemoryProvider(string name, Row[] rows)
-        => new(GetService<Pool>(), name, rows);
+        => new(CreatePool(), name, rows);
 
     /// <summary>
     /// Creates a catalog with a single in-memory table from positional <c>object[]</c> rows.
@@ -127,7 +133,7 @@ public abstract class ServiceTestBase : IDisposable
         params object?[][] rows)
     {
         TableCatalog catalog = CreateCatalog();
-        catalog.Add(new InMemoryTableProvider(GetService<Pool>(), tableName, columns, rows));
+        catalog.Add(new InMemoryTableProvider(CreatePool(), tableName, columns, rows));
         return catalog;
     }
 
@@ -140,7 +146,7 @@ public abstract class ServiceTestBase : IDisposable
         string tableName,
         string[] columns,
         params object?[][] rows)
-        => new(GetService<Pool>(), tableName, columns, rows);
+        => new(CreatePool(), tableName, columns, rows);
 
     /// <summary>
     /// Creates a minimal execution context suitable for most unit tests.
@@ -156,9 +162,10 @@ public abstract class ServiceTestBase : IDisposable
         int? batchSize = null,
         int? maxStratifyClasses = null,
         Arena? store = null,
+        Pool? pool = null,
         CancellationToken cancellationToken = default)
     {
-        Pool pool = GetService<Pool>();
+        pool ??= CreatePool();
         return new(
             cancellationToken,
             functionRegistry ?? FunctionRegistry.CreateDefault(),

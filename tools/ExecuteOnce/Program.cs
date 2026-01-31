@@ -49,7 +49,7 @@ using TableCatalog catalog = TableCatalog.FromFile(opts.DatumPath, opts.TableNam
 IQueryPlan plan;
 try
 {
-    plan = catalog.Plan(sql);
+    plan = await catalog.PlanAsync(sql);
 }
 catch (Exception ex)
 {

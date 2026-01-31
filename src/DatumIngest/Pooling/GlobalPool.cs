@@ -16,21 +16,6 @@ public static class GlobalPool
     public static PoolBacking Backing => new();
 
     /// <summary>
-    /// Rents a <see cref="LocalBufferPool"/> for a single query. Returns a previously
-    /// returned instance when one is available; allocates otherwise.
-    /// </summary>
-    public static LocalBufferPool RentLocalBufferPool()
-    {
-        if (localBufferPools.TryDequeue(out LocalBufferPool? pool))
-        {
-            pool.Reset();
-            return pool;
-        }
-
-        return new LocalBufferPool(Backing);
-    }
-
-    /// <summary>
     /// Returns a <see cref="LocalBufferPool"/> for reuse by a subsequent query.
     /// </summary>
     public static void ReturnLocalBufferPool(LocalBufferPool pool)

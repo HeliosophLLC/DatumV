@@ -40,32 +40,6 @@ public readonly struct Row
         _values = values;
     }
 
-    /// <summary>
-    /// Creates a row from parallel arrays of column names and values, building a
-    /// case-insensitive name-to-ordinal index. Suitable for tests and one-off construction.
-    /// </summary>
-    /// <exception cref="ArgumentException">
-    /// Thrown when the name and value arrays have different lengths.
-    /// </exception>
-    public Row(string[] names, DataValue[] values)
-    {
-        throw new Exception("DON'T USE");
-    }
-
-    /// <summary>
-    /// Creates a row that shares a pre-built column name array and name-index dictionary
-    /// with other rows of the same schema. This avoids re-allocating the names array and
-    /// rebuilding the dictionary for every row in hot paths such as joins.
-    /// </summary>
-    /// <remarks>
-    /// Callers must guarantee that <paramref name="names"/> and <paramref name="nameIndex"/>
-    /// are never mutated after construction.
-    /// </remarks>
-    public Row(IReadOnlyList<string> names, DataValue[] values, IReadOnlyDictionary<string, int> nameIndex)
-    {
-        throw new Exception("DON'T USE");
-    }
-
     /// <summary>The number of fields in this row.</summary>
     public int FieldCount => _values.Length;
 
