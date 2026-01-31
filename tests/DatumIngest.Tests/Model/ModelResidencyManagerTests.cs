@@ -467,14 +467,17 @@ public sealed class ModelResidencyManagerTests
     // ---- Group 4: File-size heuristic footguns -------------------------------
 
     /// <summary>
-    /// EXPECTED TO FAIL. When <see cref="ModelCatalogEntry.EstimatedVramBytes"/>
-    /// is null and the entry references files that don't exist on disk, the
-    /// heuristic silently returns 0 — the budget is bypassed entirely and any
-    /// number of "phantom" models can be loaded. This should at minimum log a
-    /// warning; arguably it should throw so the user fixes the missing file.
+    /// When <see cref="ModelCatalogEntry.EstimatedVramBytes"/> is null and the
+    /// entry declares files that don't exist on disk, the heuristic used to
+    /// silently return 0 — the budget was bypassed entirely and any number of
+    /// "phantom" models could be loaded before the loader itself eventually
+    /// failed deeper in the stack with a less helpful message. The fix throws
+    /// at admission time with a diagnostic that names the missing file(s) and
+    /// points at the two escape hatches: fix the install, or set
+    /// <see cref="ModelCatalogEntry.EstimatedVramBytes"/> explicitly.
     /// </summary>
     [Fact]
-    public async Task EstimateFromFile_MissingPath_DoesNotSilentlyBypassBudget()
+    public async Task EstimateFromFile_MissingPath_ThrowsWithDiagnostic()
     {
         // No EstimatedVramBytes — force the file-size heuristic.
         ModelCatalogEntry entry = new(
@@ -488,14 +491,39 @@ public sealed class ModelResidencyManagerTests
 
         using ModelResidencyManager mgr = new(vramBudgetBytes: 100);
 
-        using ModelLease lease = await mgr.AcquireAsync(entry, modelDirectory: "/nonexistent-dir", CancellationToken.None);
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => mgr.AcquireAsync(entry, modelDirectory: "/nonexistent-dir", CancellationToken.None));
 
-        // Asserting "we got *something* >= 1 byte" — the manager should refuse to
-        // estimate at 0 because that turns the budget into a no-op for missing files.
-        Assert.True(mgr.VramUsedBytes >= 1,
-            "A model whose backing file cannot be sized must not be admitted as 0 bytes — " +
-            "the residency budget becomes meaningless. Either reject the load or use a " +
-            "conservative non-zero default.");
+        Assert.Contains("this-file-does-not-exist.onnx", ex.Message);
+        Assert.Contains("EstimatedVramBytes", ex.Message);
+
+        // No accounting drift from the failed estimate.
+        Assert.Equal(0, mgr.VramUsedBytes);
+        Assert.Empty(mgr.Snapshot());
+    }
+
+    /// <summary>
+    /// Synthetic backends (<c>EchoModel</c> and friends) declare no
+    /// <see cref="ModelCatalogEntry.RelativePath"/> and no
+    /// <see cref="ModelCatalogEntry.Files"/>. The heuristic must return 0 for
+    /// these without throwing — they're legitimately weight-less.
+    /// </summary>
+    [Fact]
+    public async Task EstimateFromFile_NoFilesDeclared_ReturnsZeroForSyntheticBackends()
+    {
+        ModelCatalogEntry entry = new(
+            Name: "synthetic",
+            Backend: "synthetic",
+            RelativePath: null,
+            InputKinds: [DataKind.String],
+            OutputKind: DataKind.String,
+            IsDeterministic: true,
+            Loader: _ => new FakeModel { Name = "synthetic" });
+
+        using ModelResidencyManager mgr = new(vramBudgetBytes: 100);
+        using ModelLease lease = await mgr.AcquireAsync(entry, "/anywhere", CancellationToken.None);
+
+        Assert.Equal(0, mgr.VramUsedBytes);
     }
 
     /// <summary>

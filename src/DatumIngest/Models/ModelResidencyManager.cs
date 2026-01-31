@@ -324,23 +324,46 @@ public sealed class ModelResidencyManager : IDisposable
         // Prefer summing all declared files — multi-file models (SDXL, Florence-2,
         // Whisper, etc.) store their graph in a small .onnx and their weights in a
         // large .onnx_data sibling; reading only RelativePath misses the bulk.
-        if (entry.Files is { Count: > 0 })
+        IReadOnlyList<string> paths =
+            entry.Files is { Count: > 0 } ? entry.Files
+            : entry.RelativePath is not null ? [entry.RelativePath]
+            : [];
+
+        // No files declared at all = a synthetic backend (EchoModel and the like).
+        // Legitimately zero — no VRAM, no admission cost.
+        if (paths.Count == 0) return 0;
+
+        long total = 0;
+        List<string>? missing = null;
+        foreach (string rel in paths)
         {
-            long total = 0;
-            foreach (string rel in entry.Files)
-            {
-                string p = Path.Combine(modelDirectory, rel);
-                if (File.Exists(p))
-                    total += new FileInfo(p).Length;
-            }
-            // 1.2× covers activations / scratch / KV cache headroom.
-            return (long)(total * 1.2);
+            string p = Path.Combine(modelDirectory, rel);
+            if (File.Exists(p))
+                total += new FileInfo(p).Length;
+            else
+                (missing ??= []).Add(rel);
         }
 
-        if (entry.RelativePath is null) return 0;
-        string path = Path.Combine(modelDirectory, entry.RelativePath);
-        if (!File.Exists(path)) return 0;
-        return (long)(new FileInfo(path).Length * 1.2);
+        // Declared-but-missing is a broken install. Refusing to estimate (and
+        // therefore refusing to load) is the right failure mode: silently
+        // returning 0 turned the budget into a no-op for missing files, which
+        // let an arbitrary number of "phantom" loads sail past admission
+        // control before the loader itself eventually failed deeper in the
+        // stack with a less helpful message.
+        if (missing is not null)
+        {
+            throw new InvalidOperationException(
+                $"Model '{entry.Name}' declares {paths.Count} file(s) but {missing.Count} are " +
+                $"missing from '{modelDirectory}': {string.Join(", ", missing)}. " +
+                $"Re-download from ModelCatalogEntry.SourceUrl ({entry.SourceUrl ?? "<unset>"}) " +
+                "or set ModelCatalogEntry.EstimatedVramBytes explicitly to bypass the file-size heuristic.");
+        }
+
+        // 1.2× covers activations / scratch / small KV cache headroom. This
+        // fudge is insufficient for LLMs whose KV cache scales with context
+        // length × batch size — set ModelCatalogEntry.EstimatedVramBytes
+        // explicitly for those.
+        return (long)(total * 1.2);
     }
 
     private static string FormatBytes(long bytes)
