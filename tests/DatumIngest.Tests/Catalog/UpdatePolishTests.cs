@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Catalog;
 /// CLR round-trip + sidecar duplication for value-copy SET expressions).
 /// Both are pure executor-layer additions on top of PR11c's path.
 /// </summary>
-public sealed class UpdatePolishTests : IAsyncLifetime
+public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr11_polish_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -31,8 +31,8 @@ public sealed class UpdatePolishTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private TableCatalog NewFileCatalog() => new(new Pool(new PoolBacking()), CatalogPath);
-    private TableCatalog NewMemoryCatalog() => new(new Pool(new PoolBacking()));
+    private TableCatalog NewFileCatalog() => CreateCatalog(CatalogPath);
+    private TableCatalog NewMemoryCatalog() => CreateCatalog();
 
     // ──────────────────── No-op detection ────────────────────
 

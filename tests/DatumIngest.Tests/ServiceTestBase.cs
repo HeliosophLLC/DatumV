@@ -94,6 +94,18 @@ public abstract class ServiceTestBase : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="TableCatalog"/> bound to <paramref name="path"/>
+    /// using the supplied <paramref name="pool"/>. Use this overload when a
+    /// test reopens the same catalog across multiple <c>using</c> blocks and
+    /// needs the pool's lifetime to outlive any individual catalog
+    /// instance.
+    /// </summary>
+    protected TableCatalog CreateCatalog(Pool pool, string path)
+    {
+        return new TableCatalog(pool, path);
+    }
+
+    /// <summary>
     /// Creates a <see cref="TableCatalog"/> pre-populated with
     /// <see cref="InMemoryTableProvider"/> entries for each supplied
     /// <c>(name, rows)</c> pair.

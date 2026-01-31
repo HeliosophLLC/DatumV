@@ -454,50 +454,81 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
     /// <summary>
     /// Creates a new composite-index sidecar (<c>.datum-cindex-{Name}</c>),
-    /// registers it for INSERT maintenance, and (if the table is non-empty)
-    /// rejects — backfill of existing rows is not yet supported in v1.
+    /// registers it for INSERT maintenance, and — when the table already
+    /// has rows — backfills the tree from a full table scan so existing
+    /// keys are immediately findable. INSERTs after this point queue
+    /// new entries through the append session as usual.
     /// </summary>
     /// <remarks>
-    /// v1 limitation: composite indexes must be created before any data is
-    /// inserted. The error message points the user at the workaround
-    /// (<c>DROP TABLE</c> → <c>CREATE TABLE</c> → <c>CREATE INDEX</c> →
-    /// <c>INSERT</c>). Backfill via <c>ScanAsync</c> + per-row tuple
-    /// encoding lands in a follow-up.
+    /// Holds <see cref="_mutationLock"/> for the duration so concurrent
+    /// INSERT / UPDATE / DELETE / DROP TABLE are serialised against the
+    /// build. The new tree is registered in the visible-state dictionaries
+    /// only after the scan completes, so a query running concurrently
+    /// with the build either misses the index (and falls through to scan)
+    /// or sees the fully-populated tree — never a half-built one. This is
+    /// the non-<c>CONCURRENTLY</c> Postgres model: writers block until
+    /// the build returns.
     /// </remarks>
-    internal Task AddCompositeIndexAsync(IndexDescriptor descriptor)
+    internal async Task AddCompositeIndexAsync(IndexDescriptor descriptor)
     {
-        if (_compositeIndexTrees.ContainsKey(descriptor.Name))
+        await _mutationLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException(
-                $"Composite index '{descriptor.Name}' is already open on table '{_descriptor.Name}'.");
-        }
+            if (_compositeIndexTrees.ContainsKey(descriptor.Name))
+            {
+                throw new InvalidOperationException(
+                    $"Composite index '{descriptor.Name}' is already open on table '{_descriptor.Name}'.");
+            }
 
-        if (GetRowCount() > 0)
+            int[]? ordinals = TryResolveCompositeIndexOrdinals(_snapshot.Schema, descriptor);
+            if (ordinals is null)
+            {
+                // Caller (TableCatalog.ApplyCreateIndexAsync) already
+                // validated column existence; this is a defense-in-depth
+                // check.
+                throw new InvalidOperationException(
+                    $"CREATE INDEX '{descriptor.Name}': one or more columns no longer exist on the schema.");
+            }
+
+            string treePath = GetCompositeIndexPath(_descriptor.FilePath, descriptor.Name);
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(treePath, allowDuplicates: true);
+
+            try
+            {
+                // Backfill into the local tree handle BEFORE it's visible
+                // to readers / future append sessions. Empty tables yield
+                // no batches and the loop is a cheap no-op.
+                if (GetRowCount() > 0)
+                {
+                    Dictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        [descriptor.Name] = (tree, ordinals),
+                    };
+                    await PopulateCompositeIndexesFromScanAsync(targets, CancellationToken.None).ConfigureAwait(false);
+                }
+
+                // Build succeeded — publish to visible state. After this
+                // point the planner picks up the index and any pending
+                // AppendSession will see it on its next start.
+                _compositeIndexTrees[descriptor.Name] = tree;
+                _compositeIndexColumnIndices[descriptor.Name] = ordinals;
+                _compositeIndexDescriptors[descriptor.Name] = descriptor;
+            }
+            catch
+            {
+                // Build failed — tear down the local tree and remove the
+                // sidecar so a retry starts clean. Nothing was published
+                // to the visible-state dictionaries.
+                try { tree.Dispose(); } catch { /* best-effort */ }
+                try { if (File.Exists(treePath)) File.Delete(treePath); } catch { /* best-effort */ }
+                throw;
+            }
+        }
+        finally
         {
-            throw new InvalidOperationException(
-                $"CREATE INDEX '{descriptor.Name}' on a populated table is not yet supported. " +
-                "v1 limitation: composite indexes must be created before any rows are inserted. " +
-                "Workaround: DROP TABLE, recreate, CREATE INDEX, then INSERT.");
+            _mutationLock.Release();
         }
-
-        int[]? ordinals = TryResolveCompositeIndexOrdinals(_snapshot.Schema, descriptor);
-        if (ordinals is null)
-        {
-            // Caller (TableCatalog.ApplyCreateIndexAsync) already validated
-            // column existence; this is a defense-in-depth check.
-            throw new InvalidOperationException(
-                $"CREATE INDEX '{descriptor.Name}': one or more columns no longer exist on the schema.");
-        }
-
-        string treePath = GetCompositeIndexPath(_descriptor.FilePath, descriptor.Name);
-        Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
-            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(treePath, allowDuplicates: true);
-
-        _compositeIndexTrees[descriptor.Name] = tree;
-        _compositeIndexColumnIndices[descriptor.Name] = ordinals;
-        _compositeIndexDescriptors[descriptor.Name] = descriptor;
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -552,11 +583,34 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
 
         if (_compositeIndexTrees.Count == 0) return;
 
-        // Scan + populate. Map absolute row positions to (chunkIndex,
-        // rowOffsetInChunk) via the live SourceIndex's chunk directory.
-        // Without a SourceIndex (rebuild swallowed the failure), fall back
-        // to default-chunk-size partitioning — entries point at the right
-        // chunk slot if a future rebuild produces matching chunks.
+        Dictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets =
+            new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string name, int[] ordinals) in _compositeIndexColumnIndices)
+        {
+            targets[name] = (_compositeIndexTrees[name], ordinals);
+        }
+        await PopulateCompositeIndexesFromScanAsync(targets, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Streams every live row through a scan and inserts entries into each
+    /// (tree, ordinals) pair in <paramref name="targets"/>. Absolute row
+    /// positions map to <c>(chunkIndex, rowOffsetInChunk)</c> via the live
+    /// <see cref="SourceIndex"/>'s chunk directory; the planner's seek
+    /// path resolves entries via the same arithmetic. Without a
+    /// <see cref="SourceIndex"/> the loop falls back to default-chunk-size
+    /// partitioning. Caller holds <c>_mutationLock</c>. Trees are passed
+    /// explicitly (not looked up from <c>_compositeIndexTrees</c>) so
+    /// callers can populate a tree before it's published to the visible
+    /// state dictionaries — e.g. CREATE INDEX backfill on a populated
+    /// table works against the local handle until the scan completes.
+    /// </summary>
+    private async Task PopulateCompositeIndexesFromScanAsync(
+        IReadOnlyDictionary<string, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree, int[] Ordinals)> targets,
+        CancellationToken ct)
+    {
+        if (targets.Count == 0) return;
+
         IReadOnlyList<Indexing.IndexChunk>? chunks = _sourceIndex?.Chunks;
         int defaultChunkSize = Indexing.IndexConstants.DefaultChunkSize;
         long absoluteRow = 0;
@@ -591,7 +645,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     }
 
                     Row row = batch[r];
-                    foreach ((string name, int[] ordinals) in _compositeIndexColumnIndices)
+                    foreach ((_, (Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree, int[] ordinals)) in targets)
                     {
                         DataValue[] tuple = new DataValue[ordinals.Length];
                         for (int p = 0; p < ordinals.Length; p++)
@@ -599,7 +653,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                             tuple[p] = row[ordinals[p]];
                         }
                         byte[] encoded = Indexing.CompositeKeyEncoder.Encode(tuple, batch.Arena);
-                        _compositeIndexTrees[name].Insert(
+                        tree.Insert(
                             new Indexing.BTree.MutableBytes.BytesIndexEntry(
                                 encoded, chunkIndex, rowOffsetInChunk));
                     }
@@ -2486,6 +2540,14 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 EnsureIndexBuildersInitialized();
             }
 
+            // Offset the session-local chunk index by the number of chunks the
+            // existing source index already carries. SourceIndex.Merge appends
+            // delta chunks AFTER existing ones (delta chunkIndex 0 becomes
+            // merged chunkIndex N where N = existing chunk count); without
+            // this shift, entries queued for the new rows would resolve via
+            // chunks[0] in the planner and seek to pre-existing rows.
+            int existingChunkCount = _existingForMerge?.Chunks.Count ?? 0;
+
             for (int r = 0; r < batch.Count; r++)
             {
                 Row row = batch[r];
@@ -2494,7 +2556,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 // values match where IncrementalIndexBuilder will place this
                 // row internally. AddRow may roll the chunk forward inside
                 // its own bookkeeping; we want the pre-add slot.
-                int chunkIndex = _indexBuilder!.CurrentChunkIndex;
+                int chunkIndex = _indexBuilder!.CurrentChunkIndex + existingChunkCount;
                 int rowOffsetInChunk = _indexBuilder.RowsInCurrentChunk;
 
                 _indexBuilder.AddRow(row, batch.Arena);

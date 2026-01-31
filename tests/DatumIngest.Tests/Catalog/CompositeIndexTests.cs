@@ -1,5 +1,4 @@
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.BTree.MutableBytes;
@@ -9,15 +8,16 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
-/// Phase 2b/c tests for user-defined composite secondary indexes
+/// Tests for user-defined composite secondary indexes
 /// (<c>CREATE INDEX</c> / <c>DROP INDEX</c>). Cover: sidecar file
 /// lifecycle, catalog persistence across reopen, INSERT-time
-/// maintenance via the append session, DROP TABLE cleanup of
-/// dependent sidecars, validation errors, and IF EXISTS / IF NOT EXISTS
-/// edge cases. Backfill of pre-existing rows is a v1 limitation:
-/// CREATE INDEX on a populated table is rejected.
+/// maintenance via the append session, post-UPDATE rebuild,
+/// CREATE INDEX backfill on populated tables, DROP TABLE cleanup of
+/// dependent sidecars, ALTER DROP COLUMN cascade, planner integration
+/// (full-match seek path), and validation / IF EXISTS / IF NOT EXISTS
+/// edge cases.
 /// </summary>
-public sealed class CompositeIndexTests : IAsyncLifetime
+public sealed class CompositeIndexTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_cidx_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -44,8 +44,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_SingleColumn_CreatesSidecarFile()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE users (id Int32, name String)");
         catalog.Plan("CREATE INDEX idx_users_name ON users (name)");
@@ -56,8 +56,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_CompositeColumns_CreatesSidecarFile()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE orders (customer_id Int32, order_date Date, total Float64)");
         catalog.Plan("CREATE INDEX idx_orders_cust_date ON orders (customer_id, order_date)");
@@ -68,8 +68,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void DropIndex_RemovesSidecarFile()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -82,8 +82,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void DropTable_RemovesAllCompositeIndexSidecars()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32)");
         catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
@@ -103,8 +103,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_IfNotExists_OnExistingIndex_IsNoOp()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
@@ -118,8 +118,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_DuplicateNameWithoutIfNotExists_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
@@ -131,8 +131,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void DropIndex_IfExists_OnMissingIndex_IsNoOp()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         // No throw — IF EXISTS swallows the not-found.
         catalog.Plan("DROP INDEX IF EXISTS idx_nonexistent");
@@ -141,8 +141,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void DropIndex_WithoutIfExists_OnMissingIndex_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("DROP INDEX idx_nonexistent"));
@@ -153,8 +153,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_OnMissingTable_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         Assert.Throws<InvalidOperationException>(() =>
             catalog.Plan("CREATE INDEX idx_x ON missing_table (col)"));
@@ -163,8 +163,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_OnMissingColumn_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32)");
 
@@ -173,25 +173,75 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     }
 
     [Fact]
-    public void CreateIndex_OnPopulatedTable_Throws_V1Limitation()
+    public async Task CreateIndex_OnPopulatedTable_BackfillsExistingRows()
     {
-        // Phase 2b/c v1 limitation: backfill of existing rows isn't
-        // implemented. Issue CREATE INDEX before any INSERTs.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        // Phase 5: CREATE INDEX after data has been INSERTed must scan
+        // the existing rows and populate the tree so pre-existing keys
+        // are immediately findable.
+        Pool pool = CreatePool();
 
-        catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
-        catalog.Plan("INSERT INTO t VALUES (1, 10)");
+        List<int> values;
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+            catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300)");
 
-        Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE INDEX idx_t_a ON t (a)"));
+            // No throw — backfill runs silently.
+            catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+
+            // The planner must now route equality predicates against the
+            // backfilled keys through the seek path.
+            IQueryPlan plan = catalog.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
+            values = await CollectFirstColumnInts(plan);
+        }
+
+        Assert.Single(values);
+        Assert.Equal(200, values[0]);
+
+        // After the catalog drops its handle, the tree file should hold
+        // an entry per backfilled row.
+        using MutableBPlusTreeBytes tree =
+            MutableBPlusTreeBytes.Open(CompositeIndexPath("t", "idx_t_ab"));
+        Assert.Equal(3L, tree.EntryCount);
+    }
+
+    [Fact]
+    public async Task CreateIndex_OnPopulatedTable_BackfillAndSubsequentInsert_BothFindable()
+    {
+        // Verifies that backfilled rows and post-CREATE-INDEX INSERTs
+        // coexist correctly in the same tree.
+        Pool pool = CreatePool();
+
+        List<int> oldRowValues, newRowValues;
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
+            catalog.Plan("INSERT INTO t VALUES (1, 10, 100), (2, 20, 200)");
+            catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
+            catalog.Plan("INSERT INTO t VALUES (3, 30, 300)");
+
+            // Backfilled row.
+            IQueryPlan planOld = catalog.Plan("SELECT v FROM t WHERE a = 1 AND b = 10");
+            oldRowValues = await CollectFirstColumnInts(planOld);
+
+            // Post-CREATE-INDEX INSERT.
+            IQueryPlan planNew = catalog.Plan("SELECT v FROM t WHERE a = 3 AND b = 30");
+            newRowValues = await CollectFirstColumnInts(planNew);
+        }
+
+        Assert.Equal(100, oldRowValues[0]);
+        Assert.Equal(300, newRowValues[0]);
+
+        using MutableBPlusTreeBytes tree =
+            MutableBPlusTreeBytes.Open(CompositeIndexPath("t", "idx_t_ab"));
+        Assert.Equal(3L, tree.EntryCount);
     }
 
     [Fact]
     public void CreateIndex_GlobalNameUniqueness_AcrossTables_Throws()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t1 (a Int32)");
         catalog.Plan("CREATE TABLE t2 (a Int32)");
@@ -208,9 +258,9 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void Insert_AfterCreateIndex_PopulatesCompositeTree()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
             catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -226,9 +276,9 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void Insert_AfterCreateIndex_TupleEncodingIsFindable()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
             catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -248,9 +298,9 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void Insert_MultipleIndexes_AllMaintained()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE orders (customer_id Int32, order_date Date, status String)");
             catalog.Plan("CREATE INDEX idx_orders_cust ON orders (customer_id)");
@@ -272,9 +322,9 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void CreateIndex_SurvivesCatalogReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
             catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -283,7 +333,7 @@ public sealed class CompositeIndexTests : IAsyncLifetime
 
         // Reopen and insert again — the second INSERT must also land in
         // the tree, proving the index was rehydrated from the catalog.
-        using (TableCatalog reopened = new(pool, CatalogPath))
+        using (TableCatalog reopened = CreateCatalog(pool, CatalogPath))
         {
             reopened.Plan("INSERT INTO t VALUES (2, 20)");
         }
@@ -298,8 +348,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_CascadesDependentIndex()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32)");
         catalog.Plan("CREATE INDEX idx_t_b ON t (b)");
@@ -316,8 +366,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_LeavesUnrelatedIndexIntact()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, c Int32)");
         catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
@@ -334,16 +384,16 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void AlterTable_DropColumn_CascadeSurvivesCatalogReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
             catalog.Plan("CREATE INDEX idx_t_b ON t (b)");
             catalog.Plan("ALTER TABLE t DROP COLUMN b");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(pool, CatalogPath);
 
         // After reopen, the dropped index name is gone from the catalog.
         Assert.Throws<InvalidOperationException>(() =>
@@ -360,8 +410,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // `Date col = 'string literal'` is a pre-existing limitation
         // upstream of Phase 3; conflating the two would mask whether
         // the index-seek path itself works.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE orders (customer_id Int32, product_id Int32, amount Float64)");
         catalog.Plan("CREATE INDEX idx_orders_cust_prod ON orders (customer_id, product_id)");
@@ -385,8 +435,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     {
         // Equality predicates can appear in any order in the WHERE — the
         // planner must rebuild the tuple in the index's declared order.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -405,8 +455,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // v1 only handles full-prefix matches. Predicate covers only some
         // of the index's columns — the planner skips this index but the
         // query still returns the right rows via scan.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -422,9 +472,9 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public async Task Select_CompositeIndexMatchesRowAcrossCatalogReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
             catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -433,7 +483,7 @@ public sealed class CompositeIndexTests : IAsyncLifetime
 
         // Reopen and probe — the rehydrated provider must expose the
         // composite index so the planner can use it.
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(pool, CatalogPath);
         IQueryPlan plan = reopened.Plan("SELECT v FROM t WHERE a = 2 AND b = 20");
         List<int> values = await CollectFirstColumnInts(plan);
 
@@ -444,8 +494,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public async Task Select_NoMatchingRow_ReturnsEmpty()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -466,8 +516,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // verify the seek path actually fired (correctness alone can't
         // distinguish "seek returned 1 row" from "chunked scan filtered
         // down to 1 row").
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -486,8 +536,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // appears in 3 rows; b=20 in 3 rows); only the composite key
         // (a=1, b=20) resolves to a unique row. If the seek count is 1,
         // the composite path won the selectivity contest.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -510,8 +560,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // per-column tree on `a` may still fire, so the seek count would
         // reflect that — but it'll be 3 (count of a=1 rows), not 1
         // (count of (a=1, b=20)).
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -535,8 +585,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public async Task Delete_RemovesRowFromCompositeIndexResults()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -553,8 +603,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public async Task Delete_PreservesOtherRowsInCompositeIndexResults()
     {
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -576,8 +626,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // UPDATE changes only the payload column; the composite key is
         // unchanged. The index must still resolve the row to the right
         // (post-update) value.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -598,8 +648,8 @@ public sealed class CompositeIndexTests : IAsyncLifetime
         // UPDATE changes a column covered by the composite index.
         // After the update: the new key (a=2, b=99) must be findable;
         // the old key (a=2, b=20) must NOT match any rows.
-        Pool pool = new(new PoolBacking());
-        using TableCatalog catalog = new(pool, CatalogPath);
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool, CatalogPath);
 
         catalog.Plan("CREATE TABLE t (a Int32, b Int32, v Int32)");
         catalog.Plan("CREATE INDEX idx_t_ab ON t (a, b)");
@@ -670,16 +720,16 @@ public sealed class CompositeIndexTests : IAsyncLifetime
     [Fact]
     public void DropIndex_SurvivesCatalogReopen()
     {
-        Pool pool = new(new PoolBacking());
+        Pool pool = CreatePool();
 
-        using (TableCatalog catalog = new(pool, CatalogPath))
+        using (TableCatalog catalog = CreateCatalog(pool, CatalogPath))
         {
             catalog.Plan("CREATE TABLE t (a Int32)");
             catalog.Plan("CREATE INDEX idx_t_a ON t (a)");
             catalog.Plan("DROP INDEX idx_t_a");
         }
 
-        using TableCatalog reopened = new(pool, CatalogPath);
+        using TableCatalog reopened = CreateCatalog(pool, CatalogPath);
 
         // After reopen the index name should be gone — re-issuing DROP
         // (without IF EXISTS) must throw.

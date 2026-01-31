@@ -319,7 +319,7 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
         try
         {
             string catalogPath = Path.Combine(tempDir, ".datum-catalog.json");
-            using (TableCatalog catalog = new(new Pool(new PoolBacking()), catalogPath))
+            using (TableCatalog catalog = CreateCatalog(catalogPath))
             {
                 catalog.Plan("CREATE TABLE t (id Int32, name String)");
                 for (int i = 1; i <= 10; i++)
@@ -330,7 +330,7 @@ public sealed class IdentityColumnTests : ServiceTestBase, IAsyncLifetime
                     catalog.Plan("ALTER TABLE t ADD COLUMN seq Int8 GENERATED ALWAYS AS IDENTITY(120, 1)"));
             }
 
-            using TableCatalog reopened = new(new Pool(new PoolBacking()), catalogPath);
+            using TableCatalog reopened = CreateCatalog(catalogPath);
             Schema schema = reopened["t"].GetSchema();
             Assert.Equal(["id", "name"], schema.Columns.Select(c => c.Name));
             int rows = 0;

@@ -12,7 +12,7 @@ namespace DatumIngest.Tests.Catalog;
 /// column references on both sides, target-in-FROM rejection, missing
 /// source rejection, and persistence on .datum tables.
 /// </summary>
-public sealed class UpdateFromExecutorTests : IAsyncLifetime
+public sealed class UpdateFromExecutorTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr11d_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -32,8 +32,8 @@ public sealed class UpdateFromExecutorTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private TableCatalog NewMemoryCatalog() => new(new Pool(new PoolBacking()));
-    private TableCatalog NewFileCatalog() => new(new Pool(new PoolBacking()), CatalogPath);
+    private TableCatalog NewMemoryCatalog() => CreateCatalog();
+    private TableCatalog NewFileCatalog() => CreateCatalog(CatalogPath);
 
     // ──────────────────── 1:1 match ────────────────────
 

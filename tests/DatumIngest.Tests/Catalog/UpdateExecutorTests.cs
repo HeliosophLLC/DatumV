@@ -13,7 +13,7 @@ namespace DatumIngest.Tests.Catalog;
 /// NOT NULL enforcement, expression-based RHS, persistence across
 /// catalog reopen.
 /// </summary>
-public sealed class UpdateExecutorTests : IAsyncLifetime
+public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"datum_pr11c_{Guid.NewGuid():N}");
     private string CatalogPath => Path.Combine(_tempDir, ".datum-catalog.json");
@@ -33,8 +33,8 @@ public sealed class UpdateExecutorTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private TableCatalog NewMemoryCatalog() => new(new Pool(new PoolBacking()));
-    private TableCatalog NewFileCatalog() => new(new Pool(new PoolBacking()), CatalogPath);
+    private TableCatalog NewMemoryCatalog() => CreateCatalog();
+    private TableCatalog NewFileCatalog() => CreateCatalog(CatalogPath);
 
     // ──────────────────── Plain UPDATE on TEMP TABLE ────────────────────
 
