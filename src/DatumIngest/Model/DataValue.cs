@@ -3015,11 +3015,25 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (IsNull && other.IsNull) return true;
         if (IsNull != other.IsNull) return false;
 
-        // Byte arrays (UInt8 + IsArray) use offset-equality on (_p0, _p1) like other
-        // arena-backed reference types — must come before the scalar UInt8 arm below.
-        if (IsByteArrayKind)
+        // Array values (IsArray) must short-circuit before the scalar kind switch
+        // — that switch only compares the payload words a scalar of that kind uses
+        // (e.g. Float32 only checks _p0), which misses the rest of an inline
+        // array's bytes and the length of an arena-backed array. Inline arrays
+        // pack bytes across _p0–_p3 with the element count in the low byte of
+        // _charCount; arena-backed arrays store (offset, length) in _p0/_p1
+        // with _p2/_p3 zero. A unified payload + flags + _charCount comparison
+        // handles both: inline gets full-byte equality, arena gets
+        // offset-equality (same store ⇒ identical content) plus length, and
+        // any Array<Struct> typeId carried in _charCount is included.
+        if (IsArray)
         {
-            return other.IsByteArrayKind && _p0 == other._p0 && _p1 == other._p1;
+            return other.IsArray
+                && _flags == other._flags
+                && _charCount == other._charCount
+                && _p0 == other._p0
+                && _p1 == other._p1
+                && _p2 == other._p2
+                && _p3 == other._p3;
         }
 
         return _kind switch
@@ -3084,11 +3098,20 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull) return HashCode.Combine(_kind, true);
 
-        // Byte arrays (UInt8 + IsArray) hash on (_p0, _p1) — must come before the
-        // scalar UInt8 arm below.
-        if (IsByteArrayKind)
+        // Array values: mirror Equals' unified IsArray branch. The scalar arms
+        // below only hash the payload words their kind uses (Float32 hashes
+        // _p0), which would collide for inline arrays sharing a first element.
+        if (IsArray)
         {
-            return HashCode.Combine(_kind, true, _p0, _p1);
+            HashCode hash = new();
+            hash.Add(_kind);
+            hash.Add(_flags);
+            hash.Add(_charCount);
+            hash.Add(_p0);
+            hash.Add(_p1);
+            hash.Add(_p2);
+            hash.Add(_p3);
+            return hash.ToHashCode();
         }
 
         return _kind switch
