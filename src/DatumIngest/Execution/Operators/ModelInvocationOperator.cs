@@ -247,7 +247,7 @@ public sealed class ModelInvocationOperator : IQueryOperator
                 }
             }
 
-            // A streaming sink (currently EXEC) forces per-row dispatch:
+            // A streaming sink (currently CALL) forces per-row dispatch:
             // each row's IAsyncEnumerable<ValueRef> needs to be drained
             // independently to forward chunks live, and cross-row batching
             // would interleave chunks from different rows on the same sink.

@@ -120,7 +120,7 @@ public interface IModel
     /// SQL semantics never see partial values — every <c>SELECT</c>,
     /// <c>WHERE</c>, <c>GROUP BY</c>, etc. uses <see cref="InferBatchAsync"/>
     /// (which collects internally for streaming-capable models). Only an
-    /// explicit streaming sink — currently <c>EXEC &lt;model-call&gt;</c> to
+    /// explicit streaming sink — currently <c>CALL &lt;model-call&gt;</c> to
     /// the terminal — consumes chunks incrementally.
     /// </para>
     /// <para>

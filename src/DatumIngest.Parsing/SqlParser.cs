@@ -3380,17 +3380,17 @@ public static class SqlParser
             Span: null);
 
     /// <summary>
-    /// Parses <c>EXEC namespace.functionname(arg1, arg2, ...)</c>.
-    /// The function call expression after EXEC is parsed by the same
+    /// Parses <c>CALL namespace.functionname(arg1, arg2, ...)</c>.
+    /// The function call expression after CALL is parsed by the same
     /// <see cref="FunctionCall"/> combinator used for inline expressions,
     /// so namespaced calls (<c>udf.shout('hello')</c>) and all argument
     /// forms are supported. OVER and WITHIN GROUP are accepted by the
     /// combinator but carry no meaning in a statement context.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, Statement> ExecFunctionParser =
-        from execKw in Token.EqualTo(SqlToken.Exec)
+    private static readonly TokenListParser<SqlToken, Statement> CallStatementParser =
+        from callKw in Token.EqualTo(SqlToken.Call)
         from call in FunctionCall
-        select (Statement)new ExecStatement(call, ToSpan(execKw));
+        select (Statement)new CallStatement(call, ToSpan(callKw));
 
     // ───────────────────── Procedural statement parsers ─────────────────────
     //
@@ -3916,7 +3916,7 @@ public static class SqlParser
             .Or(DropFunctionParser.Try())
             .Or(CreateProcedureParser)
             .Or(DropProcedureParser.Try())
-            .Or(ExecFunctionParser.Try())
+            .Or(CallStatementParser.Try())
             // Procedural-flow statements: keyword-dispatched, all share the
             // SP.Ref() lazy-recursion pattern so bodies can themselves be any
             // statement (including another procedural form).
@@ -4010,7 +4010,7 @@ public static class SqlParser
         SqlToken.Update,
         SqlToken.Delete,
         SqlToken.Alter,
-        SqlToken.Exec,
+        SqlToken.Call,
     ];
 
     // ───────────────────── Public API ─────────────────────

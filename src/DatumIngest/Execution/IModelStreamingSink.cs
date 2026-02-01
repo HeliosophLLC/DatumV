@@ -13,7 +13,7 @@ namespace DatumIngest.Execution;
 /// <para>
 /// <strong>Streaming is the wire protocol, not a SQL semantic.</strong> The
 /// sink is invoked exclusively from sinks that opted into incremental
-/// delivery — currently <c>EXEC &lt;model-call&gt;</c> in the interactive
+/// delivery — currently <c>CALL &lt;model-call&gt;</c> in the interactive
 /// shell. Plain <c>SELECT</c>/<c>WHERE</c>/<c>GROUP BY</c> never see this
 /// hook because they need the full collected value; the operator only
 /// branches into the streaming path when <see cref="ExecutionContext.StreamingSink"/>

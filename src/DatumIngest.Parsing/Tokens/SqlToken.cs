@@ -346,8 +346,8 @@ public enum SqlToken
     /// </summary>
     Pure,
 
-    /// <summary>The EXEC keyword (direct function execution statement).</summary>
-    Exec,
+    /// <summary>The CALL keyword (procedure / UDF invocation statement).</summary>
+    Call,
 
     /// <summary>The BEGIN keyword (procedural block opener; pairs with END).</summary>
     Begin,

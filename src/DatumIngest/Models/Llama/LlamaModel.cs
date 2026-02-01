@@ -25,7 +25,7 @@ namespace DatumIngest.Models.Llama;
 /// <see cref="ValueRef"/> chunks) in the order LlamaSharp emits them.
 /// <see cref="InferBatchAsync"/> is implemented in terms of it — it collects
 /// chunks into a single string per row before returning. This means
-/// SQL <c>SELECT</c> and <c>EXEC</c> share one inference path; the only
+/// SQL <c>SELECT</c> and <c>CALL</c> share one inference path; the only
 /// difference is whether the consumer collects or forwards chunks to a
 /// streaming sink.
 /// </para>

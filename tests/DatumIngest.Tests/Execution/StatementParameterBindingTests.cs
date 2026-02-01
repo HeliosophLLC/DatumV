@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Execution;
 /// Tests for the top-level <see cref="Statement"/> overloads of
 /// <see cref="ParameterBinder.Bind(Statement, IReadOnlyDictionary{string, ParameterValue})"/>
 /// and the multi-statement batch variant — covers INSERT / UPDATE /
-/// DELETE / EXEC / multi-statement union validation /
+/// DELETE / CALL / multi-statement union validation /
 /// <see cref="BinaryParameter"/> / <see cref="StringParameter"/> shapes
 /// added for the multipart endpoint.
 /// </summary>

@@ -9,7 +9,7 @@ namespace DatumIngest.Tests.Catalog;
 /// End-to-end tests for procedure DDL and invocation: registration through
 /// <see cref="TableCatalog.Plan(string)"/>, side effects on the
 /// <see cref="ProcedureRegistry"/>, and full-batch execution that exercises
-/// <c>EXEC proc.X(...)</c> through the procedural batch executor.
+/// <c>CALL proc.X(...)</c> through the procedural batch executor.
 /// </summary>
 public class ProcedureIntegrationTests : ServiceTestBase
 {
@@ -130,7 +130,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         // Body validation walks every statement and inlines the expressions
         // against the current UDF registry — an unresolved udf.X surfaces
-        // at CREATE PROCEDURE time, not at the first EXEC.
+        // at CREATE PROCEDURE time, not at the first CALL.
         TableCatalog catalog = CreateCatalog();
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
@@ -155,7 +155,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // We assert that the call doesn't throw and the procedure is
         // registered & callable.
         BatchResult result = await RunBatchAsync(
-            "EXEC proc.setone()",
+            "CALL proc.setone()",
             catalog);
 
         // No outer-scope bindings produced; the test confirms invocation
@@ -176,7 +176,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @answer INT64 = 0; " +
-            "EXEC proc.assign_outer(5)",
+            "CALL proc.assign_outer(5)",
             catalog);
 
         // @answer untouched by the procedure (procedure has its own scope).
@@ -197,7 +197,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @counter INT64 = 5; " +
-            "EXEC proc.shadow(@counter)",
+            "CALL proc.shadow(@counter)",
             catalog);
 
         // @counter is 5 still — the procedure's SET on its local @v
@@ -215,7 +215,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "END");
 
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.need_two(1)", catalog));
+            () => RunBatchAsync("CALL proc.need_two(1)", catalog));
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
 
         await Assert.ThrowsAnyAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.never_registered()", catalog));
+            () => RunBatchAsync("CALL proc.never_registered()", catalog));
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunBatchAsync(
-                "DECLARE @n STRING = NULL; EXEC proc.need_name(@n)",
+                "DECLARE @n STRING = NULL; CALL proc.need_name(@n)",
                 catalog));
 
         string fullMessage = ex.Message + (ex.InnerException?.Message ?? "");
@@ -259,7 +259,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @input INT64 = 42; " +
-            "EXEC proc.noop(@input + 8)",
+            "CALL proc.noop(@input + 8)",
             catalog);
 
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["input"]));
@@ -275,11 +275,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE PROCEDURE recurse() AS BEGIN " +
-            "  EXEC proc.recurse() " +
+            "  CALL proc.recurse() " +
             "END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.recurse()", catalog));
+            () => RunBatchAsync("CALL proc.recurse()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("recurse", ex.Message);
     }
@@ -289,11 +289,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
     {
         // A → B → A → B → … cap-doesn't-care which routine triggers it.
         TableCatalog catalog = CreateCatalog();
-        catalog.Plan("CREATE PROCEDURE a() AS BEGIN EXEC proc.b() END");
-        catalog.Plan("CREATE PROCEDURE b() AS BEGIN EXEC proc.a() END");
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL proc.b() END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL proc.a() END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.a()", catalog));
+            () => RunBatchAsync("CALL proc.a()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -304,11 +304,11 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // depth is 3 inside `c`; rolls back to 0 when the batch ends.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE PROCEDURE c() AS BEGIN DECLARE @inside INT64 = 99 END");
-        catalog.Plan("CREATE PROCEDURE b() AS BEGIN EXEC proc.c() END");
-        catalog.Plan("CREATE PROCEDURE a() AS BEGIN EXEC proc.b() END");
+        catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL proc.c() END");
+        catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL proc.b() END");
 
         BatchResult result = await RunBatchAsync(
-            "DECLARE @x INT64 = 1; EXEC proc.a()",
+            "DECLARE @x INT64 = 1; CALL proc.a()",
             catalog);
 
         // Caller's variable should still be bound — proves the chain
@@ -424,7 +424,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // that the proc completed without an arity error.
         BatchResult result = await RunBatchAsync(
             "DECLARE @ok BOOLEAN = FALSE; " +
-            "EXEC proc.add_default(7); " +
+            "CALL proc.add_default(7); " +
             "SET @ok = TRUE",
             catalog);
 
@@ -444,8 +444,8 @@ public class ProcedureIntegrationTests : ServiceTestBase
 
         BatchResult result = await RunBatchAsync(
             "DECLARE @done BOOLEAN = FALSE; " +
-            "EXEC proc.record(); " +    // omit → default = 0
-            "EXEC proc.record(42); " +   // explicit
+            "CALL proc.record(); " +    // omit → default = 0
+            "CALL proc.record(42); " +   // explicit
             "SET @done = TRUE",
             catalog);
 
@@ -460,7 +460,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE need_one(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.need_one()", catalog));
+            () => RunBatchAsync("CALL proc.need_one()", catalog));
         Assert.Contains("need_one", ex.Message);
     }
 
@@ -472,7 +472,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE one_or_two(@a INT64, @b INT64 = 0) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.one_or_two(1, 2, 3)", catalog));
+            () => RunBatchAsync("CALL proc.one_or_two(1, 2, 3)", catalog));
         Assert.Contains("one_or_two", ex.Message);
     }
 
@@ -486,7 +486,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "CREATE PROCEDURE need_one(@a INT64 IS NOT NULL = NULL) AS BEGIN SELECT @a END");
 
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => RunBatchAsync("EXEC proc.need_one()", catalog));
+            () => RunBatchAsync("CALL proc.need_one()", catalog));
         Assert.Contains("must not be null", ex.Message);
         Assert.Contains("a", ex.Message);
     }

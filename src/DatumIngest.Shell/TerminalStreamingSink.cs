@@ -9,7 +9,7 @@ namespace DatumIngest.Shell;
 /// <summary>
 /// <see cref="IModelStreamingSink"/> implementation that prints model output
 /// to the terminal as it arrives. Wired up by <see cref="InteractiveShell"/>
-/// for <c>EXEC &lt;model-call&gt;</c> statements so LLM tokens render live
+/// for <c>CALL &lt;model-call&gt;</c> statements so LLM tokens render live
 /// rather than after the full response collects.
 /// </summary>
 /// <remarks>
@@ -24,7 +24,7 @@ namespace DatumIngest.Shell;
 /// <para>
 /// <strong>Tracking chunk receipt.</strong> The shell consults
 /// <see cref="ChunksReceived"/> after the streaming run to decide whether the
-/// EXEC target actually streamed (in which case the sink already printed
+/// CALL target actually streamed (in which case the sink already printed
 /// everything) or fell through to a non-streaming function (in which case
 /// the shell prints the synthetic single-row result via the normal
 /// pagination path).
@@ -37,8 +37,8 @@ internal sealed class TerminalStreamingSink : IModelStreamingSink
 
     /// <summary>
     /// Number of chunks delivered to <see cref="OnChunkAsync"/> across all
-    /// dispatches observed by this sink. Zero when the EXEC target was a
-    /// non-streaming function (e.g. <c>EXEC upper('hi')</c>); the shell
+    /// dispatches observed by this sink. Zero when the CALL target was a
+    /// non-streaming function (e.g. <c>CALL upper('hi')</c>); the shell
     /// uses this to decide whether to print a fallback row summary.
     /// </summary>
     public int ChunksReceived { get; private set; }

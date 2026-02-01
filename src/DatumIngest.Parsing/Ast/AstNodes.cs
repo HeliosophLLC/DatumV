@@ -1442,7 +1442,7 @@ public sealed record DropFunctionStatement(
 /// <summary>
 /// <c>CREATE [OR REPLACE] PROCEDURE [IF NOT EXISTS] name(@p1 TYPE [IS NOT NULL], ...) AS BEGIN ... END</c>
 /// — registers a named procedural block. Procedures are not inlined; the
-/// catalog stores the body verbatim and <c>EXEC proc.name(...)</c> resolves
+/// catalog stores the body verbatim and <c>CALL proc.name(...)</c> resolves
 /// the descriptor at runtime, pushes a fresh batch context with the
 /// parameters declared in its root frame, and runs the body's statements.
 /// </summary>
@@ -1482,14 +1482,14 @@ public sealed record DropProcedureStatement(
     SourceSpan? Span = null) : Statement;
 
 /// <summary>
-/// <c>EXEC namespace.functionname(arg1, arg2, ...)</c> — directly executes a function
-/// (typically a UDF via <c>udf.name(...)</c>) as a top-level statement rather than inside
-/// a SELECT. The engine evaluates the call expression and returns its result as a
-/// single-row, single-column result set.
+/// <c>CALL namespace.functionname(arg1, arg2, ...)</c> — directly invokes a function
+/// (typically a UDF via <c>udf.name(...)</c>) or procedure (via <c>proc.name(...)</c>)
+/// as a top-level statement rather than inside a SELECT. The engine evaluates the call
+/// expression and returns its result as a single-row, single-column result set.
 /// </summary>
-/// <param name="Call">The function call expression to execute.</param>
-/// <param name="Span">Source location of the EXEC keyword for diagnostic reporting.</param>
-public sealed record ExecStatement(Expression Call, SourceSpan? Span = null) : Statement;
+/// <param name="Call">The function call expression to invoke.</param>
+/// <param name="Span">Source location of the CALL keyword for diagnostic reporting.</param>
+public sealed record CallStatement(Expression Call, SourceSpan? Span = null) : Statement;
 
 // ───────────────────── Procedural statements ─────────────────────
 

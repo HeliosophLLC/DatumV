@@ -80,7 +80,7 @@ public sealed class BatchContext : IDisposable
     /// <summary>
     /// Procedure-lifetime type registry for self-describing struct/array values.
     /// Shared across every <see cref="DatumIngest.Execution.ExecutionContext"/> spun up
-    /// for queries inside this batch (FOR-loop sources, body queries, EXEC bodies, …)
+    /// for queries inside this batch (FOR-loop sources, body queries, CALL bodies, …)
     /// so a TypeId stamped on a row struct in one query stays resolvable when the same
     /// struct appears in a downstream query within the same procedural batch.
     /// </summary>
@@ -89,8 +89,8 @@ public sealed class BatchContext : IDisposable
     /// <summary>
     /// Number of procedure-call frames currently above this context's
     /// invocation. The top-level batch is depth 0; the body of an
-    /// <c>EXEC proc.X(...)</c> runs in a fresh <see cref="BatchContext"/>
-    /// at depth 1; any <c>EXEC proc.Y(...)</c> inside that body opens a
+    /// <c>CALL proc.X(...)</c> runs in a fresh <see cref="BatchContext"/>
+    /// at depth 1; any <c>CALL proc.Y(...)</c> inside that body opens a
     /// further context at depth 2; and so on. The procedure executor
     /// rejects new calls once the depth would exceed
     /// <see cref="BatchExecutor.MaxProcedureCallDepth"/> so a self- or

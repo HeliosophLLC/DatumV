@@ -333,7 +333,7 @@ public sealed class ExecutionContext
     /// When non-<see langword="null"/>, <see cref="Operators.ModelInvocationOperator"/>
     /// switches the active model from its batched <c>InferBatchAsync</c>
     /// path to the per-row <c>InferStreamingAsync</c> path and forwards
-    /// each yielded chunk to the sink. Used by <c>EXEC &lt;model-call&gt;</c>
+    /// each yielded chunk to the sink. Used by <c>CALL &lt;model-call&gt;</c>
     /// in the shell to render LLM tokens live.
     /// </summary>
     /// <remarks>

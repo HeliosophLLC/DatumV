@@ -62,8 +62,8 @@ public static class SqlKeywordRegistry
         // DML keywords
         "INSERT", "VALUES", "RETURNING", "UPDATE", "SET", "DELETE",
 
-        // Direct execution
-        "EXEC",
+        // Direct invocation
+        "CALL",
 
         // Procedural-batch keywords. BEGIN / END pair as block delimiters
         // (END is already in the conditional-expression list above).

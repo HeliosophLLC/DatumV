@@ -81,7 +81,7 @@ public sealed record CellPrintBatchEvent(string CellId, string? Text) : BatchEve
 /// <see cref="BlockStatement"/>, <see cref="IfStatement"/>,
 /// <see cref="WhileStatement"/>, <see cref="ForCounterStatement"/>,
 /// <see cref="ForInStatement"/>, <see cref="QueryStatement"/>, and
-/// <see cref="ExecStatement"/>.
+/// <see cref="CallStatement"/>.
 /// </para>
 /// <para>
 /// <strong>Expression evaluation</strong> — DECLARE / SET initialisers,
@@ -306,13 +306,13 @@ public sealed class BatchExecutor
                     // catalog-dispatch arm.
                     goto default;
                 }
-                case ExecStatement exec:
+                case CallStatement call:
                 {
-                    // Detect EXEC proc.<name>(args) and route to the
+                    // Detect CALL proc.<name>(args) and route to the
                     // procedure-invocation path. Anything else (UDF or
                     // built-in scalar) flows through catalog.Plan via
                     // the unified default arm.
-                    if (TryGetProcedureCall(exec, out string? procName, out IReadOnlyList<Expression>? args))
+                    if (TryGetProcedureCall(call, out string? procName, out IReadOnlyList<Expression>? args))
                     {
                         await ExecuteProcedureCallAsync(
                             procName, args, batchContext, onEvent, nextCellId, ct)
@@ -452,7 +452,7 @@ public sealed class BatchExecutor
                 }
                 default:
                     // Unified catalog-dispatch arm. Every non-procedural
-                    // statement — SELECT (without LET-assignment), EXEC
+                    // statement — SELECT (without LET-assignment), CALL
                     // (without procedure-call form), all DDL (CREATE /
                     // DROP / ALTER / ANALYZE / REINDEX for tables and
                     // functions / procedures), and all DML (INSERT /
@@ -513,7 +513,7 @@ public sealed class BatchExecutor
     private static string KindOf(Statement stmt) => stmt switch
     {
         QueryStatement => "select",
-        ExecStatement => "exec",
+        CallStatement => "call",
         BlockStatement => "block",
         IfStatement => "if",
         WhileStatement => "while",
@@ -623,7 +623,7 @@ public sealed class BatchExecutor
     private const string ProcedureNamespacePrefix = "proc.";
 
     /// <summary>
-    /// Detects whether <paramref name="exec"/> is invoking a stored
+    /// Detects whether <paramref name="statement"/> is invoking a stored
     /// procedure (call name starts with <c>proc.</c>) and, if so, returns
     /// the unqualified procedure name plus the argument expression list.
     /// Anything else — UDFs, built-in scalars, model invocations — is
@@ -631,11 +631,11 @@ public sealed class BatchExecutor
     /// <see langword="false"/>.
     /// </summary>
     private static bool TryGetProcedureCall(
-        ExecStatement exec,
+        CallStatement statement,
         out string? procedureName,
         out IReadOnlyList<Expression>? arguments)
     {
-        if (exec.Call is FunctionCallExpression call
+        if (statement.Call is FunctionCallExpression call
             && call.FunctionName.StartsWith(ProcedureNamespacePrefix, StringComparison.OrdinalIgnoreCase))
         {
             procedureName = call.FunctionName[ProcedureNamespacePrefix.Length..];
@@ -741,7 +741,7 @@ public sealed class BatchExecutor
         // the procedure-lifetime arena releases and any variable bindings
         // become unreachable, matching how a top-level procedural batch
         // tears down. Carries the bumped call depth so any further
-        // EXECs the body issues see the running total.
+        // CALLs the body issues see the running total.
         using BatchContext procContext = new() { ProcedureCallDepth = newDepth };
         for (int i = 0; i < descriptor.Parameters.Count; i++)
         {

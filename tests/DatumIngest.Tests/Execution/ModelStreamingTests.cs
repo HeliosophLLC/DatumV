@@ -99,7 +99,7 @@ public sealed class ModelStreamingTests : ServiceTestBase
     /// interface impl yields one chunk via <c>InferBatchAsync</c>): sink
     /// fires <see cref="IModelStreamingSink.OnChunk"/> exactly once, the
     /// row passes through unchanged. Confirms non-streaming models work
-    /// transparently when EXEC is pointed at them.
+    /// transparently when CALL is pointed at them.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_WithSink_NonStreamingModel_FiresExactlyOneChunk()
@@ -136,10 +136,10 @@ public sealed class ModelStreamingTests : ServiceTestBase
     }
 
     /// <summary>
-    /// Sink attached but no model in the call (e.g. <c>EXEC upper('hi')</c>
+    /// Sink attached but no model in the call (e.g. <c>CALL upper('hi')</c>
     /// lowered to <c>SELECT upper('hi')</c>): no model invocation, no
     /// chunks. The plan still produces its synthetic row, which the shell's
-    /// EXEC fallback path renders via <c>TableFormatter</c>.
+    /// CALL fallback path renders via <c>TableFormatter</c>.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_WithSink_NoModelInPlan_FiresNoChunks()

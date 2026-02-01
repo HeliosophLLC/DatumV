@@ -646,7 +646,11 @@ public static class BuiltinModels
         ModelCatalog catalog,
         string modelName = "qwen25_coder_7b",
         string modelFilename = Qwen25Coder7bDefaultFilename,
-        uint contextSize = 16384,
+        // Qwen 2.5 7B is trained at 32 768. Bumped from 16384 → 32768 so chat
+        // sessions can run longer before compacting kicks in. KV cache scales
+        // linearly with context (≈2× memory at 32K vs 16K) but the residency
+        // headroom easily absorbs it on a single-model host.
+        uint contextSize = 32768,
         int maxTokens = 4096,
         float temperature = 0.5f)
         => RegisterQwen25CoderVariant(

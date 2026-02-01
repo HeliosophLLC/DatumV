@@ -263,8 +263,8 @@ internal sealed class InteractiveShell
 
                 bool isExplain = sqlCore.StartsWith("EXPLAIN ", StringComparison.OrdinalIgnoreCase)
                               || sqlCore.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase);
-                bool isExec = sqlCore.StartsWith("EXEC ", StringComparison.OrdinalIgnoreCase)
-                           || sqlCore.Equals("EXEC", StringComparison.OrdinalIgnoreCase);
+                bool isCall = sqlCore.StartsWith("CALL ", StringComparison.OrdinalIgnoreCase)
+                           || sqlCore.Equals("CALL", StringComparison.OrdinalIgnoreCase);
 
                 if (isExplain)
                 {
@@ -288,9 +288,9 @@ internal sealed class InteractiveShell
 
                     await ExplainAsync(explainBody, analyze).ConfigureAwait(false);
                 }
-                else if (isExec)
+                else if (isCall)
                 {
-                    await ExecuteExecAsync(sqlCore).ConfigureAwait(false);
+                    await ExecuteCallAsync(sqlCore).ConfigureAwait(false);
                 }
                 else
                 {
@@ -308,14 +308,14 @@ internal sealed class InteractiveShell
     }
 
     /// <summary>
-    /// Executes an <c>EXEC &lt;expression&gt;</c> statement, forwarding model
+    /// Executes a <c>CALL &lt;expression&gt;</c> statement, forwarding model
     /// chunks live to the terminal as they arrive and falling back to
-    /// table-formatted row rendering if the EXEC target wasn't a streaming
-    /// model (e.g. <c>EXEC upper('hi')</c>).
+    /// table-formatted row rendering if the CALL target wasn't a streaming
+    /// model (e.g. <c>CALL upper('hi')</c>).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// EXEC lowers to a synthetic single-row <c>SELECT</c> in the planner; the
+    /// CALL lowers to a synthetic single-row <c>SELECT</c> in the planner; the
     /// streaming-aware <see cref="IQueryPlan.ExecuteAsync(CancellationToken, IModelStreamingSink?)"/>
     /// overload attaches a <see cref="TerminalStreamingSink"/> to the per-query
     /// context. The model invocation operator branches on the sink's presence:
@@ -339,7 +339,7 @@ internal sealed class InteractiveShell
     /// </list>
     /// </para>
     /// </remarks>
-    private async Task ExecuteExecAsync(string sql)
+    private async Task ExecuteCallAsync(string sql)
     {
         IQueryPlan plan;
         try
@@ -360,7 +360,7 @@ internal sealed class InteractiveShell
         SidecarRegistry registry = _catalog.SidecarRegistry;
 
         // Buffer formatted cells so we can fall back to table rendering when
-        // the EXEC body wasn't a streaming model. Cell strings are copied
+        // the CALL body wasn't a streaming model. Cell strings are copied
         // out before each MoveNext, so we don't depend on RowBatch lifetime.
         Schema? schema = null;
         List<string[]> bufferedRows = [];

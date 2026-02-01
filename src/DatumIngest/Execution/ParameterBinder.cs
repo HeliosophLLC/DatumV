@@ -762,8 +762,8 @@ public static class ParameterBinder
                     del.TableName,
                     del.Where is not null ? BindExpression(del.Where, parameters) : null);
 
-            case ExecStatement exec:
-                return new ExecStatement(BindExpression(exec.Call, parameters), exec.Span);
+            case CallStatement call:
+                return new CallStatement(BindExpression(call.Call, parameters), call.Span);
 
             case CreateTableAsSelectStatement ctas:
                 return new CreateTableAsSelectStatement(
@@ -974,8 +974,8 @@ public static class ParameterBinder
                 if (del.Where is not null) CollectFromExpression(del.Where, names);
                 break;
 
-            case ExecStatement exec:
-                CollectFromExpression(exec.Call, names);
+            case CallStatement call:
+                CollectFromExpression(call.Call, names);
                 break;
 
             case CreateTableAsSelectStatement ctas:

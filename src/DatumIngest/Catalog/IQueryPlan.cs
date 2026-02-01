@@ -43,7 +43,7 @@ public interface IQueryPlan
     /// as it arrives.
     /// </summary>
     /// <remarks>
-    /// Used by <c>EXEC &lt;model-call&gt;</c> in the interactive shell to
+    /// Used by <c>CALL &lt;model-call&gt;</c> in the interactive shell to
     /// render LLM tokens live. Plain <c>SELECT</c>/<c>WHERE</c>/<c>GROUP BY</c>
     /// callers leave <paramref name="streamingSink"/> at <see langword="null"/>
     /// — they need the full collected value, not chunks.
@@ -64,7 +64,7 @@ public interface IQueryPlan
     /// </summary>
     /// <remarks>
     /// Used by the procedural batch executor when running a child
-    /// <c>SELECT</c> or <c>EXEC</c> inside a procedure body. Top-level
+    /// <c>SELECT</c> or <c>CALL</c> inside a procedure body. Top-level
     /// callers — direct <c>plan.ExecuteAsync(ct)</c> — pass
     /// <see langword="null"/> here, and queries that reference
     /// <c>@var</c> in that mode throw.

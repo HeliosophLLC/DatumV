@@ -8,7 +8,7 @@ namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Slice 4 end-to-end tests for the procedural batch executor: DECLARE,
-/// SET, BEGIN/END, IF/ELSE, WHILE, plus query / EXEC statements that
+/// SET, BEGIN/END, IF/ELSE, WHILE, plus query / CALL statements that
 /// reference declared variables. The substrate (<see cref="VariableScope"/>
 /// / <see cref="BatchContext"/>) is verified separately; these tests
 /// pin the integrated semantics.
@@ -460,18 +460,18 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Assert.Equal(0, Convert.ToInt32(result.FinalBindings["ran"]));
     }
 
-    // ───────────────────── EXEC inside batch ─────────────────────
+    // ───────────────────── CALL inside batch ─────────────────────
 
     [Fact]
-    public async Task Exec_InBatch_ResolvesVariableFromScope()
+    public async Task Call_InBatch_ResolvesVariableFromScope()
     {
-        // EXEC of a built-in scalar function with a variable arg — exercises
-        // the same wire as a regular EXEC, just with variable resolution.
+        // CALL of a built-in scalar function with a variable arg — exercises
+        // the same wire as a regular CALL, just with variable resolution.
         // The batch only verifies the execution didn't throw; result rows
         // aren't surfaced in slice 4.
         BatchResult result = await RunAsync(
             "DECLARE @msg STRING = 'hello world from a long-enough literal'; " +
-            "EXEC upper(@msg)");
+            "CALL upper(@msg)");
 
         // The variable's still bound at end-of-batch.
         Assert.Equal(
@@ -825,10 +825,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Print_InsideProcedure_EventsFlowThroughExec()
+    public async Task Print_InsideProcedure_EventsFlowThroughCall()
     {
         // The proc body's PRINT should surface in the same event stream
-        // the EXEC cell drives.
+        // the CALL cell drives.
         TableCatalog catalog = CreateCatalog();
         catalog.Plan(
             "CREATE PROCEDURE trace(@n INT32) AS BEGIN " +
@@ -838,7 +838,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             "END");
 
         List<CellPrintBatchEvent> prints = await CollectPrintsAsync(
-            "EXEC proc.trace(3)", catalog);
+            "CALL proc.trace(3)", catalog);
 
         Assert.Equal(
             ["enter trace", "1", "2", "3", "exit trace"],
@@ -1008,7 +1008,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         BatchResult result = await RunAsync(
             "DECLARE @msg STRING = ''; " +
-            "TRY EXEC proc.does_not_exist() " +
+            "TRY CALL proc.does_not_exist() " +
             "CATCH @err SET @msg = @err",
             catalog);
 
@@ -1024,7 +1024,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
                 "DECLARE @msg STRING = ''; " +
-                "TRY EXEC proc.does_not_exist() " +
+                "TRY CALL proc.does_not_exist() " +
                 "CATCH @err SET @msg = @err; " +
                 "SET @msg = @err",  // @err out of scope here
                 catalog));
@@ -1067,7 +1067,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         BatchResult result = await RunAsync(
             "DECLARE @ran_catch BOOLEAN = FALSE; " +
             "DECLARE @ran_finally BOOLEAN = FALSE; " +
-            "TRY EXEC proc.does_not_exist() " +
+            "TRY CALL proc.does_not_exist() " +
             "CATCH @e SET @ran_catch = TRUE " +
             "FINALLY SET @ran_finally = TRUE",
             catalog);
@@ -1107,14 +1107,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_FinallyThrows_SupersedesPendingException()
     {
         // FINALLY raising its own error should win over the original;
-        // matches C# / Java try/finally semantics. Use EXEC of a missing
+        // matches C# / Java try/finally semantics. Use CALL of a missing
         // procedure inside FINALLY to provoke a fresh throw.
         TableCatalog catalog = CreateCatalog();
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => RunAsync(
-                "TRY EXEC proc.original_error() " +
-                "CATCH @e EXEC proc.catch_error() " +
-                "FINALLY EXEC proc.finally_error()",
+                "TRY CALL proc.original_error() " +
+                "CATCH @e CALL proc.catch_error() " +
+                "FINALLY CALL proc.finally_error()",
                 catalog));
         Assert.Contains("finally_error", ex.Message);
     }
@@ -1132,8 +1132,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
             // FinalBindings inside RunAsync would still be unreachable
             // because the exception escapes — instead verify via the message.
             result = await RunAsync(
-                "TRY EXEC proc.original_error() " +
-                "CATCH @e EXEC proc.catch_error() " +
+                "TRY CALL proc.original_error() " +
+                "CATCH @e CALL proc.catch_error() " +
                 "FINALLY DECLARE @cleanup BOOLEAN = TRUE",
                 catalog);
         });
@@ -1198,7 +1198,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             "DECLARE @inner_caught BOOLEAN = FALSE; " +
             "DECLARE @outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY EXEC proc.does_not_exist() " +
+            "  TRY CALL proc.does_not_exist() " +
             "  CATCH @inner SET @inner_caught = TRUE " +
             "END " +
             "CATCH @outer SET @outer_caught = TRUE",
@@ -1218,8 +1218,8 @@ public sealed class BatchExecutorTests : ServiceTestBase
         BatchResult result = await RunAsync(
             "DECLARE @outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY EXEC proc.first_error() " +
-            "  CATCH @inner EXEC proc.second_error() " +
+            "  TRY CALL proc.first_error() " +
+            "  CATCH @inner CALL proc.second_error() " +
             "END " +
             "CATCH @outer SET @outer_caught = TRUE",
             catalog);

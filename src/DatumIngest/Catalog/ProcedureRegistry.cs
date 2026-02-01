@@ -8,7 +8,7 @@ namespace DatumIngest.Catalog;
 /// A registered procedural-batch macro. Unlike <see cref="UdfDescriptor"/>,
 /// procedures are not inlined at plan time — the body is stored as a
 /// <see cref="BlockStatement"/> AST plus the original source text, and
-/// <c>EXEC proc.&lt;name&gt;(...)</c> resolves the descriptor at runtime,
+/// <c>CALL proc.&lt;name&gt;(...)</c> resolves the descriptor at runtime,
 /// pushes a fresh batch context with the parameters auto-declared, and
 /// runs the body.
 /// </summary>
@@ -42,7 +42,7 @@ public sealed record ProcedureDescriptor(
 /// Process-scoped registry of named procedures for a single
 /// <see cref="TableCatalog"/>. Lookups are case-insensitive on the
 /// unqualified procedure name. The procedural batch executor consults
-/// this registry on every <c>EXEC proc.X(...)</c> call site to find the
+/// this registry on every <c>CALL proc.X(...)</c> call site to find the
 /// descriptor whose body should run.
 /// </summary>
 public sealed class ProcedureRegistry

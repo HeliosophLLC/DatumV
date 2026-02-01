@@ -622,7 +622,7 @@ internal sealed class RoutineRegistrar
     /// Walks every expression in a procedure body's statement tree and
     /// runs the UDF inliner against it, so unresolved <c>udf.X(...)</c>
     /// references surface at <c>CREATE PROCEDURE</c> time rather than at
-    /// the first <c>EXEC</c>. Doesn't substitute parameters — those are
+    /// the first <c>CALL</c>. Doesn't substitute parameters — those are
     /// resolved at runtime when the procedure is invoked.
     /// </summary>
     private void ValidateProcedureBody(Statement statement)
@@ -660,8 +660,8 @@ internal sealed class RoutineRegistrar
             case QueryStatement q:
                 _ = UdfInliner.Inline(q.Query, _udfs);
                 break;
-            case ExecStatement exec:
-                _ = UdfInliner.Inline(exec.Call, _udfs);
+            case CallStatement call:
+                _ = UdfInliner.Inline(call.Call, _udfs);
                 break;
             case BreakStatement:
             case ContinueStatement:
@@ -670,7 +670,7 @@ internal sealed class RoutineRegistrar
                 break;
             // Nested routine DDL inside a procedure body is rejected here so
             // the user sees the error at CREATE PROCEDURE rather than at the
-            // first EXEC. Nested DML and table DDL are intentionally allowed
+            // first CALL. Nested DML and table DDL are intentionally allowed
             // — procedures should be able to mutate data and shape temp
             // tables.
             case CreateFunctionStatement createFn:

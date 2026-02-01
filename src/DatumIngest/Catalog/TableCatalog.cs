@@ -72,7 +72,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._backing = pool.Backing;
         this._functions = FunctionRegistry.CreateDefault();
         // Wire the model-catalog fallback so unhoisted models.X(...) calls
-        // (procedural UDF bodies, EXEC, etc.) resolve through this catalog.
+        // (procedural UDF bodies, CALL, etc.) resolve through this catalog.
         // The closure follows the parent-chain getter so child catalogs
         // inherit the root's models without duplicating registrations.
         this._functions.SetModelCatalogResolver(() => Models);
@@ -254,7 +254,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <summary>
     /// Registry of named procedural blocks registered against this catalog
     /// via <c>CREATE PROCEDURE</c>. Consulted by the procedural batch
-    /// executor on every <c>EXEC proc.X(...)</c> call site to find the
+    /// executor on every <c>CALL proc.X(...)</c> call site to find the
     /// descriptor whose body should run.
     /// </summary>
     public ProcedureRegistry Procedures => _procedures;
@@ -400,8 +400,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 _routines.ApplyDropProcedure(drop);
                 return EmptyQueryPlan.Instance;
 
-            case ExecStatement exec:
-                return PlanExec(exec);
+            case CallStatement call:
+                return PlanCall(call);
 
             case CreateTableStatement createTable:
                 await ApplyCreateTableAsync(createTable).ConfigureAwait(false);
@@ -1989,14 +1989,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         return result;
     }
 
-    private IQueryPlan PlanExec(ExecStatement exec)
+    private IQueryPlan PlanCall(CallStatement call)
     {
-        // Lower EXEC udf.fn(args) to SELECT udf.fn(args) — a tableless query
+        // Lower CALL udf.fn(args) to SELECT udf.fn(args) — a tableless query
         // against the implicit single-row source. UDF inlining and model hoisting
         // apply exactly as they would for an explicit SELECT, so UDFs, model
         // invocations, and template strings in the body all work unchanged.
         SelectStatement syntheticSelect = new(
-            Columns: [new SelectColumn(exec.Call)]);
+            Columns: [new SelectColumn(call.Call)]);
         QueryExpression syntheticQuery = new SelectQueryExpression(syntheticSelect);
         return PlanQuery(syntheticQuery);
     }

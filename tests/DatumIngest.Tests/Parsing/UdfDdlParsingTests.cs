@@ -529,62 +529,62 @@ public class UdfDdlParsingTests : ServiceTestBase
         Assert.IsType<QueryStatement>(batch[1]);
     }
 
-    // ───────────────────── EXEC statement ─────────────────────
+    // ───────────────────── CALL statement ─────────────────────
 
     [Fact]
-    public void Exec_NamespacedUdfCall_ProducesExecStatement()
+    public void Call_NamespacedUdfCall_ProducesCallStatement()
     {
-        ExecStatement exec = Parse<ExecStatement>("EXEC udf.shout('hello')");
+        CallStatement stmt = Parse<CallStatement>("CALL udf.shout('hello')");
 
-        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
         Assert.Equal("udf.shout", call.FunctionName);
         Assert.Single(call.Arguments);
     }
 
     [Fact]
-    public void Exec_BareFunction_ProducesExecStatement()
+    public void Call_BareFunction_ProducesCallStatement()
     {
-        ExecStatement exec = Parse<ExecStatement>("EXEC upper('hello')");
+        CallStatement stmt = Parse<CallStatement>("CALL upper('hello')");
 
-        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
         Assert.Equal("upper", call.FunctionName);
     }
 
     [Fact]
-    public void Exec_MultipleArgs_ParsesAllArguments()
+    public void Call_MultipleArgs_ParsesAllArguments()
     {
-        ExecStatement exec = Parse<ExecStatement>("EXEC udf.add3(1, 2, 3)");
+        CallStatement stmt = Parse<CallStatement>("CALL udf.add3(1, 2, 3)");
 
-        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
         Assert.Equal("udf.add3", call.FunctionName);
         Assert.Equal(3, call.Arguments.Count);
     }
 
     [Fact]
-    public void Exec_NoArgs_ParsesEmptyArgumentList()
+    public void Call_NoArgs_ParsesEmptyArgumentList()
     {
-        ExecStatement exec = Parse<ExecStatement>("EXEC udf.nullary()");
+        CallStatement stmt = Parse<CallStatement>("CALL udf.nullary()");
 
-        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(exec.Call);
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(stmt.Call);
         Assert.Equal("udf.nullary", call.FunctionName);
         Assert.Empty(call.Arguments);
     }
 
     [Fact]
-    public void Exec_TrailingSemicolon_IsAcceptedByBatch()
+    public void Call_TrailingSemicolon_IsAcceptedByBatch()
     {
-        IReadOnlyList<Statement> batch = SqlParser.ParseBatch("EXEC udf.shout('hello');");
+        IReadOnlyList<Statement> batch = SqlParser.ParseBatch("CALL udf.shout('hello');");
 
         Assert.Single(batch);
-        Assert.IsType<ExecStatement>(batch[0]);
+        Assert.IsType<CallStatement>(batch[0]);
     }
 
     [Fact]
-    public void Exec_SpanPointsToExecKeyword_NotFunctionName()
+    public void Call_SpanPointsToCallKeyword_NotFunctionName()
     {
-        ExecStatement exec = Parse<ExecStatement>("EXEC udf.shout('hello')");
+        CallStatement stmt = Parse<CallStatement>("CALL udf.shout('hello')");
 
-        Assert.NotNull(exec.Span);
-        Assert.Equal(1, exec.Span!.Column);
+        Assert.NotNull(stmt.Span);
+        Assert.Equal(1, stmt.Span!.Column);
     }
 }
