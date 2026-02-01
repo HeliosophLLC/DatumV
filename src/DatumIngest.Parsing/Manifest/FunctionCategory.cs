@@ -62,4 +62,11 @@ public enum FunctionCategory
 
     /// <summary>Cryptographic hashing: MD5, SHA-1, SHA-2 family, and the generic <c>digest</c> dispatcher.</summary>
     Crypto,
+
+    /// <summary>
+    /// Full-text search: <c>plainto_tsquery</c> / <c>to_tsquery</c> query
+    /// constructors and the <c>tsquery_match</c> predicate underlying the
+    /// <c>@@</c> operator.
+    /// </summary>
+    FullText,
 }

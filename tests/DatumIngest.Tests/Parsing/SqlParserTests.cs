@@ -2623,6 +2623,49 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
+    public void MatchOperator_DesugarsToTsqueryMatchFunctionCall()
+    {
+        SelectStatement result = Parse("SELECT body @@ 'foo' FROM messages");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(
+            result.Columns[0].Expression);
+        Assert.Equal("tsquery_match", call.FunctionName);
+        Assert.Equal(2, call.Arguments.Count);
+        Assert.IsType<ColumnReference>(call.Arguments[0]);
+        Assert.Equal("foo", Assert.IsType<LiteralExpression>(call.Arguments[1]).Value);
+    }
+
+    [Fact]
+    public void MatchOperator_InWhereClause_DesugarsCorrectly()
+    {
+        SelectStatement result = Parse(
+            "SELECT id FROM messages WHERE body @@ plainto_tsquery('error timeout')");
+
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(result.Where);
+        Assert.Equal("tsquery_match", call.FunctionName);
+        Assert.Equal(2, call.Arguments.Count);
+        Assert.IsType<ColumnReference>(call.Arguments[0]);
+        FunctionCallExpression rhs = Assert.IsType<FunctionCallExpression>(call.Arguments[1]);
+        Assert.Equal("plainto_tsquery", rhs.FunctionName);
+    }
+
+    [Fact]
+    public void MatchOperator_BindsAtComparisonPrecedence_NotInsideAdditive()
+    {
+        // `a @@ b AND c = 1` must parse as `(a @@ b) AND (c = 1)`, not as
+        // `a @@ (b AND c) = 1` or other nonsense.
+        SelectStatement result = Parse(
+            "SELECT id FROM t WHERE body @@ 'foo' AND id = 1");
+
+        BinaryExpression top = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.And, top.Operator);
+        FunctionCallExpression left = Assert.IsType<FunctionCallExpression>(top.Left);
+        Assert.Equal("tsquery_match", left.FunctionName);
+        BinaryExpression right = Assert.IsType<BinaryExpression>(top.Right);
+        Assert.Equal(BinaryOperator.Equal, right.Operator);
+    }
+
+    [Fact]
     public void ConcatOperator_LeftAssociative_ChainsAsNestedConcat()
     {
         SelectStatement result = Parse("SELECT 'a' || 'b' || 'c' FROM t");

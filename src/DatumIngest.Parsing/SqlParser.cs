@@ -1020,6 +1020,7 @@ public static class SqlParser
             .Or(LikePostfix.Try())
             .Or(ILikePostfix.Try())
             .Or(RegexpPostfix.Try())
+            .Or(MatchPostfix.Try())
             .Or(ComparisonPostfix)
             .OptionalOrDefault()
         select postfix is not null ? postfix(left) : left;
@@ -1148,6 +1149,18 @@ public static class SqlParser
         from right in SP.Ref(() => AtTimeZoneLevel!)
         select (Func<Expression, Expression>)(left =>
             new BinaryExpression(left, op, right));
+
+    /// <summary>
+    /// Full-text match postfix: <c>haystack @@ needle</c> desugars to
+    /// <c>tsquery_match(haystack, needle)</c>. Sits at the same precedence as
+    /// other comparison postfixes — the result is boolean and binds looser
+    /// than AT TIME ZONE / arithmetic.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> MatchPostfix =
+        from atAt in Token.EqualTo(SqlToken.AtAt)
+        from right in SP.Ref(() => AtTimeZoneLevel!)
+        select (Func<Expression, Expression>)(left =>
+            new FunctionCallExpression("tsquery_match", [left, right]));
 
     /// <summary>
     /// Parses a type-narrowing bind: <c>expr AS TypeKeyword name</c>.

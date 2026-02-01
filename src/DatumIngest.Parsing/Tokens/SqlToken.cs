@@ -442,6 +442,9 @@ public enum SqlToken
     /// <summary>The || (double-pipe) string-concatenation operator. Sugar for <c>concat(...)</c>.</summary>
     DoublePipe,
 
+    /// <summary>The @@ (double-at) full-text match operator. Sugar for <c>tsquery_match(...)</c>.</summary>
+    AtAt,
+
     /// <summary>The + (plus) arithmetic operator.</summary>
     Plus,
 
