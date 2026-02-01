@@ -5,6 +5,7 @@ using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.Fts;
 using DatumIngest.Model;
 using DatumIngest.Models;
 using DatumIngest.Parsing.Ast;
@@ -551,6 +552,12 @@ public sealed class QueryPlanner
         }
         else if (pendingPredicates is not null)
         {
+            // FTS rewrite: if any predicate is `col @@ <const>` and `col`
+            // has a full-text index, replace the scan with a
+            // FullTextSearchOperator and strip the matched predicate from
+            // pendingPredicates so it doesn't also become a residual filter.
+            source = MaybeRewriteForFullTextSearch(source, pendingPredicates);
+
             // No joins — push applicable predicates directly to the source.
             source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
         }
@@ -1434,6 +1441,138 @@ public sealed class QueryPlanner
     /// When the underlying source is a <see cref="ScanOperator"/>, the predicate
     /// is also added as an advisory filter hint for statistics-based partition pruning.
     /// </summary>
+    /// <summary>
+    /// If <paramref name="source"/> is a single <c>Scan</c> (optionally wrapped
+    /// in an <c>Alias</c>) and one of <paramref name="pendingPredicates"/> is
+    /// a <c>tsquery_match(col, &lt;const&gt;)</c> against a column with an
+    /// FTS index, replace the scan with a <see cref="FullTextSearchOperator"/>
+    /// and remove the predicate from the pending list. Otherwise return
+    /// <paramref name="source"/> unchanged.
+    /// </summary>
+    /// <remarks>
+    /// v1 scope: single-table queries (no JOINs), single FTS predicate per
+    /// query, RHS must be a literal or <c>plainto_tsquery(literal)</c>.
+    /// Multi-predicate FTS combinations (one column with two queries, or
+    /// two FTS-indexed columns ANDed) are deferred — they require either
+    /// an intersection step or planner cost-comparison.
+    /// </remarks>
+    private static IQueryOperator MaybeRewriteForFullTextSearch(
+        IQueryOperator source,
+        List<Expression> pendingPredicates)
+    {
+        ScanOperator? scan;
+        string? wrappingAlias;
+        switch (source)
+        {
+            case AliasOperator alias when alias.Source is ScanOperator innerScan:
+                scan = innerScan;
+                wrappingAlias = alias.Alias;
+                break;
+            case ScanOperator topScan:
+                scan = topScan;
+                wrappingAlias = null;
+                break;
+            default:
+                return source;
+        }
+
+        ITableProvider provider = scan.TableProvider;
+
+        for (int i = 0; i < pendingPredicates.Count; i++)
+        {
+            if (!TryMatchFullTextPredicate(pendingPredicates[i], out string? columnName, out string? queryText))
+            {
+                continue;
+            }
+
+            if (!provider.TryGetTextSearchIndex(columnName!, out ITextSearchIndex? index))
+            {
+                continue;
+            }
+
+            // Empty post-analyzer query would mean "no rows" via the FTS
+            // operator but "match everything" via the tsquery_match function.
+            // To preserve semantic equivalence, skip the rewrite — the
+            // function-path filter still runs and returns all rows.
+            if (!HasAnySurvivingToken(index.Analyzer, queryText!))
+            {
+                continue;
+            }
+
+            FullTextSearchOperator ftsOp = new(
+                provider,
+                columnName!,
+                queryText!,
+                scan.RequiredColumns);
+
+            pendingPredicates.RemoveAt(i);
+
+            return wrappingAlias is null
+                ? ftsOp
+                : new AliasOperator(ftsOp, wrappingAlias);
+        }
+
+        return source;
+    }
+
+    /// <summary>
+    /// Matches a predicate of shape <c>tsquery_match(&lt;column-ref&gt;, &lt;const-string&gt;)</c>.
+    /// The RHS may be a bare string literal or a call to <c>plainto_tsquery</c>
+    /// wrapping one. Other shapes (parameterised queries, expression-derived
+    /// query strings) fall through to the scan + filter path for v1.
+    /// </summary>
+    private static bool TryMatchFullTextPredicate(
+        Expression predicate,
+        out string? columnName,
+        out string? queryText)
+    {
+        columnName = null;
+        queryText = null;
+
+        if (predicate is not FunctionCallExpression call) return false;
+        if (!string.Equals(call.FunctionName, "tsquery_match", StringComparison.OrdinalIgnoreCase)) return false;
+        if (call.Arguments.Count != 2) return false;
+
+        if (call.Arguments[0] is not ColumnReference colRef) return false;
+        if (!TryExtractConstantString(call.Arguments[1], out string? text)) return false;
+
+        columnName = colRef.ColumnName;
+        queryText = text;
+        return true;
+    }
+
+    /// <summary>
+    /// Extracts a plan-time-constant string from <paramref name="expr"/>: either
+    /// a <see cref="LiteralExpression"/> wrapping a <see cref="string"/>, or a
+    /// call to <c>plainto_tsquery</c> wrapping one. Returns <see langword="false"/>
+    /// for anything else (column refs, parameters, computed expressions).
+    /// </summary>
+    private static bool TryExtractConstantString(Expression expr, out string? text)
+    {
+        text = null;
+        switch (expr)
+        {
+            case LiteralExpression { Value: string s }:
+                text = s;
+                return true;
+            case FunctionCallExpression call
+                when string.Equals(call.FunctionName, "plainto_tsquery", StringComparison.OrdinalIgnoreCase)
+                  && call.Arguments.Count == 1:
+                return TryExtractConstantString(call.Arguments[0], out text);
+            default:
+                return false;
+        }
+    }
+
+    private static bool HasAnySurvivingToken(IFullTextAnalyzer analyzer, string queryText)
+    {
+        foreach (Token _ in analyzer.Tokenize(queryText))
+        {
+            return true;
+        }
+        return false;
+    }
+
     private static IQueryOperator PushPredicatesBelow(
         IQueryOperator operatorNode,
         HashSet<string> availableAliases,

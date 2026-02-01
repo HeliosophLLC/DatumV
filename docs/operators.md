@@ -43,6 +43,19 @@ FilterOperator upstream still re-evaluates the predicate for correctness — ide
 
 Walks the entries of an `IColumnIndex` in index order, fetching each row by random access. Produces sorted output without materializing-and-sorting the entire dataset. Primary feeder for `MergeJoinOperator`.
 
+### `FullTextSearchOperator`
+
+Reads rows that match a `WHERE col @@ q` predicate via a `.datum-fts-{col}` inverted-index sidecar. Sibling to `ScanOperator` — same leaf-row-producer shape, different strategy: instead of streaming chunks and pruning, it walks the index's posting lists and seeks each matching document.
+
+- **Posting-list intersection.** Tokenizes the query through the index's analyzer, fetches one posting list per surviving term, sorts smallest-first, AND-intersects via `HashSet<(chunk, row)>`. Short-circuits to empty on a missing term.
+- **Exact-row emission.** Translates surviving postings to absolute row positions via the source-index chunk directory and streams matching rows through `provider.OpenSeekSession(_requiredColumns, …)`. No chunk-level scanning — every row read is a row that already satisfies the FTS predicate.
+- **Projection pushdown.** `_requiredColumns` forwards to the seek session so unselected columns aren't decoded.
+- **Empty-token short-circuit.** A query that tokenizes to zero terms (stop-words only) yields no rows. The planner suppresses the rewrite in that case so `tsquery_match`'s match-all semantics survive on the `FilterOperator` path.
+
+The planner injects this operator only when the WHERE clause contains a top-level `<col-ref> @@ <const>` (literal or `plainto_tsquery(literal)`) predicate against an FTS-indexed column in a single-table query. Other shapes — non-constant RHS, JOIN context, column on the RHS — fall through to `ScanOperator + FilterOperator(tsquery_match(...))`, which evaluates per-row and still returns correct results.
+
+**Trade-off vs. ScanOperator's pruning paths.** When the WHERE mixes the FTS predicate with predicates that would otherwise drive zone maps, bloom filters, sorted-index pruning, or bitmap row filtering, the FTS operator replaces the scan entirely — the residual predicates land on a `FilterOperator` above and are evaluated per-row rather than per-chunk. This is usually the right call because FTS is highly selective: a typical search matches a few documents out of millions, and the seek-driven I/O is far cheaper than any chunk-pruned full scan. The pathological case is a low-selectivity query (`body @@ 'something-everyone-says'`) paired with a residual predicate that would have pruned most chunks (`AND created_at > '2030-01-01'`) — the FTS operator seeks every row, the filter rejects them all. A cost-based planner that compares the two strategies' selectivity estimates closes this gap; the current planner picks the FTS-driven plan unconditionally when the shape matches.
+
 ### `FunctionSourceOperator`
 
 Executes a table-valued function and streams its rows. Arguments are evaluated once at execution start.
@@ -229,6 +242,7 @@ Uniform Bernoulli filter at a given percentage. Each row is independently includ
 |---|---|---|
 | `ScanOperator` | ✅ | — (source) |
 | `IndexScanOperator` | ✅ | — (source, index-ordered) |
+| `FullTextSearchOperator` | ✅ | — (source, FTS-driven) |
 | `FunctionSourceOperator` | ✅ | — (source) |
 | `SingleEmptyRowOperator` | ✅ | — (source) |
 | `FilterOperator` | ✅ | any |

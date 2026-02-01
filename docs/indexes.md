@@ -555,7 +555,7 @@ When a `.datum` file is mutated via `INSERT` / `DELETE` / `ALTER TABLE ADD COLUM
 
 ## Mutable B+Trees
 
-In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, the engine maintains three families of *mutable* B+Tree sidecars that survive `INSERT` / `DELETE` / `UPDATE` without a rebuild. They share a page layout (8 KiB pages, dual-slot CRC32 header, COW commits, bump-only allocation) but split along key shape and use case:
+In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, the engine maintains four families of *mutable* B+Tree sidecars that survive `INSERT` / `DELETE` / `UPDATE` without a rebuild. The first three are summarised in the table below; the fourth — `.datum-fts-{column}` for full-text search — is documented in its own section since the keys are terms rather than values and the query surface is different. All four share the same page layout (8 KiB pages, dual-slot CRC32 header, COW commits, bump-only allocation), differing in key shape and use case:
 
 | | `.datum-pkindex` (bytes-keyed) | `.datum-cindex-{name}` (bytes-keyed) | `.datum-bptree-{col}` (typed) |
 |---|---|---|---|
@@ -607,3 +607,95 @@ See [.datum format — `.datum-pkindex`](datum-format.md#optional-sidecar-datum-
 - **Maintenance under mutation** — INSERT queues per-row entries during `WriteAsync` and flushes at `CommitAsync` (same pattern as PK). UPDATE rebuilds every composite index from scratch after the data commit (the indexed key may have changed; rebuild from the post-mutation table is simpler than trying to encode an incremental delta). DELETE doesn't currently touch the tree — tombstoned rows leave stale entries that get pruned at the next `DROP INDEX` / `CREATE INDEX` cycle, but the seek path still produces correct results because downstream filters reject the tombstoned rows.
 
 See the DDL surface in [DDL / DML — CREATE INDEX](sql/ddl-dml.md#create-index--create-unique-index) for the user-facing syntax.
+
+### Full-text indexes
+
+`CREATE INDEX name ON table (col) USING FTS [WITH (analyzer = 'simple_en')]` materialises a `.datum-fts-{col}` sidecar — a fourth mutable B+Tree family that turns a `String` column into a Postgres-flavored inverted index. It shares the bytes-keyed page-COW machinery with `.datum-pkindex` and `.datum-cindex-*` but stores postings (term → document references) instead of values.
+
+```sql
+-- Build. analyzer defaults to 'simple_en' if the WITH clause is omitted.
+CREATE INDEX idx_msg_body ON messages (body) USING FTS;
+CREATE INDEX idx_msg_body ON messages (body) USING FTS WITH (analyzer = 'simple_en');
+
+-- Query. Both shapes parse identically; the planner picks up the index when present.
+SELECT id FROM messages WHERE body @@ 'fox';
+SELECT id FROM messages WHERE body @@ plainto_tsquery('error timeout');
+
+-- Drop. Removes the sidecar file and the catalog descriptor in one step.
+DROP INDEX idx_msg_body;
+```
+
+#### On-disk shape
+
+Each posting is one entry in a `MutableBPlusTreeBytes` opened with `allowDuplicates: true`:
+
+- **Key**: `utf8(term)` with the same `\x00 → \x00\xFF` escape + `\x00\x00` terminator that `CompositeKeyEncoder` uses for strings. The terminator is what stops `"cat"` from prefix-matching `"cats"` postings during a `FindPrefix` lookup.
+- **Tie-breakers**: the `BytesIndexEntry`'s `ChunkIndex` (int32) and `RowOffsetInChunk` (int64) carry the document coordinates. Multiple postings for the same term are stored as duplicate-key entries; the tree sorts them by `(chunk, row)` ascending so prefix scans return postings in natural document order.
+
+A prefix scan for `escape(term)` returns every posting for that term, ready to feed straight into an intersection step.
+
+#### Analyzer
+
+An `IFullTextAnalyzer` tokenizes both at index-build time and at query time — the same instance lives on the index, so the two sides can't drift. The default `simple_en` analyzer:
+
+1. Unicode word-boundary segmentation — maximal runs of `Rune.IsLetterOrDigit` form tokens, punctuation splits them.
+2. Lowercase fold via `Rune.ToLowerInvariant`.
+3. Drop tokens shorter than 2 characters.
+4. Drop English stop words from a curated frozen set.
+
+`Token.Position` is computed (1-based, counting filtered tokens so stop words leave gaps for future phrase queries) but not persisted in the sidecar.
+
+`FtsAnalyzerRegistry` resolves analyzer names; the catalog descriptor stores the registered name alongside the index. Opening an FTS sidecar whose analyzer name is no longer registered fails with a `FtsAnalyzerNotFoundException` that names the missing analyzer.
+
+#### Maintenance
+
+Backfill on `CREATE INDEX` over a populated table runs under `_mutationLock`, scans the table once, tokenizes each row's column value through the chosen analyzer, deduplicates terms within a document (so `"fox fox fox"` produces one posting per chunk-row), and inserts one posting per surviving `(term, chunk, row)` triple. NULL values are skipped. The new sidecar is published to the provider's visible-state dictionaries only after the scan completes — a concurrent reader either misses the index entirely (and queries fall through to scan) or sees the fully populated tree, never a half-built one.
+
+Steady-state INSERT / UPDATE / DELETE maintenance is handled by `REINDEX` rather than per-row updates; see [deferred-decisions.md](deferred-decisions.md#full-text-search) for the incremental-maintenance roadmap.
+
+#### Query surface
+
+`@@` is the full-text match operator. It parses at comparison precedence (same level as `=` / `<` / `>`) and lowers to `tsquery_match(haystack, needle)` — the function-path implementation tokenizes both sides through `simple_en` and returns true when every needle term is present in the haystack's tokens. Empty / all-stop-words needles match every row, matching PG's `plainto_tsquery('')` semantics.
+
+`plainto_tsquery(text) → text` is the query constructor. Because the engine has no `tsquery` column type, the function returns its argument unchanged; tokenization happens inside `@@` (or inside the operator, when the planner takes the indexed path). The function exists so user SQL matches the PG surface verbatim — `body @@ plainto_tsquery('error timeout')` and `body @@ 'error timeout'` mean the same thing.
+
+#### Planner integration
+
+When the planner sees a top-level `WHERE` predicate of shape
+
+- `<col-ref> @@ <string-literal>`, or
+- `<col-ref> @@ plainto_tsquery(<string-literal>)`,
+
+against a single-table query (no JOINs) and `<col>` has an FTS index, the `ScanOperator + FilterOperator(tsquery_match(col, q))` pair is replaced with a `FullTextSearchOperator`. The operator:
+
+1. Resolves the FTS index from the table provider.
+2. Tokenizes the query string through the index's own analyzer.
+3. Fetches per-term posting lists, sorts them smallest-first, and AND-intersects via a `HashSet<(chunk, row)>`.
+4. Translates surviving `(chunk, row)` pairs to absolute row positions via the source index's chunk directory.
+5. Streams matching rows through the provider's seek session, honoring the planner's `requiredColumns` projection.
+
+Predicates that don't match the shape (a column on the RHS, a parameter, an arbitrary expression, a JOIN context) fall through to the function-evaluation path on a regular `ScanOperator + FilterOperator`. The function path tokenizes both sides per-row and still returns the right answer — the rewrite is a performance optimization, not a correctness requirement.
+
+The rewrite is suppressed when the query tokenizes to zero terms (empty or all-stop-words). In that case the function path's match-all semantics survive; the operator path's "no surviving tokens → no rows" behavior would otherwise diverge from `tsquery_match('any', '')` returning true.
+
+When the FTS predicate is one conjunct of a larger `WHERE` (`body @@ 'fox' AND id > 5`), the planner consumes only the FTS conjunct — the residual predicates stay on a wrapping `FilterOperator` above the `FullTextSearchOperator`.
+
+#### Sidecar lifecycle
+
+| Phase | Behavior |
+|-------|----------|
+| `CREATE INDEX ... USING FTS` | Validates the column is a non-array `String`, that no other FTS index covers it, and that the requested analyzer is registered. Creates the sidecar, backfills under `_mutationLock`, publishes atomically. |
+| Catalog reopen | `DatumFileTableProviderV2.OpenFtsIndexes` discovers each descriptor with `Kind = IndexKind.FullText`, resolves the analyzer by name, and opens the sidecar by column. Sidecars whose analyzer name is missing from the registry are skipped silently and degrade to scan-based access. |
+| `DROP INDEX` | Dispatches by `IndexDescriptor.Kind` — for FTS, `DropFtsIndex` disposes the tree handle, deletes the `.datum-fts-{col}` file, and removes the descriptor from the visible-state dictionaries. |
+| `DROP TABLE` | Cascades to every FTS sidecar belonging to the table alongside the other `.datum-*` files. |
+| `REINDEX` | Rebuilds the sidecar from the live table. Used for steady-state maintenance after INSERT / UPDATE / DELETE. |
+
+#### Scope
+
+- Each column may have at most one FTS index.
+- `tsquery_match` is AND-of-terms: no `OR`, no `NOT`, no phrase matching. `plainto_tsquery` is the only query constructor.
+- Postings carry `(chunk, row)` only — no term frequencies, no positions. Results stream in source-row order, not relevance order; `ts_rank` is not provided.
+- INSERT / UPDATE / DELETE refresh the sidecar through `REINDEX` rather than per-row maintenance.
+- Storage repeats the term bytes once per posting (one tree entry per `(term, chunk, row)` triple) and intersects posting lists with a `HashSet`. Compact at chat scale; the term-dictionary + posting-heap layout with skip pointers is the upgrade lever when posting counts grow.
+
+[deferred-decisions.md](deferred-decisions.md) carries the forward-looking ledger for each of these scope boundaries — what triggers an upgrade, what it costs, and what it breaks.

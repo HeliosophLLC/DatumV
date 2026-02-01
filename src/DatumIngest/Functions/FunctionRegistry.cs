@@ -358,6 +358,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.ConcatFunction>();
         registry.RegisterScalar<Scalar.ConcatStrictFunction>();
         registry.RegisterScalar<Scalar.ConcatWsFunction>();
+        registry.RegisterScalar<Scalar.PlainToTsqueryFunction>();
+        registry.RegisterScalar<Scalar.TsqueryMatchFunction>();
         registry.RegisterScalar<Scalar.UpperFunction>();
         registry.RegisterScalar<Scalar.LowerFunction>();
         registry.RegisterScalar<Scalar.LenFunction>();
