@@ -1204,6 +1204,91 @@ public class DdlParsingTests : ServiceTestBase
     }
 
     [Fact]
+    public void CreateIndex_NoUsingOrWith_MethodAndOptionsAreNull()
+    {
+        Statement statement = SqlParser.ParseStatement("CREATE INDEX idx_uid ON users (user_id)");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Null(create.Method);
+        Assert.Null(create.Options);
+    }
+
+    [Fact]
+    public void CreateIndex_UsingFts_CapturesMethodLowercased()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_msg_body ON messages (body) USING FTS");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("idx_msg_body", create.IndexName);
+        Assert.Equal("messages", create.TableName);
+        Assert.Equal(new[] { "body" }, create.Columns);
+        Assert.Equal("fts", create.Method);
+        Assert.Null(create.Options);
+    }
+
+    [Fact]
+    public void CreateIndex_UsingFtsLowercase_StillMatches()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_msg_body ON messages (body) using fts");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("fts", create.Method);
+    }
+
+    [Fact]
+    public void CreateIndex_UsingFtsWithAnalyzerOption_CapturesBoth()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_msg_body ON messages (body) USING FTS WITH (analyzer = 'simple_en')");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("fts", create.Method);
+        Assert.NotNull(create.Options);
+        Assert.Single(create.Options);
+        Assert.Equal("simple_en", create.Options["analyzer"]);
+    }
+
+    [Fact]
+    public void CreateIndex_WithMultipleOptions_CapturesAll()
+    {
+        // Multi-option round-trip — exercises the comma-delimited list shape
+        // even though FTS only uses one option in v1.
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_x ON t (c) USING fts WITH (analyzer = 'simple_en', other = 'foo')");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.NotNull(create.Options);
+        Assert.Equal(2, create.Options.Count);
+        Assert.Equal("simple_en", create.Options["analyzer"]);
+        Assert.Equal("foo", create.Options["other"]);
+    }
+
+    [Fact]
+    public void CreateIndex_OptionKeysAreCaseInsensitive()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_x ON t (c) USING fts WITH (ANALYZER = 'simple_en')");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.NotNull(create.Options);
+        Assert.Equal("simple_en", create.Options["analyzer"]);
+        Assert.Equal("simple_en", create.Options["ANALYZER"]); // case-insensitive lookup
+    }
+
+    [Fact]
+    public void CreateIndex_OptionWithEscapedQuote_PreservesValue()
+    {
+        // Double-single-quote is the SQL string escape; parser must collapse it.
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE INDEX idx_x ON t (c) USING fts WITH (k = 'foo''bar')");
+
+        CreateIndexStatement create = Assert.IsType<CreateIndexStatement>(statement);
+        Assert.Equal("foo'bar", create.Options!["k"]);
+    }
+
+    [Fact]
     public void DropIndex()
     {
         Statement statement = SqlParser.ParseStatement("DROP INDEX idx_uid");

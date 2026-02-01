@@ -673,6 +673,24 @@ public sealed class CatalogFileIndexEntry
     /// (a non-unique secondary index).
     /// </summary>
     public bool IsUnique { get; set; }
+
+    /// <summary>
+    /// Index method string — lowercase, matches the <c>USING method</c>
+    /// clause in DDL. <c>"composite"</c> for the default composite B+Tree,
+    /// <c>"fulltext"</c> for the FTS inverted index. <see langword="null"/>
+    /// on catalog files written before FTS existed; loaded as
+    /// <c>"composite"</c> in that case so back-compat is preserved.
+    /// </summary>
+    public string? Kind { get; set; }
+
+    /// <summary>
+    /// For full-text indexes: the analyzer name persisted at CREATE INDEX
+    /// time. Used at provider-open time to look up the analyzer from
+    /// <see cref="Indexing.Fts.FtsAnalyzerRegistry"/> for both query-time
+    /// tokenization and incremental-insert tokenization.
+    /// <see langword="null"/> for non-FTS indexes.
+    /// </summary>
+    public string? AnalyzerName { get; set; }
 }
 
 /// <summary>One UDF entry in the persisted catalog.</summary>

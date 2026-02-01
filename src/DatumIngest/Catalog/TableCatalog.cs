@@ -150,7 +150,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         {
                             continue;
                         }
-                        indexes.Add(new IndexDescriptor(indexEntry.Name, indexEntry.Columns.ToArray(), indexEntry.IsUnique));
+                        IndexKind kind = ParseIndexKindOrDefault(indexEntry.Kind);
+                        indexes.Add(new IndexDescriptor(
+                            indexEntry.Name,
+                            indexEntry.Columns.ToArray(),
+                            indexEntry.IsUnique,
+                            kind,
+                            indexEntry.AnalyzerName));
                     }
                 }
 
@@ -696,7 +702,65 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"CREATE INDEX '{create.IndexName}' requires at least one column.");
         }
 
-        // Validate columns exist on the table and have encoder-supported kinds.
+        // Branch on USING method. Pre-FTS DDL has Method=null → composite.
+        IndexKind kind = ResolveCreateIndexKind(create);
+        IndexDescriptor descriptor = kind switch
+        {
+            IndexKind.Composite => BuildCompositeIndexDescriptor(create, datumProvider),
+            IndexKind.FullText => BuildFullTextIndexDescriptor(create, datumProvider),
+            _ => throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': unsupported index kind {kind}."),
+        };
+
+        switch (kind)
+        {
+            case IndexKind.Composite:
+                await datumProvider.AddCompositeIndexAsync(descriptor).ConfigureAwait(false);
+                break;
+            case IndexKind.FullText:
+                await datumProvider.AddFtsIndexAsync(descriptor).ConfigureAwait(false);
+                break;
+        }
+
+        // Update catalog state and persist.
+        if (!_persistentTableIndexes.TryGetValue(create.TableName, out List<IndexDescriptor>? list))
+        {
+            list = new List<IndexDescriptor>();
+            _persistentTableIndexes[create.TableName] = list;
+        }
+        list.Add(descriptor);
+        _indexNameToTable[descriptor.Name] = create.TableName;
+        _catalogStore?.Save(_udfs, _procedures);
+    }
+
+    private static IndexKind ResolveCreateIndexKind(CreateIndexStatement create)
+    {
+        if (create.Method is null)
+        {
+            return IndexKind.Composite;
+        }
+
+        return create.Method.ToLowerInvariant() switch
+        {
+            "btree" or "composite" => IndexKind.Composite,
+            "fts" or "fulltext" => IndexKind.FullText,
+            _ => throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': USING method '{create.Method}' is not recognized. " +
+                "Supported methods: BTREE (default), FTS."),
+        };
+    }
+
+    private static IndexDescriptor BuildCompositeIndexDescriptor(CreateIndexStatement create, Providers.DatumFileTableProviderV2 datumProvider)
+    {
+        // WITH options aren't recognised on composite indexes today; fail loudly
+        // if someone supplies one so typos don't get silently dropped.
+        if (create.Options is { Count: > 0 })
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': WITH options are not supported for composite (B+Tree) indexes. " +
+                "Known options apply to USING FTS only.");
+        }
+
         Model.Schema schema = datumProvider.GetSchema();
         foreach (string columnName in create.Columns)
         {
@@ -718,19 +782,112 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
         }
 
-        IndexDescriptor descriptor = new(create.IndexName, create.Columns.ToArray(), create.IsUnique);
-        await datumProvider.AddCompositeIndexAsync(descriptor).ConfigureAwait(false);
-
-        // Update catalog state and persist.
-        if (!_persistentTableIndexes.TryGetValue(create.TableName, out List<IndexDescriptor>? list))
-        {
-            list = new List<IndexDescriptor>();
-            _persistentTableIndexes[create.TableName] = list;
-        }
-        list.Add(descriptor);
-        _indexNameToTable[descriptor.Name] = create.TableName;
-        _catalogStore?.Save(_udfs, _procedures);
+        return new IndexDescriptor(create.IndexName, create.Columns.ToArray(), create.IsUnique);
     }
+
+    private static IndexDescriptor BuildFullTextIndexDescriptor(CreateIndexStatement create, Providers.DatumFileTableProviderV2 datumProvider)
+    {
+        if (create.IsUnique)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': UNIQUE is not valid for full-text indexes — " +
+                "duplicate postings are the whole point of an inverted index.");
+        }
+
+        if (create.Columns.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': USING FTS requires exactly one column (got {create.Columns.Count}). " +
+                "For cross-column search, either create one FTS index per column or use a generated " +
+                "concatenation column.");
+        }
+
+        string columnName = create.Columns[0];
+        Model.Schema schema = datumProvider.GetSchema();
+        Model.ColumnInfo? column = schema.FindColumn(columnName);
+        if (column is null)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': column '{columnName}' does not exist on table '{create.TableName}'.");
+        }
+        if (column.IsArray || column.Kind != Model.DataKind.String)
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': USING FTS requires a non-array String column. " +
+                $"Column '{columnName}' is {column.Kind}{(column.IsArray ? "[]" : string.Empty)}.");
+        }
+
+        // Forbid two FTS indexes on the same column for v1. Deferred-decisions
+        // #5 calls out the cheap escape hatch (allow multiple FTS indexes per
+        // column with different analyzers); when that ships, drop this check.
+        if (datumProvider.TryGetTextSearchIndex(columnName, out _))
+        {
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': column '{columnName}' already has a full-text index. " +
+                "Multiple FTS indexes per column are deferred to a future PR.");
+        }
+
+        string analyzerName = ResolveFtsAnalyzerOption(create);
+
+        // Validate the analyzer is registered before we commit to creating the sidecar.
+        if (!Indexing.Fts.FtsAnalyzerRegistry.Default.TryGet(analyzerName, out _))
+        {
+            string known = string.Join(", ", Indexing.Fts.FtsAnalyzerRegistry.Default.RegisteredNames);
+            throw new InvalidOperationException(
+                $"CREATE INDEX '{create.IndexName}': analyzer '{analyzerName}' is not registered. " +
+                $"Known analyzers: {known}.");
+        }
+
+        return new IndexDescriptor(
+            create.IndexName,
+            create.Columns.ToArray(),
+            IsUnique: false,
+            Kind: IndexKind.FullText,
+            AnalyzerName: analyzerName);
+    }
+
+    private const string DefaultFtsAnalyzerName = "simple_en";
+
+    private static string ResolveFtsAnalyzerOption(CreateIndexStatement create)
+    {
+        if (create.Options is null || create.Options.Count == 0)
+        {
+            return DefaultFtsAnalyzerName;
+        }
+
+        foreach (string key in create.Options.Keys)
+        {
+            if (!string.Equals(key, "analyzer", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"CREATE INDEX '{create.IndexName}': unknown WITH option '{key}'. " +
+                    "USING FTS recognizes only 'analyzer' in v1.");
+            }
+        }
+
+        return create.Options["analyzer"];
+    }
+
+    private static IndexKind ParseIndexKindOrDefault(string? wireValue)
+    {
+        if (string.IsNullOrEmpty(wireValue))
+        {
+            return IndexKind.Composite;
+        }
+        return wireValue.ToLowerInvariant() switch
+        {
+            "composite" or "btree" => IndexKind.Composite,
+            "fulltext" or "fts" => IndexKind.FullText,
+            _ => IndexKind.Composite, // forward-compat: unknown kinds load as composite + leave the sidecar alone
+        };
+    }
+
+    private static string FormatIndexKind(IndexKind kind) => kind switch
+    {
+        IndexKind.Composite => "composite",
+        IndexKind.FullText => "fulltext",
+        _ => "composite",
+    };
 
     /// <summary>
     /// Applies a <c>DROP INDEX</c> statement: locates the owning table,
@@ -759,9 +916,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"Index '{drop.IndexName}' references missing table '{tableName}'.");
         }
 
+        // Find the descriptor so we can dispatch the per-kind drop.
+        IndexDescriptor? descriptor = null;
+        if (_persistentTableIndexes.TryGetValue(tableName, out List<IndexDescriptor>? indexList))
+        {
+            descriptor = indexList.FirstOrDefault(idx =>
+                string.Equals(idx.Name, drop.IndexName, StringComparison.OrdinalIgnoreCase));
+        }
+
         if (provider is Providers.DatumFileTableProviderV2 datumProvider)
         {
-            datumProvider.DropCompositeIndex(drop.IndexName);
+            IndexKind kind = descriptor?.Kind ?? IndexKind.Composite;
+            switch (kind)
+            {
+                case IndexKind.Composite:
+                    datumProvider.DropCompositeIndex(drop.IndexName);
+                    break;
+                case IndexKind.FullText:
+                    datumProvider.DropFtsIndex(drop.IndexName);
+                    break;
+            }
         }
 
         _indexNameToTable.Remove(drop.IndexName);
@@ -1791,6 +1965,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         Name = index.Name,
                         Columns = new List<string>(index.Columns),
                         IsUnique = index.IsUnique,
+                        Kind = FormatIndexKind(index.Kind),
+                        AnalyzerName = index.AnalyzerName,
                     });
                 }
                 entry.Indexes = indexEntries;

@@ -2897,12 +2897,55 @@ public static class SqlParser
         select (Statement)new DropTableStatement(tableName, ifExists);
 
     /// <summary>
-    /// Parses <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c>.
+    /// Optional <c>USING method</c> clause after the column list. The
+    /// <c>USING</c> keyword is matched as a contextual identifier (no
+    /// dedicated token); the method name is captured lowercased so the
+    /// catalog matches case-insensitively.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string?> CreateIndexUsingParser =
+        (from usingKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("USING", StringComparison.OrdinalIgnoreCase), "USING")
+         from method in Token.EqualTo(SqlToken.Identifier)
+         select (string?)GetTokenText(method).ToLowerInvariant()
+        ).Try().OptionalOrDefault();
+
+    /// <summary>
+    /// One <c>key = 'value'</c> pair inside a <c>WITH (...)</c> options
+    /// list. Keys are lowercased; values are interpreted as string
+    /// literals (single-quoted). The catalog validates which keys make
+    /// sense for the index method.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (string Key, string Value)> CreateIndexWithOptionParser =
+        from key in Token.EqualTo(SqlToken.Identifier)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from value in Token.EqualTo(SqlToken.StringLiteral)
+        select (GetTokenText(key).ToLowerInvariant(), GetTokenText(value));
+
+    /// <summary>
+    /// Optional <c>WITH (key = 'value', ...)</c> clause. Returns
+    /// <see langword="null"/> when absent so the catalog can distinguish
+    /// "no options given" from "empty options object" without an extra
+    /// flag.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyDictionary<string, string>?> CreateIndexWithOptionsParser =
+        (from withKw in Token.EqualTo(SqlToken.With)
+         from openParen in Token.EqualTo(SqlToken.LeftParen)
+         from pairs in CreateIndexWithOptionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+         from closeParen in Token.EqualTo(SqlToken.RightParen)
+         select (IReadOnlyDictionary<string, string>?)pairs
+             .ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase)
+        ).OptionalOrDefault();
+
+    /// <summary>
+    /// Parses <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table
+    /// (col1[, col2]*) [USING method] [WITH (opt = 'value', ...)]</c>.
     /// The <c>CREATE</c> prefix is wrapped in <c>.Try()</c> at the dispatcher
     /// so sibling <c>CREATE</c> parsers can backtrack; the body runs without
     /// an outer <c>.Try()</c> so body-shape failures surface with deep
     /// Remainder positions. <c>UNIQUE</c> is optional and toggles
-    /// <see cref="CreateIndexStatement.IsUnique"/>.
+    /// <see cref="CreateIndexStatement.IsUnique"/>. The <c>USING</c> and
+    /// <c>WITH</c> clauses default to <see langword="null"/> for back-compat
+    /// with pre-FTS CREATE INDEX statements.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> CreateIndexParser =
         from createKw in Token.EqualTo(SqlToken.Create)
@@ -2915,7 +2958,13 @@ public static class SqlParser
         from openParen in Token.EqualTo(SqlToken.LeftParen)
         from columns in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from closeParen in Token.EqualTo(SqlToken.RightParen)
-        select (Statement)new CreateIndexStatement(indexName, tableName, columns, ifNotExists, IsUnique: uniqueKw);
+        from method in CreateIndexUsingParser
+        from options in CreateIndexWithOptionsParser
+        select (Statement)new CreateIndexStatement(
+            indexName, tableName, columns, ifNotExists,
+            IsUnique: uniqueKw,
+            Method: method,
+            Options: options);
 
     /// <summary>
     /// Parses <c>DROP INDEX [IF EXISTS] name</c>.

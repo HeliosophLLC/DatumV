@@ -52,21 +52,60 @@ public sealed record TableDescriptor(
     IReadOnlyList<IndexDescriptor>? Indexes = null);
 
 /// <summary>
-/// A user-defined secondary index built via <c>CREATE INDEX</c>. Persisted in
-/// the catalog and materialised on disk as a <c>.datum-cindex-{Name}</c>
-/// sidecar (a bytes-keyed mutable B+Tree backed by
-/// <see cref="DatumIngest.Indexing.CompositeKeyEncoder"/>).
+/// The kind of secondary index a <see cref="IndexDescriptor"/> describes.
+/// Maps 1:1 to a <c>USING &lt;method&gt;</c> in <c>CREATE INDEX</c>.
 /// </summary>
-/// <param name="Name">Index name (unique within the table; used as the sidecar filename).</param>
-/// <param name="Columns">Ordered list of column names covered by the index.</param>
+public enum IndexKind
+{
+    /// <summary>
+    /// Default. Composite B+Tree over one-or-more columns, materialised as
+    /// a <c>.datum-cindex-{Name}</c> sidecar. The <c>USING</c> clause is
+    /// absent in DDL.
+    /// </summary>
+    Composite = 0,
+
+    /// <summary>
+    /// Full-text inverted index over a single string column, materialised
+    /// as a <c>.datum-fts-{column}</c> sidecar. DDL is
+    /// <c>CREATE INDEX ... USING FTS(col) [WITH (analyzer = '...')]</c>.
+    /// </summary>
+    FullText = 1,
+}
+
+/// <summary>
+/// A user-defined secondary index built via <c>CREATE INDEX</c>. Persisted in
+/// the catalog. The on-disk sidecar shape depends on <see cref="Kind"/>:
+/// <see cref="IndexKind.Composite"/> uses <c>.datum-cindex-{Name}</c>,
+/// <see cref="IndexKind.FullText"/> uses <c>.datum-fts-{column}</c>.
+/// </summary>
+/// <param name="Name">Index name (unique within the table; used as the sidecar filename for composite indexes).</param>
+/// <param name="Columns">
+/// Ordered list of column names covered by the index. Full-text indexes
+/// must have exactly one column.
+/// </param>
 /// <param name="IsUnique">
-/// <see langword="true"/> for indexes created via <c>CREATE UNIQUE INDEX</c>.
-/// The backing tree is opened with <c>allowDuplicates: false</c>; INSERTs
-/// that would produce a second entry with the same encoded key throw a
-/// uniqueness violation. Rows where any covered column is <c>NULL</c> are
-/// exempt from the check (NULLS DISTINCT, PG default).
+/// Only meaningful for <see cref="IndexKind.Composite"/>. When
+/// <see langword="true"/> (<c>CREATE UNIQUE INDEX</c>), the backing tree is
+/// opened with <c>allowDuplicates: false</c>; INSERTs that would produce a
+/// second entry with the same encoded key throw a uniqueness violation.
+/// Rows where any covered column is <c>NULL</c> are exempt from the check
+/// (NULLS DISTINCT, PG default). Must be <see langword="false"/> for
+/// full-text indexes — duplicates are the whole point.
+/// </param>
+/// <param name="Kind">
+/// What flavour of index this is. Defaults to
+/// <see cref="IndexKind.Composite"/> so pre-Kind catalog entries deserialise
+/// to the right shape.
+/// </param>
+/// <param name="AnalyzerName">
+/// Only meaningful for <see cref="IndexKind.FullText"/>. Names the
+/// <see cref="Indexing.Fts.IFullTextAnalyzer"/> used to tokenize both
+/// at index-build time and at query time. <see langword="null"/> for
+/// non-FTS indexes.
 /// </param>
 public sealed record IndexDescriptor(
     string Name,
     IReadOnlyList<string> Columns,
-    bool IsUnique = false);
+    bool IsUnique = false,
+    IndexKind Kind = IndexKind.Composite,
+    string? AnalyzerName = null);

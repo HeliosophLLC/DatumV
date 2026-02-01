@@ -1124,17 +1124,20 @@ public sealed record DropTableStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
-/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)</c> —
-/// creates a maintained secondary index over one or more columns of a table.
-/// Single-column or composite over scalar / temporal / Uuid / String kinds;
-/// the encoder rejects array / Decimal / Point columns. Expression indexes
-/// and partial indexes are not supported in v1.
+/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)
+/// [USING method] [WITH (opt = 'value', ...)]</c> — creates a maintained
+/// secondary index over one or more columns of a table. The <c>USING</c>
+/// clause selects an index method (default: composite B+Tree;
+/// <c>FTS</c> for the full-text inverted index). The <c>WITH</c> clause
+/// supplies method-specific options. Expression indexes and partial
+/// indexes are not supported in v1.
 /// </summary>
 /// <param name="IndexName">The name of the index (used in DROP INDEX and as the sidecar filename).</param>
 /// <param name="TableName">The table the index is built on.</param>
 /// <param name="Columns">
 /// Ordered list of columns covered by the index. Leftmost-prefix matching
-/// applies at query time (Postgres semantics).
+/// applies at query time (Postgres semantics). Full-text indexes require
+/// exactly one column.
 /// </param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the index already exists.</param>
 /// <param name="IsUnique">
@@ -1144,14 +1147,27 @@ public sealed record DropTableStatement(
 /// table that already contains duplicates fails the CREATE INDEX statement
 /// before the index becomes visible. Unlike <c>PRIMARY KEY</c>, <c>NULL</c> in
 /// any covered column makes the row exempt from the uniqueness check (PG
-/// NULLS DISTINCT default).
+/// NULLS DISTINCT default). Not valid for full-text indexes.
+/// </param>
+/// <param name="Method">
+/// The <c>USING method</c> identifier, lower-cased (e.g. <c>"fts"</c>).
+/// <see langword="null"/> when the clause is omitted — the catalog
+/// interprets that as a composite B+Tree.
+/// </param>
+/// <param name="Options">
+/// Method-specific <c>WITH (key = 'value', ...)</c> options. Keys are
+/// lower-cased; values are string literals as written. <see langword="null"/>
+/// or empty when the clause is omitted. The catalog validates which keys
+/// are recognised per <see cref="Method"/>.
 /// </param>
 public sealed record CreateIndexStatement(
     string IndexName,
     string TableName,
     IReadOnlyList<string> Columns,
     bool IfNotExists = false,
-    bool IsUnique = false) : Statement;
+    bool IsUnique = false,
+    string? Method = null,
+    IReadOnlyDictionary<string, string>? Options = null) : Statement;
 
 /// <summary>
 /// <c>DROP INDEX [IF EXISTS] name</c> — removes a maintained secondary index.
