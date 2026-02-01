@@ -644,6 +644,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 {
                     TryDeleteFile(cindexFile);
                 }
+                foreach (string ftsFile in Directory.EnumerateFiles(dir, stem + ".datum-fts-*"))
+                {
+                    TryDeleteFile(ftsFile);
+                }
             }
 
             _persistentTableEntries.Remove(drop.TableName);
@@ -1868,7 +1872,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             {
                 foreach (IndexDescriptor index in indexesToDrop)
                 {
-                    datumProvider.DropCompositeIndex(index.Name);
+                    switch (index.Kind)
+                    {
+                        case IndexKind.FullText:
+                            datumProvider.DropFtsIndex(index.Name);
+                            break;
+                        case IndexKind.Composite:
+                        default:
+                            datumProvider.DropCompositeIndex(index.Name);
+                            break;
+                    }
                     indexList.Remove(index);
                     _indexNameToTable.Remove(index.Name);
                 }

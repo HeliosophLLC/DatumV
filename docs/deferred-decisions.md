@@ -160,7 +160,71 @@ Plan: [fts-inverted-index.md](../plans/fts-inverted-index.md).
   assistant; non-deferrable the moment you launch in a CJK market.
 - **Compat:** None — new analyzer name.
 
-### 8. Apostrophes split tokens
+### 8. FTS planner picks index-driven plan unconditionally (no cost compare)
+
+- **Limitation:** When the WHERE has a `col @@ q` predicate against an
+  FTS-indexed column, the planner always rewrites to
+  `FullTextSearchOperator` regardless of selectivity. For a common-word
+  query paired with a selective non-FTS residual (e.g.
+  `body @@ 'common-word' AND created_at > '2030-01-01'`), this seeks
+  every FTS-matching row before the residual filter rejects them all —
+  worse than a scan with chunk-pruning on `created_at`.
+- **v1:** Shape-match wins. The FTS operator runs whenever the predicate
+  shape is right (literal RHS, single-table query, FTS index present)
+  and the query tokenizes to at least one term.
+- **v2 path:** Cost-based plan choice — estimate `FTS postings count ×
+  per-seek cost` vs. `chunks × per-chunk decode + predicate eval`, pick
+  the cheaper. Per-term posting counts are already available from the
+  FTS index; chunk-prune selectivity comes from the existing
+  `StatisticsPredicateEvaluator`. ~300 LOC of planner work, no operator
+  changes.
+- **Trigger:** observed regressions on the assistant's chat-search
+  workload — a common-word query running slower than a metadata-only
+  filter.
+- **Compat:** Internal — planner picks better, no SQL or format change.
+
+### 9. FTS operator can't prune via other indexes (pre-filter posting list)
+
+- **Limitation:** `FullTextSearchOperator` walks every posting in its
+  AND-intersection result and seeks every surviving row, even when an
+  unrelated index could have pruned chunks. `WHERE body @@ 'fox' AND
+  status = 'archived'` seeks every 'fox' row, then the residual filter
+  rejects rows whose status doesn't match — the bitmap index on
+  `status` doesn't get consulted.
+- **v1:** FTS operator is leaf-pure. Residual predicates evaluate via
+  the `FilterOperator` above it.
+- **v2 path:** Planner derives a permitted-chunks set (or
+  permitted-rows bitmap) from non-FTS predicates using the same
+  pruning logic `ScanOperator` already runs, passes it into the FTS
+  operator as an optional parameter. The operator filters postings
+  by chunk before seeking. Same pattern as the vector plan's
+  PR-VEC-G pre-filter ANN. ~400 LOC.
+- **Trigger:** any FTS query mixed with a high-selectivity residual
+  on a chunk-prunable column.
+- **Compat:** Additive parameter on the FTS operator; planner does
+  more work but produces the same shape.
+
+### 10. Pruning logic is duplicated across operators
+
+- **Limitation:** `ScanOperator` owns its chunk-prune and bitmap-row-
+  filter machinery as inline code paths in `ExecuteAsync`. Other index-
+  driven operators (`FullTextSearchOperator`, and eventually
+  `VectorTopKOperator` from the vector plan) want the same machinery
+  but have to either duplicate it or do without — currently they do
+  without.
+- **v1:** Each leaf operator implements its own pruning, or none.
+- **v2 path:** Factor out an `IPruningAdvisor` (or equivalent) service
+  that derives chunk-skip / row-permit sets from a predicate + the
+  available indexes on a column. `ScanOperator` consumes it for its
+  current logic; FTS and vector consume it for their residual-predicate
+  pruning. Architectural cleanup, ~600–800 LOC. Lands cleanly after
+  entry #9 ships.
+- **Trigger:** the moment a third leaf operator wants chunk pruning
+  (vector top-k qualifies).
+- **Compat:** Internal refactor; observable behavior unchanged on the
+  scan side, additive on FTS and vector.
+
+### 11. Apostrophes split tokens
 
 - **Limitation:** `"don't"` becomes `"don"` (and `"t"` dropped by length
   filter). Hurts recall on contractions.

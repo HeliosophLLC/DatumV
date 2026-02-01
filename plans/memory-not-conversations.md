@@ -195,6 +195,68 @@ of the row is the same in both cases, the *source of the row* differs.
    clean; what happens when a user has two machines? Out of scope for v1
    (single-host); plays into the eventual peer-compute story.
 
+## Cold corpus import
+
+The memory layer is most valuable when it has weight on day one. Existing
+cloud-chat exports (Claude, ChatGPT, Gemini, etc.) are corpora the user
+has already produced — tens or hundreds of threads of accumulated decisions,
+code, and patterns of thinking — and currently can't reuse, because cloud
+apps treat them as navigable threads that go cold and stay cold. Importing
+them into the message graph + embedding pipeline makes the cold corpus into
+substrate for *new* conversations.
+
+This is a corollary of the thesis, not a separate feature: if memory is the
+product and threads are write-only in practice, then *every existing
+write-only thread the user has is latent memory waiting to be unlocked*.
+Cold-corpus import is the migration path from cloud chat into DatumIngest.
+
+### Schema impact
+
+None. Exported turns map directly to `messages` rows:
+
+- `role` from the export's role field (`user` / `assistant` / `system`).
+- `content` verbatim.
+- `model` from the export's metadata (`claude-3-5-sonnet`, `gpt-4`, etc.)
+  — surfaces in the same column we already populate from the local LLM.
+- `created_at` from the export's timestamp, **not** `now()`. Preserves
+  recency-bias scoring in retrieval.
+- `input_tokens` / `output_tokens` if the export provides them; null
+  otherwise.
+
+The `message_references` table absorbs any tool-call / table-reference
+metadata the source export provides; otherwise references are inferred
+later via the same Phase A SQL-block parsing.
+
+### Operational concerns
+
+- **Per-source ingester.** Each cloud app's export format is different:
+  Claude's `conversations.json`, ChatGPT's `conversations.json` (different
+  shape), Gemini's takeout. Each gets a small tool —
+  `tools/ImportClaudeExport`, `tools/ImportChatGPTExport`, etc. — that
+  parses and INSERTs into `messages`. Format is owned by the source, not
+  by us; if a vendor changes their export shape, we update one tool.
+- **Embedding backlog.** A user with 50k turns dropping in an export
+  causes the embedding worker to process 50k rows. MiniLM CPU inference
+  is ~50ms/turn → 40 minutes to backlog. Worker should be rate-limitable
+  and resumable; not blocking the chat surface during catch-up.
+- **De-duplication across imports.** A user who imports from Claude
+  *and* ChatGPT will have content overlap (same task asked twice in
+  different tools). De-dup is a future concern; v1 just keeps both with
+  distinct `model` values.
+- **Privacy.** Cloud exports may contain sensitive data. Import is local-
+  to-catalog; nothing leaves the machine. No special handling needed
+  beyond what the catalog itself already provides.
+
+### Competitive framing
+
+Cloud chat data is "hostage" — even with export, the JSON is dead the
+moment it leaves the source UI because there's no other place to *use*
+it. DatumIngest becomes the place where exported chat data is *more
+useful than it was in the cloud app*, because retrieval works across it.
+That makes export → DatumIngest a migration path toward us, not just a
+backup. Filed as part of the thesis; build when the chat surface is ready
+to consume the imported corpus.
+
 ## Build order
 
 1. **MiniLM + `tasks.embed`** — register `all-MiniLM-L6-v2` ONNX, expose

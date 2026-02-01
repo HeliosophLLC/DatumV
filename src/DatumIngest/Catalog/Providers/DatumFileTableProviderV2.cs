@@ -1089,6 +1089,85 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <summary>
+    /// Tears down every open FTS sidecar, recreates an empty tree per index,
+    /// and replays the table's rows through each analyzer to repopulate. Used
+    /// by <see cref="UpdateRowsAsync"/>: an UPDATE that rewrites the indexed
+    /// column would leave stale postings pointing at rows whose text no
+    /// longer matches. Mirrors <see cref="RebuildCompositeIndexesNoLockAsync"/>.
+    /// Caller must hold <c>_mutationLock</c>.
+    /// </summary>
+    private async Task RebuildFtsIndexesNoLockAsync(CancellationToken ct)
+    {
+        // Snapshot live runtime state: (indexName, column, analyzer) for every
+        // open FTS index. Reading `_descriptor.Indexes` here would be wrong —
+        // that reflects the descriptor as of provider-open, missing CREATE
+        // INDEX entries added later in the same process. The open dicts plus
+        // each index's Analyzer property are the authoritative runtime view.
+        List<(string IndexName, string Column, IFullTextAnalyzer Analyzer)> snapshot = new();
+        lock (_ftsIndexSync)
+        {
+            foreach ((string indexName, string column) in _ftsIndexNameToColumn)
+            {
+                if (_ftsIndexes.TryGetValue(column, out FullTextSearchIndex? idx))
+                {
+                    snapshot.Add((indexName, column, idx.Analyzer));
+                }
+            }
+        }
+        if (snapshot.Count == 0) return;
+
+        // Tear down existing trees + sidecars under the dict lock so a
+        // concurrent reader sees either pre- or post-clear state, never
+        // a half-populated rebuild.
+        List<FullTextSearchIndex> oldHandles = new();
+        lock (_ftsIndexSync)
+        {
+            foreach (FullTextSearchIndex idx in _ftsIndexes.Values) oldHandles.Add(idx);
+            _ftsIndexes.Clear();
+            _ftsIndexNameToColumn.Clear();
+        }
+        foreach (FullTextSearchIndex h in oldHandles)
+        {
+            try { h.Dispose(); } catch { /* best-effort */ }
+        }
+        foreach ((string _, string column, IFullTextAnalyzer _) in snapshot)
+        {
+            string path = GetFtsIndexPath(_descriptor.FilePath, column);
+            try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ }
+        }
+
+        // Recreate empty trees + backfill each. Schema drift (column gone)
+        // drops the index for this rebuild round.
+        Schema schema = _snapshot.Schema;
+        foreach ((string indexName, string column, IFullTextAnalyzer analyzer) in snapshot)
+        {
+            int ordinal = ResolveColumnOrdinalCaseInsensitive(schema, column);
+            if (ordinal < 0) continue;
+
+            string path = GetFtsIndexPath(_descriptor.FilePath, column);
+            FullTextSearchIndex index = FullTextSearchIndex.Create(path, analyzer, column);
+            try
+            {
+                if (GetRowCount() > 0)
+                {
+                    await BackfillFtsIndexAsync(index, ordinal, analyzer, ct).ConfigureAwait(false);
+                }
+                lock (_ftsIndexSync)
+                {
+                    _ftsIndexes[column] = index;
+                    _ftsIndexNameToColumn[indexName] = column;
+                }
+            }
+            catch
+            {
+                try { index.Dispose(); } catch { /* best-effort */ }
+                try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ }
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
     /// Drops the FTS index named <paramref name="indexName"/> — disposes
     /// the tree handle, deletes the <c>.datum-fts-{column}</c> sidecar,
     /// and removes it from the visible-state dictionaries. Idempotent on
@@ -2253,6 +2332,11 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             DatumFileWriterV2.SoftDeleteRows(_descriptor.FilePath, rowIndices);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
             InvalidateSourceIndexCache();
+            // Secondary-index staleness after DELETE is a known limitation
+            // shared by composite + FTS: tombstoned rows shift the live-row
+            // numbering that postings reference. Fixed by REINDEX, or by a
+            // future DELETE async path that can call RebuildFtsIndexesNoLockAsync /
+            // RebuildCompositeIndexesNoLockAsync without sync-over-async.
         }
         finally
         {
@@ -2407,6 +2491,23 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             try
             {
                 await RebuildCompositeIndexesNoLockAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Swallowed — see above.
+            }
+
+            // FTS indexes follow the same correctness story as composite
+            // indexes: an UPDATE rewrites the indexed text, so any posting
+            // for the old terms points at a row whose value no longer
+            // contains them. Full rebuild is the cheapest correct path until
+            // an incremental delete-old/insert-new posting path lands. Same
+            // best-effort failure contract — data commit stands even if the
+            // FTS rebuild fails; queries fall back to the FilterOperator
+            // path (which scans + re-tokenizes per row, so still correct).
+            try
+            {
+                await RebuildFtsIndexesNoLockAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch
             {
@@ -2828,6 +2929,27 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         // at flush time in CommitAsync.
         private readonly Dictionary<string, CompositeIndexState>? _compositeIndexStates;
 
+        // Per-row inverted-index postings queued during WriteAsync, one
+        // queue per FTS index (keyed by index name). Each pending posting
+        // carries the deduped term + the (chunkIndex, rowOffsetInChunk) the
+        // row lands at — same chunk-directory arithmetic the composite
+        // queue uses. Flushed into the open FullTextSearchIndex on
+        // CommitAsync after the data commit succeeds. Empty (null) when
+        // the table has no FTS indexes. If a row carries a sidecar-bound
+        // string (no access to the source registry here), we set
+        // <see cref="_ftsRequiresFullRebuild"/> instead so the commit
+        // falls back to a full FTS rebuild rather than silently dropping
+        // postings.
+        private readonly Dictionary<string, FtsIndexState>? _ftsIndexStates;
+
+        // Set when WriteAsync encounters a sidecar-bound text value it
+        // can't resolve via the incoming batch's arena. CommitAsync
+        // detects this and calls RebuildFtsIndexesNoLockAsync (full
+        // table scan) instead of flushing the per-row queues, trading
+        // throughput for correctness on the rare INSERT...SELECT-from-
+        // a-sidecar-source path.
+        private bool _ftsRequiresFullRebuild;
+
         // Phase 3a-wide: per-row in-line index build. Eliminates the
         // post-commit scan that ExtendAsync used to do — the append session
         // already has the rows in hand, so we mirror them into an
@@ -2902,6 +3024,33 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         SeenUniqueKeys: seenUniqueKeys);
                 }
             }
+
+            // FTS-index state snapshot. Walk the live runtime dicts directly
+            // rather than _descriptor.Indexes — the descriptor reflects the
+            // catalog manifest at provider-open, missing CREATE INDEX entries
+            // added later in the same process. CREATE/DROP holds
+            // _mutationLock for the whole publish step, so reading the dicts
+            // here gives a consistent snapshot.
+            if (provider._ftsIndexes.Count > 0)
+            {
+                Schema schema = provider._snapshot.Schema;
+                _ftsIndexStates = new Dictionary<string, FtsIndexState>(StringComparer.OrdinalIgnoreCase);
+                lock (provider._ftsIndexSync)
+                {
+                    foreach ((string indexName, string column) in provider._ftsIndexNameToColumn)
+                    {
+                        if (!provider._ftsIndexes.TryGetValue(column, out FullTextSearchIndex? index)) continue;
+                        int ordinal = ResolveColumnOrdinalCaseInsensitive(schema, column);
+                        if (ordinal < 0) continue;
+                        _ftsIndexStates[indexName] = new FtsIndexState(
+                            IndexName: indexName,
+                            ColumnOrdinal: ordinal,
+                            Analyzer: index.Analyzer,
+                            Index: index,
+                            PendingPostings: new List<PendingFtsPosting>());
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -2920,6 +3069,30 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             Indexing.BTree.MutableBytes.MutableBPlusTreeBytes Tree,
             List<Indexing.BTree.MutableBytes.BytesIndexEntry> PendingEntries,
             HashSet<byte[]>? SeenUniqueKeys);
+
+        /// <summary>
+        /// Per-FTS-index state captured at session start. Carries the column
+        /// ordinal to read per row, the analyzer used to tokenize (captured
+        /// to avoid a registry lookup per row), the open index handle, and
+        /// the per-row queue of postings that <see cref="CommitAsync"/>
+        /// flushes after the data commit succeeds.
+        /// </summary>
+        private sealed record FtsIndexState(
+            string IndexName,
+            int ColumnOrdinal,
+            IFullTextAnalyzer Analyzer,
+            FullTextSearchIndex Index,
+            List<PendingFtsPosting> PendingPostings);
+
+        /// <summary>
+        /// A queued (term, document-position) pair waiting for commit-time
+        /// insertion into a <see cref="FullTextSearchIndex"/>. Term strings
+        /// are managed allocations from <see cref="IFullTextAnalyzer.Tokenize"/>
+        /// (independent of any arena), so they're safe to hold across the
+        /// source batch's pool return.
+        /// </summary>
+        private readonly record struct PendingFtsPosting(
+            string Term, int ChunkIndex, long RowOffsetInChunk);
 
         /// <summary>
         /// Value-equality + content-derived hash for byte arrays. Used by
@@ -3119,6 +3292,38 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                                 encoded, chunkIndex, rowOffsetInChunk));
                     }
                 }
+
+                // FTS indexes: tokenize the indexed column's text and queue
+                // one posting per unique term per row. Postings flushed in
+                // CommitAsync. Sidecar-bound values can't be resolved here
+                // (we don't have the source batch's SidecarRegistry), so we
+                // fall back to a post-commit full rebuild — slower, but
+                // avoids silently dropping rows from the index.
+                if (_ftsIndexStates is { } ftsStates && !_ftsRequiresFullRebuild)
+                {
+                    foreach ((string _, FtsIndexState state) in ftsStates)
+                    {
+                        DataValue v = row[state.ColumnOrdinal];
+                        if (v.IsNull) continue;
+                        if (v.IsInSidecar)
+                        {
+                            _ftsRequiresFullRebuild = true;
+                            break;
+                        }
+                        string text = v.AsString(batch.Arena);
+                        // Per-row term dedup matches BackfillFtsIndexAsync —
+                        // one posting per (term, document), not per token.
+                        HashSet<string> uniqueTerms = new(StringComparer.Ordinal);
+                        foreach (Token token in state.Analyzer.Tokenize(text))
+                        {
+                            if (uniqueTerms.Add(token.Term))
+                            {
+                                state.PendingPostings.Add(new PendingFtsPosting(
+                                    token.Term, chunkIndex, rowOffsetInChunk));
+                            }
+                        }
+                    }
+                }
             }
 
             _writer ??= _provider.OpenAppendWriter();
@@ -3182,7 +3387,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             _indexBuilder = builder.CreateIncrementalBuilder(placeholder);
         }
 
-        public Task CommitAsync(CancellationToken cancellationToken = default)
+        public async Task CommitAsync(CancellationToken cancellationToken = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_committed) throw new InvalidOperationException("CommitAsync was already called.");
@@ -3291,6 +3496,43 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                     }
                 }
 
+                // Flush queued FTS postings. Mirrors the composite-index
+                // flush: same post-data-commit timing means a writer crash
+                // between the two leaves the FTS sidecar slightly stale
+                // (rows committed, postings missing) — recoverable via
+                // REINDEX. If WriteAsync flagged a sidecar-bound source
+                // value mid-session, do a full rebuild instead so the
+                // index sees every row regardless of source-store
+                // accessibility.
+                if (_ftsIndexStates is { } ftsStates)
+                {
+                    if (_ftsRequiresFullRebuild)
+                    {
+                        await _provider.RebuildFtsIndexesNoLockAsync(cancellationToken).ConfigureAwait(false);
+                        foreach ((string _, FtsIndexState s) in ftsStates) s.PendingPostings.Clear();
+                    }
+                    else
+                    {
+                        foreach ((string indexName, FtsIndexState state) in ftsStates)
+                        {
+                            // Index may have been dropped mid-session — the
+                            // descriptor still names it but the open dict
+                            // has cleared. Skip; nothing to flush.
+                            if (!_provider._ftsIndexes.TryGetValue(state.Index.ColumnName, out FullTextSearchIndex? live)
+                                || !ReferenceEquals(live, state.Index))
+                            {
+                                state.PendingPostings.Clear();
+                                continue;
+                            }
+                            foreach (PendingFtsPosting p in state.PendingPostings)
+                            {
+                                state.Index.InsertPosting(p.Term, p.ChunkIndex, p.RowOffsetInChunk);
+                            }
+                            state.PendingPostings.Clear();
+                        }
+                    }
+                }
+
                 _committed = true;
             }
             catch
@@ -3336,8 +3578,6 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             {
                 _provider.InvalidateSourceIndexCache();
             }
-
-            return Task.CompletedTask;
         }
 
         /// <summary>
