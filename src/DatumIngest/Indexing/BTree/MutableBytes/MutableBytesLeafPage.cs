@@ -70,12 +70,19 @@ internal sealed class MutableBytesLeafPage
     }
 
     /// <summary>
-    /// Finds the position where <paramref name="key"/> should be inserted to
-    /// keep the array sorted. Returns the first index whose key is &gt;=
-    /// <paramref name="key"/>, or <see cref="EntryCount"/> if all existing
-    /// keys are smaller.
+    /// Finds the position where <paramref name="entry"/> should be inserted
+    /// to keep the array sorted by composite (Key, ChunkIndex,
+    /// RowOffsetInChunk). Returns the first index whose composite is &gt;
+    /// <paramref name="entry"/>, or <see cref="EntryCount"/> if every
+    /// existing entry sorts before it.
     /// </summary>
-    internal int BinarySearchInsertPosition(ReadOnlySpan<byte> key)
+    /// <remarks>
+    /// Comparing the full composite (not just the key) is what keeps
+    /// duplicate-key entries in their natural (chunk, row) order — a
+    /// later insert of the same key with a larger (chunk, row) lands after
+    /// existing duplicates instead of before them.
+    /// </remarks>
+    internal int BinarySearchInsertPosition(BytesIndexEntry entry)
     {
         int low = 0;
         int high = _entries.Length;
@@ -84,7 +91,7 @@ internal sealed class MutableBytesLeafPage
         {
             int mid = low + ((high - low) / 2);
 
-            if (((ReadOnlySpan<byte>)_entries[mid].Key).SequenceCompareTo(key) < 0)
+            if (CompareEntries(_entries[mid], entry) < 0)
             {
                 low = mid + 1;
             }
@@ -95,5 +102,16 @@ internal sealed class MutableBytesLeafPage
         }
 
         return low;
+    }
+
+    private static int CompareEntries(BytesIndexEntry a, BytesIndexEntry b)
+    {
+        int cmp = ((ReadOnlySpan<byte>)a.Key).SequenceCompareTo(b.Key);
+        if (cmp != 0) return cmp;
+
+        cmp = a.ChunkIndex.CompareTo(b.ChunkIndex);
+        if (cmp != 0) return cmp;
+
+        return a.RowOffsetInChunk.CompareTo(b.RowOffsetInChunk);
     }
 }

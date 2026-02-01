@@ -181,6 +181,33 @@ Plan: [fts-inverted-index.md](../plans/fts-inverted-index.md).
 
 ---
 
+## Cross-cutting — resolved
+
+### `MutableBPlusTree` / `MutableBPlusTreeBytes` dup-key tie-breaker now applied at insert (2026-05-12)
+
+- **What was broken:** The docstring claimed duplicate-key entries
+  were sorted by `(Key, ChunkIndex, RowOffsetInChunk)`, but
+  `BinarySearchInsertPosition` only compared the key — so a later
+  insert of the same key with a smaller (chunk, row) landed before
+  existing dups (newest-first within a key).
+- **Fix:** `BinarySearchInsertPosition` on both
+  [`MutableLeafPage`](../src/DatumIngest/Indexing/BTree/Mutable/MutableLeafPage.cs)
+  and
+  [`MutableBytesLeafPage`](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBytesLeafPage.cs)
+  now takes the full entry and compares via `(Key, ChunkIndex,
+  RowOffsetInChunk)`. Insertion order matches the documented contract.
+- **Workarounds removed:** `FullTextSearchIndex.FindPostings` no
+  longer post-sorts; `BPlusTreeContractTests.FindAll_WithDuplicates_ReturnsAllMatches`
+  no longer `.OrderBy`s.
+- **Tests added:** three contract tests
+  (`FindAll_WithDuplicatesOutOfOrder_ReturnsByChunkThenRowOffset`,
+  `TraverseForward_WithDuplicates_OrdersByKeyThenChunkThenRow`,
+  `TraverseForward_DuplicatesAcrossLeafSplit_OrdersByChunkThenRow`)
+  in [`BPlusTreeContractTests`](../tests/DatumIngest.Tests/Indexing/BPlusTreeContractTests.cs),
+  each running against both trees.
+
+---
+
 ## Vector search
 
 Plan: [vector-search-index.md](../plans/vector-search-index.md). All entries
@@ -267,6 +294,91 @@ are deferred-by-design pending the v1 ship.
 
 ---
 
+## External libraries — candidates to adopt later
+
+The engine is intentionally library-light: posting lists, page-COW crash
+safety, manifest stats, every sidecar lifecycle — all custom. This buys
+architectural coherence (every `.datum-*` companion plays by the same
+rules) at the cost of reinventing well-solved problems. These entries are
+the places where pulling in a library is the right v2 move.
+
+A note on PDF ingestion: once the assistant starts dumping random PDFs
+into the corpus, the analyzer side gets stress-tested in ways `simple_en`
+can't handle — mixed languages, contractions, hyphenated word-wrap, CJK
+content, scientific notation. Most of the analyzer-side library entries
+below have "first PDF ingest" as their realistic trigger.
+
+### L1. ICU4N for Unicode word segmentation
+
+- **Limitation:** `SimpleEnglishAnalyzer` walks runes and treats any
+  letter/digit run as one token. Apostrophes split (`"don't" → "don"`),
+  CJK collapses to one token per run, hyphen-wrapped words from PDFs
+  (`"data-\nbase"`) become two tokens.
+- **v1:** Rune-loop in
+  [SimpleEnglishAnalyzer.cs](../src/DatumIngest/Indexing/Fts/SimpleEnglishAnalyzer.cs).
+- **v2 path:** New analyzer `uax29_en` (and `uax29_cjk`, `uax29_de`, …)
+  backed by `ICU4N.Globalization.BreakIterator.GetWordInstance(locale)`.
+  Drop-in at the analyzer layer — doesn't touch storage, posting layout,
+  or query.
+- **Trigger:** first non-English PDF; first reported precision loss on
+  contractions; first CJK content.
+- **Cost:** ~5 MB nuget. Pure managed.
+- **Compat:** None — additive analyzer names. Existing indexes keep
+  using their declared analyzer.
+
+### L2. Snowball / Porter2 stemmer
+
+- **Limitation:** `"running"` doesn't match `"runs"` doesn't match
+  `"run"`. Recall suffers on inflected forms.
+- **v1:** No stemming.
+- **v2 path:** New analyzer `porter_en` (and `porter_de`, `porter_fr`,
+  …) backed by a Snowball stemmer. Either pull a tiny library
+  (`Snowball.Net`, ~10 KB) or copy the algorithm — both are fine, no
+  architectural difference.
+- **Trigger:** RAG retrieval quality measurable; first "I searched for
+  X and didn't find the obvious result" report.
+- **Cost:** tiny library OR ~200 LOC port.
+- **Compat:** None — additive analyzer name.
+
+### L3. USearch or hnswlib for vector search core
+
+- **Limitation:** PR-VEC-B is ~1000 LOC of in-memory HNSW. Native
+  implementations are mature, fast, and well-tuned.
+- **v1:** Hand-rolled `HnswGraph` (planned for PR-VEC-B).
+- **v2 path:** Native HNSW via P/Invoke wrapping
+  ([USearch](https://github.com/unum-cloud/usearch) is the cleanest
+  candidate; hnswlib is the reference). Wrap as `IVectorIndex`. The
+  load-bearing question is persistence — if the library wants to own
+  its own file format, we lose the page-COW story and the deferred
+  entries about pre-filter / quantization get harder.
+- **Trigger:** 1-day spike before PR-VEC-B confirms persistence story
+  fits; or hand-rolled HNSW recall doesn't hit the 0.95 @ default
+  params bar on sift-1M.
+- **Cost:** Adds a native dependency — first one in the engine. Breaks
+  the all-managed deployment story.
+- **Compat:** Internal — `IVectorIndex` is the boundary.
+
+### L4. Lucene.NET — explicitly not adopting
+
+Recording the "no" so it doesn't get re-litigated each time someone
+notices Lucene exists.
+
+- **Why it looks attractive:** complete FTS solution — analyzers,
+  posting lists, BM25, phrase queries, faceting, mature for 20+ years.
+- **Why we're not adopting:** Lucene owns its own file format
+  (`Directory` abstraction), its own crash-safety model (segments +
+  commit), its own analyzer pipeline. Adopting it means either
+  (a) writing a custom `Directory` over `.datum-*` sidecars (losing
+  most of Lucene's optimizations) or (b) handing storage to Lucene
+  entirely (breaking the "everything is a `.datum-*` companion file
+  under provider control" model). Both fragment the engine's
+  architectural coherence — the property that makes every sidecar
+  look the same to maintainers, tooling, and crash-recovery.
+- **Re-litigate when:** FTS scope grows past what a custom Shape-B
+  posting heap + ICU4N + Snowball can deliver. Realistic trigger:
+  ~10 GB of indexed text per tenant with mixed-language faceted
+  search and phrase queries at sub-50ms p95. Not imminent.
+
 ## Cross-cutting
 
 ### 1. Manifest format bumps need coordination
@@ -286,28 +398,7 @@ are deferred-by-design pending the v1 ship.
 - **Compat:** Refactor is on-disk transparent — readers tolerant of
   unknown tags treat them as forward-compat.
 
-### 2. `MutableBPlusTreeBytes` dup-key tie-breaker isn't actually applied
-
-- **Limitation:** The tree's docstring claims duplicate-key entries are
-  sorted by `(Key, ChunkIndex, RowOffsetInChunk)`, but `InsertIntoLeafAndPropagate`
-  uses `BinarySearchInsertPosition` which only sees the byte key — new
-  duplicates land *before* existing ones (newest-first within a key).
-- **v1:** Each consumer sorts results themselves. Visible in
-  `BPlusTreeContractTests.FindAll_WithDuplicates_ReturnsAllMatches`
-  (explicit `.OrderBy`) and `FullTextSearchIndex.FindPostings`
-  (explicit `Array.Sort` post-`FindPrefix`).
-- **v2 path:** Either (a) fix `BinarySearchInsertPosition` to take the
-  full `BytesIndexEntry` and do the (chunk, row) tie-break properly, or
-  (b) change the docstring to match reality and require callers to sort.
-  (a) is cleaner — the docstring's promise is the right contract.
-- **Trigger:** any new consumer wants in-order traversal without
-  per-call sort overhead; or someone hits the discrepancy and gets
-  confused.
-- **Compat:** Fix in (a) is internal — sort order changes but already-
-  consuming code that sorts itself is unaffected. Existing
-  `.OrderBy(...)` calls become dead.
-
-### 3. Hybrid rerank not yet wired
+### 2. Hybrid rerank not yet wired
 
 - **Limitation:** FTS and vector search return ranked iterators
   separately. Combining them ("rank by BM25 score + cosine distance,

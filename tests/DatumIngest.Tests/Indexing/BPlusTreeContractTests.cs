@@ -499,8 +499,9 @@ public abstract class BPlusTreeContractTests : IDisposable
         tree.Insert(new ValueIndexEntry(DataValue.FromInt32(2), 0, 22));
         tree.Insert(new ValueIndexEntry(DataValue.FromInt32(3), 0, 30));
 
-        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(2));
-        long[] rows = hits.Select(h => h.RowOffsetInChunk).OrderBy(r => r).ToArray();
+        long[] rows = tree.FindAll(DataValue.FromInt32(2))
+            .Select(h => h.RowOffsetInChunk)
+            .ToArray();
         Assert.Equal(new long[] { 20, 21, 22 }, rows);
     }
 
@@ -525,6 +526,119 @@ public abstract class BPlusTreeContractTests : IDisposable
 
         IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(500));
         Assert.Equal(101, hits.Count); // 1 original + 100 duplicates
+    }
+
+    // ───────────────────────── Duplicate tie-breaker order ─────────────────────────
+    //
+    // The tree's contract claims duplicate-key entries are sorted by composite
+    // (Key, ChunkIndex, RowOffsetInChunk). These tests assert that directly
+    // without working around it with a downstream sort.
+
+    [Fact]
+    public void FindAll_WithDuplicatesOutOfOrder_ReturnsByChunkThenRowOffset()
+    {
+        string path = PathFor("findall_dup_order");
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
+
+        // Insert duplicates of key=42 in deliberately out-of-order (chunk, row)
+        // tuples. Expected natural order after insertion: (0,1), (0,5), (1,100), (2,0).
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(42), ChunkIndex: 2, RowOffsetInChunk: 0));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(42), ChunkIndex: 0, RowOffsetInChunk: 5));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(42), ChunkIndex: 1, RowOffsetInChunk: 100));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(42), ChunkIndex: 0, RowOffsetInChunk: 1));
+
+        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(42));
+
+        Assert.Equal(4, hits.Count);
+        Assert.Equal((0, 1L), (hits[0].ChunkIndex, hits[0].RowOffsetInChunk));
+        Assert.Equal((0, 5L), (hits[1].ChunkIndex, hits[1].RowOffsetInChunk));
+        Assert.Equal((1, 100L), (hits[2].ChunkIndex, hits[2].RowOffsetInChunk));
+        Assert.Equal((2, 0L), (hits[3].ChunkIndex, hits[3].RowOffsetInChunk));
+    }
+
+    [Fact]
+    public void TraverseForward_WithDuplicates_OrdersByKeyThenChunkThenRow()
+    {
+        string path = PathFor("traverse_dup_order");
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
+
+        // Mix multiple keys with multiple out-of-order duplicates each.
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(2), ChunkIndex: 2, RowOffsetInChunk: 0));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(1), ChunkIndex: 0, RowOffsetInChunk: 10));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(2), ChunkIndex: 0, RowOffsetInChunk: 5));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(3), ChunkIndex: 0, RowOffsetInChunk: 30));
+        tree.Insert(new ValueIndexEntry(DataValue.FromInt32(2), ChunkIndex: 1, RowOffsetInChunk: 100));
+
+        (int chunk, long row)[] actual = tree
+            .TraverseForward()
+            .Select(e => (e.ChunkIndex, e.RowOffsetInChunk))
+            .ToArray();
+
+        Assert.Equal(new (int, long)[]
+        {
+            (0, 10),   // key=1
+            (0, 5),    // key=2
+            (1, 100),  // key=2
+            (2, 0),    // key=2
+            (0, 30),   // key=3
+        }, actual);
+    }
+
+    [Fact]
+    public void TraverseForward_DuplicatesAcrossLeafSplit_OrdersByChunkThenRow()
+    {
+        string path = PathFor("traverse_dup_split");
+        using IMutableBPlusTreeAdapter tree = CreateTree(path, DataKind.Int32, allowDuplicates: true);
+
+        // Force tree height >= 2, then pile out-of-order duplicates on one key
+        // so the duplicates straddle a leaf-split boundary.
+        for (int i = 0; i < 800; i++)
+        {
+            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(i), 0, i));
+        }
+
+        // Insert 100 duplicates of key=500 with (chunk, row) reversed:
+        // chunk decreases, row decreases. Expected natural order is ascending.
+        for (int rep = 99; rep >= 0; rep--)
+        {
+            tree.Insert(new ValueIndexEntry(DataValue.FromInt32(500), ChunkIndex: rep / 10, RowOffsetInChunk: rep));
+        }
+
+        Assert.True(tree.TreeHeight >= 2);
+
+        IReadOnlyList<ValueIndexEntry> hits = tree.FindAll(DataValue.FromInt32(500));
+        Assert.Equal(101, hits.Count); // 1 original (0, 500) + 100 duplicates
+
+        // The original is at (chunk=0, row=500); the 100 dups span (0,0)..(9,99).
+        // Expected order:
+        //   (0, 0), (0, 1), ..., (0, 9),       // chunk=0 dups
+        //   (0, 500),                          // original
+        //   (1, 10), (1, 11), ..., (1, 19),    // chunk=1 dups
+        //   (2, 20), ..., (9, 99).
+        (int chunk, long row)[] expected = BuildExpectedSplitOrder();
+        (int chunk, long row)[] actual = hits
+            .Select(h => (h.ChunkIndex, h.RowOffsetInChunk))
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+
+        static (int, long)[] BuildExpectedSplitOrder()
+        {
+            List<(int, long)> e = new();
+            // chunk=0 dups (rows 0..9)
+            for (int r = 0; r < 10; r++) e.Add((0, r));
+            // original
+            e.Add((0, 500));
+            // chunks 1..9, each with 10 rows
+            for (int c = 1; c < 10; c++)
+            {
+                for (int r = c * 10; r < (c + 1) * 10; r++)
+                {
+                    e.Add((c, r));
+                }
+            }
+            return e.ToArray();
+        }
     }
 
     // ───────────────────────── Traversal ─────────────────────────

@@ -681,7 +681,7 @@ internal sealed class MutableBPlusTreeBytes : IDisposable
 
     private void InsertIntoLeafAndPropagate(MutableBytesLeafPage leaf, BytesIndexEntry entry, List<PathStep> path)
     {
-        int insertPos = leaf.BinarySearchInsertPosition(entry.Key);
+        int insertPos = leaf.BinarySearchInsertPosition(entry);
         BytesIndexEntry[] merged = new BytesIndexEntry[leaf.EntryCount + 1];
         leaf.Entries[..insertPos].CopyTo(merged.AsSpan(0, insertPos));
         merged[insertPos] = entry;

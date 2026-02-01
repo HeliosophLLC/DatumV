@@ -609,7 +609,7 @@ internal sealed class MutableBPlusTree : IDisposable
     private void InsertIntoLeafAndPropagate(MutableLeafPage leaf, ValueIndexEntry entry, List<PathStep> path)
     {
         // Build the merged entry list.
-        int insertPos = leaf.BinarySearchInsertPosition(entry.Key);
+        int insertPos = leaf.BinarySearchInsertPosition(entry);
         ValueIndexEntry[] merged = new ValueIndexEntry[leaf.EntryCount + 1];
         leaf.Entries[..insertPos].CopyTo(merged.AsSpan(0, insertPos));
         merged[insertPos] = entry;

@@ -88,19 +88,6 @@ internal sealed class FullTextSearchIndex : ITextSearchIndex
         {
             result[i] = new TextPosting(entries[i].ChunkIndex, entries[i].RowOffsetInChunk);
         }
-
-        // MutableBPlusTreeBytes does not sort dup-key entries by their
-        // (ChunkIndex, RowOffsetInChunk) tie-breaker despite the docstring's
-        // claim — existing callers (BPlusTreeContractTests.FindAll_WithDuplicates)
-        // already work around it with an explicit sort. Mirror that here so
-        // the FTS contract holds independently of the underlying tree's fix.
-        // Tracked in docs/deferred-decisions.md under cross-cutting.
-        Array.Sort(result, static (a, b) =>
-        {
-            int byChunk = a.ChunkIndex.CompareTo(b.ChunkIndex);
-            return byChunk != 0 ? byChunk : a.RowOffsetInChunk.CompareTo(b.RowOffsetInChunk);
-        });
-
         return result;
     }
 
