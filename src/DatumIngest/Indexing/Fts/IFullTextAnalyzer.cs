@@ -12,7 +12,7 @@ namespace DatumIngest.Indexing.Fts;
 /// Adding a new analyzer is therefore an additive, non-breaking change as
 /// long as the name stays stable.</para>
 /// </remarks>
-internal interface IFullTextAnalyzer
+public interface IFullTextAnalyzer
 {
     /// <summary>
     /// Stable, lowercase, snake_case identifier (e.g. <c>"simple_en"</c>).
@@ -43,4 +43,4 @@ internal interface IFullTextAnalyzer
 /// retained on the contract so v2 phrase queries can drop in without
 /// reshaping the analyzer interface.
 /// </remarks>
-internal readonly record struct Token(string Term, int Position);
+public readonly record struct Token(string Term, int Position);

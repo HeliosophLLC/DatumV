@@ -286,7 +286,28 @@ are deferred-by-design pending the v1 ship.
 - **Compat:** Refactor is on-disk transparent — readers tolerant of
   unknown tags treat them as forward-compat.
 
-### 2. Hybrid rerank not yet wired
+### 2. `MutableBPlusTreeBytes` dup-key tie-breaker isn't actually applied
+
+- **Limitation:** The tree's docstring claims duplicate-key entries are
+  sorted by `(Key, ChunkIndex, RowOffsetInChunk)`, but `InsertIntoLeafAndPropagate`
+  uses `BinarySearchInsertPosition` which only sees the byte key — new
+  duplicates land *before* existing ones (newest-first within a key).
+- **v1:** Each consumer sorts results themselves. Visible in
+  `BPlusTreeContractTests.FindAll_WithDuplicates_ReturnsAllMatches`
+  (explicit `.OrderBy`) and `FullTextSearchIndex.FindPostings`
+  (explicit `Array.Sort` post-`FindPrefix`).
+- **v2 path:** Either (a) fix `BinarySearchInsertPosition` to take the
+  full `BytesIndexEntry` and do the (chunk, row) tie-break properly, or
+  (b) change the docstring to match reality and require callers to sort.
+  (a) is cleaner — the docstring's promise is the right contract.
+- **Trigger:** any new consumer wants in-order traversal without
+  per-call sort overhead; or someone hits the discrepancy and gets
+  confused.
+- **Compat:** Fix in (a) is internal — sort order changes but already-
+  consuming code that sorts itself is unaffected. Existing
+  `.OrderBy(...)` calls become dead.
+
+### 3. Hybrid rerank not yet wired
 
 - **Limitation:** FTS and vector search return ranked iterators
   separately. Combining them ("rank by BM25 score + cosine distance,

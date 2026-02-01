@@ -73,6 +73,28 @@ public interface ITableProvider : IDisposable
     }
 
     /// <summary>
+    /// Returns the full-text search index for <paramref name="columnName"/>
+    /// if the provider maintains one (CREATE INDEX ... USING FTS). The
+    /// planner consults this when matching <c>col @@ tsquery</c> predicates
+    /// against an indexed column.
+    /// </summary>
+    /// <param name="columnName">Column name (case-insensitive lookup).</param>
+    /// <param name="index">The FTS index, or <see langword="null"/> if none exists.</param>
+    /// <returns><see langword="true"/> if an FTS index exists for the column.</returns>
+    /// <remarks>
+    /// Default implementation returns <see langword="false"/>. Providers
+    /// that own <c>.datum-fts-{col}</c> sidecars override and resolve
+    /// through their per-column FTS dictionary. The catalog-level
+    /// descriptor wiring that drives discovery lands in PR-FTS-A3; A2
+    /// ships the interface contract and the storage primitive.
+    /// </remarks>
+    bool TryGetTextSearchIndex(string columnName, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Indexing.Fts.ITextSearchIndex? index)
+    {
+        index = null;
+        return false;
+    }
+
+    /// <summary>
     /// Returns the user-defined composite indexes (created via
     /// <c>CREATE INDEX</c>) registered on this provider. The query planner
     /// consults this list when matching AND-chained equality predicates
