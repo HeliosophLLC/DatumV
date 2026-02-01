@@ -82,6 +82,9 @@ public sealed class KeywordRegistryTests : ServiceTestBase
             CompletionZoneKind.AfterAssert,
             CompletionZoneKind.InsideOver,
             CompletionZoneKind.InsideExtract,
+            CompletionZoneKind.AfterCreateIndexColumns,
+            CompletionZoneKind.AfterCreateIndexUsing,
+            CompletionZoneKind.InsideCreateIndexWithOptions,
         ];
 
         foreach (CompletionZoneKind zone in zonesWithKeywords)

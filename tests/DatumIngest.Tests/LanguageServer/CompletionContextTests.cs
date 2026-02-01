@@ -349,6 +349,83 @@ public sealed class CompletionContextTests : ServiceTestBase
         Assert.Equal(CompletionZoneKind.AfterAlterTable, zone.Kind);
     }
 
+    [Fact]
+    public void Classify_AfterCreateIndexColumnList_ReturnsAfterCreateIndexColumns()
+    {
+        // Cursor sits past the `)` of the column list; USING / WITH suffixes
+        // are next.
+        CompletionZone zone = CompletionContext.Classify("CREATE INDEX idx ON t (col) ", 28);
+
+        Assert.Equal(CompletionZoneKind.AfterCreateIndexColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterCreateUniqueIndexColumnList_ReturnsAfterCreateIndexColumns()
+    {
+        CompletionZone zone = CompletionContext.Classify("CREATE UNIQUE INDEX idx ON t (col) ", 35);
+
+        Assert.Equal(CompletionZoneKind.AfterCreateIndexColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_BeforeCreateIndexColumnList_DoesNotReturnAfterCreateIndexColumns()
+    {
+        // Cursor hasn't crossed the column list yet (`CREATE INDEX |`) —
+        // should fall through to AfterCreate so the user sees TABLE / INDEX /
+        // FUNCTION / etc. suggestions, not USING / WITH.
+        CompletionZone zone = CompletionContext.Classify("CREATE INDEX ", 13);
+
+        Assert.NotEqual(CompletionZoneKind.AfterCreateIndexColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_DropIndex_DoesNotReturnAfterCreateIndexColumns()
+    {
+        // DROP INDEX has no column list; INDEX without a preceding paren
+        // group must not trigger the new zone.
+        CompletionZone zone = CompletionContext.Classify("DROP INDEX ", 11);
+
+        Assert.NotEqual(CompletionZoneKind.AfterCreateIndexColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterCreateIndexUsing_ReturnsAfterCreateIndexUsing()
+    {
+        // After `USING `, the user is picking an index method (FTS).
+        CompletionZone zone = CompletionContext.Classify("CREATE INDEX idx ON t (col) USING ", 34);
+
+        Assert.Equal(CompletionZoneKind.AfterCreateIndexUsing, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterUsingInQuery_DoesNotReturnAfterCreateIndexUsing()
+    {
+        // USING in JOIN context (`JOIN t USING (col)`) — not CREATE INDEX.
+        // Cursor right after USING in a JOIN must not pick up the new zone.
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM a JOIN b USING ", 29);
+
+        Assert.NotEqual(CompletionZoneKind.AfterCreateIndexUsing, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateIndexWithParens_ReturnsInsideCreateIndexWithOptions()
+    {
+        // Cursor sits inside the WITH option list.
+        CompletionZone zone = CompletionContext.Classify(
+            "CREATE INDEX idx ON t (col) USING fts WITH (", 44);
+
+        Assert.Equal(CompletionZoneKind.InsideCreateIndexWithOptions, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideWithCteParens_DoesNotReturnInsideCreateIndexWithOptions()
+    {
+        // CTE `WITH x AS (` — not CREATE INDEX. Must not pick up the new zone.
+        CompletionZone zone = CompletionContext.Classify("WITH x AS (", 11);
+
+        Assert.NotEqual(CompletionZoneKind.InsideCreateIndexWithOptions, zone.Kind);
+    }
+
     // ───────────────────── DML zones ─────────────────────
 
     [Fact]

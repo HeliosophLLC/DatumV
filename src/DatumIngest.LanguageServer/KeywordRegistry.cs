@@ -240,6 +240,26 @@ internal static class KeywordRegistry
         [CompletionZoneKind.AfterAlterTableAdd] =
             ["COLUMN", .. ColumnTypeKeywords, "NOT NULL", "DEFAULT"],
 
+        // After the column list of CREATE INDEX closes. Both clauses are
+        // optional (a bare `CREATE INDEX idx ON t (c)` is a default composite
+        // B+Tree); the completions just surface that the optional suffixes
+        // exist.
+        [CompletionZoneKind.AfterCreateIndexColumns] =
+            ["USING", "WITH"],
+
+        // After `CREATE INDEX ... USING `, offer the available index methods.
+        // BTREE is the implicit default and isn't surfaced — typing it is
+        // equivalent to omitting USING entirely.
+        [CompletionZoneKind.AfterCreateIndexUsing] =
+            ["FTS"],
+
+        // Inside `CREATE INDEX ... WITH (`, offer the option keys. The set is
+        // method-specific (analyzer is only meaningful for FTS), but the
+        // detector doesn't currently distinguish — we just offer the union of
+        // known keys.
+        [CompletionZoneKind.InsideCreateIndexWithOptions] =
+            ["analyzer"],
+
         [CompletionZoneKind.AfterInto] =
             ["SHARD"],
 

@@ -408,6 +408,17 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterInsertTable;
                 }
 
+                // Check if this is the option list of a CREATE INDEX
+                // `... WITH (...)` clause. The token before the LeftParen
+                // must be WITH; walking further back must find Index without
+                // crossing FROM / JOIN (which would mean we're inside a CTE
+                // or other WITH usage).
+                if (index > 0 && tokens[index - 1].Kind == SqlToken.With
+                    && IsCreateIndexWithOptionsParen(tokens, index - 1))
+                {
+                    return CompletionZoneKind.InsideCreateIndexWithOptions;
+                }
+
                 // Check if this is a TABLESAMPLE method argument: TABLESAMPLE STRATIFIED(|
                 // The identifier before the paren is the method name; if preceded by
                 // TABLESAMPLE, we're inside the method argument (percentage or count).
@@ -467,6 +478,27 @@ public static class CompletionContext
                         : CompletionZoneKind.AfterJoin;
 
                 case SqlToken.On:
+                    // CREATE INDEX has the same `... ON table (cols)` shape
+                    // but isn't a join. When the cursor has crossed a paren
+                    // group (the column list), look back for `Index` before
+                    // any `From` / `Join` / `Lateral` / `Apply` — if found,
+                    // this is CREATE INDEX after the column list.
+                    if (passedParenGroup)
+                    {
+                        for (int back = index - 1; back >= 0; back--)
+                        {
+                            SqlToken backKind = tokens[back].Kind;
+                            if (backKind == SqlToken.Index)
+                            {
+                                return CompletionZoneKind.AfterCreateIndexColumns;
+                            }
+                            if (backKind is SqlToken.From or SqlToken.Join
+                                or SqlToken.Lateral or SqlToken.Apply)
+                            {
+                                break;
+                            }
+                        }
+                    }
                     return CompletionZoneKind.AfterOn;
 
                 case SqlToken.Where:
@@ -689,6 +721,18 @@ public static class CompletionContext
                     // Return AfterSelect to offer columns and functions for the expression.
                     return CompletionZoneKind.AfterSelect;
 
+                case SqlToken.Index:
+                    // After a CREATE INDEX column list closes (cursor has crossed
+                    // a `(...)` paren group), offer USING / WITH. Before the
+                    // column list (e.g. just-typed `CREATE INDEX `), fall
+                    // through to walk back to `Create` and return AfterCreate.
+                    // DROP INDEX never crosses a paren so it's unaffected.
+                    if (passedParenGroup)
+                    {
+                        return CompletionZoneKind.AfterCreateIndexColumns;
+                    }
+                    continue;
+
                 // ───────────────────── Contextual identifier keywords ─────────────────────
 
                 case SqlToken.Tablesample:
@@ -701,6 +745,29 @@ public static class CompletionContext
                         : CompletionZoneKind.AfterTablesample;
 
                 default:
+                    // Contextual `USING` inside a CREATE INDEX shape: not a
+                    // dedicated SqlToken, so detected by identifier text. The
+                    // CREATE INDEX shape has `Index` somewhere before USING
+                    // with no FROM / JOIN between; if we see that, this is
+                    // the USING-method position.
+                    if (kind == SqlToken.Identifier
+                        && string.Equals(tokens[index].Text, "USING", StringComparison.OrdinalIgnoreCase))
+                    {
+                        for (int back = index - 1; back >= 0; back--)
+                        {
+                            SqlToken backKind = tokens[back].Kind;
+                            if (backKind == SqlToken.Index)
+                            {
+                                return CompletionZoneKind.AfterCreateIndexUsing;
+                            }
+                            if (backKind is SqlToken.From or SqlToken.Join
+                                or SqlToken.Lateral or SqlToken.Apply)
+                            {
+                                break;
+                            }
+                        }
+                    }
+
                     // Identifiers, literals, etc. — mark as content and keep walking back.
                     passedContent = true;
                     continue;
@@ -799,6 +866,28 @@ public static class CompletionContext
     private static bool IsKeywordToken(SqlToken kind)
     {
         return kind < SqlToken.Identifier;
+    }
+
+    /// <summary>
+    /// Checks whether the <c>WITH</c> at <paramref name="withIndex"/> opens
+    /// the option list of a <c>CREATE INDEX ... WITH (...)</c> clause (as
+    /// opposed to a CTE preamble). The shape requires an <c>Index</c> token
+    /// somewhere earlier without an intervening <c>From</c> / <c>Join</c> /
+    /// <c>Lateral</c> / <c>Apply</c>.
+    /// </summary>
+    private static bool IsCreateIndexWithOptionsParen(List<TokenInfo> tokens, int withIndex)
+    {
+        for (int back = withIndex - 1; back >= 0; back--)
+        {
+            SqlToken kind = tokens[back].Kind;
+            if (kind == SqlToken.Index) return true;
+            if (kind is SqlToken.From or SqlToken.Join
+                or SqlToken.Lateral or SqlToken.Apply)
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -1244,6 +1333,27 @@ public enum CompletionZoneKind
 
     /// <summary>After ALTER TABLE name ADD — offer COLUMN keyword and column type context.</summary>
     AfterAlterTableAdd,
+
+    /// <summary>
+    /// After a <c>CREATE INDEX name ON table (col, ...)</c> column list closes —
+    /// offer <c>USING</c> (to pick an index method) and <c>WITH</c> (to supply
+    /// method-specific options).
+    /// </summary>
+    AfterCreateIndexColumns,
+
+    /// <summary>
+    /// After <c>CREATE INDEX ... USING</c> — offer the available index methods
+    /// (<c>FTS</c> in v1). The default composite B+Tree has no spelled-out
+    /// keyword and is not surfaced.
+    /// </summary>
+    AfterCreateIndexUsing,
+
+    /// <summary>
+    /// Inside the <c>(...)</c> of <c>CREATE INDEX ... WITH (...)</c> — offer
+    /// the option keys understood by the chosen method (<c>analyzer</c> for
+    /// FTS in v1).
+    /// </summary>
+    InsideCreateIndexWithOptions,
 
     // ───────────────────── Contextual identifier zones ─────────────────────
 
