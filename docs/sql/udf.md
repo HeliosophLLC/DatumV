@@ -45,7 +45,7 @@ DROP FUNCTION [IF EXISTS] name;
 
 SELECT udf.name(arg1, arg2) FROM ...;
 
-EXEC udf.name(arg1, arg2);
+CALL udf.name(arg1, arg2);
 ```
 
 ## Macro UDFs
@@ -311,22 +311,22 @@ present).
 
 ```sql
 SELECT udf.add(1, 2) FROM dual;
-EXEC udf.shout('hello');
+CALL udf.shout('hello');
 ```
 
 UDF names are case-insensitive.
 
-### Direct execution with EXEC
+### Direct invocation with CALL
 
-`EXEC` executes a callable expression as a standalone statement and returns
+`CALL` invokes a callable expression as a standalone statement and returns
 its result as a single-row, single-column result set.
 
 ```sql
-EXEC udf.shout('hello');               -- yields 'HELLO'
-EXEC udf.dnd_rewrite_caption(caption); -- yields the LLM-rewritten string
+CALL udf.shout('hello');               -- yields 'HELLO'
+CALL udf.dnd_rewrite_caption(caption); -- yields the LLM-rewritten string
 ```
 
-When the call resolves to a streaming LLM, `EXEC` forwards tokens to the
+When the call resolves to a streaming LLM, `CALL` forwards tokens to the
 terminal as the model produces them. Non-streaming calls behave identically
 to `SELECT udf.name(arg)`.
 

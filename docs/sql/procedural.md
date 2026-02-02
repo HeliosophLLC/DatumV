@@ -236,7 +236,7 @@ lowercase booleans). Inside a `CATCH` block, `RAISE @err` rethrows the
 caught error to a surrounding handler:
 
 ```sql
-TRY EXEC models.flaky_llm(@prompt)
+TRY CALL models.flaky_llm(@prompt)
 CATCH @err BEGIN
   PRINT `model failed: ${@err}`
   RAISE @err  -- propagate to the outer handler
@@ -252,7 +252,7 @@ the exception's message — visible only inside the catch body.
 
 ```sql
 TRY
-  EXEC models.flaky_llm(@prompt)
+  CALL models.flaky_llm(@prompt)
 CATCH @err
   PRINT 'model call failed: ' || @err
   SET @result = 'fallback'
@@ -418,7 +418,7 @@ next batch.
 A *procedure* is a named, parameterised procedural batch — the multi-
 statement equivalent of a UDF. Bodies live in the catalog and survive
 process restarts when the catalog is opened with a path (same persistence
-contract as UDFs). Invocation is `EXEC proc.<name>(args)`.
+contract as UDFs). Invocation is `CALL proc.<name>(args)`.
 
 ```sql
 CREATE PROCEDURE compute_cohort(@threshold FLOAT64) AS BEGIN
@@ -435,7 +435,7 @@ CREATE PROCEDURE compute_cohort(@threshold FLOAT64) AS BEGIN
     SELECT @kept AS rows_kept, @sum_score / @kept AS mean_score
 END
 
-EXEC proc.compute_cohort(0.5)
+CALL proc.compute_cohort(0.5)
 ```
 
 ### Syntax
@@ -450,7 +450,7 @@ END;
 
 DROP PROCEDURE [IF EXISTS] name;
 
-EXEC proc.name(arg1, arg2);
+CALL proc.name(arg1, arg2);
 ```
 
 `OR REPLACE` (PostgreSQL convention) and `OR ALTER` (T-SQL convention)
@@ -467,7 +467,7 @@ collapses to a single statement is a UDF, not a procedure.
 | Body shape | Scalar expression | `BEGIN ... END` block |
 | Plan-time treatment | Inlined into call site | **Not inlined.** Invocation resolves the descriptor at runtime, runs the body in a fresh batch context. |
 | Returns | A single scalar value | Whatever rows the body's `SELECT`s produce |
-| Call site | `udf.X(...)` (anywhere a scalar is valid) | `EXEC proc.X(...)` (statement only) |
+| Call site | `udf.X(...)` (anywhere a scalar is valid) | `CALL proc.X(...)` (statement only) |
 | Persistence | Body formatted from AST (whitespace canonicalised) | **Original source text** stored verbatim |
 | Variable scope | Sees call-site columns as bare identifiers | Isolated — parameters are the only bridge from the caller |
 
@@ -483,8 +483,8 @@ CREATE PROCEDURE need_name(@name STRING IS NOT NULL) AS BEGIN
     SELECT upper(@name)
 END
 
-EXEC proc.need_name('alice')   -- yields 'ALICE'
-EXEC proc.need_name(NULL)
+CALL proc.need_name('alice')   -- yields 'ALICE'
+CALL proc.need_name(NULL)
 -- error: Procedure 'proc.need_name' parameter '@name' must not be null.
 ```
 
@@ -499,8 +499,8 @@ AS BEGIN
     -- ...
 END
 
-EXEC proc.summarize('orders')          -- @limit takes 100
-EXEC proc.summarize('orders', 1000)    -- @limit explicit
+CALL proc.summarize('orders')          -- @limit takes 100
+CALL proc.summarize('orders', 1000)    -- @limit explicit
 ```
 
 The default expression evaluates in the caller's scope, so it can
@@ -517,7 +517,7 @@ CREATE PROCEDURE shadow(@v INT64) AS BEGIN
 END
 
 DECLARE @counter INT64 = 5
-EXEC proc.shadow(@counter)
+CALL proc.shadow(@counter)
 SELECT @counter             -- still 5; the procedure can't see or
                             -- modify the caller's @counter
 ```
@@ -540,7 +540,7 @@ CREATE PROCEDURE summarize() AS BEGIN
     SELECT count(*) FROM data
 END
 
-EXEC proc.summarize()
+CALL proc.summarize()
 ```
 
 produces two cells in the host (terminal table or DevWeb pane), just as
@@ -583,7 +583,7 @@ layout.
   query has its `@param` reference resolved against the procedure's
   variable scope at runtime — same as elsewhere. (This is the same
   rule that applies to `@vars` in regular procedural batches.)
-- **Recursion is capped at 32 nested calls.** A procedure that `EXEC`s
+- **Recursion is capped at 32 nested calls.** A procedure that `CALL`s
   itself (directly or transitively) raises a clear error once the call
   depth exceeds the limit, instead of silently overflowing the .NET
   call stack. Procedural recursion is intentionally not a supported
@@ -593,19 +593,19 @@ layout.
   `DROP FUNCTION`, or `DROP PROCEDURE`. DML and table DDL (`CREATE
   TEMP TABLE`, `INSERT`, `UPDATE`, `DELETE`) are allowed.
 
-## EXEC inside a batch
+## CALL inside a batch
 
-`EXEC` runs a function call as a top-level statement. Inside a
+`CALL` invokes a function or procedure as a top-level statement. Inside a
 procedural batch it can reference declared variables in the argument
 list:
 
 ```sql
 DECLARE @prompt STRING = 'summarise the last quarter'
 
-EXEC models.llama_3_8b(@prompt)
+CALL models.llama_3_8b(@prompt)
 ```
 
-For LLM models, an `EXEC` cell forwards token chunks live to the host
+For LLM models, an `CALL` cell forwards token chunks live to the host
 (terminal or DevWeb pane) as they arrive. See [Models](../models.md) for
 streaming details.
 
