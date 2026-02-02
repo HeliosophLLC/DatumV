@@ -69,7 +69,7 @@ export function parseParameterList(s: string | undefined | null): ParsedParam[] 
 // Builds:
 //   DECLARE @a INT32
 //   DECLARE @b STRING
-//   EXEC udf.name(@a, @b)
+//   CALL udf.name(@a, @b)
 // for UDFs/procedures. Caller fills in values before running.
 export function buildExecuteTemplate(
   prefix: string,
@@ -78,11 +78,11 @@ export function buildExecuteTemplate(
 ): string {
   const params = parseParameterList(parameterList);
   if (params.length === 0) {
-    return `EXEC ${prefix}.${name}()`;
+    return `CALL ${prefix}.${name}()`;
   }
   const declares = params.map((p) => `DECLARE @${p.name} ${p.type}`).join('\n');
   const args = params.map((p) => `@${p.name}`).join(', ');
-  return `${declares}\n\nEXEC ${prefix}.${name}(${args})`;
+  return `${declares}\n\nCALL ${prefix}.${name}(${args})`;
 }
 
 // Macro UDFs don't persist original source — recompose from parameters,

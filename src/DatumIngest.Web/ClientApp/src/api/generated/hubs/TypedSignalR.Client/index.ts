@@ -82,6 +82,14 @@ class IStreamHub_HubProxy implements IStreamHub {
     public readonly ping = async (message: string): Promise<void> => {
         return await this.connection.invoke("Ping", message);
     }
+
+    public readonly sendMessage = async (content: string): Promise<void> => {
+        return await this.connection.invoke("SendMessage", content);
+    }
+
+    public readonly cancelMessage = async (): Promise<void> => {
+        return await this.connection.invoke("CancelMessage");
+    }
 }
 
 
@@ -97,11 +105,20 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
     public readonly register = (connection: HubConnection, receiver: IStreamHubClient): Disposable => {
 
         const __onPong = (...args: [string]) => receiver.onPong(...args);
+        const __onToken = (...args: [string]) => receiver.onToken(...args);
+        const __onComplete = () => receiver.onComplete();
+        const __onError = (...args: [string]) => receiver.onError(...args);
 
         connection.on("OnPong", __onPong);
+        connection.on("OnToken", __onToken);
+        connection.on("OnComplete", __onComplete);
+        connection.on("OnError", __onError);
 
         const methodList: ReceiverMethod[] = [
-            { methodName: "OnPong", method: __onPong }
+            { methodName: "OnPong", method: __onPong },
+            { methodName: "OnToken", method: __onToken },
+            { methodName: "OnComplete", method: __onComplete },
+            { methodName: "OnError", method: __onError }
         ]
 
         return new ReceiverMethodSubscription(connection, methodList);

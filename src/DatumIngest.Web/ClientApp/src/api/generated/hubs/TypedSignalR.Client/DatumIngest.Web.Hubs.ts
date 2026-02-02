@@ -10,6 +10,15 @@ export type IStreamHub = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     ping(message: string): Promise<void>;
+    /**
+    * @param content Transpiled from string
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    sendMessage(content: string): Promise<void>;
+    /**
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    cancelMessage(): Promise<void>;
 }
 
 export type IStreamHubClient = {
@@ -18,5 +27,19 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPong(message: string): Promise<void>;
+    /**
+    * @param content Transpiled from string
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onToken(content: string): Promise<void>;
+    /**
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onComplete(): Promise<void>;
+    /**
+    * @param message Transpiled from string
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onError(message: string): Promise<void>;
 }
 

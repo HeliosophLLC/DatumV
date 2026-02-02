@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
+using DatumIngest.Models;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Hubs;
+using DatumIngest.Web.Llm;
 using DatumIngest.Web.Settings;
 
 namespace DatumIngest.Web.Hosting;
@@ -34,15 +36,46 @@ public static class WebHostExtensions
             services.AddDatumIngest();
 
             string catalogRootPath = options.CatalogRootPath;
+            bool registerBuiltinModels = options.RegisterBuiltinModels;
+            string? modelsDirectory = options.ModelsDirectory;
+
             services.AddSingleton<TableCatalog>(sp =>
             {
                 Pool pool = sp.GetRequiredService<Pool>();
                 Directory.CreateDirectory(catalogRootPath);
                 string catalogFile = Path.Combine(catalogRootPath, CatalogStore.DefaultFileName);
-                return new TableCatalog(pool, catalogFile);
+                TableCatalog catalog = new(pool, catalogFile);
+
+                // Attach the standard model zoo before any hosted service runs.
+                // BuiltinModels uses VramBudgetResolver internally (one
+                // nvidia-smi shell-out) and sets catalog.Models. Registrations
+                // are cheap — model loads are lazy via the residency manager,
+                // triggered later by LlmStartupService.
+                if (registerBuiltinModels)
+                {
+                    BuiltinModels.AttachStandardModels(catalog, modelsDirectory);
+                }
+
+                return catalog;
             });
 
             services.AddHostedService<CatalogInitializationService>();
+
+            // Chat LLM wiring. Holder is the singleton consumers depend on;
+            // the hosted service sets it during StartAsync after the model is
+            // loaded. ILlmDriver resolves through the holder so any consumer
+            // (IConversationAgent etc.) gets a fully-loaded driver or a clear
+            // "not initialised yet" error.
+            if (registerBuiltinModels)
+            {
+                services.AddSingleton<LlmDriverHolder>();
+                services.AddSingleton<ILlmDriver>(sp =>
+                    sp.GetRequiredService<LlmDriverHolder>().Current);
+                services.AddHostedService<LlmStartupService>();
+
+                services.AddSingleton<Messages.IMessageGraph, Messages.MessageGraph>();
+                services.AddSingleton<Conversation.IConversationAgent, Conversation.ConversationAgent>();
+            }
         }
 
         // Per-request context. CurrentContext is the writable concrete; ICurrentContext

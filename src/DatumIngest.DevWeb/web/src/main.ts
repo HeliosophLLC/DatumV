@@ -1719,7 +1719,7 @@ import {
   function openUdfContextMenu(e, udf) {
     openContextMenu(e, [
       { label: 'Execute',
-        action: () => openSqlInNewTab(`EXEC udf.${udf.name}`,
+        action: () => openSqlInNewTab(`CALL udf.${udf.name}`,
           buildExecuteTemplate('udf', udf.name, udf.parameters)) },
       { label: 'Modify',
         action: () => openSqlInNewTab(`Modify ${udf.name}`,
@@ -1730,7 +1730,7 @@ import {
   function openProcedureContextMenu(e, proc) {
     openContextMenu(e, [
       { label: 'Execute',
-        action: () => openSqlInNewTab(`EXEC proc.${proc.name}`,
+        action: () => openSqlInNewTab(`CALL proc.${proc.name}`,
           buildExecuteTemplate('proc', proc.name, proc.parameters)) },
       { label: 'Modify',
         action: () => openSqlInNewTab(`Modify ${proc.name}`,

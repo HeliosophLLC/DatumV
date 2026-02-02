@@ -1,6 +1,7 @@
 import i18next from 'i18next';
 import ICU from 'i18next-icu';
 import { initReactI18next } from 'react-i18next';
+import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enHome from './locales/en/home.json';
 
@@ -12,7 +13,7 @@ export type SupportedLocale = (typeof SupportedLocales)[number];
 export const FallbackLocale: SupportedLocale = 'en';
 
 const resources = {
-  en: { common: enCommon, home: enHome },
+  en: { common: enCommon, home: enHome, chat: enChat },
 } as const;
 
 i18next
@@ -23,7 +24,7 @@ i18next
     lng: FallbackLocale,
     fallbackLng: FallbackLocale,
     defaultNS: 'common',
-    ns: ['common', 'home'],
+    ns: ['common', 'home', 'chat'],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },
     returnNull: false,

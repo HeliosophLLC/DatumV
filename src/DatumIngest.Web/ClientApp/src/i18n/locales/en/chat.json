@@ -1,0 +1,8 @@
+{
+  "placeholder": "Ask a question or write SQL…",
+  "submit": "Send",
+  "stop": "Stop",
+  "hint": "Press Enter to send · Shift+Enter for a new line",
+  "thinking": "Thinking…",
+  "errorPrefix": "Something went wrong: {message}"
+}

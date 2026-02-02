@@ -1,0 +1,149 @@
+using System.Runtime.CompilerServices;
+using System.Text;
+using DatumIngest.Web.Hosting;
+using DatumIngest.Web.Llm;
+using DatumIngest.Web.Messages;
+
+namespace DatumIngest.Web.Conversation;
+
+// v1 chat loop: in-memory accumulator + LLM stream + DB persistence.
+//
+// Lifecycle: singleton per app. The accumulator starts with the system
+// prompt at construction and grows with each turn. No DB rehydration on
+// startup — fresh each session. When rehydration lands, the constructor
+// will run a SCAN query (per project_message_graph_design) to rebuild the
+// accumulator from persisted messages.
+//
+// Concurrency: a lock guards accumulator mutations. v1 is single-conversation
+// single-user, so this is largely belt-and-braces — but it does protect
+// against a UI bug that issues a second SendAsync before the first completes.
+//
+// Cancellation: each SendAsync registers its own CTS as the "active"
+// cancellation source. CancelActive cancels whichever send is currently
+// running; the SendAsync caller observes OperationCanceledException at the
+// next iterator step. We deliberately persist the partial assistant
+// response on cancel — the user sees what was being said, and the next
+// turn carries that context.
+internal sealed class ConversationAgent : IConversationAgent
+{
+    private const string BuiltInSystemPrompt =
+        "You are an assistant inside DatumIngest, a local data tool. The user is " +
+        "exploring data on their own machine; compute is local and free, so you can " +
+        "be helpful at length without worrying about token costs. Be concise but " +
+        "informative. When the user asks about their data and you need SQL, write " +
+        "it in fenced code blocks; once SQL tool-calling is wired you'll execute " +
+        "it yourself, but for now describe what you'd run. Do not over explain, keep " +
+        "responses short unless the user asks for a long response, or you notice they " +
+        "may be in need of a longer explanation.";
+
+    private readonly ILlmDriver _driver;
+    private readonly IMessageGraph _graph;
+    private readonly object _accumulatorLock = new();
+    private string _accumulator;
+    private CancellationTokenSource? _activeCts;
+
+    public ConversationAgent(ILlmDriver driver, IMessageGraph graph, WebHostOptions options)
+    {
+        _driver = driver;
+        _graph = graph;
+        string systemPrompt = options.SystemPrompt ?? BuiltInSystemPrompt;
+        _accumulator = _driver.Template.Open
+            + _driver.Template.WrapMessage("system", systemPrompt);
+    }
+
+    public async IAsyncEnumerable<string> SendAsync(
+        string userContent,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        Models.Llama.LlamaChatTemplate template = _driver.Template;
+
+        // Link the caller's token with our own internal CTS so CancelActive
+        // and ConnectionAborted both terminate the same enumeration. The
+        // linked token is disposed in the finally; the internal CTS is
+        // cleared from _activeCts there too.
+        using CancellationTokenSource internalCts = new();
+        using CancellationTokenSource linked =
+            CancellationTokenSource.CreateLinkedTokenSource(ct, internalCts.Token);
+        _activeCts = internalCts;
+
+        string prompt;
+        lock (_accumulatorLock)
+        {
+            _accumulator += template.WrapMessage("user", userContent);
+            prompt = _accumulator + template.AssistantTurn;
+        }
+
+        // Persist the user turn before we start generating. The user turn
+        // is durable even if generation is cancelled or fails — we'd rather
+        // have an orphan user message than lose the input.
+        await _graph.AppendAsync(new MessageDraft("user", userContent), linked.Token).ConfigureAwait(false);
+
+        StringBuilder assistantBuilder = new();
+        bool wasCancelled = false;
+        try
+        {
+            await foreach (string chunk in _driver
+                .StreamAsync(prompt, linked.Token)
+                .ConfigureAwait(false))
+            {
+                assistantBuilder.Append(chunk);
+                yield return chunk;
+            }
+        }
+        finally
+        {
+            wasCancelled = linked.Token.IsCancellationRequested;
+            _activeCts = null;
+        }
+
+        // Always finalize: persist the (possibly partial) assistant turn and
+        // extend the in-memory accumulator. On cancel, this captures what
+        // was being generated so the next turn carries the truncation as
+        // context. CancellationToken.None on the finalize INSERT so we
+        // don't lose the partial on the same cancellation that stopped us.
+        string assistantContent = StripTrailingStop(assistantBuilder.ToString(), template.StopSequences);
+
+        if (assistantContent.Length > 0)
+        {
+            lock (_accumulatorLock)
+            {
+                _accumulator += template.WrapMessage("assistant", assistantContent);
+            }
+
+            await _graph.AppendAsync(
+                new MessageDraft("assistant", assistantContent, _driver.ModelName),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+
+        if (wasCancelled)
+        {
+            // Surface cancellation to the caller so the hub can pivot to the
+            // "cancelled" path without conflating it with a completed turn.
+            // The partial state is already persisted above.
+            ct.ThrowIfCancellationRequested();
+            throw new OperationCanceledException();
+        }
+    }
+
+    public void CancelActive()
+    {
+        // Snapshot under no lock: CTS Cancel is thread-safe, and the worst
+        // case of a stale reference is a no-op cancel of a CTS that's
+        // already done.
+        CancellationTokenSource? cts = _activeCts;
+        try { cts?.Cancel(); }
+        catch (ObjectDisposedException) { /* CTS finalize race — benign */ }
+    }
+
+    private static string StripTrailingStop(string text, IReadOnlyList<string> stopSequences)
+    {
+        foreach (string stop in stopSequences)
+        {
+            if (stop.Length > 0 && text.EndsWith(stop, StringComparison.Ordinal))
+            {
+                return text[..^stop.Length];
+            }
+        }
+        return text;
+    }
+}

@@ -1,3 +1,4 @@
+import type enChat from './locales/en/chat.json';
 import type enCommon from './locales/en/common.json';
 import type enHome from './locales/en/home.json';
 
@@ -11,6 +12,7 @@ declare module 'i18next' {
     resources: {
       common: typeof enCommon;
       home: typeof enHome;
+      chat: typeof enChat;
     };
     returnNull: false;
   }

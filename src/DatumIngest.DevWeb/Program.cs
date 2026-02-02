@@ -642,7 +642,7 @@ static async Task ExecuteQueryStreaming(
 
     // Single execution path: every batch goes through BatchExecutor —
     // procedural blocks (DECLARE/SET/IF/WHILE/BEGIN), single SELECT, single
-    // EXEC, multi-statement scripts. LLM chunk streaming is preserved via
+    // CALL, multi-statement scripts. LLM chunk streaming is preserved via
     // BatchEventStreamingSink, which translates per-cell IModelStreamingSink
     // chunks into CellChunkBatchEvent emissions on the same event channel.
     bool errorEmitted = false;
