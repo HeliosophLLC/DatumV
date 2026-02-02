@@ -754,6 +754,109 @@ public class DdlParsingTests : ServiceTestBase
         Assert.IsType<QueryStatement>(statements[1]);
     }
 
+    // ─── Missing-column-type diagnostics — ALTER TABLE ADD COLUMN ───
+
+    [Fact]
+    public void AlterTableAddColumn_MissingTypeBeforeAs_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN ratio AS (revenue / cost)"));
+        Assert.Contains("ALTER TABLE ADD COLUMN 'ratio'", ex.Message);
+        Assert.Contains("missing column type before AS", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTableAddColumn_MissingTypeBeforeDefault_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN score DEFAULT 0"));
+        Assert.Contains("ALTER TABLE ADD COLUMN 'score'", ex.Message);
+        Assert.Contains("missing column type before DEFAULT", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTableAddColumn_MissingTypeBeforeNotNull_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN x NOT NULL"));
+        Assert.Contains("ALTER TABLE ADD COLUMN 'x'", ex.Message);
+        Assert.Contains("missing column type before NOT", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTableAddColumn_MissingTypeBeforeGenerated_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN id GENERATED ALWAYS AS IDENTITY"));
+        Assert.Contains("ALTER TABLE ADD COLUMN 'id'", ex.Message);
+        Assert.Contains("missing column type before GENERATED", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTableAddColumn_MissingTypeBeforeIdentity_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN id IDENTITY"));
+        Assert.Contains("ALTER TABLE ADD COLUMN 'id'", ex.Message);
+        Assert.Contains("missing column type before IDENTITY", ex.Message);
+    }
+
+    // ─── Missing-column-type diagnostics — CREATE TABLE ───
+
+    [Fact]
+    public void CreateTable_MissingTypeBeforeAs_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (ratio AS (revenue / cost))"));
+        Assert.Contains("column 'ratio'", ex.Message);
+        Assert.Contains("missing column type before AS", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTable_MissingTypeBeforeDefault_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (score DEFAULT 0)"));
+        Assert.Contains("column 'score'", ex.Message);
+        Assert.Contains("missing column type before DEFAULT", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTable_MissingTypeBeforeNotNull_ReportsFriendlyError()
+    {
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (x NOT NULL)"));
+        Assert.Contains("column 'x'", ex.Message);
+        Assert.Contains("missing column type before NOT", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTable_MissingTypeBeforePrimary_ReportsFriendlyError()
+    {
+        // `id PRIMARY KEY` without a type — distinct from the table-level
+        // trailing `, PRIMARY KEY (cols)` form, which is unaffected.
+        ParseException ex = Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement("CREATE TABLE t (id PRIMARY KEY)"));
+        Assert.Contains("column 'id'", ex.Message);
+        Assert.Contains("missing column type before PRIMARY", ex.Message);
+    }
+
+    [Fact]
+    public void CreateTable_TableLevelPrimaryKey_StillParses()
+    {
+        // Regression: the trailing-column .Try() backtrack path must still
+        // resolve `, PRIMARY KEY (col)` to the table-level constraint after
+        // the helper falls through. The friendly-error throw must not fire
+        // when PRIMARY appears in the *trailing-comma* position rather than
+        // immediately after a bare column name.
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TABLE t (id INT32, name STRING, PRIMARY KEY (id))");
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Equal(2, create.Columns.Count);
+        Assert.Equal("id", create.Columns[0].Name);
+        Assert.Equal("name", create.Columns[1].Name);
+    }
+
     // ───────────────────── Error cases ─────────────────────
 
     [Fact]

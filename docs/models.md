@@ -1106,10 +1106,10 @@ you tweak both temperature and max_tokens at the call site.
 **Streaming output.** LLM responses produce tokens incrementally;
 DatumIngest exposes that stream when the consumer opts in:
 
-- `EXEC models.X('prompt')` in `datum-shell` prints tokens to the terminal
+- `CALL models.X('prompt')` in `datum-shell` prints tokens to the terminal
   as the model produces them, finishing with a dim `(streamed from
   models.X)` footer.
-- `EXEC models.X('prompt')` in `datum-devweb` fills a live streaming pane
+- `CALL models.X('prompt')` in `datum-devweb` fills a live streaming pane
   in the result panel; chunks arrive over the `/api/query/stream`
   endpoint as `{"type":"chunk", ...}` events. Press **Esc** to cancel
   an in-flight call — the browser aborts the fetch, the server's
@@ -1123,7 +1123,7 @@ DatumIngest exposes that stream when the consumer opts in:
 
 The LLM is the only model family that produces multi-chunk streams
 today; other models (classifiers, detectors, captioners, image
-generators) yield a single result and the `EXEC` streaming pane shows
+generators) yield a single result and the `CALL` streaming pane shows
 that one value once inference completes.
 
 **Setup**: each is a single `*.gguf` file dropped into the models

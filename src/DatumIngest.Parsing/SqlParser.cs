@@ -2491,6 +2491,45 @@ public static class SqlParser
         select postfixArray ? $"Array<{baseOrWrapper}>" : baseOrWrapper;
 
     /// <summary>
+    /// Wraps <see cref="TypeNameParser"/> with a column-context error check.
+    /// When the next token is one of the column-constraint keywords
+    /// (<c>AS</c>, <c>DEFAULT</c>, <c>GENERATED</c>, <c>IDENTITY</c>,
+    /// <c>NOT</c>, <c>PRIMARY</c>), Superpower's default failure surfaces as
+    /// "unexpected as 'AS', expected identifier, typekeyword or time" — which
+    /// leaks token-class names. Throw a friendlier message instead, anchored
+    /// at the modifier token so editors highlight the right spot.
+    /// </summary>
+    /// <param name="columnName">The column being parsed, included in the message.</param>
+    /// <param name="context">User-visible context label, e.g. "column" or "ALTER TABLE ADD COLUMN".</param>
+    private static TokenListParser<SqlToken, string> RequireColumnType(string columnName, string context) =>
+        input =>
+        {
+            if (!input.IsAtEnd)
+            {
+                Token<SqlToken> head = input.ConsumeToken().Value;
+                string? modifier = ColumnTypeModifierLabel(head.Kind);
+                if (modifier is not null)
+                {
+                    throw new ParseException(
+                        $"{context} '{columnName}': missing column type before {modifier} clause.",
+                        head.Position);
+                }
+            }
+            return TypeNameParser(input);
+        };
+
+    private static string? ColumnTypeModifierLabel(SqlToken kind) => kind switch
+    {
+        SqlToken.As => "AS",
+        SqlToken.Default => "DEFAULT",
+        SqlToken.Generated => "GENERATED",
+        SqlToken.Identity => "IDENTITY",
+        SqlToken.Not => "NOT",
+        SqlToken.Primary => "PRIMARY",
+        _ => null,
+    };
+
+    /// <summary>
     /// A single column-constraint clause captured during column parsing.
     /// Clauses are folded into <see cref="ColumnDefinition"/> after collection
     /// so duplicates / conflicts can be rejected with a token-anchored
@@ -2588,7 +2627,7 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
         from name in IdentifierOrKeywordAsName
-        from typeName in TypeNameParser
+        from typeName in RequireColumnType(name, "column")
         from clauses in ColumnConstraintParser.Many()
         select FoldColumnConstraints(name, typeName, clauses);
 
@@ -3778,7 +3817,7 @@ public static class SqlParser
     private static TokenListParser<SqlToken, Statement> AlterTableAddColumnBody(string tableName) =>
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from colName in IdentifierOrKeywordAsName
-        from typeName in TypeNameParser
+        from typeName in RequireColumnType(colName, "ALTER TABLE ADD COLUMN")
         from clauses in AlterAddColumnConstraintParser.Many()
         select FoldAlterAddColumnConstraints(tableName, colName, typeName, clauses);
 
