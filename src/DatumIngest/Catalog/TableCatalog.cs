@@ -94,6 +94,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         Add(new Providers.InformationSchemaTablesProvider(pool, this));
         Add(new Providers.InformationSchemaColumnsProvider(pool, this));
         Add(new Providers.InformationSchemaSchemataProvider(pool));
+        Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
+        Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
         Add(new Providers.DatumCatalogFunctionsProvider(pool, _functions));
         Add(new Providers.DatumCatalogFunctionParametersProvider(pool, _functions));
         Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
@@ -225,6 +227,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private readonly Dictionary<string, string> _indexNameToTable =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the user-created index descriptors for <paramref name="tableName"/>,
+    /// or <see langword="null"/> when the table has no indexes (or doesn't exist).
+    /// Used by the <c>information_schema.table_constraints</c> /
+    /// <c>information_schema.key_column_usage</c> views to surface UNIQUE
+    /// constraints alongside PRIMARY KEY constraints.
+    /// </summary>
+    internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
+        => _persistentTableIndexes.TryGetValue(tableName, out List<IndexDescriptor>? list)
+            ? list
+            : null;
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>

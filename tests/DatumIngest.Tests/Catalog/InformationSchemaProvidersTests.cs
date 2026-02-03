@@ -292,4 +292,272 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
         ITableProvider provider = catalog[InformationSchemaSchemataProvider.TableName];
         Assert.False(provider.Seekable);
     }
+
+    // ───────────── information_schema.table_constraints ─────────────
+
+    private sealed record TableConstraintsRow(
+        string ConstraintCatalog, string ConstraintSchema, string ConstraintName,
+        string TableCatalog, string TableSchema, string TableName, string ConstraintType);
+
+    private static async Task<List<TableConstraintsRow>> ScanTableConstraintsAsync(
+        InformationSchemaTableConstraintsProvider provider)
+    {
+        List<TableConstraintsRow> rows = new();
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null,
+            CancellationToken.None))
+        {
+            Arena arena = batch.Arena;
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                rows.Add(new TableConstraintsRow(
+                    row[0].AsString(arena), row[1].AsString(arena), row[2].AsString(arena),
+                    row[3].AsString(arena), row[4].AsString(arena), row[5].AsString(arena),
+                    row[6].AsString(arena)));
+            }
+        }
+        return rows;
+    }
+
+    [Fact]
+    public void TableConstraints_AutoRegistered_InEmptyCatalog()
+    {
+        TableCatalog catalog = CreateCatalog();
+        Assert.True(catalog.TryGetTable(InformationSchemaTableConstraintsProvider.TableName, out _));
+    }
+
+    [Fact]
+    public void TableConstraints_Schema_HasSevenColumnsInOrder()
+    {
+        TableCatalog catalog = CreateCatalog();
+        ITableProvider provider = catalog[InformationSchemaTableConstraintsProvider.TableName];
+        Schema schema = provider.GetSchema();
+
+        Assert.Equal(7, schema.Columns.Count);
+        Assert.Equal("constraint_catalog", schema.Columns[0].Name);
+        Assert.Equal("constraint_schema",  schema.Columns[1].Name);
+        Assert.Equal("constraint_name",    schema.Columns[2].Name);
+        Assert.Equal("table_catalog",      schema.Columns[3].Name);
+        Assert.Equal("table_schema",       schema.Columns[4].Name);
+        Assert.Equal("table_name",         schema.Columns[5].Name);
+        Assert.Equal("constraint_type",    schema.Columns[6].Name);
+
+        Assert.All(schema.Columns, c => Assert.Equal(DataKind.String, c.Kind));
+        Assert.All(schema.Columns, c => Assert.False(c.Nullable));
+    }
+
+    [Fact]
+    public async Task TableConstraints_Scan_PrimaryKey_NamedTablePkey()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE users (id Int32 PRIMARY KEY, name String)");
+
+        InformationSchemaTableConstraintsProvider provider =
+            (InformationSchemaTableConstraintsProvider)catalog[InformationSchemaTableConstraintsProvider.TableName];
+        List<TableConstraintsRow> rows = await ScanTableConstraintsAsync(provider);
+
+        TableConstraintsRow? pk = rows.FirstOrDefault(r =>
+            r.TableName == "users" && r.ConstraintType == "PRIMARY KEY");
+        Assert.NotNull(pk);
+        Assert.Equal("users_pkey", pk.ConstraintName);
+        Assert.Equal("datum",      pk.ConstraintCatalog);
+        Assert.Equal("public",     pk.ConstraintSchema);
+        Assert.Equal("datum",      pk.TableCatalog);
+        Assert.Equal("public",     pk.TableSchema);
+    }
+
+    [Fact]
+    public async Task TableConstraints_Scan_TableWithoutPk_NotListed()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE notes (text String)");
+
+        InformationSchemaTableConstraintsProvider provider =
+            (InformationSchemaTableConstraintsProvider)catalog[InformationSchemaTableConstraintsProvider.TableName];
+        List<TableConstraintsRow> rows = await ScanTableConstraintsAsync(provider);
+
+        Assert.DoesNotContain(rows, r => r.TableName == "notes");
+    }
+
+    [Fact]
+    public async Task TableConstraints_Scan_CompositePrimaryKey_OneRow()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE orders (a Int32, b Int32, c String, PRIMARY KEY (a, b))");
+
+        InformationSchemaTableConstraintsProvider provider =
+            (InformationSchemaTableConstraintsProvider)catalog[InformationSchemaTableConstraintsProvider.TableName];
+        List<TableConstraintsRow> rows = await ScanTableConstraintsAsync(provider);
+
+        // Composite PK produces exactly one constraint row (the column-level
+        // decomposition lives in information_schema.key_column_usage).
+        List<TableConstraintsRow> orderPks = rows
+            .Where(r => r.TableName == "orders" && r.ConstraintType == "PRIMARY KEY")
+            .ToList();
+        Assert.Single(orderPks);
+        Assert.Equal("orders_pkey", orderPks[0].ConstraintName);
+    }
+
+    [Fact]
+    public async Task TableConstraints_Scan_UniqueIndex_UsesUserSuppliedName()
+    {
+        using TableCatalog catalog = CreateCatalog(Path.Combine(
+            Path.GetTempPath(), $"datum_isuq_{Guid.NewGuid():N}", ".datum-catalog.json"));
+        catalog.Plan("CREATE TABLE products (id Int32 PRIMARY KEY, sku String)");
+        catalog.Plan("CREATE UNIQUE INDEX my_sku_idx ON products (sku)");
+
+        InformationSchemaTableConstraintsProvider provider =
+            (InformationSchemaTableConstraintsProvider)catalog[InformationSchemaTableConstraintsProvider.TableName];
+        List<TableConstraintsRow> rows = await ScanTableConstraintsAsync(provider);
+
+        TableConstraintsRow? uq = rows.FirstOrDefault(r =>
+            r.TableName == "products" && r.ConstraintType == "UNIQUE");
+        Assert.NotNull(uq);
+        Assert.Equal("my_sku_idx", uq.ConstraintName);
+    }
+
+    [Fact]
+    public async Task TableConstraints_Scan_NonUniqueIndex_NotListed()
+    {
+        using TableCatalog catalog = CreateCatalog(Path.Combine(
+            Path.GetTempPath(), $"datum_isnu_{Guid.NewGuid():N}", ".datum-catalog.json"));
+        catalog.Plan("CREATE TABLE products (id Int32 PRIMARY KEY, sku String)");
+        catalog.Plan("CREATE INDEX sku_lookup ON products (sku)");
+
+        InformationSchemaTableConstraintsProvider provider =
+            (InformationSchemaTableConstraintsProvider)catalog[InformationSchemaTableConstraintsProvider.TableName];
+        List<TableConstraintsRow> rows = await ScanTableConstraintsAsync(provider);
+
+        // Non-unique indexes are not constraints — they're plain B+Trees.
+        Assert.DoesNotContain(rows, r => r.ConstraintName == "sku_lookup");
+    }
+
+    [Fact]
+    public void TableConstraints_IsNotSeekable()
+    {
+        TableCatalog catalog = CreateCatalog();
+        ITableProvider provider = catalog[InformationSchemaTableConstraintsProvider.TableName];
+        Assert.False(provider.Seekable);
+    }
+
+    // ───────────── information_schema.key_column_usage ─────────────
+
+    private sealed record KeyColumnUsageRow(
+        string ConstraintCatalog, string ConstraintSchema, string ConstraintName,
+        string TableCatalog, string TableSchema, string TableName,
+        string ColumnName, int OrdinalPosition);
+
+    private static async Task<List<KeyColumnUsageRow>> ScanKeyColumnUsageAsync(
+        InformationSchemaKeyColumnUsageProvider provider)
+    {
+        List<KeyColumnUsageRow> rows = new();
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null,
+            CancellationToken.None))
+        {
+            Arena arena = batch.Arena;
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                rows.Add(new KeyColumnUsageRow(
+                    row[0].AsString(arena), row[1].AsString(arena), row[2].AsString(arena),
+                    row[3].AsString(arena), row[4].AsString(arena), row[5].AsString(arena),
+                    row[6].AsString(arena), row[7].AsInt32()));
+            }
+        }
+        return rows;
+    }
+
+    [Fact]
+    public void KeyColumnUsage_AutoRegistered_InEmptyCatalog()
+    {
+        TableCatalog catalog = CreateCatalog();
+        Assert.True(catalog.TryGetTable(InformationSchemaKeyColumnUsageProvider.TableName, out _));
+    }
+
+    [Fact]
+    public void KeyColumnUsage_Schema_HasEightColumnsInOrder()
+    {
+        TableCatalog catalog = CreateCatalog();
+        ITableProvider provider = catalog[InformationSchemaKeyColumnUsageProvider.TableName];
+        Schema schema = provider.GetSchema();
+
+        Assert.Equal(8, schema.Columns.Count);
+        Assert.Equal("constraint_catalog", schema.Columns[0].Name);
+        Assert.Equal("constraint_schema",  schema.Columns[1].Name);
+        Assert.Equal("constraint_name",    schema.Columns[2].Name);
+        Assert.Equal("table_catalog",      schema.Columns[3].Name);
+        Assert.Equal("table_schema",       schema.Columns[4].Name);
+        Assert.Equal("table_name",         schema.Columns[5].Name);
+        Assert.Equal("column_name",        schema.Columns[6].Name);
+        Assert.Equal("ordinal_position",   schema.Columns[7].Name);
+    }
+
+    [Fact]
+    public async Task KeyColumnUsage_Scan_SingleColumnPk_OneRowOrdinalOne()
+    {
+        TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE users (id Int32 PRIMARY KEY, name String)");
+
+        InformationSchemaKeyColumnUsageProvider provider =
+            (InformationSchemaKeyColumnUsageProvider)catalog[InformationSchemaKeyColumnUsageProvider.TableName];
+        List<KeyColumnUsageRow> rows = await ScanKeyColumnUsageAsync(provider);
+
+        KeyColumnUsageRow? pkCol = rows.FirstOrDefault(r =>
+            r.ConstraintName == "users_pkey");
+        Assert.NotNull(pkCol);
+        Assert.Equal("id", pkCol.ColumnName);
+        Assert.Equal(1,    pkCol.OrdinalPosition);
+    }
+
+    [Fact]
+    public async Task KeyColumnUsage_Scan_CompositePk_OrdinalsMatchDeclarationOrder()
+    {
+        TableCatalog catalog = CreateCatalog();
+        // PK is (b, a) — note the reversed order from the column list.
+        catalog.Plan("CREATE TEMP TABLE orders (a Int32, b Int32, c String, PRIMARY KEY (b, a))");
+
+        InformationSchemaKeyColumnUsageProvider provider =
+            (InformationSchemaKeyColumnUsageProvider)catalog[InformationSchemaKeyColumnUsageProvider.TableName];
+        List<KeyColumnUsageRow> rows = await ScanKeyColumnUsageAsync(provider);
+
+        List<KeyColumnUsageRow> pkCols = rows
+            .Where(r => r.ConstraintName == "orders_pkey")
+            .OrderBy(r => r.OrdinalPosition)
+            .ToList();
+        Assert.Equal(2, pkCols.Count);
+        // Ordinals follow PK declaration order, not the column list's order.
+        Assert.Equal("b", pkCols[0].ColumnName); Assert.Equal(1, pkCols[0].OrdinalPosition);
+        Assert.Equal("a", pkCols[1].ColumnName); Assert.Equal(2, pkCols[1].OrdinalPosition);
+    }
+
+    [Fact]
+    public async Task KeyColumnUsage_Scan_UniqueIndex_ColumnsListed()
+    {
+        using TableCatalog catalog = CreateCatalog(Path.Combine(
+            Path.GetTempPath(), $"datum_iskcu_{Guid.NewGuid():N}", ".datum-catalog.json"));
+        catalog.Plan("CREATE TABLE products (id Int32 PRIMARY KEY, sku String, region String)");
+        catalog.Plan("CREATE UNIQUE INDEX sku_region_idx ON products (sku, region)");
+
+        InformationSchemaKeyColumnUsageProvider provider =
+            (InformationSchemaKeyColumnUsageProvider)catalog[InformationSchemaKeyColumnUsageProvider.TableName];
+        List<KeyColumnUsageRow> rows = await ScanKeyColumnUsageAsync(provider);
+
+        List<KeyColumnUsageRow> uqCols = rows
+            .Where(r => r.ConstraintName == "sku_region_idx")
+            .OrderBy(r => r.OrdinalPosition)
+            .ToList();
+        Assert.Equal(2, uqCols.Count);
+        Assert.Equal("sku",    uqCols[0].ColumnName); Assert.Equal(1, uqCols[0].OrdinalPosition);
+        Assert.Equal("region", uqCols[1].ColumnName); Assert.Equal(2, uqCols[1].OrdinalPosition);
+    }
+
+    [Fact]
+    public void KeyColumnUsage_IsNotSeekable()
+    {
+        TableCatalog catalog = CreateCatalog();
+        ITableProvider provider = catalog[InformationSchemaKeyColumnUsageProvider.TableName];
+        Assert.False(provider.Seekable);
+    }
 }
