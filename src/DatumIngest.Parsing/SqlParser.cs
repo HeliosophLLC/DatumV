@@ -3795,13 +3795,14 @@ public static class SqlParser
          select tableName)
         .Try();
 
-    // Same order-independent alternation as CREATE TABLE columns, minus
-    // PRIMARY KEY — ALTER TABLE ADD COLUMN's AST has no PK slot, and
-    // ALTER-time PK addition isn't supported in v1. Bare `PRIMARY` will
-    // fall out as an unexpected token rather than being silently dropped.
+    // Same order-independent alternation as CREATE TABLE columns.
+    // PRIMARY KEY participates so users can write
+    // `ALTER TABLE t ADD COLUMN id Int64 GENERATED ALWAYS AS IDENTITY PRIMARY KEY`
+    // — the canonical "I forgot a PK" workflow.
     private static readonly TokenListParser<SqlToken, ColumnConstraintClause> AlterAddColumnConstraintParser =
         NotNullConstraintParser
             .Or(BareNullConstraintParser)
+            .Or(PrimaryKeyConstraintParser)
             .Or(DefaultConstraintParser)
             .Or(GeneratedConstraintParser)
             .Or(BareAsComputedConstraintParser)
@@ -3834,6 +3835,7 @@ public static class SqlParser
         ColumnConstraintClause[] clauses)
     {
         bool? nullable = null;
+        bool primaryKey = false;
         Expression? defaultValue = null;
         GeneratedSlotConstraint? generatedSlot = null;
 
@@ -3852,6 +3854,16 @@ public static class SqlParser
                         throw new ParseException(detail, nc.Position);
                     }
                     nullable = nc.Nullable;
+                    break;
+
+                case PrimaryKeyConstraint pkc:
+                    if (primaryKey)
+                    {
+                        throw new ParseException(
+                            $"duplicate PRIMARY KEY constraint on column '{colName}'",
+                            pkc.Position);
+                    }
+                    primaryKey = true;
                     break;
 
                 case DefaultConstraint dc:
@@ -3876,12 +3888,17 @@ public static class SqlParser
             }
         }
 
+        // PRIMARY KEY implies NOT NULL when nullability wasn't given explicitly
+        // (matches CREATE TABLE column-definition semantics).
+        bool finalNullable = nullable ?? !primaryKey;
+
         return new AlterTableAddColumnStatement(
             tableName, colName, typeName,
             DefaultValue: defaultValue,
-            Nullable: nullable ?? true,
+            Nullable: finalNullable,
             ComputedExpression: generatedSlot?.ComputedExpression,
-            Identity: generatedSlot?.Identity);
+            Identity: generatedSlot?.Identity,
+            PrimaryKey: primaryKey);
     }
 
     /// <summary>

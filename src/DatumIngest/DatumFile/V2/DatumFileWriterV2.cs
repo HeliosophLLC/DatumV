@@ -1182,6 +1182,76 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Rewrites <paramref name="datumPath"/>'s footer with
+    /// <paramref name="pkColumnIndices"/> as the PRIMARY KEY column list.
+    /// Pure footer mutation — no pages are written, no data is touched.
+    /// Generation bumps by one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Used by <c>ALTER TABLE … ADD COLUMN … PRIMARY KEY</c> after the
+    /// column has been added (with IDENTITY backfill) and the
+    /// <c>.datum-pkindex</c> sidecar has been built from the populated
+    /// column. Flipping the footer's <c>PrimaryKeyColumnIndices</c> is
+    /// the final commit step.
+    /// </para>
+    /// <para>
+    /// Rejects the call when the file already has a non-empty
+    /// PRIMARY KEY — only one PK per table is supported, and changing it
+    /// would invalidate the existing <c>.datum-pkindex</c> sidecar.
+    /// </para>
+    /// </remarks>
+    public static void SetPrimaryKey(string datumPath, IReadOnlyList<ushort> pkColumnIndices)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(pkColumnIndices);
+        if (pkColumnIndices.Count == 0)
+        {
+            throw new ArgumentException(
+                "SetPrimaryKey requires at least one column index.", nameof(pkColumnIndices));
+        }
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        if (writer._primaryKeyColumnIndices is { Length: > 0 } existing)
+        {
+            throw new InvalidOperationException(
+                $"SetPrimaryKey: file already has a PRIMARY KEY ({existing.Length} column(s)). " +
+                "Changing an existing PK is not supported.");
+        }
+
+        // Validate every index is in range of the live column count so
+        // a malformed call can't stamp an invalid footer.
+        for (int i = 0; i < pkColumnIndices.Count; i++)
+        {
+            ushort idx = pkColumnIndices[i];
+            if (idx >= writer._columns!.Length)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(pkColumnIndices),
+                    $"PRIMARY KEY index {idx} is out of range for a file with {writer._columns.Length} columns.");
+            }
+        }
+
+        ushort[] indices = new ushort[pkColumnIndices.Count];
+        for (int i = 0; i < pkColumnIndices.Count; i++) indices[i] = pkColumnIndices[i];
+        writer._primaryKeyColumnIndices = indices;
+
+        // We deliberately don't flip descriptor.IsNullable=false here even
+        // though PK columns are conventionally NOT NULL. The on-disk pages
+        // for an ALTER-added column were written by AddColumn with a null
+        // bitmap (because the column had to be nullable to accept the
+        // missing-value backfill for historical rows pre-IDENTITY pump).
+        // Flipping IsNullable post-hoc would tell the decoder to skip the
+        // null bitmap and shift every payload read by a byte. The schema-
+        // build path overrides Nullable=false for PK columns at read time
+        // (see ColumnInfo construction in DatumFileTableProviderV2.OpenSnapshot).
+
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// One-shot helper for batched column additions in a single
     /// commit. Generation bumps by one regardless of how many columns
     /// are added.

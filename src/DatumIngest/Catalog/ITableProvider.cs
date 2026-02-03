@@ -228,6 +228,24 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support DropColumn (CanAlterColumns is false).");
 
     /// <summary>
+    /// Promotes the column at <paramref name="columnIndex"/> to be the
+    /// table's PRIMARY KEY. Implementations are expected to enforce
+    /// uniqueness across existing rows (failing with a duplicate-key
+    /// violation if not satisfied) and to persist the PK metadata so it
+    /// survives a reopen.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/> —
+    /// override on providers that opt in via <see cref="CanAlterColumns"/>.
+    /// Called by the catalog as the second half of
+    /// <c>ALTER TABLE … ADD COLUMN … PRIMARY KEY</c> after the column
+    /// itself has been added and (optionally) backfilled.
+    /// </remarks>
+    Task EnablePrimaryKeyAsync(int columnIndex, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support EnablePrimaryKey (CanAlterColumns is false).");
+
+    /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
     /// inserts. The session holds a writer for its lifetime; rows
     /// become visible only after <see cref="IAppendSession.CommitAsync"/>.

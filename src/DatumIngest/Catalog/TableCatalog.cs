@@ -1536,7 +1536,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyAlterTableAddColumnAsync(AlterTableAddColumnStatement alter)
     {
-        if (!alter.Nullable)
+        // PRIMARY KEY columns implicitly take !Nullable from the parser
+        // (matches CREATE TABLE). The general NOT-NULL-on-ALTER restriction
+        // doesn't apply here because the PK path requires a guaranteed
+        // non-null backfill (IDENTITY on a populated table, or an empty
+        // table). Other !Nullable callers still hit the restriction below.
+        if (!alter.Nullable && !alter.PrimaryKey)
         {
             throw new InvalidOperationException(
                 $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' NOT NULL " +
@@ -1630,6 +1635,41 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
         }
 
+        // PRIMARY KEY validation — only one PK per table, and on a
+        // non-empty table we need IDENTITY to supply unique non-null
+        // values for existing rows (DEFAULT doesn't backfill historical
+        // rows in the current writer, and a plain PK column would leave
+        // every existing row NULL).
+        if (alter.PrimaryKey)
+        {
+            if (computedExpr is not null)
+            {
+                throw new InvalidOperationException(
+                    $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': PRIMARY KEY " +
+                    "cannot combine with GENERATED ALWAYS AS (computed column).");
+            }
+            if (TryGetTable(alter.TableName, out ITableProvider? existingForPk))
+            {
+                Schema existingSchema = existingForPk.GetSchema();
+                if (existingSchema.PrimaryKeyColumnIndices.Count > 0)
+                {
+                    string existingPkName = existingSchema.Columns[existingSchema.PrimaryKeyColumnIndices[0]].Name;
+                    throw new InvalidOperationException(
+                        $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}': table already " +
+                        $"has a PRIMARY KEY (column '{existingPkName}'). Only one PRIMARY KEY per table " +
+                        "is supported.");
+                }
+                if (existingForPk.GetRowCount() > 0 && identity is null)
+                {
+                    throw new InvalidOperationException(
+                        $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' PRIMARY KEY " +
+                        "on a non-empty table requires GENERATED IDENTITY so existing rows can be " +
+                        "backfilled with unique non-null values. Either truncate the table first or " +
+                        "declare the column GENERATED ALWAYS AS IDENTITY PRIMARY KEY.");
+                }
+            }
+        }
+
         ColumnInfo column = new(alter.ColumnName, kind, nullable: true)
         {
             IsArray = isArray,
@@ -1653,6 +1693,54 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (computedExpr is not null)
         {
             await BackfillComputedColumnAsync(alter.TableName, column).ConfigureAwait(false);
+        }
+
+        // Promote the new column to PRIMARY KEY. AddColumn has already
+        // committed the column (with IDENTITY backfill if specified), so
+        // the column is populated. EnablePrimaryKeyAsync scans, builds the
+        // PK index, and flips the footer's PrimaryKeyColumnIndices. On any
+        // failure (NULL in column, duplicate value) the partial sidecar is
+        // cleaned up — we additionally drop the just-added column so the
+        // table returns to its pre-ALTER state.
+        if (alter.PrimaryKey)
+        {
+            if (!TryGetTable(alter.TableName, out ITableProvider? provider))
+            {
+                throw new InvalidOperationException(
+                    $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' PRIMARY KEY: " +
+                    "provider for table disappeared between AddColumn and EnablePrimaryKey.");
+            }
+
+            int newColumnIndex = -1;
+            Schema postAddSchema = provider.GetSchema();
+            for (int i = 0; i < postAddSchema.Columns.Count; i++)
+            {
+                if (string.Equals(postAddSchema.Columns[i].Name, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    newColumnIndex = i;
+                    break;
+                }
+            }
+            if (newColumnIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    $"ALTER TABLE '{alter.TableName}' ADD COLUMN '{alter.ColumnName}' PRIMARY KEY: " +
+                    "could not locate freshly-added column in the post-AddColumn schema.");
+            }
+
+            try
+            {
+                await provider.EnablePrimaryKeyAsync(newColumnIndex).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Roll back the just-added column. Use best-effort because
+                // the rollback path itself shouldn't fail on a freshly-
+                // added column (it isn't part of any PK at this point, so
+                // DropColumn's PK rejection doesn't apply).
+                try { provider.DropColumn(alter.ColumnName); } catch { /* swallow */ }
+                throw;
+            }
         }
     }
 

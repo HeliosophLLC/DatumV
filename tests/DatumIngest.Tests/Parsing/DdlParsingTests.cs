@@ -665,6 +665,54 @@ public class DdlParsingTests : ServiceTestBase
             SqlParser.ParseStatement("ALTER TABLE t ADD COLUMN x Int32 NULL NOT NULL"));
     }
 
+    // ── ALTER TABLE ADD COLUMN with PRIMARY KEY (parser surface) ──
+
+    /// <summary>
+    /// <c>ALTER TABLE t ADD COLUMN id Int64 PRIMARY KEY</c> parses with
+    /// <see cref="AlterTableAddColumnStatement.PrimaryKey"/> set and
+    /// <see cref="AlterTableAddColumnStatement.Nullable"/> implicitly false.
+    /// </summary>
+    [Fact]
+    public void AlterTableAddColumn_PrimaryKey_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE t ADD COLUMN id Int64 PRIMARY KEY");
+
+        AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.True(alter.PrimaryKey);
+        Assert.False(alter.Nullable, "PRIMARY KEY column should be implicitly NOT NULL.");
+    }
+
+    /// <summary>
+    /// PRIMARY KEY and GENERATED ALWAYS AS IDENTITY can appear in either
+    /// order on an ADD COLUMN (matches the CREATE TABLE surface).
+    /// </summary>
+    [Theory]
+    [InlineData("PRIMARY KEY GENERATED ALWAYS AS IDENTITY")]
+    [InlineData("GENERATED ALWAYS AS IDENTITY PRIMARY KEY")]
+    public void AlterTableAddColumn_PrimaryKeyAndGenerated_AnyOrder(string constraints)
+    {
+        Statement statement = SqlParser.ParseStatement(
+            $"ALTER TABLE t ADD COLUMN id Int64 {constraints}");
+
+        AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.True(alter.PrimaryKey);
+        Assert.NotNull(alter.Identity);
+        Assert.False(alter.Identity!.AcceptUserValues);
+        Assert.False(alter.Nullable);
+    }
+
+    /// <summary>
+    /// Duplicate PRIMARY KEY on ADD COLUMN is rejected at parse time.
+    /// </summary>
+    [Fact]
+    public void AlterTableAddColumn_DuplicatePrimaryKey_Throws()
+    {
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement(
+                "ALTER TABLE t ADD COLUMN id Int64 PRIMARY KEY PRIMARY KEY"));
+    }
+
     // ───────────────────── Query as Statement ─────────────────────
 
     [Fact]

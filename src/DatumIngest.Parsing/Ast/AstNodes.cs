@@ -1287,6 +1287,12 @@ public sealed record ColumnAssignment(string ColumnName, Expression Value);
 /// backfilled into existing rows with sequential counter values and the
 /// table's prologue identity state is initialised.
 /// </param>
+/// <param name="PrimaryKey">
+/// When <see langword="true"/>, the new column becomes the table's PRIMARY KEY.
+/// Requires that the table doesn't already have a PK; on a non-empty table the
+/// column must also carry a <c>GENERATED IDENTITY</c> so historical rows
+/// receive non-null unique values.
+/// </param>
 public sealed record AlterTableAddColumnStatement(
     string TableName,
     string ColumnName,
@@ -1294,7 +1300,8 @@ public sealed record AlterTableAddColumnStatement(
     Expression? DefaultValue = null,
     bool Nullable = true,
     Expression? ComputedExpression = null,
-    IdentitySpec? Identity = null) : Statement;
+    IdentitySpec? Identity = null,
+    bool PrimaryKey = false) : Statement;
 
 /// <summary>
 /// <c>ALTER TABLE name DROP [COLUMN] col [IF EXISTS]</c> — soft-drops a

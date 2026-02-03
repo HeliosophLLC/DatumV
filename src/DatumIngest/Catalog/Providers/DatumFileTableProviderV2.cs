@@ -1941,12 +1941,22 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             }
 
             footerIndexToSchemaIndex[i] = columns.Count;
-            columns.Add(new ColumnInfo(d.Name, d.Kind, d.IsNullable)
+            bool isPrimaryKey = pkFooterIndexSet is not null && pkFooterIndexSet.Contains((ushort)i);
+            // PK columns are implicitly NOT NULL at the schema level even
+            // if the underlying descriptor still records IsNullable=true.
+            // The latter happens for ALTER TABLE … ADD COLUMN … PRIMARY KEY:
+            // the column's pages were written with a null bitmap (the
+            // writer requires it for historical-row backfill), but the
+            // promote-to-PK path guarantees every live row has a non-null
+            // value. Surfacing Nullable=false on the schema matches what
+            // CREATE TABLE-time PK columns report.
+            bool effectiveNullable = isPrimaryKey ? false : d.IsNullable;
+            columns.Add(new ColumnInfo(d.Name, d.Kind, effectiveNullable)
             {
                 IsArray = d.IsArray,
                 DefaultExpression = defaultExpression,
                 Identity = i == identityFooterIndex ? identitySpec : null,
-                IsPrimaryKey = pkFooterIndexSet is not null && pkFooterIndexSet.Contains((ushort)i),
+                IsPrimaryKey = isPrimaryKey,
                 ComputedExpression = computedExpression,
             });
             indices.Add(i);
@@ -2292,6 +2302,141 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
         {
             DatumFileWriterV2.DropColumn(_descriptor.FilePath, columnName);
             RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Promotes <paramref name="columnIndex"/> to be the table's PRIMARY KEY.
+    /// Builds the <c>.datum-pkindex</c> sidecar from a scan of existing rows,
+    /// then flips the footer's <c>PrimaryKeyColumnIndices</c> to reference
+    /// the column. On any failure (NULL in the column, duplicate value, IO
+    /// error), the partial sidecar is deleted and the footer is left
+    /// untouched.
+    /// </summary>
+    /// <remarks>
+    /// Called by <see cref="TableCatalog"/> as the second half of
+    /// <c>ALTER TABLE … ADD COLUMN … PRIMARY KEY</c> — provider.AddColumn
+    /// runs first (with IDENTITY backfill if specified) so the column is
+    /// populated by the time this scan starts.
+    /// </remarks>
+    /// <inheritdoc/>
+    public async Task EnablePrimaryKeyAsync(int columnIndex, CancellationToken ct = default)
+    {
+        await _mutationLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Validate against the live snapshot.
+            Schema schema = _snapshot.Schema;
+            if (schema.PrimaryKeyColumnIndices.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "EnablePrimaryKey: table already has a PRIMARY KEY. " +
+                    "Only one PK per table is supported.");
+            }
+            if (columnIndex < 0 || columnIndex >= schema.Columns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(columnIndex),
+                    $"Column index {columnIndex} is out of range for schema with {schema.Columns.Count} columns.");
+            }
+            string columnName = schema.Columns[columnIndex].Name;
+
+            // Defensive cleanup — a stray sidecar from a prior aborted attempt
+            // would corrupt this build's results.
+            string pkIndexPath = GetPrimaryKeyIndexPath(_descriptor.FilePath);
+            if (File.Exists(pkIndexPath))
+            {
+                File.Delete(pkIndexPath);
+            }
+
+            // Build the sidecar. We intentionally let the underlying tree's
+            // uniqueness enforcement do the duplicate detection: Insert
+            // throws DuplicateKeyException on a collision, which we translate
+            // into a user-facing PrimaryKeyViolationException. On any failure
+            // the file is deleted so a retry starts from a clean slate.
+            Indexing.BTree.MutableBytes.MutableBPlusTreeBytes tree =
+                Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(pkIndexPath, allowDuplicates: false);
+            bool indexFinalized = false;
+            try
+            {
+                await foreach (RowBatch batch in ScanAsync(
+                    requiredColumns: null,
+                    filterHint: null,
+                    targetArena: null,
+                    cancellationToken: ct).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        for (int r = 0; r < batch.Count; r++)
+                        {
+                            Row row = batch[r];
+                            DataValue value = row[columnIndex];
+                            if (value.IsNull)
+                            {
+                                throw new Execution.PrimaryKeyViolationException(
+                                    $"PRIMARY KEY column '{columnName}' has a NULL in an existing row; " +
+                                    "every row must have a non-null value before the column can be PK.");
+                            }
+
+                            byte[] encoded = Indexing.CompositeKeyEncoder.Encode(
+                                new[] { value }, batch.Arena);
+                            try
+                            {
+                                tree.Insert(new Indexing.BTree.MutableBytes.BytesIndexEntry(
+                                    encoded, ChunkIndex: 0, RowOffsetInChunk: 0L));
+                            }
+                            catch (Indexing.BTree.MutableBytes.DuplicateKeyException)
+                            {
+                                throw new Execution.PrimaryKeyViolationException(
+                                    $"PRIMARY KEY violation on column '{columnName}': duplicate value " +
+                                    "in existing rows. The PK index cannot be built without unique values.");
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        batch.Dispose();
+                    }
+                }
+                indexFinalized = true;
+            }
+            finally
+            {
+                tree.Dispose();
+                if (!indexFinalized && File.Exists(pkIndexPath))
+                {
+                    try { File.Delete(pkIndexPath); } catch { /* best-effort cleanup */ }
+                }
+            }
+
+            // Sidecar built and closed — flip the footer to commit. If this
+            // throws, the sidecar is orphaned but harmless (the footer still
+            // says "no PK", so TryOpenPrimaryKeyIndex won't load it on the
+            // next reopen). Delete it anyway so a retry starts clean.
+            try
+            {
+                DatumFileWriterV2.SetPrimaryKey(_descriptor.FilePath, new ushort[] { (ushort)columnIndex });
+            }
+            catch
+            {
+                if (File.Exists(pkIndexPath))
+                {
+                    try { File.Delete(pkIndexPath); } catch { /* best-effort cleanup */ }
+                }
+                throw;
+            }
+
+            // Re-snapshot and re-open the sidecar handle so the in-memory
+            // provider state matches the freshly-committed footer.
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            _pkIndexBytes?.Dispose();
+            _pkIndexBytes = null;
+            _pkColumnIndices = Array.Empty<int>();
+            TryOpenPrimaryKeyIndex();
             InvalidateSourceIndexCache();
         }
         finally
