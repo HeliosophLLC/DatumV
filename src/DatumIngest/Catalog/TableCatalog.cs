@@ -449,6 +449,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 ApplyAlterTableDropColumn(alterDrop);
                 return EmptyQueryPlan.Instance;
 
+            case AlterTableDropConstraintStatement alterDropConstraint:
+                await ApplyAlterTableDropConstraintAsync(alterDropConstraint).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
             case InsertStatement insert:
                 return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
 
@@ -1909,12 +1913,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // PK columns are load-bearing on the prologue's PK index
             // list and on the runtime uniqueness check. Dropping one
             // would leave the table referencing a non-existent column;
-            // require the user to drop the constraint first (a future
-            // ALTER TABLE DROP CONSTRAINT path).
+            // require the user to drop the constraint first.
             throw new InvalidOperationException(
                 $"Column '{alter.ColumnName}' is part of the table's PRIMARY KEY and cannot be " +
-                "dropped. Drop the PRIMARY KEY constraint first (not yet supported), or recreate " +
-                "the table without the constraint.");
+                "dropped. Drop the PRIMARY KEY constraint first (e.g., " +
+                $"`ALTER TABLE {alter.TableName} DROP CONSTRAINT {alter.TableName}_pkey`).");
         }
 
         // PG-style dependent-column check: a column referenced by any
@@ -1999,6 +2002,47 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         DropColumn(alter.TableName, alter.ColumnName);
+    }
+
+    /// <summary>
+    /// Applies <c>ALTER TABLE name DROP CONSTRAINT constraint_name [IF EXISTS]</c>.
+    /// In v1 the only constraint kind that can be dropped is PRIMARY KEY,
+    /// whose auto-derived name is <c>&lt;table&gt;_pkey</c>. Other constraint
+    /// names produce a PG-flavored "does not exist" error (suppressed by
+    /// <c>IF EXISTS</c>).
+    /// </summary>
+    private async Task ApplyAlterTableDropConstraintAsync(AlterTableDropConstraintStatement alter)
+    {
+        if (!TryGetTable(alter.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{alter.TableName}' is not registered in the catalog.");
+        }
+
+        // PG convention: PK auto-name = <table>_pkey. v1 is PK-only; future
+        // PRs extend this to UNIQUE / FK / CHECK names.
+        string expectedPkName = Providers.InformationSchemaTableConstraintsProvider
+            .PrimaryKeyConstraintName(alter.TableName);
+
+        if (string.Equals(alter.ConstraintName, expectedPkName, StringComparison.OrdinalIgnoreCase))
+        {
+            Schema schema = provider.GetSchema();
+            if (schema.PrimaryKeyColumnIndices.Count == 0)
+            {
+                if (alter.IfExists) return;
+                throw new InvalidOperationException(
+                    $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
+            }
+
+            await provider.DisablePrimaryKeyAsync().ConfigureAwait(false);
+            return;
+        }
+
+        // Name didn't match the PK convention. In v1 there are no other
+        // droppable constraint names, so this is always "does not exist".
+        if (alter.IfExists) return;
+        throw new InvalidOperationException(
+            $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
     }
 
     /// <summary>

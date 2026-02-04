@@ -1318,6 +1318,21 @@ public sealed record AlterTableDropColumnStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
+/// <c>ALTER TABLE name DROP CONSTRAINT constraint_name [IF EXISTS]</c> —
+/// removes a named constraint from a table. In v1 only PRIMARY KEY
+/// constraints can be dropped (their auto-derived name is
+/// <c>&lt;table&gt;_pkey</c>); future PRs will extend this to UNIQUE / FK /
+/// CHECK once they exist.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ConstraintName">The constraint to drop (e.g., <c>users_pkey</c>).</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the constraint does not exist.</param>
+public sealed record AlterTableDropConstraintStatement(
+    string TableName,
+    string ConstraintName,
+    bool IfExists = false) : Statement;
+
+/// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
 /// </summary>
 /// <param name="TableName">The target table name.</param>

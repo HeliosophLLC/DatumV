@@ -239,7 +239,12 @@ internal static class KeywordRegistry
             ["WHERE", "FROM"],
 
         [CompletionZoneKind.AfterAlterTable] =
-            ["ADD"],
+            ["ADD", "DROP"],
+
+        // ALTER TABLE name DROP {COLUMN | CONSTRAINT} … — offer both verbs
+        // plus IF EXISTS for both shapes.
+        [CompletionZoneKind.AfterAlterTableDrop] =
+            ["COLUMN", "CONSTRAINT", "IF EXISTS"],
 
         // ALTER TABLE ADD COLUMN accepts the same constraint set as CREATE
         // TABLE columns (PRIMARY KEY, NULL/NOT NULL, DEFAULT, GENERATED …)
@@ -393,6 +398,7 @@ internal static class KeywordRegistry
         [SqlToken.Alter] = ["ALTER"],
         [SqlToken.Add] = ["ADD"],
         [SqlToken.Column] = ["COLUMN"],
+        [SqlToken.Constraint] = ["CONSTRAINT"],
         [SqlToken.Default] = ["DEFAULT"],
         [SqlToken.Primary] = ["PRIMARY KEY"],
         [SqlToken.Key] = [],            // Component: part of PRIMARY KEY

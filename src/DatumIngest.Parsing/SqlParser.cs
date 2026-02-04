@@ -3913,12 +3913,25 @@ public static class SqlParser
         select (Statement)new AlterTableDropColumnStatement(tableName, colName, ifExists);
 
     /// <summary>
+    /// Parses the <c>CONSTRAINT [IF EXISTS] constraint_name</c> body of an
+    /// <c>ALTER TABLE name DROP</c> statement once the <c>DROP</c> keyword
+    /// has been consumed. The <c>CONSTRAINT</c> token is consumed inside
+    /// this parser (not by the caller) so the caller can <c>.Try()</c>
+    /// over the whole thing to fall back to the drop-column body when no
+    /// CONSTRAINT token is present.
+    /// </summary>
+    private static TokenListParser<SqlToken, Statement> AlterTableDropConstraintBody(string tableName) =>
+        from constraintKw in Token.EqualTo(SqlToken.Constraint)
+        from ifExists in IfExistsParser
+        from constraintName in IdentifierOrKeywordAsName
+        select (Statement)new AlterTableDropConstraintStatement(tableName, constraintName, ifExists);
+
+    /// <summary>
     /// Parses <c>ALTER TABLE name (ADD ... | DROP ...)</c>. The prefix
-    /// matches <c>ALTER TABLE name</c> as a Try-protected unit; the
-    /// next token (<c>ADD</c> or <c>DROP</c>) selects the body parser
-    /// directly so neither body needs <c>.Try()</c> protection — deep
-    /// errors (e.g., bad <c>DEFAULT</c> expression) propagate with
-    /// their real <c>Remainder.Position</c>.
+    /// matches <c>ALTER TABLE name</c> as a Try-protected unit. After
+    /// <c>DROP</c>, the drop-constraint body is tried first (it expects a
+    /// <c>CONSTRAINT</c> token next); on miss the parser backtracks into
+    /// the (legacy) drop-column body.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
         from tableName in AlterTablePrefix
@@ -3926,7 +3939,8 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Drop))
         from body in addOrDrop.Kind == SqlToken.Add
             ? AlterTableAddColumnBody(tableName)
-            : AlterTableDropColumnBody(tableName)
+            : AlterTableDropConstraintBody(tableName).Try()
+                .Or(AlterTableDropColumnBody(tableName))
         select body;
 
     /// <summary>

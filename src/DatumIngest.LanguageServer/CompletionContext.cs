@@ -668,6 +668,28 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterCreate;
 
                 case SqlToken.Drop:
+                    // Walk back to see whether this DROP is the verb of an
+                    // ALTER TABLE statement (`ALTER TABLE name DROP …`) — in
+                    // which case the user wants COLUMN / CONSTRAINT / IF EXISTS
+                    // completions, not top-level DROP TABLE / DROP INDEX
+                    // suggestions. Recognise the shape by walking past an
+                    // identifier (table name) → TABLE → ALTER.
+                    {
+                        int back = index - 1;
+                        if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
+                                          || IsKeywordToken(tokens[back].Kind)))
+                        {
+                            back--;
+                            if (back >= 0 && tokens[back].Kind == SqlToken.Table)
+                            {
+                                back--;
+                                if (back >= 0 && tokens[back].Kind == SqlToken.Alter)
+                                {
+                                    return CompletionZoneKind.AfterAlterTableDrop;
+                                }
+                            }
+                        }
+                    }
                     return CompletionZoneKind.AfterDrop;
 
                 case SqlToken.Table:
@@ -1333,6 +1355,13 @@ public enum CompletionZoneKind
 
     /// <summary>After ALTER TABLE name ADD — offer COLUMN keyword and column type context.</summary>
     AfterAlterTableAdd,
+
+    /// <summary>
+    /// After <c>ALTER TABLE name DROP</c> — offer <c>COLUMN</c> (for the
+    /// drop-column body) and <c>CONSTRAINT</c> (for the drop-constraint
+    /// body), plus <c>IF EXISTS</c>.
+    /// </summary>
+    AfterAlterTableDrop,
 
     /// <summary>
     /// After a <c>CREATE INDEX name ON table (col, ...)</c> column list closes —

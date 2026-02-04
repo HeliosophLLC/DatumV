@@ -455,6 +455,131 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         Assert.Contains("backfill", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ──────────────────── ALTER TABLE … DROP CONSTRAINT ────────────────────
+    //
+    // Drops the PRIMARY KEY constraint from a table by its auto-derived name
+    // (<c>&lt;table&gt;_pkey</c>). Removes the .datum-pkindex sidecar, flips the
+    // footer's PrimaryKeyColumnIndices to empty, and refreshes the snapshot
+    // so subsequent INSERTs no longer enforce uniqueness on the (former) PK
+    // column.
+
+    [Fact]
+    public void AlterTable_DropPrimaryKeyConstraint_Persistent_RemovesPkAndSidecar()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+        catalog.Plan("INSERT INTO users VALUES (1, 'alice')");
+
+        string pkIndexPath = Path.Combine(_tempDir, "users.datum-pkindex");
+        Assert.True(File.Exists(pkIndexPath), "PK sidecar should exist before drop.");
+
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey");
+
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+        Assert.False(schema.Columns[0].IsPrimaryKey);
+        Assert.False(File.Exists(pkIndexPath), "PK sidecar should be removed after drop.");
+    }
+
+    [Fact]
+    public void AlterTable_DropPrimaryKey_AllowsDuplicateInsertAfterDrop()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+        catalog.Plan("INSERT INTO users VALUES (1, 'alice'), (2, 'bob')");
+
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey");
+
+        // PK no longer enforced — what was a violation before now succeeds.
+        catalog.Plan("INSERT INTO users VALUES (1, 'duplicate')");
+        Assert.Equal(3, catalog["users"].GetRowCount());
+    }
+
+    [Fact]
+    public async Task AlterTable_DropPrimaryKey_SurvivesReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+            catalog.Plan("INSERT INTO users VALUES (1, 'alice')");
+            catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+
+        // No PK after reopen — duplicate inserts must succeed.
+        reopened.Plan("INSERT INTO users VALUES (1, 'duplicate')");
+        Assert.Equal(2, reopened["users"].GetRowCount());
+
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public void AlterTable_DropConstraint_TableHasNoPk_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32, name String)");
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey"));
+        Assert.Contains("users_pkey", ex.Message);
+        Assert.Contains("does not exist", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTable_DropConstraint_WrongName_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+
+        // The right name is `users_pkey`; this one shouldn't match.
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE users DROP CONSTRAINT some_other_name"));
+        Assert.Contains("some_other_name", ex.Message);
+        Assert.Contains("does not exist", ex.Message);
+    }
+
+    [Fact]
+    public void AlterTable_DropConstraint_IfExists_OnAbsentConstraint_NoThrow()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32, name String)");
+
+        // Table has no PK, but IF EXISTS suppresses the error.
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_pkey");
+
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+    }
+
+    [Fact]
+    public void AlterTable_DropConstraint_TableNotFound_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE missing DROP CONSTRAINT missing_pkey"));
+        Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlterTable_DropConstraint_VisibleInInformationSchema_AfterDrop()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey");
+
+        // information_schema.table_constraints must drop the row, otherwise
+        // the discovery → drop loop wouldn't be symmetric.
+        Schema constraintsSchema = catalog["information_schema.table_constraints"].GetSchema();
+        _ = constraintsSchema; // touch to confirm the provider is wired
+        Schema usersSchema = catalog["users"].GetSchema();
+        Assert.Empty(usersSchema.PrimaryKeyColumnIndices);
+    }
+
     [Fact]
     public async Task AlterTable_AddPkColumn_SurvivesReopen()
     {

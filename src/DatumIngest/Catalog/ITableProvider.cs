@@ -246,6 +246,21 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support EnablePrimaryKey (CanAlterColumns is false).");
 
     /// <summary>
+    /// Clears the table's PRIMARY KEY constraint. Removes the on-disk PK
+    /// index sidecar (if any), flips the footer's PrimaryKeyColumnIndices
+    /// to empty, and refreshes the snapshot so subsequent INSERTs no
+    /// longer enforce uniqueness on the (former) PK column.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Called by the catalog as the body of
+    /// <c>ALTER TABLE … DROP CONSTRAINT &lt;table&gt;_pkey</c>.
+    /// </remarks>
+    Task DisablePrimaryKeyAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support DisablePrimaryKey (CanAlterColumns is false).");
+
+    /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
     /// inserts. The session holds a writer for its lifetime; rows
     /// become visible only after <see cref="IAppendSession.CommitAsync"/>.

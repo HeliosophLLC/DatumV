@@ -1252,6 +1252,47 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Rewrites <paramref name="datumPath"/>'s footer with an empty PRIMARY
+    /// KEY column list (i.e., clears any prior PK). Pure footer mutation —
+    /// no pages are written, no data is touched. Generation bumps by one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Used by <c>ALTER TABLE … DROP CONSTRAINT &lt;table&gt;_pkey</c>. The
+    /// caller is expected to delete the <c>.datum-pkindex</c> sidecar before
+    /// or after this call — the writer does not touch the sidecar file
+    /// (it doesn't own it; the provider does).
+    /// </para>
+    /// <para>
+    /// No-op when the file already has no PK. Does NOT restore the prior
+    /// column descriptor's IsNullable flag — descriptors describe wire
+    /// format, and the on-disk pages were written according to whatever
+    /// IsNullable was at write time. The schema-build path overrides
+    /// Nullable=false for PK columns only when PrimaryKeyColumnIndices is
+    /// non-empty; once cleared, the column's Nullable reverts to whatever
+    /// the descriptor says (which is the right PG-equivalent semantics).
+    /// </para>
+    /// </remarks>
+    public static void ClearPrimaryKey(string datumPath)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        if (writer._primaryKeyColumnIndices is null || writer._primaryKeyColumnIndices.Length == 0)
+        {
+            // No-op — finalize anyway to keep the call observable as a
+            // generation bump, matching the SetPrimaryKey shape.
+            writer.FinalizeWriter();
+            return;
+        }
+
+        writer._primaryKeyColumnIndices = null;
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// One-shot helper for batched column additions in a single
     /// commit. Generation bumps by one regardless of how many columns
     /// are added.

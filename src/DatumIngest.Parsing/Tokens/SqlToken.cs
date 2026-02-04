@@ -301,6 +301,9 @@ public enum SqlToken
     /// <summary>The COLUMN keyword (ALTER TABLE column specifier).</summary>
     Column,
 
+    /// <summary>The CONSTRAINT keyword (used in <c>ALTER TABLE … DROP CONSTRAINT name</c>).</summary>
+    Constraint,
+
     /// <summary>The DEFAULT keyword (column default value).</summary>
     Default,
 

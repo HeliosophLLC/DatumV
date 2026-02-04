@@ -713,6 +713,53 @@ public class DdlParsingTests : ServiceTestBase
                 "ALTER TABLE t ADD COLUMN id Int64 PRIMARY KEY PRIMARY KEY"));
     }
 
+    // ─── ALTER TABLE DROP CONSTRAINT (parser surface) ───
+
+    /// <summary>
+    /// <c>ALTER TABLE t DROP CONSTRAINT users_pkey</c> parses to
+    /// <see cref="AlterTableDropConstraintStatement"/>.
+    /// </summary>
+    [Fact]
+    public void AlterTableDropConstraint_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users DROP CONSTRAINT users_pkey");
+
+        AlterTableDropConstraintStatement drop = Assert.IsType<AlterTableDropConstraintStatement>(statement);
+        Assert.Equal("users", drop.TableName);
+        Assert.Equal("users_pkey", drop.ConstraintName);
+        Assert.False(drop.IfExists);
+    }
+
+    /// <summary>
+    /// <c>ALTER TABLE t DROP CONSTRAINT IF EXISTS …</c> sets IfExists=true.
+    /// </summary>
+    [Fact]
+    public void AlterTableDropConstraint_IfExists_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_pkey");
+
+        AlterTableDropConstraintStatement drop = Assert.IsType<AlterTableDropConstraintStatement>(statement);
+        Assert.True(drop.IfExists);
+        Assert.Equal("users_pkey", drop.ConstraintName);
+    }
+
+    /// <summary>
+    /// The legacy <c>DROP COLUMN</c> path is unaffected by the new
+    /// <c>DROP CONSTRAINT</c> dispatch — a regression guard for the
+    /// dispatcher that picks between the two DROP arms.
+    /// </summary>
+    [Fact]
+    public void AlterTableDropColumn_StillParses_AfterDropConstraintAdded()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users DROP COLUMN obsolete");
+
+        AlterTableDropColumnStatement drop = Assert.IsType<AlterTableDropColumnStatement>(statement);
+        Assert.Equal("obsolete", drop.ColumnName);
+    }
+
     // ───────────────────── Query as Statement ─────────────────────
 
     [Fact]

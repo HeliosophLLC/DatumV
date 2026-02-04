@@ -2294,6 +2294,44 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
+    public async Task DisablePrimaryKeyAsync(CancellationToken ct = default)
+    {
+        await _mutationLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // No-op shortcut — caller (the catalog) already handles the
+            // "no PK to drop" error; this is defense in depth.
+            if (_snapshot.Schema.PrimaryKeyColumnIndices.Count == 0)
+            {
+                return;
+            }
+
+            // Close + delete the sidecar FIRST so a crash between this and
+            // the footer flip leaves the table without an orphan PK index
+            // pointing at stale (chunk, row) entries. Subsequent footer
+            // commits with the new (empty) PrimaryKeyColumnIndices then
+            // also won't try to re-open the missing sidecar.
+            _pkIndexBytes?.Dispose();
+            _pkIndexBytes = null;
+            _pkColumnIndices = Array.Empty<int>();
+
+            string pkIndexPath = GetPrimaryKeyIndexPath(_descriptor.FilePath);
+            if (File.Exists(pkIndexPath))
+            {
+                try { File.Delete(pkIndexPath); } catch { /* best-effort */ }
+            }
+
+            DatumFileWriterV2.ClearPrimaryKey(_descriptor.FilePath);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public void DropColumn(string columnName)
     {
         ArgumentNullException.ThrowIfNull(columnName);
