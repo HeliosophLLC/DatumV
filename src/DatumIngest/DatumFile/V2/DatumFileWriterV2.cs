@@ -1293,6 +1293,88 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     }
 
     /// <summary>
+    /// Clears the table's IDENTITY column state in <paramref name="datumPath"/>'s
+    /// footer. Pure footer mutation — no pages are written, no data is
+    /// touched. Existing rows keep their stored identity values; the
+    /// column simply loses its auto-increment behavior for future INSERTs
+    /// and becomes a plain nullable column from the runtime's point of
+    /// view. Generation bumps by one.
+    /// </summary>
+    /// <remarks>
+    /// No-op when the file already has no IDENTITY column. Used by
+    /// <c>ALTER TABLE … ALTER COLUMN c DROP IDENTITY</c>.
+    /// </remarks>
+    public static void ClearIdentity(string datumPath)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        writer._identityColumnIndex = -1;
+        writer._identitySeed = 0;
+        writer._identityStep = 0;
+        writer._identityNextValue = 0;
+        writer._identityAcceptUserValues = false;
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// Returns the footer column index of <paramref name="columnName"/>,
+    /// or <see langword="null"/> when no live column matches. Tombstoned
+    /// columns are skipped. Helper for footer-mutation entry points that
+    /// take a column name from the user.
+    /// </summary>
+    private static int? FindLiveColumnIndex(DatumFileWriterV2 writer, string columnName)
+    {
+        for (int i = 0; i < writer._columns!.Length; i++)
+        {
+            ColumnDescriptorV2 d = writer._columns[i];
+            if (d.IsTombstoned) continue;
+            if (string.Equals(d.Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Removes <paramref name="columnName"/>'s entry from the footer's
+    /// defaults table in <paramref name="datumPath"/>. Pure footer
+    /// mutation. Existing rows are unaffected; future INSERTs that omit
+    /// the column will store NULL instead of the previously-configured
+    /// default. Generation bumps by one.
+    /// </summary>
+    /// <remarks>
+    /// No-op when the column has no default. Throws when the column does
+    /// not exist (the catalog validates the column-exists precondition
+    /// before calling, so this is a safety net only).
+    /// </remarks>
+    public static void ClearColumnDefault(string datumPath, string columnName)
+    {
+        ArgumentNullException.ThrowIfNull(datumPath);
+        ArgumentNullException.ThrowIfNull(columnName);
+
+        string? sidecarPath = ResolveSidecarPathIfNeeded(datumPath);
+        using DatumFileWriterV2 writer = OpenForAppend(datumPath, sidecarPath);
+
+        int? columnIndex = FindLiveColumnIndex(writer, columnName);
+        if (columnIndex is null)
+        {
+            throw new InvalidOperationException(
+                $"ClearColumnDefault: column '{columnName}' does not exist on '{datumPath}'.");
+        }
+
+        if (writer._columnDefaults is { Count: > 0 })
+        {
+            ushort target = checked((ushort)columnIndex.Value);
+            writer._columnDefaults.RemoveAll(d => d.ColumnIndex == target);
+        }
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
     /// One-shot helper for batched column additions in a single
     /// commit. Generation bumps by one regardless of how many columns
     /// are added.

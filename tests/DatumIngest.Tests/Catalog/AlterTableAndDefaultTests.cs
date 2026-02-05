@@ -804,4 +804,95 @@ public sealed class AlterTableAndDefaultTests : ServiceTestBase, IAsyncLifetime
             catalog.Plan("ALTER TABLE t ADD COLUMN n Int32 DEFAULT 3.14"));
         Assert.Contains("Int32", ex.Message);
     }
+
+    // ──────────────────── ALTER TABLE … ALTER COLUMN c DROP DEFAULT ────────────────────
+    //
+    // Clears a column's DEFAULT expression so future INSERTs that omit
+    // the column write NULL rather than the previously-configured default.
+    // Existing rows are unaffected (the default never backfilled them).
+
+    [Fact]
+    public void AlterTable_DropDefault_ClearsDefaultExpression()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, label String DEFAULT 'unknown')");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN label DROP DEFAULT");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Null(schema.Columns[1].DefaultExpression);
+    }
+
+    [Fact]
+    public async Task AlterTable_DropDefault_OmittedColumn_StoresNullAfterDrop()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, label String DEFAULT 'unknown')");
+
+        // Pre-drop INSERT omits label → default fills 'unknown'.
+        catalog.Plan("INSERT INTO t (id) VALUES (1)");
+
+        catalog.Plan("ALTER TABLE t ALTER COLUMN label DROP DEFAULT");
+
+        // Post-drop INSERT omits label → NULL.
+        catalog.Plan("INSERT INTO t (id) VALUES (2)");
+
+        int beforeWithDefault = 0;
+        int afterNull = 0;
+        await foreach (RowBatch batch in catalog["t"].ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Arena arena = batch.Arena;
+            for (int r = 0; r < batch.Count; r++)
+            {
+                int id = batch[r][0].AsInt32();
+                DataValue label = batch[r][1];
+                if (id == 1 && !label.IsNull && label.AsString(arena) == "unknown") beforeWithDefault++;
+                if (id == 2 && label.IsNull) afterNull++;
+            }
+            batch.Dispose();
+        }
+        Assert.Equal(1, beforeWithDefault);
+        Assert.Equal(1, afterNull);
+    }
+
+    [Fact]
+    public void AlterTable_DropDefault_IsIdempotent()
+    {
+        // PG treats DROP DEFAULT as idempotent (no error if no default);
+        // we match that behavior regardless of IF EXISTS.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32, label String)");
+
+        // No default to begin with — must not throw.
+        catalog.Plan("ALTER TABLE t ALTER COLUMN label DROP DEFAULT");
+
+        Schema schema = catalog["t"].GetSchema();
+        Assert.Null(schema.Columns[1].DefaultExpression);
+    }
+
+    [Fact]
+    public void AlterTable_DropDefault_UnknownColumn_Throws()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32)");
+
+        Exception ex = Assert.ThrowsAny<Exception>(() =>
+            catalog.Plan("ALTER TABLE t ALTER COLUMN missing DROP DEFAULT"));
+        Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlterTable_DropDefault_SurvivesReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32, label String DEFAULT 'unknown')");
+            catalog.Plan("ALTER TABLE t ALTER COLUMN label DROP DEFAULT");
+        }
+
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        Schema schema = reopened["t"].GetSchema();
+        Assert.Null(schema.Columns[1].DefaultExpression);
+    }
 }

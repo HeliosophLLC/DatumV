@@ -453,6 +453,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 await ApplyAlterTableDropConstraintAsync(alterDropConstraint).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
+            case AlterTableAlterColumnDropStatement alterColumnDrop:
+                await ApplyAlterTableAlterColumnDropAsync(alterColumnDrop).ConfigureAwait(false);
+                return EmptyQueryPlan.Instance;
+
             case InsertStatement insert:
                 return await InsertExecutor.ExecuteAsync(this, insert).ConfigureAwait(false);
 
@@ -2043,6 +2047,62 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (alter.IfExists) return;
         throw new InvalidOperationException(
             $"constraint \"{alter.ConstraintName}\" of relation \"{alter.TableName}\" does not exist");
+    }
+
+    /// <summary>
+    /// Applies <c>ALTER TABLE name ALTER COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>.
+    /// Validates that the column exists and (for DROP IDENTITY without
+    /// IF EXISTS) that the attribute being dropped is actually present.
+    /// </summary>
+    private async Task ApplyAlterTableAlterColumnDropAsync(AlterTableAlterColumnDropStatement alter)
+    {
+        if (!TryGetTable(alter.TableName, out ITableProvider? provider))
+        {
+            throw new InvalidOperationException(
+                $"Table '{alter.TableName}' is not registered in the catalog.");
+        }
+
+        Schema schema = provider.GetSchema();
+        int columnIndex = -1;
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (string.Equals(schema.Columns[i].Name, alter.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                columnIndex = i;
+                break;
+            }
+        }
+        if (columnIndex < 0)
+        {
+            throw new InvalidOperationException(
+                $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" does not exist");
+        }
+
+        ColumnInfo column = schema.Columns[columnIndex];
+
+        switch (alter.Target)
+        {
+            case AlterColumnDropTarget.Identity:
+                if (column.Identity is null)
+                {
+                    if (alter.IfExists) return;
+                    throw new InvalidOperationException(
+                        $"column \"{alter.ColumnName}\" of relation \"{alter.TableName}\" is not an IDENTITY column");
+                }
+                await provider.DropColumnIdentityAsync(columnIndex).ConfigureAwait(false);
+                return;
+
+            case AlterColumnDropTarget.Default:
+                // PG treats DROP DEFAULT as idempotent — no error when the
+                // column has no default. Match that behavior whether or
+                // not IF EXISTS is supplied.
+                await provider.DropColumnDefaultAsync(columnIndex).ConfigureAwait(false);
+                return;
+
+            default:
+                throw new InvalidOperationException(
+                    $"ALTER COLUMN DROP target {alter.Target} is not implemented.");
+        }
     }
 
     /// <summary>

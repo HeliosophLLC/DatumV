@@ -2294,6 +2294,53 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
+    public async Task DropColumnIdentityAsync(int columnIndex, CancellationToken ct = default)
+    {
+        await _mutationLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Schema schema = _snapshot.Schema;
+            if (columnIndex < 0 || columnIndex >= schema.Columns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(columnIndex),
+                    $"Column index {columnIndex} is out of range for schema with {schema.Columns.Count} columns.");
+            }
+
+            DatumFileWriterV2.ClearIdentity(_descriptor.FilePath);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task DropColumnDefaultAsync(int columnIndex, CancellationToken ct = default)
+    {
+        await _mutationLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Schema schema = _snapshot.Schema;
+            if (columnIndex < 0 || columnIndex >= schema.Columns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(columnIndex),
+                    $"Column index {columnIndex} is out of range for schema with {schema.Columns.Count} columns.");
+            }
+            string columnName = schema.Columns[columnIndex].Name;
+
+            DatumFileWriterV2.ClearColumnDefault(_descriptor.FilePath, columnName);
+            RebuildSnapshotAfterMutation(sidecarMayHaveGrown: false);
+            InvalidateSourceIndexCache();
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task DisablePrimaryKeyAsync(CancellationToken ct = default)
     {
         await _mutationLock.WaitAsync(ct).ConfigureAwait(false);

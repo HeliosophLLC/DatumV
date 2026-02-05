@@ -760,6 +760,68 @@ public class DdlParsingTests : ServiceTestBase
         Assert.Equal("obsolete", drop.ColumnName);
     }
 
+    // ─── ALTER TABLE ALTER COLUMN DROP { IDENTITY | DEFAULT } (parser surface) ───
+
+    [Fact]
+    public void AlterTableAlterColumnDropIdentity_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN id DROP IDENTITY");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.Equal("users", alter.TableName);
+        Assert.Equal("id", alter.ColumnName);
+        Assert.Equal(AlterColumnDropTarget.Identity, alter.Target);
+        Assert.False(alter.IfExists);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDropIdentity_IfExists_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN id DROP IDENTITY IF EXISTS");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.True(alter.IfExists);
+        Assert.Equal(AlterColumnDropTarget.Identity, alter.Target);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDropDefault_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN created_at DROP DEFAULT");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.Equal("users", alter.TableName);
+        Assert.Equal("created_at", alter.ColumnName);
+        Assert.Equal(AlterColumnDropTarget.Default, alter.Target);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDropDefault_IfExists_Parses()
+    {
+        // PG doesn't accept IF EXISTS on DROP DEFAULT (it's idempotent), but
+        // accepting it uniformly keeps the grammar simple — the catalog
+        // treats DROP DEFAULT as idempotent regardless of the keyword.
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ALTER COLUMN created_at DROP DEFAULT IF EXISTS");
+
+        AlterTableAlterColumnDropStatement alter = Assert.IsType<AlterTableAlterColumnDropStatement>(statement);
+        Assert.True(alter.IfExists);
+        Assert.Equal(AlterColumnDropTarget.Default, alter.Target);
+    }
+
+    [Fact]
+    public void AlterTableAlterColumnDrop_UnknownTarget_Throws()
+    {
+        // NOT NULL is deferred — explicit rejection (rewrite required).
+        // PRIMARY KEY isn't an ALTER COLUMN target in PG either.
+        Assert.Throws<ParseException>(() =>
+            SqlParser.ParseStatement(
+                "ALTER TABLE users ALTER COLUMN id DROP SOMETHING_ELSE"));
+    }
+
     // ───────────────────── Query as Statement ─────────────────────
 
     [Fact]

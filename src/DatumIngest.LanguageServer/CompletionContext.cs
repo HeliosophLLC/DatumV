@@ -668,14 +668,26 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterCreate;
 
                 case SqlToken.Drop:
-                    // Walk back to see whether this DROP is the verb of an
-                    // ALTER TABLE statement (`ALTER TABLE name DROP …`) — in
-                    // which case the user wants COLUMN / CONSTRAINT / IF EXISTS
-                    // completions, not top-level DROP TABLE / DROP INDEX
-                    // suggestions. Recognise the shape by walking past an
-                    // identifier (table name) → TABLE → ALTER.
+                    // Disambiguate three shapes of DROP based on what
+                    // precedes it:
+                    //   1. `ALTER TABLE name ALTER COLUMN col DROP` → drop a
+                    //      column attribute (IDENTITY / DEFAULT).
+                    //   2. `ALTER TABLE name DROP` → drop-column /
+                    //      drop-constraint dispatch.
+                    //   3. Otherwise → top-level DROP TABLE / DROP INDEX.
                     {
                         int back = index - 1;
+                        // Shape 1: walk back past column-name → COLUMN → ALTER.
+                        if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
+                                          || IsKeywordToken(tokens[back].Kind))
+                            && back - 2 >= 0
+                            && tokens[back - 1].Kind == SqlToken.Column
+                            && tokens[back - 2].Kind == SqlToken.Alter)
+                        {
+                            return CompletionZoneKind.AfterAlterColumnDrop;
+                        }
+
+                        // Shape 2: walk back past table-name → TABLE → ALTER.
                         if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
                                           || IsKeywordToken(tokens[back].Kind)))
                         {
@@ -722,6 +734,26 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterDeleteFrom;
 
                 case SqlToken.Alter:
+                    // A second ALTER inside `ALTER TABLE name ALTER COLUMN …`
+                    // is the column-attribute-mutation verb (needs COLUMN
+                    // next). Recognise the shape by walking back through an
+                    // identifier (table name) → TABLE → outer ALTER.
+                    {
+                        int back = index - 1;
+                        if (back >= 0 && (tokens[back].Kind == SqlToken.Identifier
+                                          || IsKeywordToken(tokens[back].Kind)))
+                        {
+                            back--;
+                            if (back >= 0 && tokens[back].Kind == SqlToken.Table)
+                            {
+                                back--;
+                                if (back >= 0 && tokens[back].Kind == SqlToken.Alter)
+                                {
+                                    return CompletionZoneKind.AfterAlterTableAlter;
+                                }
+                            }
+                        }
+                    }
                     return CompletionZoneKind.AfterAlterTable;
 
                 case SqlToken.Add:
@@ -1362,6 +1394,18 @@ public enum CompletionZoneKind
     /// body), plus <c>IF EXISTS</c>.
     /// </summary>
     AfterAlterTableDrop,
+
+    /// <summary>
+    /// After <c>ALTER TABLE name ALTER</c> — offer the <c>COLUMN</c> keyword
+    /// that opens the column-attribute mutation body.
+    /// </summary>
+    AfterAlterTableAlter,
+
+    /// <summary>
+    /// After <c>ALTER TABLE name ALTER COLUMN col DROP</c> — offer the
+    /// droppable column attributes (<c>IDENTITY</c>, <c>DEFAULT</c>).
+    /// </summary>
+    AfterAlterColumnDrop,
 
     /// <summary>
     /// After a <c>CREATE INDEX name ON table (col, ...)</c> column list closes —

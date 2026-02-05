@@ -261,6 +261,36 @@ public interface ITableProvider : IDisposable
             $"Table '{Name}' does not support DisablePrimaryKey (CanAlterColumns is false).");
 
     /// <summary>
+    /// Clears the IDENTITY attribute of the column at
+    /// <paramref name="columnIndex"/>. Existing rows keep their stored
+    /// values; future INSERTs that omit this column will store NULL
+    /// instead of an auto-incremented value.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Called by the catalog as the body of
+    /// <c>ALTER TABLE … ALTER COLUMN c DROP IDENTITY</c>.
+    /// </remarks>
+    Task DropColumnIdentityAsync(int columnIndex, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support DropColumnIdentity (CanAlterColumns is false).");
+
+    /// <summary>
+    /// Clears the DEFAULT expression of the column at
+    /// <paramref name="columnIndex"/>. Future INSERTs that omit this
+    /// column will store NULL instead of the previously-configured
+    /// default. Existing rows are unaffected.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation throws <see cref="NotSupportedException"/>.
+    /// Called by the catalog as the body of
+    /// <c>ALTER TABLE … ALTER COLUMN c DROP DEFAULT</c>.
+    /// </remarks>
+    Task DropColumnDefaultAsync(int columnIndex, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            $"Table '{Name}' does not support DropColumnDefault (CanAlterColumns is false).");
+
+    /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
     /// inserts. The session holds a writer for its lifetime; rows
     /// become visible only after <see cref="IAppendSession.CommitAsync"/>.

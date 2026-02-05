@@ -1333,6 +1333,41 @@ public sealed record AlterTableDropConstraintStatement(
     bool IfExists = false) : Statement;
 
 /// <summary>
+/// Which column attribute an <see cref="AlterTableAlterColumnDropStatement"/>
+/// targets. PG supports <c>DROP DEFAULT</c>, <c>DROP IDENTITY</c>, and
+/// <c>DROP NOT NULL</c>; v1 ships the first two (NOT NULL is deferred
+/// because removing it requires rewriting page bytes to add a null bitmap).
+/// </summary>
+public enum AlterColumnDropTarget
+{
+    /// <summary>Removes the column's <c>GENERATED IDENTITY</c> spec from the footer's identity state.</summary>
+    Identity,
+
+    /// <summary>Removes the column's <c>DEFAULT</c> expression from the footer's defaults table.</summary>
+    Default,
+}
+
+/// <summary>
+/// <c>ALTER TABLE name ALTER COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>
+/// — clears a column attribute (identity sequence or default expression).
+/// The column itself stays on the table; only the attribute is removed.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ColumnName">The column whose attribute is being dropped.</param>
+/// <param name="Target">Which attribute to drop — <c>IDENTITY</c> or <c>DEFAULT</c>.</param>
+/// <param name="IfExists">
+/// When <see langword="true"/>, suppresses errors if the targeted attribute
+/// is not present. PG accepts this for <c>DROP IDENTITY</c> but not
+/// <c>DROP DEFAULT</c> (which is idempotent); we accept it uniformly and
+/// treat both as idempotent under <c>IF EXISTS</c>.
+/// </param>
+public sealed record AlterTableAlterColumnDropStatement(
+    string TableName,
+    string ColumnName,
+    AlterColumnDropTarget Target,
+    bool IfExists = false) : Statement;
+
+/// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
 /// </summary>
 /// <param name="TableName">The target table name.</param>

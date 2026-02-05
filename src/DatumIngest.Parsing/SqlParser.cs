@@ -3927,20 +3927,43 @@ public static class SqlParser
         select (Statement)new AlterTableDropConstraintStatement(tableName, constraintName, ifExists);
 
     /// <summary>
-    /// Parses <c>ALTER TABLE name (ADD ... | DROP ...)</c>. The prefix
-    /// matches <c>ALTER TABLE name</c> as a Try-protected unit. After
-    /// <c>DROP</c>, the drop-constraint body is tried first (it expects a
-    /// <c>CONSTRAINT</c> token next); on miss the parser backtracks into
-    /// the (legacy) drop-column body.
+    /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>
+    /// body of an <c>ALTER TABLE name ALTER</c> statement, once the outer
+    /// <c>ALTER</c> verb has been consumed.
+    /// </summary>
+    private static TokenListParser<SqlToken, Statement> AlterTableAlterColumnBody(string tableName) =>
+        from columnKw in Token.EqualTo(SqlToken.Column)
+        from colName in IdentifierOrKeywordAsName
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from targetKw in Token.EqualTo(SqlToken.Identity).Try()
+            .Or(Token.EqualTo(SqlToken.Default))
+        from ifExists in IfExistsParser
+        select (Statement)new AlterTableAlterColumnDropStatement(
+            tableName, colName,
+            targetKw.Kind == SqlToken.Identity
+                ? AlterColumnDropTarget.Identity
+                : AlterColumnDropTarget.Default,
+            ifExists);
+
+    /// <summary>
+    /// Parses <c>ALTER TABLE name (ADD ... | DROP ... | ALTER COLUMN ...)</c>.
+    /// The prefix matches <c>ALTER TABLE name</c> as a Try-protected unit.
+    /// After <c>DROP</c>, the drop-constraint body is tried first (it
+    /// expects a <c>CONSTRAINT</c> token next); on miss the parser
+    /// backtracks into the (legacy) drop-column body.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
         from tableName in AlterTablePrefix
-        from addOrDrop in Token.EqualTo(SqlToken.Add).Try()
-            .Or(Token.EqualTo(SqlToken.Drop))
-        from body in addOrDrop.Kind == SqlToken.Add
-            ? AlterTableAddColumnBody(tableName)
-            : AlterTableDropConstraintBody(tableName).Try()
-                .Or(AlterTableDropColumnBody(tableName))
+        from verb in Token.EqualTo(SqlToken.Add).Try()
+            .Or(Token.EqualTo(SqlToken.Drop).Try())
+            .Or(Token.EqualTo(SqlToken.Alter))
+        from body in verb.Kind switch
+        {
+            SqlToken.Add => AlterTableAddColumnBody(tableName),
+            SqlToken.Alter => AlterTableAlterColumnBody(tableName),
+            _ => AlterTableDropConstraintBody(tableName).Try()
+                .Or(AlterTableDropColumnBody(tableName)),
+        }
         select body;
 
     /// <summary>

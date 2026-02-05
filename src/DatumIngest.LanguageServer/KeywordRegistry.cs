@@ -239,12 +239,23 @@ internal static class KeywordRegistry
             ["WHERE", "FROM"],
 
         [CompletionZoneKind.AfterAlterTable] =
-            ["ADD", "DROP"],
+            ["ADD", "DROP", "ALTER"],
 
         // ALTER TABLE name DROP {COLUMN | CONSTRAINT} … — offer both verbs
         // plus IF EXISTS for both shapes.
         [CompletionZoneKind.AfterAlterTableDrop] =
             ["COLUMN", "CONSTRAINT", "IF EXISTS"],
+
+        // ALTER TABLE name ALTER — only COLUMN is supported as the next
+        // token in v1 (per-table-attribute alterations aren't on the roadmap).
+        [CompletionZoneKind.AfterAlterTableAlter] =
+            ["COLUMN"],
+
+        // ALTER TABLE name ALTER COLUMN col DROP — droppable column
+        // attributes. NOT NULL is intentionally absent (deferred until
+        // page-rewrite support lands).
+        [CompletionZoneKind.AfterAlterColumnDrop] =
+            ["IDENTITY", "DEFAULT", "IF EXISTS"],
 
         // ALTER TABLE ADD COLUMN accepts the same constraint set as CREATE
         // TABLE columns (PRIMARY KEY, NULL/NOT NULL, DEFAULT, GENERATED …)
