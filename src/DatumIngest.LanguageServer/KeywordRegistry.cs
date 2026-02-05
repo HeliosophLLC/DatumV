@@ -238,8 +238,11 @@ internal static class KeywordRegistry
         [CompletionZoneKind.AfterUpdateSet] =
             ["WHERE", "FROM"],
 
+        // ALTER TABLE [IF EXISTS] name — IF EXISTS only meaningful here
+        // when no table name has been typed yet, but offering it
+        // alongside the verbs is harmless and matches PG.
         [CompletionZoneKind.AfterAlterTable] =
-            ["ADD", "DROP", "ALTER"],
+            ["ADD", "DROP", "ALTER", "IF EXISTS"],
 
         // ALTER TABLE name DROP {COLUMN | CONSTRAINT} … — offer both verbs
         // plus IF EXISTS for both shapes.

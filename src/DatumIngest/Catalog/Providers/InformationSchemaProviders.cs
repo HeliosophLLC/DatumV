@@ -306,14 +306,17 @@ internal sealed class InformationSchemaTableConstraintsProvider : NonSeekableTab
 
             (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.Name);
 
-            // PRIMARY KEY — derive the constraint name from the table name.
+            // PRIMARY KEY — use the user-supplied name when one is registered
+            // in the catalog, otherwise derive the PG default `<table>_pkey`.
             if (tableSchema.PrimaryKeyColumnIndices.Count > 0)
             {
+                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.Name);
+
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(7);
                 values[0] = DataValue.FromString("datum", batch.Arena);
                 values[1] = DataValue.FromString(schemaName, batch.Arena);
-                values[2] = DataValue.FromString(PrimaryKeyConstraintName(provider.Name), batch.Arena);
+                values[2] = DataValue.FromString(pkName, batch.Arena);
                 values[3] = DataValue.FromString("datum", batch.Arena);
                 values[4] = DataValue.FromString(schemaName, batch.Arena);
                 values[5] = DataValue.FromString(provider.Name, batch.Arena);
@@ -457,7 +460,7 @@ internal sealed class InformationSchemaKeyColumnUsageProvider : NonSeekableTable
             // for `PRIMARY KEY (b, a)` on `(a, b)`).
             if (tableSchema.PrimaryKeyColumnIndices.Count > 0)
             {
-                string pkName = InformationSchemaTableConstraintsProvider.PrimaryKeyConstraintName(provider.Name);
+                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.Name);
                 for (int p = 0; p < tableSchema.PrimaryKeyColumnIndices.Count; p++)
                 {
                     int colIndex = tableSchema.PrimaryKeyColumnIndices[p];

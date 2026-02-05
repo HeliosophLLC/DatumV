@@ -822,6 +822,119 @@ public class DdlParsingTests : ServiceTestBase
                 "ALTER TABLE users ALTER COLUMN id DROP SOMETHING_ELSE"));
     }
 
+    // ─── ALTER TABLE IF EXISTS (table-level guard) ───
+
+    /// <summary>
+    /// <c>ALTER TABLE IF EXISTS name …</c> parses with the table-level
+    /// IF EXISTS flag set, regardless of which body parser fires next.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "ALTER TABLE IF EXISTS users ADD COLUMN flag Boolean",
+        typeof(AlterTableAddColumnStatement))]
+    [InlineData(
+        "ALTER TABLE IF EXISTS users DROP COLUMN flag",
+        typeof(AlterTableDropColumnStatement))]
+    [InlineData(
+        "ALTER TABLE IF EXISTS users DROP CONSTRAINT users_pkey",
+        typeof(AlterTableDropConstraintStatement))]
+    [InlineData(
+        "ALTER TABLE IF EXISTS users ALTER COLUMN id DROP DEFAULT",
+        typeof(AlterTableAlterColumnDropStatement))]
+    public void AlterTable_TableLevelIfExists_Parses(string sql, Type expectedType)
+    {
+        Statement statement = SqlParser.ParseStatement(sql);
+
+        Assert.IsType(expectedType, statement);
+        // Every ALTER TABLE body now carries a TableIfExists flag; verify
+        // it surfaced on whichever AST node fired.
+        bool tableIfExists = statement switch
+        {
+            AlterTableAddColumnStatement a => a.TableIfExists,
+            AlterTableDropColumnStatement a => a.TableIfExists,
+            AlterTableDropConstraintStatement a => a.TableIfExists,
+            AlterTableAlterColumnDropStatement a => a.TableIfExists,
+            _ => false,
+        };
+        Assert.True(tableIfExists, "TableIfExists should be true after `ALTER TABLE IF EXISTS …`.");
+    }
+
+    /// <summary>
+    /// Plain <c>ALTER TABLE name …</c> (no IF EXISTS) leaves the flag false.
+    /// </summary>
+    [Fact]
+    public void AlterTable_WithoutTableLevelIfExists_FlagFalse()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE users ADD COLUMN flag Boolean");
+
+        AlterTableAddColumnStatement add = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.False(add.TableIfExists);
+    }
+
+    // ─── User-supplied CONSTRAINT names in CREATE TABLE ───
+
+    /// <summary>
+    /// Column-level <c>CONSTRAINT name PRIMARY KEY</c>. The name surfaces on
+    /// <see cref="CreateTableStatement.PrimaryKeyConstraintName"/>.
+    /// </summary>
+    [Fact]
+    public void CreateTable_ColumnLevelNamedPk_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (id Int32 CONSTRAINT my_pk PRIMARY KEY, name String)");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Equal("my_pk", create.PrimaryKeyConstraintName);
+        Assert.True(create.Columns[0].PrimaryKey);
+    }
+
+    /// <summary>
+    /// Table-level <c>CONSTRAINT name PRIMARY KEY (cols)</c>.
+    /// </summary>
+    [Fact]
+    public void CreateTable_TableLevelNamedPk_Parses()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (a Int32, b Int32, CONSTRAINT compound_pk PRIMARY KEY (a, b))");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Equal("compound_pk", create.PrimaryKeyConstraintName);
+        Assert.NotNull(create.PrimaryKeyColumns);
+        Assert.Equal(["a", "b"], create.PrimaryKeyColumns);
+    }
+
+    /// <summary>
+    /// No <c>CONSTRAINT</c> prefix → name is null (catalog derives the
+    /// default <c>&lt;table&gt;_pkey</c>).
+    /// </summary>
+    [Fact]
+    public void CreateTable_UnnamedPk_PrimaryKeyConstraintNameIsNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (id Int32 PRIMARY KEY)");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Null(create.PrimaryKeyConstraintName);
+    }
+
+    /// <summary>
+    /// Column-level CONSTRAINT can stand in any constraint-order
+    /// position (it's part of the constraint set).
+    /// </summary>
+    [Theory]
+    [InlineData("CONSTRAINT my_pk PRIMARY KEY NOT NULL")]
+    [InlineData("NOT NULL CONSTRAINT my_pk PRIMARY KEY")]
+    public void CreateTable_NamedPk_OrderIndependent(string constraints)
+    {
+        Statement statement = SqlParser.ParseStatement(
+            $"CREATE TEMP TABLE t (id Int32 {constraints})");
+
+        CreateTableStatement create = Assert.IsType<CreateTableStatement>(statement);
+        Assert.Equal("my_pk", create.PrimaryKeyConstraintName);
+        Assert.True(create.Columns[0].PrimaryKey);
+    }
+
     // ───────────────────── Query as Statement ─────────────────────
 
     [Fact]

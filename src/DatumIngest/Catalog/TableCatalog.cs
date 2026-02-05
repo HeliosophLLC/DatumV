@@ -172,6 +172,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                         _indexNameToTable[index.Name] = entry.Name;
                     }
                 }
+                if (!string.IsNullOrEmpty(entry.PrimaryKeyConstraintName))
+                {
+                    _persistentTablePkNames[entry.Name] = entry.PrimaryKeyConstraintName!;
+                }
             }
         }
     }
@@ -239,6 +243,33 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         => _persistentTableIndexes.TryGetValue(tableName, out List<IndexDescriptor>? list)
             ? list
             : null;
+
+    /// <summary>
+    /// User-supplied PRIMARY KEY constraint names keyed by table name.
+    /// Populated at <c>CREATE TABLE</c> time when the user wrote
+    /// <c>CONSTRAINT name PRIMARY KEY</c>; <see langword="null"/> entries
+    /// or missing keys mean "derive the default <c>&lt;table&gt;_pkey</c>".
+    /// Persists in <c>.datum-catalog.json</c> alongside the table entry.
+    /// </summary>
+    private readonly Dictionary<string, string> _persistentTablePkNames =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the user-supplied PRIMARY KEY constraint name for
+    /// <paramref name="tableName"/>, or the derived default
+    /// (<c>&lt;table&gt;_pkey</c>) when no custom name was supplied.
+    /// Used by <c>information_schema.table_constraints</c> and by
+    /// <c>DROP CONSTRAINT</c> name-matching.
+    /// </summary>
+    internal string GetPrimaryKeyConstraintName(string tableName)
+    {
+        if (_persistentTablePkNames.TryGetValue(tableName, out string? custom))
+        {
+            return custom;
+        }
+        return Providers.InformationSchemaTableConstraintsProvider
+            .PrimaryKeyConstraintName(tableName);
+    }
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>
@@ -442,18 +473,22 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 return EmptyQueryPlan.Instance;
 
             case AlterTableAddColumnStatement alterAdd:
+                if (alterAdd.TableIfExists && !TryGetTable(alterAdd.TableName, out _)) return EmptyQueryPlan.Instance;
                 await ApplyAlterTableAddColumnAsync(alterAdd).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableDropColumnStatement alterDrop:
+                if (alterDrop.TableIfExists && !TryGetTable(alterDrop.TableName, out _)) return EmptyQueryPlan.Instance;
                 ApplyAlterTableDropColumn(alterDrop);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableDropConstraintStatement alterDropConstraint:
+                if (alterDropConstraint.TableIfExists && !TryGetTable(alterDropConstraint.TableName, out _)) return EmptyQueryPlan.Instance;
                 await ApplyAlterTableDropConstraintAsync(alterDropConstraint).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
             case AlterTableAlterColumnDropStatement alterColumnDrop:
+                if (alterColumnDrop.TableIfExists && !TryGetTable(alterColumnDrop.TableName, out _)) return EmptyQueryPlan.Instance;
                 await ApplyAlterTableAlterColumnDropAsync(alterColumnDrop).ConfigureAwait(false);
                 return EmptyQueryPlan.Instance;
 
@@ -617,6 +652,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // the data.
         string persistedPath = ToPersistedPath(targetPath);
         _persistentTableEntries[create.TableName] = persistedPath;
+
+        // User-supplied PRIMARY KEY constraint name from
+        // `CONSTRAINT name PRIMARY KEY [(...)]`. Only meaningful when
+        // there's actually a PK; the parser already ensures the name is
+        // only attached to a PK clause.
+        if (!string.IsNullOrEmpty(create.PrimaryKeyConstraintName)
+            && schema.PrimaryKeyColumnIndices.Count > 0)
+        {
+            _persistentTablePkNames[create.TableName] = create.PrimaryKeyConstraintName!;
+        }
+
         _catalogStore!.Save(_udfs, _procedures);
     }
 
@@ -681,6 +727,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 }
                 _persistentTableIndexes.Remove(drop.TableName);
             }
+            _persistentTablePkNames.Remove(drop.TableName);
             _catalogStore?.Save(_udfs, _procedures);
         }
     }
@@ -2023,10 +2070,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 $"Table '{alter.TableName}' is not registered in the catalog.");
         }
 
-        // PG convention: PK auto-name = <table>_pkey. v1 is PK-only; future
-        // PRs extend this to UNIQUE / FK / CHECK names.
-        string expectedPkName = Providers.InformationSchemaTableConstraintsProvider
-            .PrimaryKeyConstraintName(alter.TableName);
+        // The PK constraint name might be user-supplied (stored in
+        // _persistentTablePkNames) or derived from the table name
+        // (<table>_pkey). GetPrimaryKeyConstraintName returns whichever
+        // applies. v1 is PK-only; future PRs extend this to UNIQUE /
+        // FK / CHECK names.
+        string expectedPkName = GetPrimaryKeyConstraintName(alter.TableName);
 
         if (string.Equals(alter.ConstraintName, expectedPkName, StringComparison.OrdinalIgnoreCase))
         {
@@ -2039,6 +2088,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
 
             await provider.DisablePrimaryKeyAsync().ConfigureAwait(false);
+            // Constraint no longer exists — clear the custom-name binding
+            // so a subsequent ADD CONSTRAINT (when we ship it) starts from
+            // a clean slate, and so the catalog file doesn't carry a stale
+            // name for a non-existent constraint.
+            if (_persistentTablePkNames.Remove(alter.TableName))
+            {
+                _catalogStore?.Save(_udfs, _procedures);
+            }
             return;
         }
 
@@ -2189,6 +2246,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     });
                 }
                 entry.Indexes = indexEntries;
+            }
+            if (_persistentTablePkNames.TryGetValue(name, out string? pkName))
+            {
+                entry.PrimaryKeyConstraintName = pkName;
             }
             result.Add(entry);
         }

@@ -649,6 +649,17 @@ public sealed class CatalogFileTableEntry
     /// semantics they had before).
     /// </summary>
     public List<CatalogFileIndexEntry>? Indexes { get; set; }
+
+    /// <summary>
+    /// User-supplied PRIMARY KEY constraint name from a
+    /// <c>CONSTRAINT name PRIMARY KEY</c> clause. <see langword="null"/>
+    /// when the user didn't supply a name — the catalog derives the
+    /// PG-canonical default <c>&lt;table&gt;_pkey</c> at lookup time
+    /// (see <c>InformationSchemaTableConstraintsProvider.PrimaryKeyConstraintName</c>).
+    /// Catalog files written before this field existed load with this
+    /// field null, which is the right "use default" behavior.
+    /// </summary>
+    public string? PrimaryKeyConstraintName { get; set; }
 }
 
 /// <summary>

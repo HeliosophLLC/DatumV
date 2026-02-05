@@ -1032,13 +1032,22 @@ public sealed record QueryStatement(QueryExpression Query) : Statement;
 /// behind an <c>AllowExplicitTablePaths</c> flag so production hosts can
 /// disable it; tests opt in. Always <see langword="null"/> for TEMP tables.
 /// </param>
+/// <param name="PrimaryKeyConstraintName">
+/// Optional user-supplied PRIMARY KEY constraint name from a
+/// <c>CONSTRAINT name PRIMARY KEY …</c> clause (column-level or
+/// table-level). When <see langword="null"/>, the catalog derives the
+/// PG-canonical default <c>&lt;table&gt;_pkey</c>. Persisted in
+/// <c>.datum-catalog.json</c> for persistent tables; not stored on
+/// disk for temp tables.
+/// </param>
 public sealed record CreateTableStatement(
     string TableName,
     IReadOnlyList<ColumnDefinition> Columns,
     bool IsTemp = false,
     bool IfNotExists = false,
     IReadOnlyList<string>? PrimaryKeyColumns = null,
-    string? StoragePath = null) : Statement;
+    string? StoragePath = null,
+    string? PrimaryKeyConstraintName = null) : Statement;
 
 /// <summary>
 /// A single column definition within a <c>CREATE TABLE</c> statement.
@@ -1064,6 +1073,14 @@ public sealed record CreateTableStatement(
 /// UPDATE value. Mutually exclusive with <see cref="DefaultValue"/> and
 /// <see cref="Identity"/>; the catalog enforces at <c>CREATE TABLE</c> time.
 /// </param>
+/// <param name="PrimaryKeyConstraintName">
+/// User-supplied PRIMARY KEY constraint name from a column-level
+/// <c>CONSTRAINT name PRIMARY KEY</c> clause. Internal transport only —
+/// the CreateTable builder hoists it to
+/// <see cref="CreateTableStatement.PrimaryKeyConstraintName"/>. Meaningful
+/// only when <see cref="PrimaryKey"/> is <see langword="true"/>;
+/// <see langword="null"/> means "derive the default name at catalog time".
+/// </param>
 public sealed record ColumnDefinition(
     string Name,
     string TypeName,
@@ -1071,7 +1088,8 @@ public sealed record ColumnDefinition(
     bool PrimaryKey = false,
     Expression? DefaultValue = null,
     IdentitySpec? Identity = null,
-    Expression? ComputedExpression = null);
+    Expression? ComputedExpression = null,
+    string? PrimaryKeyConstraintName = null);
 
 /// <summary>
 /// Identity spec on a <see cref="ColumnDefinition"/> — produced by the
@@ -1293,6 +1311,11 @@ public sealed record ColumnAssignment(string ColumnName, Expression Value);
 /// column must also carry a <c>GENERATED IDENTITY</c> so historical rows
 /// receive non-null unique values.
 /// </param>
+/// <param name="TableIfExists">
+/// PG-canonical table-level guard. When <see langword="true"/>, the catalog
+/// short-circuits the statement to a no-op when the named table doesn't
+/// exist (set by the <c>ALTER TABLE IF EXISTS name …</c> prefix).
+/// </param>
 public sealed record AlterTableAddColumnStatement(
     string TableName,
     string ColumnName,
@@ -1301,7 +1324,8 @@ public sealed record AlterTableAddColumnStatement(
     bool Nullable = true,
     Expression? ComputedExpression = null,
     IdentitySpec? Identity = null,
-    bool PrimaryKey = false) : Statement;
+    bool PrimaryKey = false,
+    bool TableIfExists = false) : Statement;
 
 /// <summary>
 /// <c>ALTER TABLE name DROP [COLUMN] col [IF EXISTS]</c> — soft-drops a
@@ -1312,10 +1336,15 @@ public sealed record AlterTableAddColumnStatement(
 /// <param name="TableName">The target table name.</param>
 /// <param name="ColumnName">The name of the column to drop.</param>
 /// <param name="IfExists">When <see langword="true"/>, suppresses errors if the column does not exist.</param>
+/// <param name="TableIfExists">
+/// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
+/// the catalog short-circuits to a no-op when the named table doesn't exist.
+/// </param>
 public sealed record AlterTableDropColumnStatement(
     string TableName,
     string ColumnName,
-    bool IfExists = false) : Statement;
+    bool IfExists = false,
+    bool TableIfExists = false) : Statement;
 
 /// <summary>
 /// <c>ALTER TABLE name DROP CONSTRAINT constraint_name [IF EXISTS]</c> —
@@ -1327,10 +1356,15 @@ public sealed record AlterTableDropColumnStatement(
 /// <param name="TableName">The target table name.</param>
 /// <param name="ConstraintName">The constraint to drop (e.g., <c>users_pkey</c>).</param>
 /// <param name="IfExists">When <see langword="true"/>, suppresses errors if the constraint does not exist.</param>
+/// <param name="TableIfExists">
+/// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
+/// the catalog short-circuits to a no-op when the named table doesn't exist.
+/// </param>
 public sealed record AlterTableDropConstraintStatement(
     string TableName,
     string ConstraintName,
-    bool IfExists = false) : Statement;
+    bool IfExists = false,
+    bool TableIfExists = false) : Statement;
 
 /// <summary>
 /// Which column attribute an <see cref="AlterTableAlterColumnDropStatement"/>
@@ -1361,11 +1395,16 @@ public enum AlterColumnDropTarget
 /// <c>DROP DEFAULT</c> (which is idempotent); we accept it uniformly and
 /// treat both as idempotent under <c>IF EXISTS</c>.
 /// </param>
+/// <param name="TableIfExists">
+/// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
+/// the catalog short-circuits to a no-op when the named table doesn't exist.
+/// </param>
 public sealed record AlterTableAlterColumnDropStatement(
     string TableName,
     string ColumnName,
     AlterColumnDropTarget Target,
-    bool IfExists = false) : Statement;
+    bool IfExists = false,
+    bool TableIfExists = false) : Statement;
 
 /// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.

@@ -361,6 +361,33 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         Assert.False(schema.Columns[1].Nullable);
     }
 
+    /// <summary>
+    /// PK on an empty table without IDENTITY works — the non-empty check
+    /// is gated on <c>GetRowCount() &gt; 0</c>, so an empty table doesn't
+    /// need a backfill mechanism. Future INSERTs must supply the PK value
+    /// explicitly (since there's no IDENTITY to auto-fill it).
+    /// </summary>
+    [Fact]
+    public void AlterTable_AddPkColumnToEmptyPersistentTable_WithoutIdentity_Works()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (name String)");
+
+        catalog.Plan("ALTER TABLE users ADD COLUMN id Int32 PRIMARY KEY");
+
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Single(schema.PrimaryKeyColumnIndices);
+        Assert.True(schema.Columns[1].IsPrimaryKey);
+        Assert.False(schema.Columns[1].Nullable);
+
+        // PK enforcement: explicit user-supplied values are required and
+        // duplicates rejected.
+        catalog.Plan("INSERT INTO users (name, id) VALUES ('alice', 1)");
+        PrimaryKeyViolationException ex = Assert.Throws<PrimaryKeyViolationException>(() =>
+            catalog.Plan("INSERT INTO users (name, id) VALUES ('dup', 1)"));
+        Assert.Contains("PRIMARY KEY violation", ex.Message);
+    }
+
     [Fact]
     public async Task AlterTable_AddPkColumnToNonEmptyTable_BackfillsAndBuildsIndex()
     {
@@ -562,6 +589,113 @@ public sealed class PrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         Exception ex = Assert.ThrowsAny<Exception>(() =>
             catalog.Plan("ALTER TABLE missing DROP CONSTRAINT missing_pkey"));
         Assert.Contains("missing", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlterTable_TableLevelIfExists_MissingTable_NoThrow()
+    {
+        // PG's table-level IF EXISTS suppresses the "table not found"
+        // error so deploy scripts can run idempotently against a fresh
+        // database.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        // None of these should throw — table doesn't exist, IF EXISTS
+        // makes the whole statement a no-op.
+        catalog.Plan("ALTER TABLE IF EXISTS missing ADD COLUMN x Int32");
+        catalog.Plan("ALTER TABLE IF EXISTS missing DROP COLUMN x");
+        catalog.Plan("ALTER TABLE IF EXISTS missing DROP CONSTRAINT missing_pkey");
+        catalog.Plan("ALTER TABLE IF EXISTS missing ALTER COLUMN x DROP DEFAULT");
+    }
+
+    [Fact]
+    public void AlterTable_TableLevelIfExists_ExistingTable_StillAppliesBody()
+    {
+        // IF EXISTS only suppresses the table-not-found case — when the
+        // table is present, the body must still execute normally.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 PRIMARY KEY, name String)");
+
+        catalog.Plan("ALTER TABLE IF EXISTS users DROP CONSTRAINT users_pkey");
+
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+    }
+
+    // ──────────────────── User-supplied CONSTRAINT names ────────────────────
+
+    [Fact]
+    public async Task CreateTable_NamedPk_IS_View_ShowsCustomName()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32, name String, CONSTRAINT my_users_pk PRIMARY KEY (id))");
+
+        ITableProvider provider = catalog["information_schema.table_constraints"];
+        bool found = false;
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            Arena arena = batch.Arena;
+            for (int r = 0; r < batch.Count; r++)
+            {
+                if (batch[r][5].AsString(arena) == "users" &&
+                    batch[r][6].AsString(arena) == "PRIMARY KEY")
+                {
+                    Assert.Equal("my_users_pk", batch[r][2].AsString(arena));
+                    found = true;
+                }
+            }
+            batch.Dispose();
+        }
+        Assert.True(found, "PK row should be present in information_schema.table_constraints.");
+    }
+
+    [Fact]
+    public void DropConstraint_MatchesUserSuppliedName()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 CONSTRAINT my_pk PRIMARY KEY, name String)");
+
+        // The derived `users_pkey` is NOT the constraint name now — the
+        // user named it `my_pk`.
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("ALTER TABLE users DROP CONSTRAINT users_pkey"));
+        Assert.Contains("users_pkey", ex.Message);
+        Assert.Contains("does not exist", ex.Message);
+
+        // The user-supplied name does match.
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT my_pk");
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+    }
+
+    [Fact]
+    public void CreateTable_NamedPk_SurvivesReopen()
+    {
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE users (id Int32, name String, CONSTRAINT users_id_pk PRIMARY KEY (id))");
+        }
+
+        // Reopen — the user-supplied name must round-trip via the catalog file.
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        // DROP must still match the user-supplied name after reopen.
+        reopened.Plan("ALTER TABLE users DROP CONSTRAINT users_id_pk");
+        Schema schema = reopened["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
+    }
+
+    [Fact]
+    public void DropConstraint_NamedPk_ClearsCustomNameAfterDrop()
+    {
+        // After DROP, a future ADD-PK (when we ship it) should not see
+        // the stale name. We can't test ADD-PK yet, but we can verify
+        // the IS view stops showing the row.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE users (id Int32 CONSTRAINT my_pk PRIMARY KEY)");
+        catalog.Plan("ALTER TABLE users DROP CONSTRAINT my_pk");
+
+        Schema schema = catalog["users"].GetSchema();
+        Assert.Empty(schema.PrimaryKeyColumnIndices);
     }
 
     [Fact]

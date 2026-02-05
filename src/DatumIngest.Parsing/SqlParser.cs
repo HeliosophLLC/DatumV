@@ -2541,7 +2541,13 @@ public static class SqlParser
     /// </summary>
     private abstract record ColumnConstraintClause(Position Position);
     private sealed record NullabilityConstraint(bool Nullable, Position Position) : ColumnConstraintClause(Position);
-    private sealed record PrimaryKeyConstraint(Position Position) : ColumnConstraintClause(Position);
+    /// <summary>
+    /// Column-level PRIMARY KEY clause, optionally prefixed by a user-supplied
+    /// constraint name (<c>CONSTRAINT my_pk PRIMARY KEY</c>). The name is
+    /// propagated up to <see cref="CreateTableStatement.PrimaryKeyConstraintName"/>;
+    /// a null name means "derive the default".
+    /// </summary>
+    private sealed record PrimaryKeyConstraint(string? ConstraintName, Position Position) : ColumnConstraintClause(Position);
     private sealed record DefaultConstraint(Expression Expression, Position Position) : ColumnConstraintClause(Position);
     /// <summary>
     /// Holds whichever of (computed expression, identity spec) the clause
@@ -2563,10 +2569,23 @@ public static class SqlParser
         from nullKw in Token.EqualTo(SqlToken.Null)
         select (ColumnConstraintClause)new NullabilityConstraint(Nullable: true, nullKw.Position);
 
+    /// <summary>
+    /// Optional <c>CONSTRAINT name</c> prefix shared by named column-level
+    /// constraint forms. Returns the user-supplied name, or
+    /// <see langword="null"/> when no prefix was given.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string?> OptionalConstraintNamePrefix =
+        (from constraintKw in Token.EqualTo(SqlToken.Constraint)
+         from name in IdentifierOrKeywordAsName
+         select (string?)name)
+        .Try()
+        .OptionalOrDefault();
+
     private static readonly TokenListParser<SqlToken, ColumnConstraintClause> PrimaryKeyConstraintParser =
+        from constraintName in OptionalConstraintNamePrefix
         from primaryKw in Token.EqualTo(SqlToken.Primary)
         from keyKw in Token.EqualTo(SqlToken.Key)
-        select (ColumnConstraintClause)new PrimaryKeyConstraint(primaryKw.Position);
+        select (ColumnConstraintClause)new PrimaryKeyConstraint(constraintName, primaryKw.Position);
 
     private static readonly TokenListParser<SqlToken, ColumnConstraintClause> DefaultConstraintParser =
         from defaultKw in Token.EqualTo(SqlToken.Default)
@@ -2645,6 +2664,7 @@ public static class SqlParser
         bool? nullable = null;
         Position nullabilityPosition = default;
         bool primaryKey = false;
+        string? primaryKeyConstraintName = null;
         Expression? defaultValue = null;
         GeneratedSlotConstraint? generatedSlot = null;
 
@@ -2674,6 +2694,7 @@ public static class SqlParser
                             pkc.Position);
                     }
                     primaryKey = true;
+                    primaryKeyConstraintName = pkc.ConstraintName;
                     break;
 
                 case DefaultConstraint dc:
@@ -2708,7 +2729,8 @@ public static class SqlParser
             PrimaryKey: primaryKey,
             DefaultValue: defaultValue,
             Identity: generatedSlot?.Identity,
-            ComputedExpression: generatedSlot?.ComputedExpression);
+            ComputedExpression: generatedSlot?.ComputedExpression,
+            PrimaryKeyConstraintName: primaryKeyConstraintName);
     }
 
     /// <summary>
@@ -2829,15 +2851,19 @@ public static class SqlParser
         ).OptionalOrDefault();
 
     /// <summary>
-    /// Parses a table-level <c>PRIMARY KEY (col1, col2, ...)</c> constraint.
+    /// Parses a table-level <c>[CONSTRAINT name] PRIMARY KEY (col1, col2, ...)</c>
+    /// constraint. The optional <c>CONSTRAINT name</c> prefix supplies a
+    /// user-friendly PK name (matches PG); when absent, the catalog
+    /// derives the default <c>&lt;table&gt;_pkey</c>.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, string[]> TablePrimaryKeyConstraintParser =
+    private static readonly TokenListParser<SqlToken, (string? Name, string[] Columns)> TablePrimaryKeyConstraintParser =
+        from constraintName in OptionalConstraintNamePrefix
         from primaryKw in Token.EqualTo(SqlToken.Primary)
         from keyKw in Token.EqualTo(SqlToken.Key)
         from open in Token.EqualTo(SqlToken.LeftParen)
         from names in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
-        select names;
+        select (constraintName, names);
 
     /// <summary>
     /// Parses a column definition list with an optional trailing table-level
@@ -2845,7 +2871,7 @@ public static class SqlParser
     /// <c>(comma, column)</c> pair so that the comma before <c>PRIMARY KEY</c>
     /// is not greedily consumed by a column-definition lookahead.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, (ColumnDefinition[] Columns, string[]? PrimaryKeyColumns)>
+    private static readonly TokenListParser<SqlToken, (ColumnDefinition[] Columns, string[]? PrimaryKeyColumns, string? PrimaryKeyConstraintName)>
         ColumnListWithOptionalPrimaryKeyParser =
             from first in ColumnDefinitionParser
             from rest in (
@@ -2857,8 +2883,8 @@ public static class SqlParser
                 from comma in Token.EqualTo(SqlToken.Comma)
                 from constraint in TablePrimaryKeyConstraintParser
                 select constraint
-            ).AsNullable().OptionalOrDefault()
-            select (new[] { first }.Concat(rest).ToArray(), primaryKey);
+            ).Try().Select(t => ((string? Name, string[] Columns)?)t).OptionalOrDefault()
+            select (new[] { first }.Concat(rest).ToArray(), primaryKey?.Columns, primaryKey?.Name);
 
     /// <summary>
     /// Parses <c>CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] name (col type, ..., [PRIMARY KEY (col, ...)])</c>.
@@ -2917,6 +2943,11 @@ public static class SqlParser
                     .Select(path =>
                     {
                         IReadOnlyList<string>? primaryKeyColumns = result.PrimaryKeyColumns;
+                        // Table-level `CONSTRAINT name PRIMARY KEY (...)` wins
+                        // over column-level `CONSTRAINT name PRIMARY KEY` when
+                        // both are somehow present; the table-level form is
+                        // the canonical place to name a constraint in PG.
+                        string? pkConstraintName = result.PrimaryKeyConstraintName;
                         if (primaryKeyColumns is null)
                         {
                             List<string>? inlineKeys = null;
@@ -2926,6 +2957,17 @@ public static class SqlParser
                                 {
                                     inlineKeys ??= new List<string>();
                                     inlineKeys.Add(column.Name);
+                                    // Column-level constraint name only
+                                    // surfaces when no table-level name was
+                                    // supplied. Multiple inline names
+                                    // (degenerate composite PK with named
+                                    // clauses on multiple columns) — last
+                                    // one wins; the user should use the
+                                    // table-level form instead.
+                                    if (pkConstraintName is null && column.PrimaryKeyConstraintName is not null)
+                                    {
+                                        pkConstraintName = column.PrimaryKeyConstraintName;
+                                    }
                                 }
                             }
                             primaryKeyColumns = inlineKeys;
@@ -2934,7 +2976,8 @@ public static class SqlParser
                             tableName, result.Columns,
                             IsTemp: isTemp, IfNotExists: ifNotExists,
                             PrimaryKeyColumns: primaryKeyColumns,
-                            StoragePath: path);
+                            StoragePath: path,
+                            PrimaryKeyConstraintName: pkConstraintName);
                     }))
         select statement;
 
@@ -3788,11 +3831,19 @@ public static class SqlParser
     /// <c>DEFAULT</c> expression) propagate with their real
     /// <c>Remainder.Position</c>.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, string> AlterTablePrefix =
+    /// <summary>
+    /// Result of parsing the <c>ALTER TABLE [IF EXISTS] name</c> prefix.
+    /// <see cref="IfExists"/> is the PG-canonical table-level guard that
+    /// turns "no such table" into a no-op for every ALTER body.
+    /// </summary>
+    private readonly record struct AlterTablePrefixResult(bool IfExists, string TableName);
+
+    private static readonly TokenListParser<SqlToken, AlterTablePrefixResult> AlterTablePrefix =
         (from alterKw in Token.EqualTo(SqlToken.Alter)
          from tableKw in Token.EqualTo(SqlToken.Table)
+         from ifExists in IfExistsParser
          from tableName in IdentifierOrKeywordAsName
-         select tableName)
+         select new AlterTablePrefixResult(ifExists, tableName))
         .Try();
 
     // Same order-independent alternation as CREATE TABLE columns.
@@ -3815,12 +3866,12 @@ public static class SqlParser
     /// and conflicting nullability throw <see cref="ParseException"/> with
     /// a position anchored at the offending token.
     /// </summary>
-    private static TokenListParser<SqlToken, Statement> AlterTableAddColumnBody(string tableName) =>
+    private static TokenListParser<SqlToken, Statement> AlterTableAddColumnBody(AlterTablePrefixResult prefix) =>
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from colName in IdentifierOrKeywordAsName
         from typeName in RequireColumnType(colName, "ALTER TABLE ADD COLUMN")
         from clauses in AlterAddColumnConstraintParser.Many()
-        select FoldAlterAddColumnConstraints(tableName, colName, typeName, clauses);
+        select FoldAlterAddColumnConstraints(prefix, colName, typeName, clauses);
 
     /// <summary>
     /// Folds the constraint-clause list into an
@@ -3829,7 +3880,7 @@ public static class SqlParser
     /// ALTER TABLE ADD COLUMN doesn't carry one in v1.
     /// </summary>
     private static Statement FoldAlterAddColumnConstraints(
-        string tableName,
+        AlterTablePrefixResult prefix,
         string colName,
         string typeName,
         ColumnConstraintClause[] clauses)
@@ -3893,12 +3944,13 @@ public static class SqlParser
         bool finalNullable = nullable ?? !primaryKey;
 
         return new AlterTableAddColumnStatement(
-            tableName, colName, typeName,
+            prefix.TableName, colName, typeName,
             DefaultValue: defaultValue,
             Nullable: finalNullable,
             ComputedExpression: generatedSlot?.ComputedExpression,
             Identity: generatedSlot?.Identity,
-            PrimaryKey: primaryKey);
+            PrimaryKey: primaryKey,
+            TableIfExists: prefix.IfExists);
     }
 
     /// <summary>
@@ -3906,11 +3958,11 @@ public static class SqlParser
     /// <c>ALTER TABLE name DROP</c> statement once the <c>DROP</c>
     /// keyword has been consumed.
     /// </summary>
-    private static TokenListParser<SqlToken, Statement> AlterTableDropColumnBody(string tableName) =>
+    private static TokenListParser<SqlToken, Statement> AlterTableDropColumnBody(AlterTablePrefixResult prefix) =>
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from ifExists in IfExistsParser
         from colName in IdentifierOrKeywordAsName
-        select (Statement)new AlterTableDropColumnStatement(tableName, colName, ifExists);
+        select (Statement)new AlterTableDropColumnStatement(prefix.TableName, colName, ifExists, prefix.IfExists);
 
     /// <summary>
     /// Parses the <c>CONSTRAINT [IF EXISTS] constraint_name</c> body of an
@@ -3920,18 +3972,18 @@ public static class SqlParser
     /// over the whole thing to fall back to the drop-column body when no
     /// CONSTRAINT token is present.
     /// </summary>
-    private static TokenListParser<SqlToken, Statement> AlterTableDropConstraintBody(string tableName) =>
+    private static TokenListParser<SqlToken, Statement> AlterTableDropConstraintBody(AlterTablePrefixResult prefix) =>
         from constraintKw in Token.EqualTo(SqlToken.Constraint)
         from ifExists in IfExistsParser
         from constraintName in IdentifierOrKeywordAsName
-        select (Statement)new AlterTableDropConstraintStatement(tableName, constraintName, ifExists);
+        select (Statement)new AlterTableDropConstraintStatement(prefix.TableName, constraintName, ifExists, prefix.IfExists);
 
     /// <summary>
     /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>
     /// body of an <c>ALTER TABLE name ALTER</c> statement, once the outer
     /// <c>ALTER</c> verb has been consumed.
     /// </summary>
-    private static TokenListParser<SqlToken, Statement> AlterTableAlterColumnBody(string tableName) =>
+    private static TokenListParser<SqlToken, Statement> AlterTableAlterColumnBody(AlterTablePrefixResult prefix) =>
         from columnKw in Token.EqualTo(SqlToken.Column)
         from colName in IdentifierOrKeywordAsName
         from dropKw in Token.EqualTo(SqlToken.Drop)
@@ -3939,11 +3991,12 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Default))
         from ifExists in IfExistsParser
         select (Statement)new AlterTableAlterColumnDropStatement(
-            tableName, colName,
+            prefix.TableName, colName,
             targetKw.Kind == SqlToken.Identity
                 ? AlterColumnDropTarget.Identity
                 : AlterColumnDropTarget.Default,
-            ifExists);
+            ifExists,
+            prefix.IfExists);
 
     /// <summary>
     /// Parses <c>ALTER TABLE name (ADD ... | DROP ... | ALTER COLUMN ...)</c>.
@@ -3953,16 +4006,16 @@ public static class SqlParser
     /// backtracks into the (legacy) drop-column body.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
-        from tableName in AlterTablePrefix
+        from prefix in AlterTablePrefix
         from verb in Token.EqualTo(SqlToken.Add).Try()
             .Or(Token.EqualTo(SqlToken.Drop).Try())
             .Or(Token.EqualTo(SqlToken.Alter))
         from body in verb.Kind switch
         {
-            SqlToken.Add => AlterTableAddColumnBody(tableName),
-            SqlToken.Alter => AlterTableAlterColumnBody(tableName),
-            _ => AlterTableDropConstraintBody(tableName).Try()
-                .Or(AlterTableDropColumnBody(tableName)),
+            SqlToken.Add => AlterTableAddColumnBody(prefix),
+            SqlToken.Alter => AlterTableAlterColumnBody(prefix),
+            _ => AlterTableDropConstraintBody(prefix).Try()
+                .Or(AlterTableDropColumnBody(prefix)),
         }
         select body;
 
