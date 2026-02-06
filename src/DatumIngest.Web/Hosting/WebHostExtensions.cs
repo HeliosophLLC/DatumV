@@ -1,10 +1,11 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
 using DatumIngest.Models;
 using DatumIngest.Pooling;
 using DatumIngest.Web.Compute;
 using DatumIngest.Web.Hubs;
 using DatumIngest.Web.Llm;
+using DatumIngest.Web.ModelLibrary;
 using DatumIngest.Web.Settings;
 
 namespace DatumIngest.Web.Hosting;
@@ -86,7 +87,7 @@ public static class WebHostExtensions
         services.AddSingleton<ICurrentContextResolver, LocalCurrentContextResolver>();
 
         // Compute boundary. The factory is singleton (routing is stateless);
-        // ICatalogService is scoped — resolved once per request, lives through it,
+        // ICatalogService is scoped â€” resolved once per request, lives through it,
         // released at end. Swap UnboundCatalogServiceFactory for an in-process+gRPC
         // router when actual catalog ops are wired.
         services.AddSingleton<ICatalogServiceFactory, UnboundCatalogServiceFactory>();
@@ -101,6 +102,16 @@ public static class WebHostExtensions
         // request's principal/catalog. Today a single LocalUser; tomorrow
         // each user gets their own settings.json under their compute node.
         services.AddScoped<ISettingsService, LocalSettingsService>();
+
+        // Model catalog: manifest reader (singleton — catalog.json is content
+        // shipped with the app), HF Hub HTTP client, license acceptance, and
+        // the download orchestrator. HfHubClient takes a long-lived HttpClient
+        // from IHttpClientFactory; downloads are multi-GB streams and a fresh
+        // socket per download is fine.
+        services.AddSingleton<IManifestStore, ManifestStore>();
+        services.AddSingleton<ILicenseAcceptanceService, LicenseAcceptanceService>();
+        services.AddHttpClient<HfHubClient>();
+        services.AddSingleton<IModelDownloadService, ModelDownloadService>();
 
         // AddApplicationPart so controllers are discovered when DatumIngest.Web
         // is referenced by a non-MVC entry assembly (e.g. DatumIngest.Client).

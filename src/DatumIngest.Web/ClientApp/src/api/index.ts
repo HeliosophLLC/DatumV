@@ -1,4 +1,8 @@
-import { HealthClient, SettingsClient } from './generated/openapi-client';
+import {
+  HealthClient,
+  ModelCatalogClient,
+  SettingsClient,
+} from './generated/openapi-client';
 
 // Wrap window.fetch so every NSwag-generated client sends cookies. The
 // generated clients are credentials-agnostic — this is the single place that
@@ -19,6 +23,7 @@ export function createApi(baseUrl = '') {
   return {
     health: new HealthClient(baseUrl, http),
     settings: new SettingsClient(baseUrl, http),
+    modelCatalog: new ModelCatalogClient(baseUrl, http),
   };
 }
 

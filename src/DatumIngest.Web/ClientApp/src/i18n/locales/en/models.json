@@ -1,0 +1,25 @@
+{
+  "title": "Models",
+  "loading": "Loading model catalog…",
+  "error": "Couldn't load the model catalog: {message}",
+  "empty": "No models match the current filters.",
+  "filters": {
+    "tier": "Tier",
+    "tierAll": "All",
+    "tierStarter": "Starter",
+    "tierRecommended": "Recommended",
+    "task": "Task",
+    "taskAll": "All tasks",
+    "tags": "Tags",
+    "clear": "Clear filters"
+  },
+  "card": {
+    "size": "~{size} MB",
+    "hardwareCpu": "CPU",
+    "hardwareGpu": "GPU",
+    "hardwareAny": "CPU/GPU",
+    "comingSoon": "Coming soon",
+    "gated": "HF login required"
+  },
+  "results": "{count, plural, one {# model} other {# models}}"
+}

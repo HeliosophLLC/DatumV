@@ -4,6 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { IStreamHub, IStreamHubClient } from './DatumIngest.Web.Hubs';
+import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
 
 
 // components
@@ -108,17 +109,29 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onToken = (...args: [string]) => receiver.onToken(...args);
         const __onComplete = () => receiver.onComplete();
         const __onError = (...args: [string]) => receiver.onError(...args);
+        const __onModelDownloadStarted = (...args: [ModelDownloadStarted]) => receiver.onModelDownloadStarted(...args);
+        const __onModelDownloadProgress = (...args: [ModelDownloadProgress]) => receiver.onModelDownloadProgress(...args);
+        const __onModelDownloadComplete = (...args: [ModelDownloadComplete]) => receiver.onModelDownloadComplete(...args);
+        const __onModelDownloadFailed = (...args: [ModelDownloadFailed]) => receiver.onModelDownloadFailed(...args);
 
         connection.on("OnPong", __onPong);
         connection.on("OnToken", __onToken);
         connection.on("OnComplete", __onComplete);
         connection.on("OnError", __onError);
+        connection.on("OnModelDownloadStarted", __onModelDownloadStarted);
+        connection.on("OnModelDownloadProgress", __onModelDownloadProgress);
+        connection.on("OnModelDownloadComplete", __onModelDownloadComplete);
+        connection.on("OnModelDownloadFailed", __onModelDownloadFailed);
 
         const methodList: ReceiverMethod[] = [
             { methodName: "OnPong", method: __onPong },
             { methodName: "OnToken", method: __onToken },
             { methodName: "OnComplete", method: __onComplete },
-            { methodName: "OnError", method: __onError }
+            { methodName: "OnError", method: __onError },
+            { methodName: "OnModelDownloadStarted", method: __onModelDownloadStarted },
+            { methodName: "OnModelDownloadProgress", method: __onModelDownloadProgress },
+            { methodName: "OnModelDownloadComplete", method: __onModelDownloadComplete },
+            { methodName: "OnModelDownloadFailed", method: __onModelDownloadFailed }
         ]
 
         return new ReceiverMethodSubscription(connection, methodList);

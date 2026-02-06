@@ -3,6 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
+import type { ModelDownloadStarted, ModelDownloadProgress, ModelDownloadComplete, ModelDownloadFailed } from '../DatumIngest.Web.ModelLibrary';
 
 export type IStreamHub = {
     /**
@@ -41,5 +42,25 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onError(message: string): Promise<void>;
+    /**
+    * @param started Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadStarted
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelDownloadStarted(started: ModelDownloadStarted): Promise<void>;
+    /**
+    * @param progress Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadProgress
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelDownloadProgress(progress: ModelDownloadProgress): Promise<void>;
+    /**
+    * @param complete Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadComplete
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelDownloadComplete(complete: ModelDownloadComplete): Promise<void>;
+    /**
+    * @param failed Transpiled from DatumIngest.Web.ModelLibrary.ModelDownloadFailed
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onModelDownloadFailed(failed: ModelDownloadFailed): Promise<void>;
 }
 

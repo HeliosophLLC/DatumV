@@ -38,6 +38,12 @@ export const conversationState = proxy<ConversationState>({
 // One receiver object for the connection's lifetime. The hub layer wants
 // the same reference across registrations; using a const object avoids
 // any chance of double-registration.
+//
+// Note: the receiver must satisfy IStreamHubClient *in full*, including
+// methods the chat surface doesn't care about (model-download events).
+// Those are no-ops here; the Models surface will register a sibling
+// receiver against the same connection when it grows its own state, OR
+// these will be routed through a small fan-out dispatcher. v1: stub them.
 const receiver = {
   async onPong(): Promise<void> {},
   async onToken(content: string): Promise<void> {
@@ -56,6 +62,13 @@ const receiver = {
     conversationState.error = message;
     conversationState.streaming = '';
   },
+  // Model-download lifecycle events are routed elsewhere (or, for v1,
+  // nowhere). Keeping these as stubs satisfies the typed receiver contract
+  // without giving the chat state visibility into download progress.
+  async onModelDownloadStarted(): Promise<void> {},
+  async onModelDownloadProgress(): Promise<void> {},
+  async onModelDownloadComplete(): Promise<void> {},
+  async onModelDownloadFailed(): Promise<void> {},
 };
 
 // One-shot subscriber to connection-closed events from the hub layer.
