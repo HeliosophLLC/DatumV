@@ -47,6 +47,14 @@ public static class WebHostExtensions
                 string catalogFile = Path.Combine(catalogRootPath, CatalogStore.DefaultFileName);
                 TableCatalog catalog = new(pool, catalogFile);
 
+                // Settings-side override (set via the Settings UI, persisted
+                // to settings.json) beats the host-config value. If neither
+                // is set, ModelCatalog falls back to $DATUM_MODELS env var,
+                // then to %LOCALAPPDATA%/DatumIngest/models.
+                string? effectiveModelsDir =
+                    StartupSettingsLoader.LoadModelsDirectory(catalogRootPath)
+                    ?? modelsDirectory;
+
                 // Attach the standard model zoo before any hosted service runs.
                 // BuiltinModels uses VramBudgetResolver internally (one
                 // nvidia-smi shell-out) and sets catalog.Models. Registrations
@@ -54,7 +62,7 @@ public static class WebHostExtensions
                 // triggered later by LlmStartupService.
                 if (registerBuiltinModels)
                 {
-                    BuiltinModels.AttachStandardModels(catalog, modelsDirectory);
+                    BuiltinModels.AttachStandardModels(catalog, effectiveModelsDir);
                 }
 
                 return catalog;

@@ -422,6 +422,7 @@ export interface HealthDto {
     displayName?: string;
     catalogPath?: string;
     nodeId?: string;
+    modelsDirectory?: string | undefined;
 }
 
 export interface CatalogManifest {
@@ -478,6 +479,7 @@ export interface SettingsDto {
     theme?: ThemePreference;
     chromeStyle?: ChromeStyle;
     locale?: string;
+    modelsDirectory?: string;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -488,6 +490,7 @@ export interface SettingsPatchDto {
     theme?: ThemePreference | undefined;
     chromeStyle?: ChromeStyle | undefined;
     locale?: string | undefined;
+    modelsDirectory?: string | undefined;
 }
 
 export interface FileResponse {

@@ -14,10 +14,15 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
     // which tells the client to resolve from navigator.language. Server
     // doesn't enumerate supported tags — that's driven by which locale
     // bundles the client ships.
+    //
+    // ModelsDirectory empty string = "use the resolution cascade"
+    // (env var → default location). The Settings UI surfaces the resolved
+    // effective path via the Health endpoint.
     private static readonly SettingsDto Defaults = new(
         Theme: ThemePreference.System,
         ChromeStyle: ChromeStyle.Auto,
-        Locale: "system");
+        Locale: "system",
+        ModelsDirectory: "");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,7 +51,8 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         var merged = new SettingsDto(
             Theme: patch.Theme ?? current.Theme,
             ChromeStyle: patch.ChromeStyle ?? current.ChromeStyle,
-            Locale: patch.Locale ?? current.Locale);
+            Locale: patch.Locale ?? current.Locale,
+            ModelsDirectory: patch.ModelsDirectory ?? current.ModelsDirectory);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

@@ -1,0 +1,36 @@
+{
+  "title": "Settings",
+  "appearance": {
+    "title": "Appearance",
+    "theme": "Theme",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "chrome": "Window chrome",
+    "chromeAuto": "Auto",
+    "chromeWindows": "Windows",
+    "chromeMacos": "macOS",
+    "chromeLinux": "Linux"
+  },
+  "language": {
+    "title": "Language",
+    "locale": "Locale",
+    "localeSystem": "System",
+    "localeEn": "English"
+  },
+  "models": {
+    "title": "Models",
+    "directory": "Models directory",
+    "directoryEffective": "Currently using: {path}",
+    "directoryPlaceholder": "Leave empty to use the default location",
+    "directorySave": "Save",
+    "directoryHint": "Changes apply on next launch.",
+    "directorySaved": "Saved — restart the app to use the new directory."
+  },
+  "about": {
+    "title": "About",
+    "version": "Version",
+    "catalogPath": "Catalog path",
+    "node": "Compute node"
+  }
+}

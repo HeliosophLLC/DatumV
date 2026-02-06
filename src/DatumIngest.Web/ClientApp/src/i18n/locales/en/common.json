@@ -2,6 +2,11 @@
   "app": {
     "name": "DatumIngest"
   },
+  "nav": {
+    "chat": "Chat",
+    "models": "Models",
+    "settings": "Settings"
+  },
   "window": {
     "minimize": "Minimize",
     "maximize": "Maximize",

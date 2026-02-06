@@ -17,12 +17,17 @@ interface SettingsState {
   // BCP 47 tag (e.g. 'en', 'en-US') or the sentinel 'system'. Resolved into
   // a concrete supported locale by state/locale.ts.
   locale: string;
+  // User-configured models directory. Empty string = "use the resolution
+  // cascade" ($DATUM_MODELS env → %LOCALAPPDATA%/DatumIngest/models). Read
+  // once at startup; runtime changes require a restart to take effect.
+  modelsDirectory: string;
 }
 
 export const settingsState = proxy<SettingsState>({
   theme: 'system',
   chromeStyle: 'auto',
   locale: 'system',
+  modelsDirectory: '',
 });
 
 export async function refreshSettings(): Promise<void> {
@@ -45,6 +50,10 @@ export async function updateSettings(patch: SettingsPatchDto): Promise<void> {
 
 export function setChromeStyle(chromeStyle: ChromeStyle): Promise<void> {
   return updateSettings({ chromeStyle });
+}
+
+export function setModelsDirectory(modelsDirectory: string): Promise<void> {
+  return updateSettings({ modelsDirectory });
 }
 
 export type { SettingsDto, ThemePreference, ChromeStyle };

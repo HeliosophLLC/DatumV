@@ -127,7 +127,13 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
 			"args": [],
-			"cwd": "${workspaceFolder}",
+			// cwd is the binary directory rather than the workspace root.
+			// Photino's WebView2 picks its user-data folder relative to the
+			// process cwd; rooting it under the workspace dropped it next to
+			// node_modules / .git / heavy file-watchers, which intermittently
+			// fatals WebView2 during init. Pinning to bin/ matches what a
+			// double-click on datum.exe gives you.
+			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0",
 			"console": "integratedTerminal",
 			"justMyCode": false,
 			"stopAtEntry": false,
@@ -142,7 +148,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
 			"args": [],
-			"cwd": "${workspaceFolder}",
+			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0",
 			"console": "integratedTerminal",
 			"justMyCode": false,
 			"stopAtEntry": false,
@@ -154,7 +160,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Release/net10.0/datum.dll",
 			"args": [],
-			"cwd": "${workspaceFolder}",
+			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Release/net10.0",
 			"console": "integratedTerminal",
 			"justMyCode": false,
 			"stopAtEntry": false,

@@ -2,6 +2,7 @@ import type enChat from './locales/en/chat.json';
 import type enCommon from './locales/en/common.json';
 import type enHome from './locales/en/home.json';
 import type enModels from './locales/en/models.json';
+import type enSettings from './locales/en/settings.json';
 
 // Module augmentation: makes `t('window.close')` etc. type-checked and
 // autocompletable. The English bundle is the canonical key set — other
@@ -15,6 +16,7 @@ declare module 'i18next' {
       home: typeof enHome;
       chat: typeof enChat;
       models: typeof enModels;
+      settings: typeof enSettings;
     };
     returnNull: false;
   }

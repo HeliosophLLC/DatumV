@@ -5,6 +5,7 @@ import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enHome from './locales/en/home.json';
 import enModels from './locales/en/models.json';
+import enSettings from './locales/en/settings.json';
 
 // Adding a locale = (1) ship a folder under locales/<tag>/, (2) add an entry
 // here, (3) extend `resources` below. The active locale is matched against
@@ -14,7 +15,13 @@ export type SupportedLocale = (typeof SupportedLocales)[number];
 export const FallbackLocale: SupportedLocale = 'en';
 
 const resources = {
-  en: { common: enCommon, home: enHome, chat: enChat, models: enModels },
+  en: {
+    common: enCommon,
+    home: enHome,
+    chat: enChat,
+    models: enModels,
+    settings: enSettings,
+  },
 } as const;
 
 i18next
@@ -25,7 +32,7 @@ i18next
     lng: FallbackLocale,
     fallbackLng: FallbackLocale,
     defaultNS: 'common',
-    ns: ['common', 'home', 'chat', 'models'],
+    ns: ['common', 'home', 'chat', 'models', 'settings'],
     // React already escapes interpolated values.
     interpolation: { escapeValue: false },
     returnNull: false,
