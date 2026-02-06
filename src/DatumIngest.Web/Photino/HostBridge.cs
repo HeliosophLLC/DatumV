@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using Photino.NET;
 
-namespace DatumIngest.Client;
+namespace DatumIngest.Web.Photino;
 
 // Central JS↔C# IPC dispatcher for the Photino host. Mirrors the JS-side
 // HostBridge in src/host/index.ts. Messages are namespaced strings

@@ -2,11 +2,20 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <OutputType>Exe</OutputType>
+    <!--
+      WinExe so the default desktop run (datum.exe / double-click) doesn't
+      flash a console window. Headless mode (the *-headless* flag or
+      DATUM_HEADLESS=1) still writes to stdout when launched from a terminal;
+      WinExe only suppresses *allocation* of a new console.
+    -->
+    <OutputType>WinExe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <AssemblyName>DatumIngest.Web</AssemblyName>
+    <!-- AssemblyName=datum so the binary is `datum.exe`, matching what users
+         type or double-click. NSwag binds the entry assembly by reflection,
+         not filename, so codegen is unaffected. -->
+    <AssemblyName>datum</AssemblyName>
     <RootNamespace>DatumIngest.Web</RootNamespace>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -30,6 +39,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Native window + WebView2 host for the desktop app. -->
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+
     <!-- OpenAPI document + Swagger UI middleware (runtime). -->
     <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />
 

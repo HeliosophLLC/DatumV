@@ -121,11 +121,7 @@ public static class WebHostExtensions
         services.AddHttpClient<HfHubClient>();
         services.AddSingleton<IModelDownloadService, ModelDownloadService>();
 
-        // AddApplicationPart so controllers are discovered when DatumIngest.Web
-        // is referenced by a non-MVC entry assembly (e.g. DatumIngest.Client).
-        // Without this, MVC's default scan only sees the entry assembly's controllers.
         services.AddControllers()
-            .AddApplicationPart(typeof(WebHostExtensions).Assembly)
             .AddJsonOptions(o =>
             {
                 // Serialize enums as their camelCase string names so the

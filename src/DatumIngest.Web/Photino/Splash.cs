@@ -1,4 +1,4 @@
-namespace DatumIngest.Client;
+namespace DatumIngest.Web.Photino;
 
 // Branded splash shown while Vite is starting up in dev mode. Replaces
 // WebView2's "can't reach this page" chrome-error UI with something that
