@@ -1,10 +1,10 @@
 import { proxy } from 'valtio';
-import { host, type ResizeSide } from '../host';
+import { host } from '../host';
 
-// Window state pushed from the host process. We optimistically flip on click
-// for snappy UI; the host echoes the real state via WindowMaximized/Restored
-// events (covering OS-level changes too: Win+Up/Down, Aero Snap, etc.),
-// which reconcile any drift.
+// Window state pushed from the Electron main process via maximize/unmaximize
+// events. We optimistically flip on click for snappy UI; the host echoes
+// the real state (also covering OS-driven changes: Win+Up/Down, Aero Snap,
+// double-click on the drag region), which reconciles any drift.
 export const windowState = proxy({
   maximized: false,
 });
@@ -30,13 +30,3 @@ export function toggleMaximize(): void {
 export function close(): void {
   host.close();
 }
-
-export function startDrag(): void {
-  host.startDrag();
-}
-
-export function startResize(side: ResizeSide): void {
-  host.startResize(side);
-}
-
-export type { ResizeSide };

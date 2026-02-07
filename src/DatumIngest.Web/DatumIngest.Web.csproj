@@ -2,20 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!--
-      WinExe so the default desktop run (datum.exe / double-click) doesn't
-      flash a console window. Headless mode (the *-headless* flag or
-      DATUM_HEADLESS=1) still writes to stdout when launched from a terminal;
-      WinExe only suppresses *allocation* of a new console.
-    -->
-    <OutputType>WinExe</OutputType>
+    <!-- Headless backend spawned by the Electron shell. Console output is
+         parsed by electron/main.ts for the "DatumIngest listening at"
+         ready signal, so Exe (not WinExe) is required. -->
+    <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <!-- AssemblyName=datum so the binary is `datum.exe`, matching what users
-         type or double-click. NSwag binds the entry assembly by reflection,
-         not filename, so codegen is unaffected. -->
-    <AssemblyName>datum</AssemblyName>
+    <!-- Binary name matches the published path electron/main.ts looks up
+         at process.resourcesPath/backend/DatumIngest.Web.exe. -->
     <RootNamespace>DatumIngest.Web</RootNamespace>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -39,9 +34,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Native window + WebView2 host for the desktop app. -->
-    <PackageReference Include="Photino.NET" Version="4.0.16" />
-
     <!-- OpenAPI document + Swagger UI middleware (runtime). -->
     <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />
 

@@ -1,16 +1,18 @@
 import { useTranslation } from 'react-i18next';
-import { minimize, toggleMaximize, close, startDrag } from '@/state/window';
+import { minimize, toggleMaximize, close } from '@/state/window';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
 // space after traffic lights — matches real macOS). Circles are the one
 // place we break the rounded-xs rule; at 12px the *shape* is what people
 // identify as Mac.
+//
+// Drag is CSS-only: the header carries `app-drag` (-webkit-app-region:
+// drag) which Chromium honors at the compositor layer.
 export function MacTitleBar() {
   const { t } = useTranslation();
   return (
     <header className="app-drag relative flex h-7 items-center bg-background px-3 select-none">
-      <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
       <div className="app-no-drag relative z-10 flex items-center gap-2">
         <button
           type="button"
@@ -36,10 +38,4 @@ export function MacTitleBar() {
       </div>
     </header>
   );
-}
-
-function onTitleBarMouseDown(event: React.MouseEvent) {
-  if (event.button !== 0) return;
-  event.preventDefault();
-  startDrag();
 }

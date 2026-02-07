@@ -14,8 +14,9 @@ export default defineConfig({
     outDir: '../wwwroot',
     emptyOutDir: true,
     // Stable filenames (no content hashes) so ASP.NET's static-web-assets
-    // manifest doesn't drift between builds. Photino fetches fresh anyway,
-    // so we don't need hash-based cache busting.
+    // manifest doesn't drift between builds. The Electron renderer
+    // reloads fresh on each launch, so we don't need hash-based cache
+    // busting.
     rollupOptions: {
       output: {
         entryFileNames: 'assets/[name].js',
@@ -26,10 +27,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: true, // fail fast if 5173 is taken — Photino expects it
-    // Forward API + SignalR back to Kestrel (pinned in Client/Program.cs).
-    // Same-origin from the SPA's POV so generated NSwag clients work with
-    // an empty baseUrl in both dev and prod.
+    strictPort: true, // fail fast if 5173 is taken — Electron expects it
+    // Forward API + SignalR back to Kestrel (pinned to 5050 by
+    // electron/main.ts's DATUM_WEB_URL env). Same-origin from the SPA's
+    // POV so generated NSwag clients work with an empty baseUrl in both
+    // dev and prod.
     proxy: {
       '/api': { target: 'http://127.0.0.1:5050', changeOrigin: true },
       '/hubs': { target: 'http://127.0.0.1:5050', ws: true, changeOrigin: true },

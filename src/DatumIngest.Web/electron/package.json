@@ -1,0 +1,27 @@
+{
+  "name": "datumingest-electron",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Electron shell for DatumIngest. Owns the main BrowserWindow, dialog windows, and the .NET subprocess lifecycle.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "npm run build && concurrently --kill-others-on-fail --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:clientapp": "npm --prefix ../ClientApp run build",
+    "publish:dotnet:win": "dotnet publish ../DatumIngest.Web.csproj -c Release -r win-x64 --self-contained true -o ./build/backend",
+    "publish:dotnet:mac": "dotnet publish ../DatumIngest.Web.csproj -c Release -r osx-x64 --self-contained true -o ./build/backend",
+    "publish:dotnet:linux": "dotnet publish ../DatumIngest.Web.csproj -c Release -r linux-x64 --self-contained true -o ./build/backend",
+    "dist:win": "npm run build:clientapp && npm run publish:dotnet:win && npm run build && electron-builder --win",
+    "dist:mac": "npm run build:clientapp && npm run publish:dotnet:mac && npm run build && electron-builder --mac",
+    "dist:linux": "npm run build:clientapp && npm run publish:dotnet:linux && npm run build && electron-builder --linux"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "concurrently": "^9.1.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "wait-on": "^8.0.1"
+  }
+}

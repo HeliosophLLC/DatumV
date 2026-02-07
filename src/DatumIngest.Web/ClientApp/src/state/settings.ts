@@ -9,8 +9,8 @@ import type {
 
 // Mirrors SettingsDto. Server defaults fill in any unset fields on GET, so
 // after refreshSettings the local copy is always non-null. The initial value
-// here is just what we render before the first fetch completes (~50ms in
-// Photino).
+// here is just what we render before the first fetch completes (~50ms after
+// the renderer mounts).
 interface SettingsState {
   theme: ThemePreference;
   chromeStyle: ChromeStyle;

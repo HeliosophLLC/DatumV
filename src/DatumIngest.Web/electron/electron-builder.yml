@@ -1,0 +1,62 @@
+appId: com.datumingest.app
+productName: DatumIngest
+copyright: Copyright © 2026
+
+directories:
+  # build/ holds intermediate artifacts (dotnet publish output, etc).
+  # out/ is the final installer destination, kept separate so the
+  # build:clientapp / publish:dotnet scripts can clean their own
+  # outputs without nuking the installer.
+  output: out
+
+# Files packed into the Electron app archive (app.asar). The .NET
+# binary is NOT here — it goes through extraResources below so it
+# stays unpacked on disk (executable bit preserved, easier to debug).
+files:
+  - dist/**
+  - package.json
+  - "node_modules/**/*"
+  - "!node_modules/.bin"
+  - "!**/*.{md,map,ts,tsbuildinfo}"
+  - "!**/{tsconfig.json,electron-builder.yml,.gitignore}"
+
+# Self-contained .NET publish output. Lives at
+# `<app>/resources/backend/DatumIngest.Web.exe` post-install, which is
+# what main.ts looks for via `path.join(process.resourcesPath, 'backend',
+# 'DatumIngest.Web.exe')`.
+extraResources:
+  - from: build/backend
+    to: backend
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+  artifactName: ${productName}-${version}.${ext}

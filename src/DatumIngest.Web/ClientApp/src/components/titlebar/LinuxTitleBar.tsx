@@ -1,12 +1,15 @@
 import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
-import { windowState, minimize, toggleMaximize, close, startDrag } from '@/state/window';
+import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
 
 // GNOME-flavored: 36px tall, title centered, controls right. GNOME tends to
 // be taller than Windows and centers the title. Square buttons match our
 // global rounded-xs rule.
+//
+// Drag is CSS-only: the header carries `app-drag` (-webkit-app-region:
+// drag) which Chromium honors at the compositor layer.
 export function LinuxTitleBar() {
   const { maximized } = useSnapshot(windowState);
   const { t } = useTranslation();
@@ -14,7 +17,6 @@ export function LinuxTitleBar() {
 
   return (
     <header className="app-drag relative flex h-9 items-center bg-background select-none">
-      <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>
@@ -34,12 +36,6 @@ export function LinuxTitleBar() {
       </div>
     </header>
   );
-}
-
-function onTitleBarMouseDown(event: React.MouseEvent) {
-  if (event.button !== 0) return;
-  event.preventDefault();
-  startDrag();
 }
 
 function LinuxButton({

@@ -2,6 +2,60 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			// Full dev launch: Vite + Electron + .NET (Electron spawns
+			// dotnet itself). -NoProfile avoids the workspace .venv
+			// auto-activation that the Python extension injects into
+			// fresh terminals; isBackground keeps the task panel in
+			// "running" state so VS Code doesn't treat the long-lived
+			// concurrently process as a failure.
+			//
+			// Run via: Ctrl+Shift+P → "Tasks: Run Task" → this label.
+			// Stop via: the trash icon on the task panel terminal,
+			// which kills concurrently and (via --kill-others-on-fail)
+			// vite + electron + the dotnet child.
+			"label": "Dev: Electron + Backend",
+			"type": "shell",
+			"command": "npm",
+			"args": ["run", "electron:dev"],
+			"options": {
+				"cwd": "${workspaceFolder}/src/DatumIngest.Web/electron",
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			// Background matcher signals "ready" to F5 / preLaunchTask once
+			// the .NET backend prints its listening URL — by that point
+			// Vite is up (concurrently sequenced electron after wait-on)
+			// and Electron's BrowserWindow is loading the SPA.
+			//
+			// The pattern uses a compile-error-shaped regex with capture
+			// groups so VS Code accepts the matcher as well-formed; our
+			// dev output never emits "file(line): error" lines so no
+			// spurious problems land in the Problems panel.
+			"problemMatcher": {
+				"owner": "dev-electron",
+				"pattern": {
+					"regexp": "^([^\\s].*)\\((\\d+|\\d+,\\d+|\\d+,\\d+,\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(.*)$",
+					"file": 1,
+					"location": 2,
+					"severity": 3,
+					"message": 4
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "DatumIngest listening at"
+				}
+			}
+		},
+		{
 			"label": "Debug: Build IndexOnce",
 			"type": "shell",
 			"command": "dotnet",

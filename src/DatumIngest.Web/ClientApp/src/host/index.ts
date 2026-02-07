@@ -1,113 +1,109 @@
-// Host environment + IPC bridge. The OS is detected client-side because chrome
-// decisions belong to the user's actual device (a SaaS backend running Linux
-// shouldn't force Linux chrome on a Mac user). The HostBridge is the seam for
-// everything that talks to the Photino host process — window controls today,
-// dialogs / file pickers / menus later.
-//
-// DatumIngest is Photino-only. The previous browser-mode shim was removed
-// once the merge into a single Web project landed — there is no SPA-in-a-
-// vanilla-browser entry point any more. If you need to invoke host APIs
-// from anywhere other than Photino, that's a new mode and needs its own
-// transport, not a fallback bridge here.
+// Host environment + IPC bridge. The OS comes from the Electron preload
+// (process.platform) — no client-side sniffing of navigator.platform.
+// The HostBridge is the seam for everything that talks to the Electron
+// main process: window controls today, file pickers and notifications
+// as the UI grows.
 
 export type HostOs = 'windows' | 'macos' | 'linux' | 'unknown';
 
 export type HostMessageHandler = (message: string) => void;
 
-export type ResizeSide =
-  | 'top'
-  | 'right'
-  | 'bottom'
-  | 'left'
-  | 'top-left'
-  | 'top-right'
-  | 'bottom-left'
-  | 'bottom-right';
-
 export interface HostBridge {
   minimize(): void;
   toggleMaximize(): void;
   close(): void;
-  // Hands the drag/resize gesture to the OS native window manager (Windows
-  // only today; Mac/Linux no-op). Called from mousedown on the drag layer /
-  // resize zones so the OS takes over from there — snap-to-edge, Aero Snap,
-  // Win+arrow handling all flow through naturally.
-  startDrag(): void;
-  startResize(side: ResizeSide): void;
-  // Subscribe to messages pushed from the host (C#). Photino's
-  // `window.external.receiveMessage` is a single-callback API; this fanout
-  // lets multiple state slices listen to the same channel.
+  // Subscribe to host-pushed messages. Today the only kind is
+  // 'host:window.maximized' / 'host:window.normal' — translated from
+  // Electron's typed window.maximizedChanged channel so existing
+  // subscribers in state/window.ts keep their string-match shape.
   onMessage(handler: HostMessageHandler): void;
-  // Raw payload send for protocols that need structured args
-  // (dialog.open, dialog.resolve, etc.). The bridge JSON-encodes the
-  // payload and joins with "|" — see plans/dialog-ipc.md for the wire
-  // format. C# splits on the first "|" and routes the JSON suffix to
-  // the registered handler.
-  sendPayload(kind: string, payload: unknown): void;
 }
 
 declare global {
-  interface External {
-    sendMessage?(message: string): void;
-    receiveMessage?(callback: (message: string) => void): void;
+  interface Window {
+    // Exposed by electron/preload.ts via contextBridge. Always present in
+    // production runs — the SPA only loads inside the Electron shell.
+    electronHost: {
+      isElectron: boolean;
+      platform: string;
+      minimize(): Promise<void>;
+      toggleMaximize(): Promise<void>;
+      close(): Promise<void>;
+      onMaximizedChanged(cb: (maximized: boolean) => void): () => void;
+      openDialog(spec: {
+        requestId: string;
+        kind: string;
+        payload?: Record<string, unknown> | null;
+        modal?: boolean;
+      }): Promise<unknown>;
+      resolveDialog(result: unknown): void;
+      notify(opts: { title: string; body: string }): Promise<void>;
+      showOpenDialog(options: {
+        title?: string;
+        defaultPath?: string;
+        properties?: ReadonlyArray<
+          | 'openFile'
+          | 'openDirectory'
+          | 'multiSelections'
+          | 'showHiddenFiles'
+          | 'createDirectory'
+          | 'promptToCreate'
+          | 'noResolveAliases'
+          | 'treatPackageAsDirectory'
+          | 'dontAddToRecent'
+        >;
+        filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
+      }): Promise<{ canceled: boolean; filePaths: string[] }>;
+    };
   }
 }
 
-export function detectOs(): HostOs {
-  const platform = (navigator.platform || '').toLowerCase();
-  const ua = (navigator.userAgent || '').toLowerCase();
-  if (platform.startsWith('mac') || ua.includes('mac os')) return 'macos';
-  if (platform.startsWith('win') || ua.includes('windows')) return 'windows';
-  if (platform.startsWith('linux') || ua.includes('linux')) return 'linux';
-  return 'unknown';
+function platformToOs(platform: string): HostOs {
+  switch (platform) {
+    case 'win32': return 'windows';
+    case 'darwin': return 'macos';
+    case 'linux': return 'linux';
+    default: return 'unknown';
+  }
 }
 
 function createHostBridge(): HostBridge {
-  const ext = window.external as External | undefined;
-  if (!ext || typeof ext.sendMessage !== 'function') {
-    // Photino didn't inject the bridge. We don't try to fall back — this
-    // is a programming error (SPA bundle loaded outside Photino) and the
-    // chat / models / settings flows all depend on the host being there.
+  const eh = window.electronHost;
+  if (!eh?.isElectron) {
+    // The SPA bundle is only meant to load inside the Electron shell.
+    // Hitting this means the preload didn't run (mis-configured
+    // BrowserWindow) or the SPA is being served standalone.
     throw new Error(
-      'window.external.sendMessage is not available. DatumIngest only runs ' +
-        'inside Photino — the SPA must be served by the Photino host process.',
+      'window.electronHost is not available. DatumIngest only runs inside ' +
+        'the Electron shell — the SPA must be loaded by electron/main.ts.',
     );
   }
 
   const handlers: HostMessageHandler[] = [];
-
-  // Register exactly once with Photino. Incoming messages fan out to all
-  // subscribers; consumers add via host.onMessage(...).
-  if (typeof ext.receiveMessage === 'function') {
-    ext.receiveMessage((message) => {
-      console.log('[host] ←', message);
-      for (const h of handlers) h(message);
-    });
-  }
-
-  const send = (kind: string) => {
-    console.log('[host] →', kind);
-    ext.sendMessage!(kind);
-  };
-
-  const sendPayload = (kind: string, payload: unknown) => {
-    const json = JSON.stringify(payload);
-    console.log('[host] →', kind, `<payload ${json.length}B>`);
-    ext.sendMessage!(`${kind}|${json}`);
-  };
+  eh.onMaximizedChanged((maximized) => {
+    const message = maximized ? 'host:window.maximized' : 'host:window.normal';
+    console.log('[host] ←', message);
+    for (const h of handlers) h(message);
+  });
 
   return {
-    minimize: () => send('host:window.minimize'),
-    toggleMaximize: () => send('host:window.toggleMaximize'),
-    close: () => send('host:window.close'),
-    startDrag: () => send('host:window.drag'),
-    startResize: (side) => send(`host:window.resize.${side}`),
+    minimize: () => {
+      console.log('[host] → window.minimize');
+      void eh.minimize();
+    },
+    toggleMaximize: () => {
+      console.log('[host] → window.toggleMaximize');
+      void eh.toggleMaximize();
+    },
+    close: () => {
+      console.log('[host] → window.close');
+      void eh.close();
+    },
     onMessage: (handler) => handlers.push(handler),
-    sendPayload,
   };
 }
 
-export const os: HostOs = detectOs();
+export const os: HostOs = platformToOs(window.electronHost?.platform ?? '');
 export const host: HostBridge = createHostBridge();
 
-console.log('[host] detected', { os });
+console.log('[host] detected', { os, platform: window.electronHost?.platform });

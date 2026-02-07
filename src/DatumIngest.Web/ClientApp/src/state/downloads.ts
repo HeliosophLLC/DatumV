@@ -246,6 +246,14 @@ onModelDownloadComplete((event) => {
   if (downloadsState.state) {
     downloadsState.state[event.modelId] = 'installed';
   }
+  // Native toast on Electron. Best-effort — fire and forget; failure
+  // (e.g. user disabled notifications) is silent.
+  if (window.electronHost?.isElectron) {
+    void window.electronHost.notify({
+      title: 'Download complete',
+      body: `${event.modelId} is installed`,
+    });
+  }
 });
 
 onModelDownloadFailed((event) => {

@@ -5,9 +5,6 @@ import { os, type HostOs } from '../host';
 // exists so consumers who prefer useSnapshot get the same access pattern as
 // the rest of the app state; one-shot readers can import `os` from '../host'
 // directly.
-//
-// Runtime detection ('photino' vs 'browser') was removed when the app
-// dropped browser support — DatumIngest is Photino-only.
 export const hostState = proxy<{ os: HostOs }>({
   os,
 });

@@ -1,17 +1,17 @@
 import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
-import { windowState, minimize, toggleMaximize, close, startDrag } from '@/state/window';
+import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
 
 // Win11-flavored: 32px tall, app title left, [-][□/❐][×] right, square buttons,
 // close turns red on hover. Maximize icon swaps to a "restore" glyph (overlapping
 // squares) when the window is currently maximized.
 //
-// An absolute-positioned drag layer fills the header beneath the buttons. The
-// CSS `app-drag` fallback is kept for hosts that honor -webkit-app-region;
-// when they don't (WebView2 chromeless), the JS mousedown handler asks the
-// host to start a native OS drag.
+// The header has `app-drag` (CSS -webkit-app-region: drag), which Chromium
+// honors at the compositor layer — clicking anywhere in the header starts
+// the OS drag automatically. The button row needs `app-no-drag` so clicks
+// reach the React handlers instead of starting a drag.
 export function WindowsTitleBar() {
   const { maximized } = useSnapshot(windowState);
   const { t } = useTranslation();
@@ -19,7 +19,6 @@ export function WindowsTitleBar() {
 
   return (
     <header className="app-drag relative flex h-8 items-center bg-background select-none">
-      <div className="absolute inset-0" onMouseDown={onTitleBarMouseDown} />
       <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
       <div className="app-no-drag relative z-10 ml-auto flex">
         <WinButton onClick={minimize} aria-label={t('window.minimize')}>
@@ -37,12 +36,6 @@ export function WindowsTitleBar() {
       </div>
     </header>
   );
-}
-
-function onTitleBarMouseDown(event: React.MouseEvent) {
-  if (event.button !== 0) return;
-  event.preventDefault();
-  startDrag();
 }
 
 function WinButton({
