@@ -135,6 +135,14 @@ public static class Program
             ? initialWindow.LoadRawString(Splash.Html)
             : initialWindow.Load(host.Url);
 
+        // Process-level DialogCoordinator. Spawns dialog windows on
+        // host:dialog.open, routes results back via SendWebMessage on the
+        // originator. The SPA base URL is where dialog windows load
+        // their content from — Vite in dev (HMR-served), Kestrel in prod
+        // (wwwroot bundle).
+        string spaBaseUrl = isDev ? "http://localhost:5173" : host.Url.ToString();
+        DialogCoordinator coordinator = new(spaBaseUrl, devMode: isDev);
+
         // Defer HostBridge construction (RegisterWebMessageReceivedHandler +
         // window event subscriptions) until after the native window actually
         // exists. The bridge reference is kept on a local so GC can't unwire
@@ -147,7 +155,7 @@ public static class Program
         HostBridge? bridge = null;
         window.WindowCreated += (_, _) =>
         {
-            bridge = new HostBridge(window);
+            bridge = new HostBridge(window, coordinator: coordinator);
         };
 
         try

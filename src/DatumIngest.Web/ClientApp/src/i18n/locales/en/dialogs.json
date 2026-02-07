@@ -1,0 +1,11 @@
+{
+  "license": {
+    "title": "License agreement",
+    "loading": "Loading license…",
+    "contextFor": "Required to download {model}",
+    "accept": "I accept",
+    "decline": "Decline",
+    "close": "Close",
+    "unknownLicense": "Unknown license: {id}"
+  }
+}

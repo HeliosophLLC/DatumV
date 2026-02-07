@@ -3,15 +3,28 @@ using Photino.NET;
 
 namespace DatumIngest.Web.Photino;
 
-// Central JS↔C# IPC dispatcher for the Photino host. Mirrors the JS-side
-// HostBridge in src/host/index.ts. Messages are namespaced strings
+// Central JS↔C# IPC dispatcher for a single Photino window. Mirrors the
+// JS-side HostBridge in src/host/index.ts. Messages are namespaced strings
 // ("host:window.minimize", "host:dialog.open", etc.) so future modules
-// don't collide. Today wires window controls; dialogs, file pickers,
-// native menus, and Lua applet bridges register through On(...).
+// don't collide. Today wires window controls + the dialog protocol;
+// file pickers, native menus, and Lua applet bridges register via On(...).
+//
+// Message format:
+//   - Bare kind: just the kind string ("host:window.minimize"). No payload.
+//   - With payload: "{kind}|{JSON}" — split on the first '|'. The JSON is
+//     opaque at this layer; consumers parse it themselves.
+//
+// Dialog wiring: when a DialogCoordinator is passed, the bridge auto-
+// registers `host:dialog.open` (any window can initiate) and — for
+// windows that ARE dialogs (constructed with a non-null dialogRequestId)
+// — `host:dialog.resolve` / `host:dialog.close`. See DialogCoordinator
+// for the cross-window routing logic.
 internal sealed class HostBridge
 {
     private readonly PhotinoWindow _window;
-    private readonly Dictionary<string, Action> _handlers = new();
+    private readonly DialogCoordinator? _coordinator;
+    private readonly Guid? _dialogRequestId;
+    private readonly Dictionary<string, Action<string?>> _handlers = new();
     // Last maximized state we pushed to JS. Photino fires WindowRestored
     // on every pixel of a drag-resize (not only on the maximize→normal
     // transition the name suggests), so without dedup we send a flood of
@@ -21,37 +34,71 @@ internal sealed class HostBridge
     // value sent lets PushWindowState skip the redundant ones.
     private bool? _lastSentMaximized;
 
-    public HostBridge(PhotinoWindow window)
+    public HostBridge(
+        PhotinoWindow window,
+        DialogCoordinator? coordinator = null,
+        Guid? dialogRequestId = null)
     {
         _window = window;
+        _coordinator = coordinator;
+        _dialogRequestId = dialogRequestId;
         _window.RegisterWebMessageReceivedHandler((_, message) => Dispatch(message));
         WireWindowControls();
+        WireDialogProtocol();
     }
 
-    // Register a JS→C# message handler. Last registration wins for a kind.
+    /// <summary>The window this bridge is attached to.</summary>
+    public PhotinoWindow Window => _window;
+
+    // Register a JS→C# message handler that takes no payload.
     public HostBridge On(string kind, Action handler)
+        => On(kind, _ => handler());
+
+    // Register a JS→C# message handler that may receive a payload string
+    // (null when the message arrived without one).
+    public HostBridge On(string kind, Action<string?> handler)
     {
         _handlers[kind] = handler;
         return this;
     }
 
-    // Push a message C#→JS.
+    // Push a bare kind to JS.
     public void Send(string message)
     {
         Console.WriteLine($"[Bridge] → {message}");
         _window.SendWebMessage(message);
     }
 
+    // Push a kind + JSON payload to JS as "{kind}|{json}".
+    public void Send(string kind, string payloadJson)
+    {
+        string composed = $"{kind}|{payloadJson}";
+        Console.WriteLine($"[Bridge] → {kind}|<payload {payloadJson.Length}B>");
+        _window.SendWebMessage(composed);
+    }
+
     private void Dispatch(string message)
     {
-        Console.WriteLine($"[Bridge] ← {message}");
-        if (_handlers.TryGetValue(message, out var handler))
+        int pipe = message.IndexOf('|');
+        string kind = pipe < 0 ? message : message[..pipe];
+        string? payload = pipe < 0 ? null : message[(pipe + 1)..];
+
+        if (payload is null)
         {
-            handler();
+            Console.WriteLine($"[Bridge] ← {kind}");
         }
         else
         {
-            Console.WriteLine($"[Bridge] no handler for '{message}'");
+            Console.WriteLine($"[Bridge] ← {kind}|<payload {payload.Length}B>");
+        }
+
+        if (_handlers.TryGetValue(kind, out var handler))
+        {
+            handler(payload);
+        }
+        else
+        {
+            Console.WriteLine($"[Bridge] no handler for '{kind}'");
         }
     }
 
@@ -82,6 +129,33 @@ internal sealed class HostBridge
 
         _window.WindowMaximized += (_, _) => PushWindowState();
         _window.WindowRestored += (_, _) => PushWindowState();
+    }
+
+    // Dialog protocol: open is initiable from any window; resolve / close
+    // only mean something from a window that IS a dialog (carries a
+    // requestId). See DialogCoordinator for routing.
+    private void WireDialogProtocol()
+    {
+        if (_coordinator is null) return;
+
+        On("host:dialog.open", payload =>
+        {
+            if (payload is null)
+            {
+                Console.Error.WriteLine("[Bridge] host:dialog.open without payload — dropping.");
+                return;
+            }
+            _coordinator.HandleOpen(_window, payload);
+        });
+
+        if (_dialogRequestId is { } reqId)
+        {
+            On("host:dialog.resolve", payload =>
+            {
+                _coordinator.HandleResolve(reqId, payload);
+            });
+            On("host:dialog.close", () => _coordinator.HandleClose(reqId));
+        }
     }
 
     // Photino fires WindowRestored for both un-maximize and un-minimize —

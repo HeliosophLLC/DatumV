@@ -38,6 +38,12 @@ export interface HostBridge {
   // `window.external.receiveMessage` is a single-callback API; this fanout
   // lets multiple state slices listen to the same channel.
   onMessage(handler: HostMessageHandler): void;
+  // Raw payload send for protocols that need structured args
+  // (dialog.open, dialog.resolve, etc.). The bridge JSON-encodes the
+  // payload and joins with "|" — see plans/dialog-ipc.md for the wire
+  // format. C# splits on the first "|" and routes the JSON suffix to
+  // the registered handler.
+  sendPayload(kind: string, payload: unknown): void;
 }
 
 declare global {
@@ -84,6 +90,12 @@ function createHostBridge(): HostBridge {
     ext.sendMessage!(kind);
   };
 
+  const sendPayload = (kind: string, payload: unknown) => {
+    const json = JSON.stringify(payload);
+    console.log('[host] →', kind, `<payload ${json.length}B>`);
+    ext.sendMessage!(`${kind}|${json}`);
+  };
+
   return {
     minimize: () => send('host:window.minimize'),
     toggleMaximize: () => send('host:window.toggleMaximize'),
@@ -91,6 +103,7 @@ function createHostBridge(): HostBridge {
     startDrag: () => send('host:window.drag'),
     startResize: (side) => send(`host:window.resize.${side}`),
     onMessage: (handler) => handlers.push(handler),
+    sendPayload,
   };
 }
 

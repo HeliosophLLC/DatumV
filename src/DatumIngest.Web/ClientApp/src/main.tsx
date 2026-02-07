@@ -1,14 +1,22 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { DialogShell } from './components/dialogs/DialogShell';
 import './index.css';
 // Side-effect imports: i18next must initialise before any component calls
 // useTranslation; state/locale wires settingsState → i18next.changeLanguage.
 import './i18n';
 import './state/locale';
+// Loads the dialog-message subscriber so openDialog promises resolve.
+// Side-effect only; safe to import in both roots.
+import './state/dialogs';
+
+// Dual-root mount: the same SPA bundle serves both the main app and
+// dialog windows. The coordinator (server-side) loads dialog windows at
+// URLs whose hash starts with '#/dialog/'; we branch on that here to
+// pick which root to mount. Plain string check — no router needed.
+const isDialogWindow = window.location.hash.startsWith('#/dialog/');
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <StrictMode>{isDialogWindow ? <DialogShell /> : <App />}</StrictMode>,
 );

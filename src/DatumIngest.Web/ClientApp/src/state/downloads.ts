@@ -7,6 +7,7 @@ import {
   onModelDownloadProgress,
   onModelDownloadStarted,
 } from '@/api/hub';
+import { openDialog } from '@/state/dialogs';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
 
 // Kick off the hub connection as soon as this module loads. The server
@@ -47,9 +48,6 @@ interface DownloadsState {
   active: Record<string, ActiveDownload>;
   // Last error per model (transient — cleared on next attempt).
   errors: Record<string, string>;
-  // Models with the license-required precondition that need a one-shot
-  // acceptance before retrying. Cleared when retry succeeds.
-  needsLicenseAcceptance: Record<string, string>; // modelId → licenseId
   loading: boolean;
 }
 
@@ -57,7 +55,6 @@ export const downloadsState = proxy<DownloadsState>({
   state: null,
   active: {},
   errors: {},
-  needsLicenseAcceptance: {},
   loading: false,
 });
 
@@ -78,9 +75,17 @@ export async function refreshDownloads(): Promise<void> {
 // progress placeholder. The server will emit OnModelDownloadStarted right
 // after, which will refine the byte counters; until then we render the
 // "Starting…" state from `active` having an entry with zero bytes.
-export async function installModel(modelId: string): Promise<void> {
+//
+// If the install returns 412 (license required), this function opens the
+// license-acceptance dialog, awaits the user's choice, accepts the
+// license, and retries the install — all transparent to the caller.
+// `modelDisplayName` is optional but improves the dialog UX ("Required
+// to download Realistic Vision V6" reads better than the bare id).
+export async function installModel(
+  modelId: string,
+  modelDisplayName?: string,
+): Promise<void> {
   delete downloadsState.errors[modelId];
-  delete downloadsState.needsLicenseAcceptance[modelId];
 
   downloadsState.active[modelId] = {
     modelId,
@@ -99,27 +104,49 @@ export async function installModel(modelId: string): Promise<void> {
     await api.modelCatalog.install(modelId);
   } catch (err) {
     delete downloadsState.active[modelId];
-    handleInstallError(modelId, err);
+    console.error('[downloads] install failed', modelId, err);
+    const licenseId = readLicenseRequired(err);
+    if (licenseId) {
+      await handleLicenseRequired(modelId, licenseId, modelDisplayName);
+      return;
+    }
+    downloadsState.errors[modelId] = describeError(err);
   }
 }
 
-// Two-step license-required flow: POST accept-license, then retry install.
-// This is the temporary v1 path until the proper modal-with-license-text
-// dialog round lands.
-export async function acceptLicenseAndInstall(modelId: string): Promise<void> {
-  const licenseId = downloadsState.needsLicenseAcceptance[modelId];
-  if (!licenseId) {
-    // Nothing pending — just try the install (caller likely raced).
-    return installModel(modelId);
+// Walked through the 412-license flow: open the license dialog, await the
+// user's accept/decline, and either retry or record the rejection. Each
+// step writes to downloadsState so the card UI reflects what's happening
+// without the caller having to thread context through.
+async function handleLicenseRequired(
+  modelId: string,
+  licenseId: string,
+  modelDisplayName: string | undefined,
+): Promise<void> {
+  const { result } = openDialog<{ accepted: boolean }>({
+    kind: 'confirmLicense',
+    payload: {
+      licenseId,
+      modelDisplayName: modelDisplayName ?? '',
+    },
+  });
+  const decision = await result;
+  if (!decision?.accepted) {
+    // User declined or closed the dialog — surface as a soft error on
+    // the card. Clicking Download again will re-prompt.
+    downloadsState.errors[modelId] = 'License declined';
+    return;
   }
   try {
     await api.modelCatalog.acceptLicense(licenseId);
-    delete downloadsState.needsLicenseAcceptance[modelId];
-    delete downloadsState.errors[modelId];
-    await installModel(modelId);
   } catch (err) {
-    handleInstallError(modelId, err);
+    console.error('[downloads] acceptLicense failed', licenseId, err);
+    downloadsState.errors[modelId] = describeError(err);
+    return;
   }
+  // License is accepted; retry the install. installModel handles its own
+  // optimistic-state setup again.
+  await installModel(modelId, modelDisplayName);
 }
 
 export async function uninstallModel(modelId: string): Promise<void> {
@@ -129,33 +156,54 @@ export async function uninstallModel(modelId: string): Promise<void> {
       downloadsState.state[modelId] = 'notInstalled';
     }
     delete downloadsState.errors[modelId];
-    delete downloadsState.needsLicenseAcceptance[modelId];
   } catch (err) {
-    downloadsState.errors[modelId] = err instanceof Error ? err.message : String(err);
+    console.error('[downloads] uninstall failed', modelId, err);
+    downloadsState.errors[modelId] = describeError(err);
   }
 }
 
-// NSwag generates a SwaggerException with `status` (HTTP code) and
-// `response` (raw body). We inspect both to distinguish the 412
-// license-not-accepted path from other failures.
-function handleInstallError(modelId: string, err: unknown): void {
-  // Parse 412 license-not-accepted shape:
-  // { error: 'license_not_accepted', licenseId: '<id>', message: '<text>' }
+// NSwag emits SwaggerException that sometimes doesn't satisfy
+// `instanceof Error` (depending on transpile target / class semantics),
+// so `String(err)` returns "[object Object]" instead of the message.
+// This helper walks the most common error shapes: Error.message,
+// SwaggerException-style { message, status, response }, plain strings,
+// finally falling back to a JSON dump so the UI never shows
+// "[object Object]" again.
+function describeError(err: unknown): string {
+  if (err == null) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message.length > 0) {
+      const status = typeof o.status === 'number' ? ` (HTTP ${o.status})` : '';
+      return o.message + status;
+    }
+    if (typeof o.response === 'string' && o.response.length > 0) {
+      return o.response;
+    }
+    try { return JSON.stringify(err); } catch { /* fall through */ }
+  }
+  return String(err);
+}
+
+// NSwag emits SwaggerException with `status` + raw `response` body. The
+// 412 license-not-accepted shape is
+//   { error: 'license_not_accepted', licenseId: '<id>', message: '<text>' }
+// — we parse manually because the typed parse goes through ProblemDetails
+// which doesn't carry the licenseId field.
+function readLicenseRequired(err: unknown): string | null {
   const status = readErrorField(err, 'status');
   const response = readErrorField(err, 'response');
-  if (status === 412 && typeof response === 'string') {
-    try {
-      const parsed = JSON.parse(response);
-      if (parsed?.error === 'license_not_accepted' && typeof parsed?.licenseId === 'string') {
-        downloadsState.needsLicenseAcceptance[modelId] = parsed.licenseId;
-        downloadsState.errors[modelId] = parsed.message ?? 'License acceptance required';
-        return;
-      }
-    } catch {
-      // fall through to generic error
+  if (status !== 412 || typeof response !== 'string') return null;
+  try {
+    const parsed = JSON.parse(response);
+    if (parsed?.error === 'license_not_accepted' && typeof parsed?.licenseId === 'string') {
+      return parsed.licenseId;
     }
+  } catch {
+    /* fall through */
   }
-  downloadsState.errors[modelId] = err instanceof Error ? err.message : String(err);
+  return null;
 }
 
 function readErrorField(err: unknown, key: string): unknown {

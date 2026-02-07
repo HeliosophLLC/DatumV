@@ -16,7 +16,6 @@ import {
 } from '@/state/models';
 import type { CatalogModelSnapshot } from '@/state/models';
 import {
-  acceptLicenseAndInstall,
   downloadsState,
   installModel,
   refreshDownloads,
@@ -202,10 +201,10 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
   const downloads = useSnapshot(downloadsState);
 
   const modelId = model.id ?? '';
+  const modelDisplayName = model.displayName ?? modelId;
   const installState = downloads.state?.[modelId];
   const activeDownload = downloads.active[modelId];
   const error = downloads.errors[modelId];
-  const pendingLicenseId = downloads.needsLicenseAcceptance[modelId];
 
   return (
     <article className="hover:bg-muted/40 flex flex-col gap-2 rounded-xs border p-4 transition-colors">
@@ -256,10 +255,10 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
 
       <CardActions
         modelId={modelId}
+        modelDisplayName={modelDisplayName}
         placeholder={!!model.placeholder}
         installed={installState === 'installed'}
         downloading={!!activeDownload}
-        pendingLicenseId={pendingLicenseId}
       />
     </article>
   );
@@ -292,16 +291,16 @@ function DownloadProgress({ download }: { download: ActiveDownload }) {
 
 function CardActions({
   modelId,
+  modelDisplayName,
   placeholder,
   installed,
   downloading,
-  pendingLicenseId,
 }: {
   modelId: string;
+  modelDisplayName: string;
   placeholder: boolean;
   installed: boolean;
   downloading: boolean;
-  pendingLicenseId?: string;
 }) {
   const { t } = useTranslation('models');
 
@@ -331,29 +330,12 @@ function CardActions({
     );
   }
 
-  if (pendingLicenseId) {
-    return (
-      <div className="mt-1 flex flex-col items-end gap-1">
-        <p className="text-muted-foreground text-xs">
-          {t('card.licenseRequired', { license: pendingLicenseId })}
-        </p>
-        <Button
-          variant="default"
-          size="sm"
-          onClick={() => void acceptLicenseAndInstall(modelId)}
-        >
-          {t('card.acceptAndDownload')}
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <div className="mt-1 flex justify-end">
       <Button
         variant="default"
         size="sm"
-        onClick={() => void installModel(modelId)}
+        onClick={() => void installModel(modelId, modelDisplayName)}
       >
         <Download />
         {t('card.download')}
