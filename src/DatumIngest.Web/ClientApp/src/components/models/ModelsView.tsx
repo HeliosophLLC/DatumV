@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Loader2 } from 'lucide-react';
+import { Download, Loader2, Trash2 } from 'lucide-react';
 import {
   clearFilters,
   collectTags,
@@ -15,8 +15,17 @@ import {
   type TierFilter,
 } from '@/state/models';
 import type { CatalogModelSnapshot } from '@/state/models';
+import {
+  acceptLicenseAndInstall,
+  downloadsState,
+  installModel,
+  refreshDownloads,
+  uninstallModel,
+  type ActiveDownload,
+} from '@/state/downloads';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
 // Models catalog browser. Loads the manifest on mount, renders filter
@@ -32,6 +41,7 @@ export function ModelsView() {
 
   useEffect(() => {
     void loadModelsCatalog();
+    void refreshDownloads();
   }, []);
 
   // Filter chip vocabularies are derived from the manifest, not hardcoded —
@@ -189,6 +199,14 @@ function FilterChip({
 
 function ModelCard({ model }: { model: CatalogModelSnapshot }) {
   const { t } = useTranslation('models');
+  const downloads = useSnapshot(downloadsState);
+
+  const modelId = model.id ?? '';
+  const installState = downloads.state?.[modelId];
+  const activeDownload = downloads.active[modelId];
+  const error = downloads.errors[modelId];
+  const pendingLicenseId = downloads.needsLicenseAcceptance[modelId];
+
   return (
     <article className="hover:bg-muted/40 flex flex-col gap-2 rounded-xs border p-4 transition-colors">
       <div className="flex items-start justify-between gap-3">
@@ -196,6 +214,12 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
         <div className="flex shrink-0 gap-1.5">
           {model.placeholder && (
             <Badge variant="muted">{t('card.comingSoon')}</Badge>
+          )}
+          {!model.placeholder && installState === 'installed' && (
+            <Badge>{t('card.installed')}</Badge>
+          )}
+          {!model.placeholder && installState === 'partial' && !activeDownload && (
+            <Badge variant="muted">{t('card.partial')}</Badge>
           )}
           {model.requiresHfLogin && (
             <Badge variant="outline">{t('card.gated')}</Badge>
@@ -219,8 +243,133 @@ function ModelCard({ model }: { model: CatalogModelSnapshot }) {
           </Badge>
         ))}
       </div>
+
+      {activeDownload && (
+        <DownloadProgress download={activeDownload} />
+      )}
+
+      {error && !activeDownload && (
+        <p className="text-destructive text-xs" role="alert">
+          {error}
+        </p>
+      )}
+
+      <CardActions
+        modelId={modelId}
+        placeholder={!!model.placeholder}
+        installed={installState === 'installed'}
+        downloading={!!activeDownload}
+        pendingLicenseId={pendingLicenseId}
+      />
     </article>
   );
+}
+
+function DownloadProgress({ download }: { download: ActiveDownload }) {
+  const { t } = useTranslation('models');
+  const total = download.bytesTotalAcrossModel;
+  const read = download.bytesReadTotal;
+  const percent = total > 0 ? (read / total) * 100 : 0;
+
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      <Progress value={percent} />
+      <div className="text-muted-foreground flex justify-between text-xs">
+        <span>
+          {download.fileCount > 0
+            ? t('card.downloadingFile', {
+                index: download.fileIndex,
+                count: download.fileCount,
+                file: shortenPath(download.currentFile),
+              })
+            : t('card.downloadingStarting')}
+        </span>
+        <span>{total > 0 ? `${Math.round(percent)}%` : ''}</span>
+      </div>
+    </div>
+  );
+}
+
+function CardActions({
+  modelId,
+  placeholder,
+  installed,
+  downloading,
+  pendingLicenseId,
+}: {
+  modelId: string;
+  placeholder: boolean;
+  installed: boolean;
+  downloading: boolean;
+  pendingLicenseId?: string;
+}) {
+  const { t } = useTranslation('models');
+
+  if (placeholder) return null;
+  if (downloading) {
+    // Cancel intentionally not wired in this round — server has no cancel
+    // hub method for installs yet. Show the inert progress + helper text.
+    return (
+      <p className="text-muted-foreground mt-1 text-xs">
+        {t('card.downloadingHint')}
+      </p>
+    );
+  }
+
+  if (installed) {
+    return (
+      <div className="mt-1 flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void uninstallModel(modelId)}
+        >
+          <Trash2 />
+          {t('card.remove')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (pendingLicenseId) {
+    return (
+      <div className="mt-1 flex flex-col items-end gap-1">
+        <p className="text-muted-foreground text-xs">
+          {t('card.licenseRequired', { license: pendingLicenseId })}
+        </p>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => void acceptLicenseAndInstall(modelId)}
+        >
+          {t('card.acceptAndDownload')}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex justify-end">
+      <Button
+        variant="default"
+        size="sm"
+        onClick={() => void installModel(modelId)}
+      >
+        <Download />
+        {t('card.download')}
+      </Button>
+    </div>
+  );
+}
+
+function shortenPath(path: string): string {
+  // Long paths inside HF repos can be unwieldy in a single-line caption.
+  // Keep the trailing segment; ellipsise the middle if it's wide.
+  if (path.length <= 48) return path;
+  const slash = path.lastIndexOf('/');
+  if (slash === -1) return path.slice(0, 24) + '…' + path.slice(-24);
+  const tail = path.slice(slash + 1);
+  return '…/' + tail;
 }
 
 function hardwareLabel(

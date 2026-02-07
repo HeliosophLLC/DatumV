@@ -1,5 +1,11 @@
 import { proxy } from 'valtio';
-import { acquireStreamHub, onConnectionClosed } from '@/api/hub';
+import {
+  acquireStreamHub,
+  onChatComplete,
+  onChatError,
+  onChatToken,
+  onConnectionClosed,
+} from '@/api/hub';
 
 // Mirrors the server's reactive loop. `messages` is the persisted turns
 // list; `streaming` accumulates the in-flight assistant turn token by
@@ -10,6 +16,11 @@ import { acquireStreamHub, onConnectionClosed } from '@/api/hub';
 // No DB rehydration on launch — see project_message_graph_design memory.
 // Fresh each session; persistence happens server-side for inspectability
 // and future rehydration.
+//
+// Event wiring lives at module scope: the hub's dispatcher fans events out
+// to anyone who subscribed. We register at import time so subscriptions
+// are in place before the first sendMessage call, regardless of view
+// mount order.
 
 export type Role = 'user' | 'assistant';
 
@@ -35,65 +46,41 @@ export const conversationState = proxy<ConversationState>({
   error: null,
 });
 
-// One receiver object for the connection's lifetime. The hub layer wants
-// the same reference across registrations; using a const object avoids
-// any chance of double-registration.
-//
-// Note: the receiver must satisfy IStreamHubClient *in full*, including
-// methods the chat surface doesn't care about (model-download events).
-// Those are no-ops here; the Models surface will register a sibling
-// receiver against the same connection when it grows its own state, OR
-// these will be routed through a small fan-out dispatcher. v1: stub them.
-const receiver = {
-  async onPong(): Promise<void> {},
-  async onToken(content: string): Promise<void> {
-    conversationState.streaming += content;
-    if (conversationState.status === 'awaiting') {
-      conversationState.status = 'streaming';
-    }
-  },
-  async onComplete(): Promise<void> {
-    // Includes the cancellation path — server emits OnComplete after
-    // persisting whatever partial response it captured.
-    finalizeStreamingTurn();
-  },
-  async onError(message: string): Promise<void> {
-    conversationState.status = 'error';
-    conversationState.error = message;
-    conversationState.streaming = '';
-  },
-  // Model-download lifecycle events are routed elsewhere (or, for v1,
-  // nowhere). Keeping these as stubs satisfies the typed receiver contract
-  // without giving the chat state visibility into download progress.
-  async onModelDownloadStarted(): Promise<void> {},
-  async onModelDownloadProgress(): Promise<void> {},
-  async onModelDownloadComplete(): Promise<void> {},
-  async onModelDownloadFailed(): Promise<void> {},
-};
+onChatToken((content) => {
+  conversationState.streaming += content;
+  if (conversationState.status === 'awaiting') {
+    conversationState.status = 'streaming';
+  }
+});
 
-// One-shot subscriber to connection-closed events from the hub layer.
+onChatComplete(() => {
+  // Includes the cancellation path — server emits OnComplete after
+  // persisting whatever partial response it captured.
+  finalizeStreamingTurn();
+});
+
+onChatError((message) => {
+  conversationState.status = 'error';
+  conversationState.error = message;
+  conversationState.streaming = '';
+});
+
 // If the WS dies while we're mid-stream, neither OnComplete nor OnError
 // will arrive — we manufacture an error so the input doesn't stay stuck.
-let connectionCloseHandlerRegistered = false;
-
-function ensureConnectionCloseHandler() {
-  if (connectionCloseHandlerRegistered) return;
-  connectionCloseHandlerRegistered = true;
-  onConnectionClosed((err) => {
-    if (
-      conversationState.status === 'awaiting' ||
-      conversationState.status === 'streaming'
-    ) {
-      // Salvage whatever we received before the drop into messages so
-      // the partial response stays visible; the server already persisted
-      // its side via the agent's finally block.
-      finalizeStreamingTurn();
-      conversationState.status = 'error';
-      conversationState.error = err?.message ?? 'Connection lost';
-      conversationState.streaming = '';
-    }
-  });
-}
+onConnectionClosed((err) => {
+  if (
+    conversationState.status === 'awaiting' ||
+    conversationState.status === 'streaming'
+  ) {
+    // Salvage whatever we received before the drop into messages so
+    // the partial response stays visible; the server already persisted
+    // its side via the agent's finally block.
+    finalizeStreamingTurn();
+    conversationState.status = 'error';
+    conversationState.error = err?.message ?? 'Connection lost';
+    conversationState.streaming = '';
+  }
+});
 
 function finalizeStreamingTurn() {
   if (conversationState.streaming.length > 0) {
@@ -127,8 +114,7 @@ export async function sendMessage(content: string): Promise<void> {
   conversationState.error = null;
 
   try {
-    ensureConnectionCloseHandler();
-    const hub = await acquireStreamHub(receiver);
+    const hub = await acquireStreamHub();
     await hub.sendMessage(trimmed);
   } catch (err) {
     // If the server-side method threw or the connection failed during
@@ -146,7 +132,7 @@ export async function cancelMessage(): Promise<void> {
     return;
   }
   try {
-    const hub = await acquireStreamHub(receiver);
+    const hub = await acquireStreamHub();
     await hub.cancelMessage();
   } catch {
     // Best-effort; the server may have already finished. The OnComplete

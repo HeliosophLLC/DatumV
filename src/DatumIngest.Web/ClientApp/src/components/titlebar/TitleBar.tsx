@@ -17,14 +17,14 @@ function resolve(chromeStyle: ChromeStyle | undefined, os: HostOs): ResolvedChro
 
 export function TitleBar() {
   const { chromeStyle } = useSnapshot(settingsState);
-  const { os, runtime } = useSnapshot(hostState);
+  const { os } = useSnapshot(hostState);
 
-  // Browser owns its own chrome. Mac/Linux use OS chrome until those
-  // platforms get the same polish (native drag/resize integration);
-  // chromeless is Windows-only today. The component code for all three
-  // styles stays in the repo so cycling on a Windows host previews how
-  // Mac/Linux *will* look once we wire them up.
-  if (runtime !== 'photino' || os !== 'windows') return null;
+  // Mac/Linux use OS chrome until those platforms get the same polish
+  // (native drag/resize integration); chromeless is Windows-only today.
+  // The component code for all three styles stays in the repo so cycling
+  // on a Windows host previews how Mac/Linux *will* look once we wire
+  // them up.
+  if (os !== 'windows') return null;
 
   const resolved = resolve(chromeStyle, os);
   if (resolved === 'macos') return <MacTitleBar />;

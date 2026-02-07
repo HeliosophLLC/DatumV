@@ -1,12 +1,15 @@
 import { proxy } from 'valtio';
-import { os, runtime, type HostOs, type HostRuntime } from '../host';
+import { os, type HostOs } from '../host';
 
-// Detected once at module load — these don't change at runtime. The proxy
-// is for consumers who prefer useSnapshot; for one-shot reads, import
-// `os` / `runtime` from '../host' directly.
-export const hostState = proxy<{ os: HostOs; runtime: HostRuntime }>({
+// OS is detected once at module load and never changes at runtime. The proxy
+// exists so consumers who prefer useSnapshot get the same access pattern as
+// the rest of the app state; one-shot readers can import `os` from '../host'
+// directly.
+//
+// Runtime detection ('photino' vs 'browser') was removed when the app
+// dropped browser support — DatumIngest is Photino-only.
+export const hostState = proxy<{ os: HostOs }>({
   os,
-  runtime,
 });
 
-export type { HostOs, HostRuntime };
+export type { HostOs };

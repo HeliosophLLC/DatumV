@@ -43,6 +43,14 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public async Task<ModelInstallState> ProbeAsync(string modelId, CancellationToken ct = default)
     {
         CatalogModel model = ResolveModel(modelId);
+
+        // Placeholders short-circuit before any I/O. Their HF repo doesn't
+        // exist yet (Heliosoph/* not uploaded), so a tree probe would 404
+        // and waste a network call. A local directory with the same name —
+        // empty leftover, prior failed download — doesn't change the fact
+        // that there's nothing to compare against.
+        if (model.Placeholder) return ModelInstallState.NotInstalled;
+
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
 
         if (!Directory.Exists(modelDir)) return ModelInstallState.NotInstalled;
@@ -124,6 +132,33 @@ internal sealed class ModelDownloadService : IModelDownloadService
         string modelDir = Path.Combine(_modelsDirectory, model.Id);
         if (Directory.Exists(modelDir)) Directory.Delete(modelDir, recursive: true);
         return Task.CompletedTask;
+    }
+
+    public async Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(
+        CancellationToken ct = default)
+    {
+        // Parallel probe. ProbeAsync short-circuits to NotInstalled when the
+        // model directory doesn't exist (no HF tree call), so for a fresh
+        // host with no installed models this is essentially N directory
+        // existence checks — fast.
+        IReadOnlyList<CatalogModel> models = _store.Manifest.Models;
+        Task<(string Id, ModelInstallState State)>[] tasks = new Task<(string, ModelInstallState)>[models.Count];
+        for (int i = 0; i < models.Count; i++)
+        {
+            CatalogModel m = models[i];
+            tasks[i] = ProbeOne(m.Id, ct);
+        }
+        (string Id, ModelInstallState State)[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        Dictionary<string, ModelInstallState> map = new(results.Length, StringComparer.Ordinal);
+        foreach ((string id, ModelInstallState state) in results)
+        {
+            map[id] = state;
+        }
+        return map;
+
+        async Task<(string, ModelInstallState)> ProbeOne(string id, CancellationToken token)
+            => (id, await ProbeAsync(id, token).ConfigureAwait(false));
     }
 
     private async Task RunDownloadAsync(CatalogModel model, CancellationToken ct)

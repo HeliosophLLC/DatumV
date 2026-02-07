@@ -19,7 +19,16 @@
     "hardwareGpu": "GPU",
     "hardwareAny": "CPU/GPU",
     "comingSoon": "Coming soon",
-    "gated": "HF login required"
+    "gated": "HF login required",
+    "installed": "Installed",
+    "partial": "Partial",
+    "download": "Download",
+    "remove": "Remove",
+    "downloadingFile": "Downloading file {index} of {count} · {file}",
+    "downloadingStarting": "Starting download…",
+    "downloadingHint": "Downloading… you can leave this view; it will keep running.",
+    "licenseRequired": "Requires accepting the {license} license.",
+    "acceptAndDownload": "Accept & download"
   },
   "results": "{count, plural, one {# model} other {# models}}"
 }

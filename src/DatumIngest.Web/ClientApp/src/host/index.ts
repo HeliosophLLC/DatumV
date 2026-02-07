@@ -1,11 +1,16 @@
-// Host environment + IPC bridge. Both OS and runtime are detected *client-side*
-// because the chrome decision belongs to the user's actual device, not the
-// server (a SaaS backend running Linux shouldn't force Linux chrome on a Mac
-// user). The HostBridge is the seam for everything that talks to the desktop
-// process — window controls today, dialogs / file pickers / menus later.
+// Host environment + IPC bridge. The OS is detected client-side because chrome
+// decisions belong to the user's actual device (a SaaS backend running Linux
+// shouldn't force Linux chrome on a Mac user). The HostBridge is the seam for
+// everything that talks to the Photino host process — window controls today,
+// dialogs / file pickers / menus later.
+//
+// DatumIngest is Photino-only. The previous browser-mode shim was removed
+// once the merge into a single Web project landed — there is no SPA-in-a-
+// vanilla-browser entry point any more. If you need to invoke host APIs
+// from anywhere other than Photino, that's a new mode and needs its own
+// transport, not a fallback bridge here.
 
 export type HostOs = 'windows' | 'macos' | 'linux' | 'unknown';
-export type HostRuntime = 'photino' | 'browser';
 
 export type HostMessageHandler = (message: string) => void;
 
@@ -51,19 +56,22 @@ export function detectOs(): HostOs {
   return 'unknown';
 }
 
-export function detectRuntime(): HostRuntime {
-  const isPhotino =
-    typeof window.external !== 'undefined' &&
-    typeof (window.external as External).sendMessage === 'function';
-  return isPhotino ? 'photino' : 'browser';
-}
+function createHostBridge(): HostBridge {
+  const ext = window.external as External | undefined;
+  if (!ext || typeof ext.sendMessage !== 'function') {
+    // Photino didn't inject the bridge. We don't try to fall back — this
+    // is a programming error (SPA bundle loaded outside Photino) and the
+    // chat / models / settings flows all depend on the host being there.
+    throw new Error(
+      'window.external.sendMessage is not available. DatumIngest only runs ' +
+        'inside Photino — the SPA must be served by the Photino host process.',
+    );
+  }
 
-function createPhotinoBridge(): HostBridge {
   const handlers: HostMessageHandler[] = [];
 
   // Register exactly once with Photino. Incoming messages fan out to all
   // subscribers; consumers add via host.onMessage(...).
-  const ext = window.external as External;
   if (typeof ext.receiveMessage === 'function') {
     ext.receiveMessage((message) => {
       console.log('[host] ←', message);
@@ -86,19 +94,7 @@ function createPhotinoBridge(): HostBridge {
   };
 }
 
-function createBrowserBridge(): HostBridge {
-  return {
-    minimize: () => {},
-    toggleMaximize: () => {},
-    close: () => window.close(),
-    startDrag: () => {},
-    startResize: () => {},
-    onMessage: () => {}, // No host to push messages from.
-  };
-}
-
-export const runtime: HostRuntime = detectRuntime();
 export const os: HostOs = detectOs();
-export const host: HostBridge = runtime === 'photino' ? createPhotinoBridge() : createBrowserBridge();
+export const host: HostBridge = createHostBridge();
 
-console.log('[host] detected', { runtime, os });
+console.log('[host] detected', { os });

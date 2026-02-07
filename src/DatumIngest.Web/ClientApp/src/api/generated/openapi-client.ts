@@ -247,7 +247,41 @@ export class ModelCatalogClient {
         return Promise.resolve<ModelInstallState>(null as any);
     }
 
-    install(id: string, signal?: AbortSignal): Promise<FileResponse> {
+    getStates(signal?: AbortSignal): Promise<{ [key: string]: ModelInstallState; }> {
+        let url_ = this.baseUrl + "/api/model-catalog/states";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_: RequestInit = {
+            method: "GET",
+            signal,
+            headers: {
+                "Accept": "application/json"
+            }
+        };
+
+        return this.http.fetch(url_, options_).then((_response: Response) => {
+            return this.processGetStates(_response);
+        });
+    }
+
+    protected processGetStates(response: Response): Promise<{ [key: string]: ModelInstallState; }> {
+        const status = response.status;
+        let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
+        if (status === 200) {
+            return response.text().then((_responseText) => {
+            let result200: any = null;
+            result200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as { [key: string]: ModelInstallState; };
+            return result200;
+            });
+        } else if (status !== 200 && status !== 204) {
+            return response.text().then((_responseText) => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            });
+        }
+        return Promise.resolve<{ [key: string]: ModelInstallState; }>(null as any);
+    }
+
+    install(id: string, signal?: AbortSignal): Promise<void> {
         let url_ = this.baseUrl + "/api/model-catalog/models/{id}/install";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
@@ -258,7 +292,6 @@ export class ModelCatalogClient {
             method: "POST",
             signal,
             headers: {
-                "Accept": "application/octet-stream"
             }
         };
 
@@ -267,26 +300,37 @@ export class ModelCatalogClient {
         });
     }
 
-    protected processInstall(response: Response): Promise<FileResponse> {
+    protected processInstall(response: Response): Promise<void> {
         const status = response.status;
         let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
-        if (status === 200 || status === 206) {
-            const contentDisposition = response.headers ? response.headers.get("content-disposition") : undefined;
-            let fileNameMatch = contentDisposition ? /filename\*=(?:(\\?['"])(.*?)\1|(?:[^\s]+'.*?')?([^;\n]*))/g.exec(contentDisposition) : undefined;
-            let fileName = fileNameMatch && fileNameMatch.length > 1 ? fileNameMatch[3] || fileNameMatch[2] : undefined;
-            if (fileName) {
-                fileName = decodeURIComponent(fileName);
-            } else {
-                fileNameMatch = contentDisposition ? /filename="?([^"]*?)"?(;|$)/g.exec(contentDisposition) : undefined;
-                fileName = fileNameMatch && fileNameMatch.length > 1 ? fileNameMatch[1] : undefined;
-            }
-            return response.blob().then(blob => { return { fileName: fileName, data: blob, status: status, headers: _headers }; });
+        if (status === 202) {
+            return response.text().then((_responseText) => {
+            return;
+            });
+        } else if (status === 404) {
+            return response.text().then((_responseText) => {
+            let result404: any = null;
+            result404 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ProblemDetails;
+            return throwException("A server side error occurred.", status, _responseText, _headers, result404);
+            });
+        } else if (status === 409) {
+            return response.text().then((_responseText) => {
+            let result409: any = null;
+            result409 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ProblemDetails;
+            return throwException("A server side error occurred.", status, _responseText, _headers, result409);
+            });
+        } else if (status === 412) {
+            return response.text().then((_responseText) => {
+            let result412: any = null;
+            result412 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver) as ProblemDetails;
+            return throwException("A server side error occurred.", status, _responseText, _headers, result412);
+            });
         } else if (status !== 200 && status !== 204) {
             return response.text().then((_responseText) => {
             return throwException("An unexpected server error occurred.", status, _responseText, _headers);
             });
         }
-        return Promise.resolve<FileResponse>(null as any);
+        return Promise.resolve<void>(null as any);
     }
 
     uninstall(id: string, signal?: AbortSignal): Promise<FileResponse> {
@@ -474,6 +518,16 @@ export interface CatalogSource {
 }
 
 export type ModelInstallState = "notInstalled" | "partial" | "installed";
+
+export interface ProblemDetails {
+    type?: string | undefined;
+    title?: string | undefined;
+    status?: number | undefined;
+    detail?: string | undefined;
+    instance?: string | undefined;
+
+    [key: string]: any;
+}
 
 export interface SettingsDto {
     theme?: ThemePreference;

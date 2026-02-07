@@ -12,6 +12,14 @@ internal sealed class HostBridge
 {
     private readonly PhotinoWindow _window;
     private readonly Dictionary<string, Action> _handlers = new();
+    // Last maximized state we pushed to JS. Photino fires WindowRestored
+    // on every pixel of a drag-resize (not only on the maximize→normal
+    // transition the name suggests), so without dedup we send a flood of
+    // identical "host:window.normal" messages. SendWebMessage runs across
+    // the WebView2 IPC channel; a flood can crash WebView2 with
+    // STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xc000041d). Tracking the last
+    // value sent lets PushWindowState skip the redundant ones.
+    private bool? _lastSentMaximized;
 
     public HostBridge(PhotinoWindow window)
     {
@@ -77,10 +85,16 @@ internal sealed class HostBridge
     }
 
     // Photino fires WindowRestored for both un-maximize and un-minimize —
-    // we snapshot the current Maximized property to disambiguate.
+    // we snapshot the current Maximized property to disambiguate. Also
+    // dedupes against the last-sent value to absorb the per-pixel
+    // WindowRestored flood during drag-resize, which would otherwise
+    // overwhelm WebView2's IPC channel and crash the host process.
     private void PushWindowState()
     {
-        Send(_window.Maximized ? "host:window.maximized" : "host:window.normal");
+        bool current = _window.Maximized;
+        if (_lastSentMaximized == current) return;
+        _lastSentMaximized = current;
+        Send(current ? "host:window.maximized" : "host:window.normal");
     }
 
     // The standard "hand the drag/resize back to the OS" technique on Windows:

@@ -4,9 +4,10 @@ import { windowState, startResize, type ResizeSide } from '@/state/window';
 
 // Eight invisible zones around the window edge that delegate to the OS for
 // native resize. Edge strips are 4px thick; corner squares are 8px (slightly
-// larger so diagonal resize is grabbable). Skipped entirely in browser mode
-// (the browser owns the window) and when the window is maximized (resizing
-// a maximized window is a no-op and the zones would just block clicks).
+// larger so diagonal resize is grabbable). Skipped on non-Windows (Mac/
+// Linux use OS chrome with native resize via the window border) and when
+// the window is maximized (resizing a maximized window is a no-op and the
+// zones would just block clicks).
 //
 // Render at the App root so the zones sit above all content. They cover
 // the title bar's corners; the title bar's buttons are inset enough that
@@ -35,13 +36,13 @@ const zones: Zone[] = [
 ];
 
 export function ResizeFrame() {
-  const { os, runtime } = useSnapshot(hostState);
+  const { os } = useSnapshot(hostState);
   const { maximized } = useSnapshot(windowState);
 
   // Windows-only today (the Win32 P/Invoke in HostBridge.cs handles the
   // actual resize). Mac/Linux use OS chrome with native resize via the
-  // window border. Browser owns its own window. Maximized = no resize.
-  if (runtime !== 'photino' || os !== 'windows' || maximized) return null;
+  // window border. Maximized = no resize.
+  if (os !== 'windows' || maximized) return null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-50">

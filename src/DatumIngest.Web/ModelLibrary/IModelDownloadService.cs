@@ -20,6 +20,12 @@ public interface IModelDownloadService
 
     // Best-effort: deletes the model's directory on disk.
     Task UninstallAsync(string modelId, CancellationToken ct = default);
+
+    // Bulk probe: returns the install state for every model in the manifest.
+    // Cheaper for the Models view than N individual ProbeAsync calls; same
+    // result. Future ship-quality version may cache, but the file-system
+    // probe is fast enough that bulk == "loop and probe."
+    Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(CancellationToken ct = default);
 }
 
 public enum ModelInstallState

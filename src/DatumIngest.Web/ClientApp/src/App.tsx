@@ -4,8 +4,7 @@ import { refreshHealth } from './state/health';
 import { refreshSettings } from './state/settings';
 import { conversationState } from './state/conversation';
 import { navState } from './state/nav';
-import { TitleBar } from '@/components/titlebar/TitleBar';
-import { ResizeFrame } from '@/components/window/ResizeFrame';
+import { WindowChrome } from '@/components/window/WindowChrome';
 import { SideNav } from '@/components/nav/SideNav';
 import { HomePage } from '@/components/home/HomePage';
 import { ConversationView } from '@/components/chat/ConversationView';
@@ -27,17 +26,13 @@ export default function App() {
   const showConversation = messages.length > 0 || status !== 'idle';
 
   return (
-    <div className="bg-background text-foreground flex h-screen flex-col border">
-      <TitleBar />
-      <ResizeFrame />
-      <div className="flex flex-1 overflow-hidden">
-        <SideNav />
-        <main className="flex flex-1 flex-col overflow-hidden">
-          {view === 'chat' && (showConversation ? <ConversationView /> : <HomePage />)}
-          {view === 'models' && <ModelsView />}
-          {view === 'settings' && <SettingsView />}
-        </main>
-      </div>
-    </div>
+    <WindowChrome>
+      <SideNav />
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {view === 'chat' && (showConversation ? <ConversationView /> : <HomePage />)}
+        {view === 'models' && <ModelsView />}
+        {view === 'settings' && <SettingsView />}
+      </main>
+    </WindowChrome>
   );
 }

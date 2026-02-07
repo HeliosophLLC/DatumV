@@ -1,31 +1,20 @@
-﻿using DatumIngest.Web.ModelLibrary;
+using DatumIngest.Web.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DatumIngest.Web.Api;
 
 [ApiController]
 [Route("api/model-catalog")]
-public sealed class ModelCatalogController : ControllerBase
+public sealed class ModelCatalogController(
+    IManifestStore store,
+    ILicenseAcceptanceService licenses,
+    IModelDownloadService downloads) : ControllerBase
 {
-    private readonly IManifestStore _store;
-    private readonly ILicenseAcceptanceService _licenses;
-    private readonly IModelDownloadService _downloads;
-
-    public ModelCatalogController(
-        IManifestStore store,
-        ILicenseAcceptanceService licenses,
-        IModelDownloadService downloads)
-    {
-        _store = store;
-        _licenses = licenses;
-        _downloads = downloads;
-    }
-
     // GET /api/model-catalog — the full manifest. Front-end fetches once at
     // startup and caches in a Valtio proxy. Re-fetched on app focus / pull-
     // to-refresh patterns later; for v1 a manual reload covers updates.
     [HttpGet]
-    public CatalogManifest GetManifest() => _store.Manifest;
+    public CatalogManifest GetManifest() => store.Manifest;
 
     // GET /api/model-catalog/licenses/{id}/text — raw license text for
     // acceptance UI. Returns 404 if id unknown or textFile missing.
@@ -33,7 +22,7 @@ public sealed class ModelCatalogController : ControllerBase
     [Produces("text/plain")]
     public ActionResult<string> GetLicenseText(string id)
     {
-        string? text = _store.GetLicenseText(id);
+        string? text = store.GetLicenseText(id);
         if (text is null) return NotFound();
         return Content(text, "text/plain");
     }
@@ -43,15 +32,15 @@ public sealed class ModelCatalogController : ControllerBase
     [HttpPost("licenses/{id}/accept")]
     public async Task<IActionResult> AcceptLicense(string id, CancellationToken ct)
     {
-        if (!_store.Manifest.Licenses.ContainsKey(id)) return NotFound();
-        await _licenses.AcceptAsync(id, ct);
+        if (!store.Manifest.Licenses.ContainsKey(id)) return NotFound();
+        await licenses.AcceptAsync(id, ct);
         return NoContent();
     }
 
     // GET /api/model-catalog/licenses/accepted — list of accepted license ids.
     [HttpGet("licenses/accepted")]
     public async Task<IReadOnlyList<string>> GetAcceptedLicenses(CancellationToken ct)
-        => await _licenses.GetAcceptedAsync(ct);
+        => await licenses.GetAcceptedAsync(ct);
 
     // GET /api/model-catalog/models/{id}/state — fast probe of local-vs-remote.
     [HttpGet("models/{id}/state")]
@@ -59,7 +48,7 @@ public sealed class ModelCatalogController : ControllerBase
     {
         try
         {
-            return await _downloads.ProbeAsync(id, ct);
+            return await downloads.ProbeAsync(id, ct);
         }
         catch (KeyNotFoundException)
         {
@@ -67,18 +56,34 @@ public sealed class ModelCatalogController : ControllerBase
         }
     }
 
+    // GET /api/model-catalog/states — bulk probe: one call returns the
+    // install state for every model in the manifest. Used by the Models
+    // view to render install-state badges without N round-trips.
+    [HttpGet("states")]
+    public async Task<IReadOnlyDictionary<string, ModelInstallState>> GetStates(CancellationToken ct)
+        => await downloads.ProbeAllAsync(ct);
+
     // POST /api/model-catalog/models/{id}/install — kicks off background
     // download. Returns 202 immediately; progress flows over the SignalR
     // hub.
     //   - 404 if id unknown
     //   - 409 if the model is a placeholder (HF repo not yet uploaded)
     //   - 412 if a required license has not been accepted (Precondition Failed)
+    //
+    // ProducesResponseType attributes are not decorative: NSwag's TS codegen
+    // uses them to decide which statuses to treat as success. Without 202
+    // explicitly listed, the generated client falls into its "unexpected
+    // server error" branch even though the install kicked off successfully.
     [HttpPost("models/{id}/install")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
     public async Task<IActionResult> Install(string id, CancellationToken ct)
     {
         try
         {
-            await _downloads.InstallAsync(id, ct);
+            await downloads.InstallAsync(id, ct);
             return Accepted();
         }
         catch (KeyNotFoundException) { return NotFound(); }
@@ -99,7 +104,7 @@ public sealed class ModelCatalogController : ControllerBase
     {
         try
         {
-            await _downloads.UninstallAsync(id, ct);
+            await downloads.UninstallAsync(id, ct);
             return NoContent();
         }
         catch (KeyNotFoundException)
