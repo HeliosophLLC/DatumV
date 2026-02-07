@@ -54,7 +54,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         Assert.NotNull(provider.GetSourceIndex());
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 
@@ -99,7 +99,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
 
         Assert.NotNull(provider.GetSourceIndex());
 
-        catalog.DeleteRows("t", [0L]);
+        catalog["t"].DeleteRows([0L]);
         Assert.Null(provider.GetSourceIndex());
 
         catalog.Plan("REINDEX t");
@@ -146,7 +146,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         Assert.NotNull(provider.GetSourceIndex());
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
         Assert.NotNull(provider.GetSourceIndex());
@@ -249,7 +249,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         Assert.All(before!.Features, f => Assert.True(f.CachedStatsValid));
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 
@@ -270,7 +270,7 @@ public sealed class ReindexExecutorTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("ANALYZE t");
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 

@@ -8,10 +8,11 @@ using DatumIngest.Pooling;
 namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
-/// PR8 tests for catalog-level ALTER TABLE / INSERT / DELETE.
-/// Cover the four mutation paths
-/// (<see cref="TableCatalog.AddColumn"/> / <see cref="TableCatalog.DropColumn"/> /
-/// <see cref="TableCatalog.AppendRowsAsync"/> / <see cref="TableCatalog.DeleteRows"/>)
+/// PR8 tests for ALTER TABLE / INSERT / DELETE through the
+/// <see cref="ITableProvider"/> mutation surface, dispatched via
+/// the catalog's table indexer. Covers
+/// <see cref="ITableProvider.AddColumn"/> / <see cref="ITableProvider.DropColumn"/> /
+/// <see cref="ITableProvider.AppendRowsAsync"/> / <see cref="ITableProvider.DeleteRows"/>
 /// against both <see cref="InMemoryTableProvider"/> and
 /// <see cref="DatumFileTableProviderV2"/>, plus the read-only
 /// rejection for system tables and the snapshot-readers semantics
@@ -45,7 +46,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
             rows: [[1, 10], [2, 20]]);
         catalog.Add(provider);
 
-        catalog.AddColumn("t", new ColumnInfo("c", DataKind.Int32, nullable: true));
+        catalog["t"].AddColumn(new ColumnInfo("c", DataKind.Int32, nullable: true));
 
         Schema schema = provider.GetSchema();
         Assert.Equal(["a", "b", "c"], schema.Columns.Select(c => c.Name));
@@ -74,7 +75,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         catalog.Add(new InMemoryTableProvider(pool, "t", columns: ["a"], rows: [[1], [2]]));
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            catalog.AddColumn("t", new ColumnInfo("nope", DataKind.Int32, nullable: false)));
+            catalog["t"].AddColumn(new ColumnInfo("nope", DataKind.Int32, nullable: false)));
         Assert.Contains("nullable", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -88,7 +89,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
             rows: [[1, 10, 100], [2, 20, 200]]);
         catalog.Add(provider);
 
-        catalog.DropColumn("t", "b");
+        catalog["t"].DropColumn("b");
 
         Schema schema = provider.GetSchema();
         Assert.Equal(["a", "c"], schema.Columns.Select(c => c.Name));
@@ -129,7 +130,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         row2[0] = DataValue.FromInt32(3); row2[1] = DataValue.FromString("three", arena);
         batch.Add(row2);
 
-        await catalog.AppendRowsAsync("t", AsyncEnumerableOf(batch));
+        await catalog["t"].AppendRowsAsync(AsyncEnumerableOf(batch), CancellationToken.None);
 
         Assert.Equal(3, provider.GetRowCount());
 
@@ -154,7 +155,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
             rows: [[1], [2], [3], [4], [5]]);
         catalog.Add(provider);
 
-        catalog.DeleteRows("t", [1L, 3L]); // delete rows 2 and 4
+        catalog["t"].DeleteRows([1L, 3L]); // delete rows 2 and 4
 
         Assert.Equal(3, provider.GetRowCount());
         List<int> aValues = new();
@@ -171,18 +172,19 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     // ──────────────────── System table read-only rejection ────────────────────
 
     [Fact]
-    public void Catalog_AddColumn_OnSystemTable_ThrowsInvalidOperation()
+    public void Catalog_AddColumn_OnSystemTable_ThrowsNotSupported()
     {
         // information_schema.tables is auto-registered by the catalog
         // and must be read-only — its provider doesn't override the
-        // capability flags so the catalog refuses the mutation.
+        // capability flags so the default ITableProvider.AddColumn
+        // throws NotSupportedException.
         Pool pool = CreatePool();
         TableCatalog catalog = CreateCatalog(pool);
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.AddColumn("information_schema.tables",
+        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
+            catalog["information_schema.tables"].AddColumn(
                 new ColumnInfo("nope", DataKind.Int32, nullable: true)));
-        Assert.Contains("read-only", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AddColumn", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -190,7 +192,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
     {
         Pool pool = CreatePool();
         TableCatalog catalog = CreateCatalog(pool);
-        Assert.Throws<KeyNotFoundException>(() => catalog.DropColumn("nope", "x"));
+        Assert.Throws<KeyNotFoundException>(() => catalog["nope"].DropColumn("x"));
     }
 
     // ──────────────────── Datum file provider, catalog dispatch ────────────────────
@@ -203,7 +205,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
-        catalog.AddColumn("t", new ColumnInfo("note", DataKind.String, nullable: true));
+        catalog["t"].AddColumn(new ColumnInfo("note", DataKind.String, nullable: true));
 
         // Provider's snapshot has been swapped — schema reflects the new column.
         Schema schema = catalog["t"].GetSchema();
@@ -230,7 +232,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
-        catalog.DropColumn("t", "b");
+        catalog["t"].DropColumn("b");
 
         Schema schema = catalog["t"].GetSchema();
         Assert.Equal(["a"], schema.Columns.Select(c => c.Name));
@@ -253,7 +255,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         row[0] = DataValue.FromInt32(99); row[1] = DataValue.FromInt32(990);
         batch.Add(row);
 
-        await catalog.AppendRowsAsync("t", AsyncEnumerableOf(batch));
+        await catalog["t"].AppendRowsAsync(AsyncEnumerableOf(batch), CancellationToken.None);
 
         Assert.Equal(beforeCount + 1, catalog["t"].GetRowCount());
 
@@ -274,7 +276,7 @@ public sealed class CatalogMutationTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
         catalog.AddFile(path, name: "t");
 
-        catalog.DeleteRows("t", [1L]); // soft-delete middle row
+        catalog["t"].DeleteRows([1L]); // soft-delete middle row
 
         // Scan no longer surfaces row index 1.
         List<int> aValues = new();

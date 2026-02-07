@@ -74,7 +74,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         {
             ITableProvider firstProvider = firstCatalog.Add(new TableDescriptor("t", datumPath));
             Schema schema = firstProvider.GetSchema();
-            await firstCatalog.AppendRowsAsync("t",
+            await firstCatalog["t"].AppendRowsAsync(
                 MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
                 CancellationToken.None);
         }
@@ -108,7 +108,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         Assert.NotNull(provider.GetSourceIndex());
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[6, "ghost"]]),
             CancellationToken.None);
 
@@ -128,7 +128,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 
-        catalog.AddColumn("t", new ColumnInfo("note", DataKind.String, nullable: true));
+        catalog["t"].AddColumn(new ColumnInfo("note", DataKind.String, nullable: true));
 
         Assert.Null(provider.GetSourceIndex());
     }
@@ -143,7 +143,7 @@ public sealed class StaleIndexDetectionTests : ServiceTestBase, IAsyncLifetime
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
 
-        catalog.DeleteRows("t", [0L]);
+        catalog["t"].DeleteRows([0L]);
 
         Assert.Null(provider.GetSourceIndex());
     }

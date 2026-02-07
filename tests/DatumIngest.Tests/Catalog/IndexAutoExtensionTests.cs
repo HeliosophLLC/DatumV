@@ -56,7 +56,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(IndexValidity.Valid, provider.GetIndexValidity());
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 
@@ -160,7 +160,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         ITableProvider provider = catalog.Add(new TableDescriptor("t", datumPath));
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[7, "rev"]]),
             CancellationToken.None);
 
@@ -208,7 +208,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         long rowsBefore = before.Schema.TotalRowCount;
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[10, "ten"], [11, "eleven"]]),
             CancellationToken.None);
 
@@ -243,7 +243,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         Assert.NotEmpty(chunksForBobBefore);
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[5, "extra"]]),
             CancellationToken.None);
 
@@ -274,7 +274,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         int chunkCountBefore = before.Chunks.Count;
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[99, "zara"]]),
             CancellationToken.None);
 
@@ -399,7 +399,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         int chunkCountBefore = before.Chunks.Count;
 
         Schema schema = provider.GetSchema();
-        await catalog.AppendRowsAsync("t",
+        await catalog["t"].AppendRowsAsync(
             MakeBatchesMatchingSchema(pool, schema, [[42, "newcomer"]]),
             CancellationToken.None);
 

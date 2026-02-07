@@ -262,7 +262,7 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
         catalog.AddFile(path, name: "t");
 
         long before = catalog["t"].GetRowCount();
-        await using (IAppendSession s = catalog.BeginAppend("t"))
+        await using (IAppendSession s = catalog["t"].BeginAppend())
         {
             await s.WriteAsync(MakeBatch(pool, ["a", "b"], [[55, 550]]));
             await s.CommitAsync();
@@ -271,12 +271,12 @@ public sealed class AppendSessionTests : ServiceTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public void Datum_Session_OnReadOnlyTable_ThrowsInvalidOperation()
+    public void Datum_Session_OnReadOnlyTable_ThrowsNotSupported()
     {
         Pool pool = CreatePool();
         using TableCatalog catalog = CreateCatalog(pool);
-        Assert.Throws<InvalidOperationException>(() =>
-            catalog.BeginAppend("information_schema.tables"));
+        Assert.Throws<NotSupportedException>(() =>
+            catalog["information_schema.tables"].BeginAppend());
     }
 
     // ──────────────────── Helpers ────────────────────
