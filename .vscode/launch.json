@@ -138,54 +138,6 @@
 			"preLaunchTask": "Debug: Build DevWeb"
 		},
 		{
-			// Headless backend only — the Electron shell is what end-users
-			// see. For the full app experience run:
-			//     npm run electron:dev
-			// from src/DatumIngest.Web/electron/ (spawns Vite + Electron;
-			// Electron in turn spawns the .NET backend).
-			"name": "Web Backend: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0/DatumIngest.Web.dll",
-			"args": [],
-			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0",
-			// internalConsole — VSCode's Debug Console captures stdio.
-			// Avoids integratedTerminal, which runs the user's PowerShell
-			// profile (including .venv activation) before our process boots.
-			"console": "internalConsole",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"env": {
-				"ASPNETCORE_ENVIRONMENT": "Development",
-				"DATUM_WEB_URL": "http://127.0.0.1:5050"
-			},
-			"preLaunchTask": "Debug: Build Web"
-		},
-		{
-			"name": "Web Backend: Debug (prod-style)",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0/DatumIngest.Web.dll",
-			"args": [],
-			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0",
-			"console": "internalConsole",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build Web"
-		},
-		{
-			"name": "Web Backend: Release",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Release/net10.0/DatumIngest.Web.dll",
-			"args": [],
-			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Release/net10.0",
-			"console": "internalConsole",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Release: Build Web"
-		},
-		{
 			"name": "DevWeb: Release",
 			"type": "coreclr",
 			"request": "launch",

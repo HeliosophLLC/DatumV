@@ -1,0 +1,459 @@
+{
+  "$schema": "./catalog.schema.json",
+  "_comment": [
+    "DatumIngest model catalog — v1 manifest read by the in-app Model Manager",
+    "and (eventually) the catalog-aware variants of scripts/download-*.ps1.",
+    "",
+    "Schema notes:",
+    "  - `licenses` (top-level) defines each license once. Per-model `licenseIds`",
+    "    references entries here. The app uses `textFile` to render acceptance UI",
+    "    offline; `canonicalUrl` is the authoritative source for verification.",
+    "  - `requiresAcceptance` is a property of the LICENSE (does the user have to",
+    "    click 'I accept' on this license text?). MIT/Apache = false. OpenRAIL-M",
+    "    and similar = true.",
+    "  - `requiresHfLogin` is a property of the MODEL (is the HF source repo",
+    "    gated by HuggingFace, requiring a logged-in token to download?). This is",
+    "    independent of the license — Llama is both gated AND has app-acceptance.",
+    "",
+    "Entries marked `placeholder: true` point at huggingface.co/Heliosoph/*",
+    "repos that do not exist yet — see models/upload-plan.json for the upload",
+    "plan that brings them online. The downloader should treat placeholder",
+    "entries as unavailable until they're cleared.",
+    "",
+    "Revision pinning: v1 manifest uses `revision: 'main'` for simplicity. When",
+    "v2 ships, each model will be pinned to a specific commit sha so the catalog",
+    "is reproducible across HF history.",
+    "",
+    "Verification: downloader queries HF's tree API at the specified revision,",
+    "which returns lfs.sha256 per file. The manifest does NOT bake per-file",
+    "hashes — they come from HF at download time."
+  ],
+  "schemaVersion": 1,
+
+  "licenses": {
+    "mit": {
+      "title": "MIT License",
+      "spdx": "MIT",
+      "canonicalUrl": "https://opensource.org/license/mit",
+      "textFile": "licenses/mit.txt",
+      "summary": "Permissive open-source license. Allows commercial use, modification, and redistribution. Only requires preserving the original copyright notice.",
+      "requiresAcceptance": false
+    },
+    "apache-2.0": {
+      "title": "Apache License 2.0",
+      "spdx": "Apache-2.0",
+      "canonicalUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+      "textFile": "licenses/apache-2.0.txt",
+      "summary": "Permissive open-source license with an explicit patent grant. Allows commercial use, modification, and redistribution. Requires preserving copyright/notice/attribution.",
+      "requiresAcceptance": false
+    },
+    "cc-by-4.0": {
+      "title": "Creative Commons Attribution 4.0 International",
+      "spdx": "CC-BY-4.0",
+      "canonicalUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+      "textFile": "licenses/cc-by-4.0.txt",
+      "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author.",
+      "requiresAcceptance": false
+    },
+    "creativeml-openrail-m": {
+      "title": "CreativeML OpenRAIL-M License",
+      "spdx": "CreativeML-OpenRAIL-M",
+      "canonicalUrl": "https://huggingface.co/spaces/CompVis/stable-diffusion-license",
+      "textFile": "licenses/creativeml-openrail-m.md",
+      "summary": "Open license with use-based restrictions. Commercial use OK. Prohibits CSAM, discrimination, automated legal/medical decision-making, misinformation generation, and similar misuse. Used by SD 1.x and its fine-tunes.",
+      "requiresAcceptance": true
+    },
+    "creativeml-openrail-pp-m": {
+      "title": "CreativeML OpenRAIL++-M License",
+      "spdx": "CreativeML-OpenRAIL-Plus-Plus-M",
+      "canonicalUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+      "textFile": "licenses/creativeml-openrail-pp-m.md",
+      "summary": "Stability AI variant of OpenRAIL-M for SDXL. Same use-based restrictions as OpenRAIL-M with tightened attribution clauses. Used by SDXL base and SDXL fine-tunes.",
+      "requiresAcceptance": true
+    },
+    "llama-3.1-community": {
+      "title": "Llama 3.1 Community License",
+      "spdx": "Llama-3.1-Community",
+      "canonicalUrl": "https://www.llama.com/llama3_1/license/",
+      "textFile": "licenses/llama-3.1-community.md",
+      "summary": "Source-available license from Meta. Allows commercial use BELOW 700 million monthly active users (above requires a separate Meta license). Requires 'Built with Llama' attribution and prefixing derivative model names with 'Llama'. Subject to Meta's Acceptable Use Policy.",
+      "requiresAcceptance": true
+    }
+  },
+
+  "tiers": {
+    "starter": [
+      "all-minilm-l6-v2",
+      "phi-3.5-mini-instruct-gguf",
+      "toxic-bert",
+      "twitter-roberta-sentiment"
+    ],
+    "recommended": [
+      "all-minilm-l6-v2",
+      "bge-small-en-v1.5",
+      "bge-reranker-base",
+      "deberta-v3-base-zeroshot-v2",
+      "twitter-roberta-sentiment",
+      "bert-base-ner",
+      "toxic-bert",
+      "roberta-squad2",
+      "phi-3.5-mini-instruct-gguf",
+      "florence-2-base-ft-quantized",
+      "yolox-s",
+      "kokoro-v1.0"
+    ]
+  },
+
+  "models": [
+    {
+      "id": "all-minilm-l6-v2",
+      "displayName": "MiniLM-L6 Embeddings",
+      "description": "Tiny, fast sentence embeddings (384-dim). Good default for similarity search.",
+      "task": "embeddings",
+      "tags": ["embeddings", "english", "small"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "optimum/all-MiniLM-L6-v2", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 90
+    },
+    {
+      "id": "bge-small-en-v1.5",
+      "displayName": "BGE Small (English)",
+      "description": "MTEB-leaderboard-grade English embeddings at MiniLM size.",
+      "task": "embeddings",
+      "tags": ["embeddings", "english", "small"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "BAAI/bge-small-en-v1.5", "revision": "main", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt", "1_Pooling/*", "sentence_bert_config.json"] },
+      "approxSizeMb": 130
+    },
+    {
+      "id": "jina-embeddings-v2-base-en",
+      "displayName": "Jina Embeddings v2 (Long Context)",
+      "description": "8K-context English embeddings, 768-dim. Good for whole-document retrieval.",
+      "task": "embeddings",
+      "tags": ["embeddings", "english", "long-context"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "jinaai/jina-embeddings-v2-base-en", "revision": "main", "include": ["onnx/*", "config.json", "tokenizer*", "special_tokens_map.json", "vocab.txt"] },
+      "approxSizeMb": 330
+    },
+    {
+      "id": "bge-reranker-base",
+      "displayName": "BGE Reranker (Base)",
+      "description": "Cross-encoder reranker — much more accurate than cosine similarity for top-k retrieval.",
+      "task": "reranker",
+      "tags": ["reranker", "english"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/bge-reranker-base", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 280
+    },
+    {
+      "id": "deberta-v3-base-zeroshot-v2",
+      "displayName": "DeBERTa v3 Base Zero-Shot",
+      "description": "Arbitrary-label classifier via NLI entailment. Give it candidate labels at inference time.",
+      "task": "zero-shot-classification",
+      "tags": ["zero-shot", "nli", "classification"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/deberta-v3-base-zeroshot-v2.0-ONNX", "revision": "main", "include": ["onnx/*", "*.json", "*.txt", "spm.model"] },
+      "approxSizeMb": 370
+    },
+    {
+      "id": "twitter-roberta-sentiment",
+      "displayName": "Twitter RoBERTa Sentiment",
+      "description": "3-class sentiment (positive / negative / neutral). Generalizes beyond Twitter.",
+      "task": "sentiment",
+      "tags": ["classification", "sentiment", "english"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/twitter-roberta-base-sentiment-latest", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 500
+    },
+    {
+      "id": "bert-base-ner",
+      "displayName": "BERT Base NER",
+      "description": "English named-entity recognition (PER / ORG / LOC / MISC).",
+      "task": "ner",
+      "tags": ["ner", "token-classification", "english"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/bert-base-NER", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 440
+    },
+    {
+      "id": "toxic-bert",
+      "displayName": "Toxic-BERT",
+      "description": "6-label toxicity (toxic / severe / obscene / threat / insult / identity-hate).",
+      "task": "toxicity",
+      "tags": ["classification", "moderation", "english"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/toxic-bert", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 440
+    },
+    {
+      "id": "roberta-squad2",
+      "displayName": "RoBERTa SQuAD2",
+      "description": "Extractive question answering — finds the answer span in a passage. Handles unanswerable.",
+      "task": "question-answering",
+      "tags": ["qa", "extractive", "english"],
+      "licenseIds": ["cc-by-4.0"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/roberta-base-squad2", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 500
+    },
+
+    {
+      "id": "florence-2-base-ft-fp16",
+      "displayName": "Florence-2 base-ft (fp16)",
+      "description": "Microsoft's unified vision-language model — captioning, OCR, detection, grounded VQA via task prompts.",
+      "task": "vision-language",
+      "tags": ["captioning", "ocr", "detection", "vlm", "fp16"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 523,
+      "placeholder": true
+    },
+    {
+      "id": "florence-2-base-ft-quantized",
+      "displayName": "Florence-2 base-ft (INT8)",
+      "description": "INT8-quantized Florence-2 for CPU/NPU/mobile. ~half the size of fp16 with modest OCR-quality cost.",
+      "task": "vision-language",
+      "tags": ["captioning", "ocr", "detection", "vlm", "int8", "cpu"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 266,
+      "placeholder": true
+    },
+    {
+      "id": "vit-gpt2-image-captioning",
+      "displayName": "ViT-GPT2 Image Captioner",
+      "description": "Classic ViT encoder + GPT-2 decoder. Vanilla 'describe this image' baseline.",
+      "task": "image-captioning",
+      "tags": ["captioning", "image-to-text"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/vit-gpt2-image-captioning-onnx", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 1100,
+      "placeholder": true
+    },
+
+    {
+      "id": "yolox-s",
+      "displayName": "YOLOX-S (Object Detection)",
+      "description": "Apache-2.0 alternative to YOLOv8. 80 COCO classes. Recommended general default.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "apache-2.0"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_s.onnx"] },
+      "approxSizeMb": 35,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-nano",
+      "displayName": "YOLOX-Nano (Edge Detection)",
+      "description": "Smallest YOLOX (0.9M params). For mobile/edge/CPU detection.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_nano.onnx"] },
+      "approxSizeMb": 4,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-x",
+      "displayName": "YOLOX-X (Maximum Accuracy)",
+      "description": "Largest YOLOX (99M params). For GPU + accuracy-critical detection.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "gpu"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 2048, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_x.onnx"] },
+      "approxSizeMb": 378,
+      "placeholder": true
+    },
+
+    {
+      "id": "kokoro-v1.0",
+      "displayName": "Kokoro v1.0 (Text-to-Speech)",
+      "description": "82M-param TTS with 11 bundled voices (American + British, male + female). Punches above its weight.",
+      "task": "text-to-speech",
+      "tags": ["tts", "speech", "english"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/kokoro-v1.0-onnx", "revision": "main", "include": ["kokoro-v1.0.onnx", "kokoro-voices/*"] },
+      "approxSizeMb": 320,
+      "placeholder": true
+    },
+
+    {
+      "id": "absolute-reality-hyper",
+      "displayName": "AbsoluteReality + Hyper-SD (4-step)",
+      "description": "SFW general-purpose SD 1.5 fine-tune + 4-step distillation. Photorealistic-ish workhorse.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "photorealistic"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/absolute-reality-hyper-onnx", "revision": "57298a3ec4a333002f9b5fc127e0cc57fbe4d338", "include": ["**/*"] },
+      "approxSizeMb": 4096
+    },
+    {
+      "id": "dreamshaper-hyper",
+      "displayName": "DreamShaper + Hyper-SD (4-step)",
+      "description": "Stylized SFW SD 1.5 fine-tune — fantasy, painterly, illustrative. Good for D&D-style art.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "fantasy", "illustrative"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/dreamshaper-hyper-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 4096,
+      "placeholder": true
+    },
+    {
+      "id": "epicrealism-hyper",
+      "displayName": "epiCRealism + Hyper-SD (4-step)",
+      "description": "Photorealistic environments + natural lighting. Pick over Realistic Vision when the subject is 'a place'.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "photorealistic", "environments"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/epicrealism-hyper-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 4096,
+      "placeholder": true
+    },
+    {
+      "id": "mo-di-hyper",
+      "displayName": "Mo-Di + Hyper-SD (4-step)",
+      "description": "Modern Disney/Pixar style fine-tune. Activator: 'modern disney style'.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "disney-style", "character-art"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/mo-di-hyper-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 4096,
+      "placeholder": true
+    },
+    {
+      "id": "openjourney-hyper",
+      "displayName": "Openjourney + Hyper-SD (4-step)",
+      "description": "Midjourney-v4-style fine-tune. Activator: 'mdjrny-v4 style'.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "midjourney-style"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/openjourney-hyper-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 4096,
+      "placeholder": true
+    },
+    {
+      "id": "realistic-vision-hyper",
+      "displayName": "Realistic Vision V6 + Hyper-SD (4-step)",
+      "description": "Photorealistic portraits. More NSFW-permissive than the other Hyper variants.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sd-1.5", "hyper-sd", "photorealistic", "portraits"],
+      "licenseIds": ["creativeml-openrail-m"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/realistic-vision-hyper-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 4096,
+      "placeholder": true
+    },
+    {
+      "id": "juggernaut-xl-lightning",
+      "displayName": "JuggernautXL Lightning (4-step SDXL)",
+      "description": "SDXL fine-tune + Lightning distillation. 1024×1024, 4 steps, photorealistic + fantasy.",
+      "task": "text-to-image",
+      "tags": ["text-to-image", "sdxl", "lightning", "photorealistic", "fantasy"],
+      "licenseIds": ["creativeml-openrail-pp-m"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 8192, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "main", "include": ["**/*"] },
+      "approxSizeMb": 13312,
+      "placeholder": true
+    },
+
+    {
+      "id": "phi-3.5-mini-instruct-gguf",
+      "displayName": "Phi-3.5 mini Instruct (GGUF Q4_K_M)",
+      "description": "Microsoft's 3.8B-param instruction-tuned LLM. Strong reasoning for its size. MIT-licensed.",
+      "task": "llm",
+      "tags": ["llm", "instruct", "small"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 4096, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "bartowski/Phi-3.5-mini-instruct-GGUF", "revision": "main", "include": ["Phi-3.5-mini-instruct-Q4_K_M.gguf"] },
+      "approxSizeMb": 2200
+    },
+    {
+      "id": "mistral-7b-instruct-v0.3-gguf",
+      "displayName": "Mistral 7B Instruct v0.3 (GGUF Q5_K_M)",
+      "description": "Apache-2.0 7B instruction-tuned LLM. Solid general-purpose default.",
+      "task": "llm",
+      "tags": ["llm", "instruct", "medium"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF", "revision": "main", "include": ["Mistral-7B-Instruct-v0.3-Q5_K_M.gguf"] },
+      "approxSizeMb": 4800
+    },
+    {
+      "id": "qwen2.5-coder-7b-instruct-gguf",
+      "displayName": "Qwen 2.5 Coder 7B Instruct (GGUF Q5_K_M)",
+      "description": "Apache-2.0 coding-specialized LLM. Strong at SQL, Python, refactoring.",
+      "task": "llm",
+      "tags": ["llm", "code", "instruct"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", "revision": "main", "include": ["Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf"] },
+      "approxSizeMb": 5100
+    },
+    {
+      "id": "llama-3.1-8b-instruct-gguf",
+      "displayName": "Llama 3.1 8B Instruct (GGUF Q4_K_M)",
+      "description": "Meta's 8B-param instruction-tuned LLM. Requires accepting Meta's license on HF before download.",
+      "task": "llm",
+      "tags": ["llm", "instruct", "medium", "gated"],
+      "licenseIds": ["llama-3.1-community"],
+      "hardware": { "minRamMb": 8192, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "revision": "main", "include": ["Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"] },
+      "approxSizeMb": 4700,
+      "requiresHfLogin": true
+    },
+
+    {
+      "id": "whisper-base",
+      "displayName": "Whisper Base (Speech-to-Text)",
+      "description": "OpenAI Whisper, base size. Balanced speed/accuracy for English STT.",
+      "task": "speech-to-text",
+      "tags": ["stt", "speech", "multilingual"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/whisper-base", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 290
+    },
+    {
+      "id": "whisper-small",
+      "displayName": "Whisper Small (Speech-to-Text)",
+      "description": "OpenAI Whisper, small size. Better accuracy than base, ~3x cost.",
+      "task": "speech-to-text",
+      "tags": ["stt", "speech", "multilingual"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 2048, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "onnx-community/whisper-small", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 970
+    },
+    {
+      "id": "clip-vit-base-patch32",
+      "displayName": "CLIP ViT-B/32",
+      "description": "OpenAI CLIP for image-text contrastive embeddings. Use for zero-shot image classification, cross-modal search.",
+      "task": "image-text-embeddings",
+      "tags": ["embeddings", "vision", "cross-modal"],
+      "licenseIds": ["mit"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Xenova/clip-vit-base-patch32", "revision": "main", "include": ["onnx/*", "*.json", "*.txt"] },
+      "approxSizeMb": 600
+    }
+  ]
+}

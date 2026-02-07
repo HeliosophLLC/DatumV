@@ -20,10 +20,20 @@ import { TitleBar } from '@/components/titlebar/TitleBar';
 // What we DELIBERATELY don't include:
 //   - SideNav (main-window-only — dialogs don't have nav)
 //   - Any content-aware routing (children decide what to render)
-export function WindowChrome({ children }: { children: React.ReactNode }) {
+// `dialog` hides minimize/maximize on the titlebar — modal child windows
+// shouldn't be minimizable (Electron minimizes them to the taskbar where
+// they can't be restored because the parent owns focus), and maximize on a
+// fixed-size modal doesn't make sense either. Close stays.
+export function WindowChrome({
+  children,
+  dialog = false,
+}: {
+  children: React.ReactNode;
+  dialog?: boolean;
+}) {
   return (
     <div className="bg-background text-foreground border-border flex h-screen flex-col border">
-      <TitleBar />
+      <TitleBar dialog={dialog} />
       <div className="flex flex-1 overflow-hidden">{children}</div>
     </div>
   );

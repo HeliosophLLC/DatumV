@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "electron:dev": "npm run build && concurrently --kill-others-on-fail --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "npm run build && concurrently --kill-others --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "build:clientapp": "npm --prefix ../ClientApp run build",
     "publish:dotnet:win": "dotnet publish ../DatumIngest.Web.csproj -c Release -r win-x64 --self-contained true -o ./build/backend",
     "publish:dotnet:mac": "dotnet publish ../DatumIngest.Web.csproj -c Release -r osx-x64 --self-contained true -o ./build/backend",

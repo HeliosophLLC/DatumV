@@ -79,6 +79,265 @@ $DATUM_MODELS\
     ...
 ```
 
+## Model catalog
+
+The model catalog is a manifest-driven library that lets users discover,
+license-accept, install, and remove models from the in-app Models panel
+or via REST. It replaces "drop files in `$DATUM_MODELS` and edit a config"
+with a curated, versioned list of models keyed to HuggingFace repos.
+
+Catalog files live in [`models/`](../models/) at the repo root and ship
+alongside the binary:
+
+```
+models/
+  catalog.json              ← the manifest
+  licenses/                 ← license texts (offline-readable)
+    mit.txt
+    apache-2.0.txt
+    cc-by-4.0.txt
+    creativeml-openrail-m.md
+    creativeml-openrail-pp-m.md
+    llama-3.1-community.md
+  upload-plan.json          ← uploads from local exports to huggingface.co/Heliosoph
+  upload-readmes/           ← model-card templates for each upload
+```
+
+### Manifest schema
+
+[`models/catalog.json`](../models/catalog.json) has three top-level sections.
+
+**`licenses`** — every license referenced by any model, defined once.
+
+```json
+"licenses": {
+  "mit": {
+    "title": "MIT License",
+    "spdx": "MIT",
+    "canonicalUrl": "https://opensource.org/license/mit",
+    "textFile": "licenses/mit.txt",
+    "summary": "Permissive. Allows commercial use, modification, redistribution.",
+    "requiresAcceptance": false
+  },
+  "creativeml-openrail-m": {
+    "title": "CreativeML OpenRAIL-M License",
+    "spdx": "CreativeML-OpenRAIL-M",
+    "canonicalUrl": "https://huggingface.co/spaces/CompVis/stable-diffusion-license",
+    "textFile": "licenses/creativeml-openrail-m.md",
+    "summary": "Open license with use-based restrictions...",
+    "requiresAcceptance": true
+  }
+}
+```
+
+`textFile` is a path relative to `models/`. The app reads it from disk to
+render the acceptance modal — the license text ships with the binary so
+acceptance works offline.
+
+**`tiers`** — named bundles for one-click multi-model installs.
+
+```json
+"tiers": {
+  "starter":     ["all-minilm-l6-v2", "phi-3.5-mini-instruct-gguf", "toxic-bert"],
+  "recommended": ["all-minilm-l6-v2", "bge-small-en-v1.5", "bge-reranker-base", ...]
+}
+```
+
+**`models`** — the model entries. Each one:
+
+```json
+{
+  "id": "absolute-reality-hyper",
+  "displayName": "AbsoluteReality + Hyper-SD (4-step)",
+  "description": "SFW general-purpose SD 1.5 fine-tune + 4-step distillation.",
+  "task": "text-to-image",
+  "tags": ["text-to-image", "sd-1.5", "hyper-sd", "photorealistic"],
+  "licenseIds": ["creativeml-openrail-m"],
+  "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
+  "source": {
+    "type": "huggingface",
+    "repo": "Heliosoph/absolute-reality-hyper-onnx",
+    "revision": "57298a3ec4a333002f9b5fc127e0cc57fbe4d338",
+    "include": ["**/*"]
+  },
+  "approxSizeMb": 4096
+}
+```
+
+Field reference:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Stable identifier. Used in API paths and as the local folder name. |
+| `displayName` | string | Human-readable label for the UI. |
+| `description` | string | One-line summary for list views. |
+| `task` | string | Free-form category (`embeddings`, `llm`, `text-to-image`, `reranker`, `ner`, `toxicity`, `vision-language`, `object-detection`, `text-to-speech`, ...). |
+| `tags` | string[] | Filter chips and search keywords. |
+| `licenseIds` | string[] | References into `licenses`. Multiple = the model bundles multiple licenses. |
+| `hardware.minRamMb` | int | Minimum system RAM, in MiB. |
+| `hardware.minVramMb` | int | Minimum GPU VRAM, in MiB. `0` = CPU-only. |
+| `hardware.preferred` | string | `cpu` \| `gpu` — informational, not enforced. |
+| `source.type` | string | `huggingface`. (Only source type defined.) |
+| `source.repo` | string | `<org>/<repo>` on HuggingFace. |
+| `source.revision` | string | Pinned commit sha (40 hex chars) or `main`. Pinned shas give reproducibility. |
+| `source.include` | string[] | Glob patterns filtering the HF repo tree. `**/*`, `*.onnx`, `onnx/*` all supported. |
+| `approxSizeMb` | int | Disk-budget estimate. The authoritative size comes from the HF tree API at install time. |
+| `placeholder` | bool | When `true`, the source repo has not been uploaded yet. The installer refuses to download placeholders. |
+| `requiresHfLogin` | bool | The source repo is gated by HuggingFace; user must paste a token before download. Independent of license acceptance. |
+
+### License acceptance
+
+Two independent gates can block a download:
+
+1. **App acceptance** — driven by the license's `requiresAcceptance` field.
+   The app shows the license text and requires an explicit "I accept"
+   click. State persists in `<catalogRoot>/license-acceptance.json` as a
+   list of accepted license IDs.
+
+2. **HuggingFace login** — driven by the model's `requiresHfLogin` field.
+   The HF source repo itself is gated. The downloader detects 401/403 and
+   prompts for an HF token.
+
+A model may require neither, either, or both. MIT/Apache models pass
+straight through. OpenRAIL-M variants require app acceptance only.
+`meta-llama/*` weights (re-hosted with gating preserved) would require
+both.
+
+License acceptance is per-license, not per-model. Once a user accepts
+OpenRAIL-M for AbsoluteReality, all five other Hyper-SD variants install
+without re-prompting.
+
+### Source resolution and verification
+
+Installation pulls a model's files in three steps:
+
+1. **Tree API**: `GET huggingface.co/api/models/<repo>/tree/<revision>?recursive=true`
+   returns every file at the pinned revision with size and (for LFS
+   files) `lfs.oid` = `sha256:<hex>`.
+2. **Include filtering**: paths are matched against `source.include`
+   using glob semantics (`**`, `*`, literal names). Directory entries
+   are dropped.
+3. **Streamed download** of each matched file:
+   `GET huggingface.co/<repo>/resolve/<revision>/<path>` follows HF's
+   redirect to S3. The downloader streams bytes into a `.part` file,
+   computes SHA-256 incrementally, then atomically renames to the final
+   path on success.
+
+LFS files are verified against the tree's `lfs.sha256` field. Non-LFS
+files (small JSON/text) are not checksummed — they're git blobs stored
+inline and protected by HTTPS.
+
+Files install into a per-model subdirectory of the resolved models
+directory:
+
+```
+<modelsDirectory>/
+  absolute-reality-hyper/
+    model_index.json
+    unet/
+      model.onnx
+      model.onnx_data
+    ...
+```
+
+### Install lifecycle
+
+The download orchestrator runs in the background and broadcasts events
+over the SignalR stream hub:
+
+| Event | When | Payload |
+|-------|------|---------|
+| `OnModelDownloadStarted` | After license + tree resolution succeed | `{ modelId, fileCount, totalBytes }` |
+| `OnModelDownloadProgress` | Throttled to ~10 Hz during streaming | `{ modelId, currentFile, fileIndex, fileCount, bytesReadInFile, bytesTotalInFile, bytesReadTotal, bytesTotalAcrossModel }` |
+| `OnModelDownloadComplete` | All files written and verified | `{ modelId }` |
+| `OnModelDownloadFailed` | Any step throws | `{ modelId, error }` |
+
+Events are broadcast to all connected clients. Concurrent installs of
+the same model id are prevented; concurrent installs of different model
+ids are allowed.
+
+### REST API
+
+The `/api/model-catalog` controller is the HTTP surface. All responses
+are JSON unless noted.
+
+| Method | Path | Returns | Notes |
+|--------|------|---------|-------|
+| `GET` | `/api/model-catalog` | `CatalogManifest` | Full manifest. Fetched once at app startup. |
+| `GET` | `/api/model-catalog/licenses/{id}/text` | `text/plain` | Raw license text for the acceptance modal. |
+| `POST` | `/api/model-catalog/licenses/{id}/accept` | `204` | Idempotent. |
+| `GET` | `/api/model-catalog/licenses/accepted` | `string[]` | List of accepted license IDs. |
+| `GET` | `/api/model-catalog/models/{id}/state` | `notInstalled` \| `partial` \| `installed` | Filesystem probe against HF tree sizes. |
+| `POST` | `/api/model-catalog/models/{id}/install` | `202` | Kicks off background download. |
+| `DELETE` | `/api/model-catalog/models/{id}` | `204` | Deletes the local model directory. |
+
+Error codes on `install`:
+
+| Status | Body | Meaning |
+|--------|------|---------|
+| `404` | — | Unknown model id. |
+| `409` | `{ error: "install_blocked", message }` | Placeholder model or install already in progress. |
+| `412` | `{ error: "license_not_accepted", licenseId, message }` | At least one required license is unaccepted. |
+
+### Module layout
+
+The C# implementation lives under
+[`DatumIngest.Web/ModelLibrary/`](../src/DatumIngest.Web/ModelLibrary/):
+
+| File | Role |
+|------|------|
+| `CatalogManifest.cs` | POCOs for the JSON shape. |
+| `IManifestStore.cs` / `ManifestStore.cs` | Singleton loader for `catalog.json` + license texts. |
+| `HfHubClient.cs` | `HttpClient`-based wrapper for the HF tree + resolve APIs. Streams + verifies. |
+| `ILicenseAcceptanceService.cs` / `LicenseAcceptanceService.cs` | JSON-file persistence of accepted license IDs. |
+| `IModelDownloadService.cs` / `ModelDownloadService.cs` | Orchestrator. Probe / install / uninstall. Pushes events via SignalR. |
+| `ModelDownloadEvents.cs` | Records broadcast over the hub. |
+
+The controller lives at
+[`DatumIngest.Web/Api/ModelCatalogController.cs`](../src/DatumIngest.Web/Api/ModelCatalogController.cs).
+Hub events are declared on
+[`IStreamHubClient`](../src/DatumIngest.Web/Hubs/IStreamHubClient.cs).
+
+Manifest path resolution looks for `models/catalog.json` first under
+`AppContext.BaseDirectory` (ship layout) and then walks up parent
+directories (dev layout, where the working dir is the project folder).
+
+### Re-hosting workflow
+
+Models that DatumIngest converts itself (the SD Hyper variants, the
+Florence quantizations, ViT-GPT2, YOLOX bundle, Kokoro voices) live
+under `huggingface.co/Heliosoph/*`. The upload plan and per-model
+README templates are tracked in
+[`models/upload-plan.json`](../models/upload-plan.json) and
+[`models/upload-readmes/`](../models/upload-readmes/).
+
+For each upload:
+
+1. Copy the matching template from `models/upload-readmes/<repo-suffix>.md`
+   into the local model folder as `README.md`.
+2. Drop the upstream `LICENSE` files into the same folder (sources are
+   listed in the upload plan's `licenseFiles` array).
+3. `huggingface-cli login` (one-time).
+4. `huggingface-cli upload Heliosoph/<repo-suffix> <localFolder> --repo-type model`.
+5. Copy the resulting commit sha into the model's `source.revision` in
+   `catalog.json` and remove its `"placeholder": true` flag.
+
+### Adding a new model
+
+1. Identify the HuggingFace repo and pin a commit sha.
+2. If the license isn't already in the `licenses` block, add it. Drop
+   the canonical license text under `models/licenses/<id>.{txt,md}`.
+3. Add a model entry under `models`. Reference the license by ID in
+   `licenseIds`. Fill in `hardware` based on the upstream model card.
+4. If the source repo doesn't exist yet (Heliosoph upload pending),
+   mark the entry `"placeholder": true`. The installer will refuse to
+   download it until the flag is removed.
+5. Optionally add the new model id to `tiers.starter` or
+   `tiers.recommended` if it belongs in a bundle.
+
+The manifest is loaded once at app startup. Restart the host process
+after editing `catalog.json`.
+
 ## Models reference
 
 ### `mobilenetv2` — image classifier

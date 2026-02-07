@@ -24,10 +24,35 @@ function applyToDocument(resolved: ResolvedTheme): void {
   document.documentElement.classList.toggle('dark', resolved === 'dark');
 }
 
-// Seed with the OS preference so first paint matches the OS while settings
-// are still loading. Flash only happens if the user has overridden away from
-// OS preference, and is bounded by the settings fetch latency.
-const initialResolved = osPrefersDark() ? 'dark' : 'light';
+// Cache the last resolved theme in localStorage so subsequent window opens
+// (especially dialog child windows) can paint in the correct theme on the
+// very first frame instead of flashing OS-preference → user-preference
+// once the settings fetch lands. Same origin, so dialog BrowserWindows
+// share this storage with the main window.
+const CACHED_THEME_KEY = 'datumingest.resolvedTheme';
+
+function readCachedTheme(): ResolvedTheme | null {
+  try {
+    const v = localStorage.getItem(CACHED_THEME_KEY);
+    return v === 'dark' || v === 'light' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedTheme(resolved: ResolvedTheme): void {
+  try {
+    localStorage.setItem(CACHED_THEME_KEY, resolved);
+  } catch {
+    /* private mode / quota — best-effort */
+  }
+}
+
+// Prefer the cached value (set during the previous session) so the first
+// paint matches what the user last saw. Falls back to OS preference on a
+// truly cold start, which is bounded by the settings fetch latency.
+const initialResolved: ResolvedTheme =
+  readCachedTheme() ?? (osPrefersDark() ? 'dark' : 'light');
 applyToDocument(initialResolved);
 
 export const themeState = proxy<ThemeState>({
@@ -38,6 +63,7 @@ export const themeState = proxy<ThemeState>({
 subscribe(settingsState, () => {
   themeState.resolved = resolve(settingsState.theme);
   applyToDocument(themeState.resolved);
+  writeCachedTheme(themeState.resolved);
 });
 
 // React to OS-level changes while preference is 'system'.
@@ -45,6 +71,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   if (settingsState.theme !== 'system') return;
   themeState.resolved = osPrefersDark() ? 'dark' : 'light';
   applyToDocument(themeState.resolved);
+  writeCachedTheme(themeState.resolved);
 });
 
 // Single mutator. Server is the source of truth; the subscribe above

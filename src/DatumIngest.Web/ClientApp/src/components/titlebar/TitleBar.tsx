@@ -15,19 +15,18 @@ function resolve(chromeStyle: ChromeStyle | undefined, os: HostOs): ResolvedChro
   return 'windows'; // also catches 'unknown'
 }
 
-export function TitleBar() {
+export function TitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { chromeStyle } = useSnapshot(settingsState);
   const { os } = useSnapshot(hostState);
 
-  // Mac/Linux use OS chrome until those platforms get the same polish
-  // (native drag/resize integration); chromeless is Windows-only today.
-  // The component code for all three styles stays in the repo so cycling
-  // on a Windows host previews how Mac/Linux *will* look once we wire
-  // them up.
-  if (os !== 'windows') return null;
-
+  // Electron is chromeless on every platform (main.ts sets `frame: false`
+  // uniformly), so we always render a custom titlebar. The chromeStyle
+  // setting picks which platform-flavored bar to draw — defaults to the
+  // host OS via `resolve`, but the user can override (e.g. preview the
+  // Mac look on a Windows host) without affecting drag/resize, which is
+  // handled by CSS and Chromium.
   const resolved = resolve(chromeStyle, os);
-  if (resolved === 'macos') return <MacTitleBar />;
-  if (resolved === 'linux') return <LinuxTitleBar />;
-  return <WindowsTitleBar />;
+  if (resolved === 'macos') return <MacTitleBar dialog={dialog} />;
+  if (resolved === 'linux') return <LinuxTitleBar dialog={dialog} />;
+  return <WindowsTitleBar dialog={dialog} />;
 }

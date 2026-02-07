@@ -7,6 +7,10 @@ import './index.css';
 // useTranslation; state/locale wires settingsState → i18next.changeLanguage.
 import './i18n';
 import './state/locale';
+// Theme is a side-effect module: it subscribes to settingsState and toggles
+// the <html>.dark class. Must be imported in both roots so dialog windows
+// pick up the resolved theme the same way the main window does.
+import './state/theme';
 // Loads the dialog-message subscriber so openDialog promises resolve.
 // Side-effect only; safe to import in both roots.
 import './state/dialogs';

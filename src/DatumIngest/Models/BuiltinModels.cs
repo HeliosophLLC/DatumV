@@ -1480,7 +1480,7 @@ public static class BuiltinModels
     }
 
     /// <summary>Default folder for the AbsoluteReality + Hyper-SD diffusers ONNX layout.</summary>
-    public const string AbsoluteRealityHyperFolder = "absolute-reality-hyper-onnx";
+    public const string AbsoluteRealityHyperFolder = "absolute-reality-hyper";
 
     /// <summary>
     /// File-existence anchor for AbsoluteReality + Hyper-SD: the UNet weights,

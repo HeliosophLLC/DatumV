@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { LicenseDialog } from './LicenseDialog';
 import { resolveDialog } from '@/state/dialogs';
+import { refreshSettings } from '@/state/settings';
 
 // Mount root for dialog windows. main.tsx renders <DialogShell /> instead
 // of <App /> when window.location.hash starts with '#/dialog/'. The shell
@@ -40,6 +41,14 @@ function parseDialogHash(hash: string): ParsedHash | null {
 export function DialogShell() {
   const parsed = useMemo(() => parseDialogHash(window.location.hash), []);
 
+  // Dialog windows mount their own React tree, so they need their own
+  // settings refresh — without it, settingsState stays at the proxy
+  // defaults and the theme subscriber renders OS preference instead of
+  // the user's chosen theme. Same call the main App makes.
+  useEffect(() => {
+    refreshSettings();
+  }, []);
+
   useEffect(() => {
     if (!parsed) return;
     document.title = `DatumIngest — ${parsed.kind}`;
@@ -47,7 +56,7 @@ export function DialogShell() {
 
   if (!parsed || !parsed.requestId) {
     return (
-      <WindowChrome>
+      <WindowChrome dialog>
         <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-sm">
           Unknown dialog (no requestId in URL).
         </div>
@@ -56,7 +65,7 @@ export function DialogShell() {
   }
 
   const child = renderDialogBody(parsed);
-  return <WindowChrome>{child}</WindowChrome>;
+  return <WindowChrome dialog>{child}</WindowChrome>;
 }
 
 function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactNode {

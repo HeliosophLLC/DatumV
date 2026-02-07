@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 // honors at the compositor layer — clicking anywhere in the header starts
 // the OS drag automatically. The button row needs `app-no-drag` so clicks
 // reach the React handlers instead of starting a drag.
-export function WindowsTitleBar() {
+export function WindowsTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { maximized } = useSnapshot(windowState);
   const { t } = useTranslation();
   const MaxIcon = maximized ? Copy : Square;
@@ -21,15 +21,19 @@ export function WindowsTitleBar() {
     <header className="app-drag relative flex h-8 items-center bg-background select-none">
       <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
       <div className="app-no-drag relative z-10 ml-auto flex">
-        <WinButton onClick={minimize} aria-label={t('window.minimize')}>
-          <Minus className="size-3.5" />
-        </WinButton>
-        <WinButton
-          onClick={toggleMaximize}
-          aria-label={maximized ? t('window.restore') : t('window.maximize')}
-        >
-          <MaxIcon className="size-3" />
-        </WinButton>
+        {!dialog && (
+          <>
+            <WinButton onClick={minimize} aria-label={t('window.minimize')}>
+              <Minus className="size-3.5" />
+            </WinButton>
+            <WinButton
+              onClick={toggleMaximize}
+              aria-label={maximized ? t('window.restore') : t('window.maximize')}
+            >
+              <MaxIcon className="size-3" />
+            </WinButton>
+          </>
+        )}
         <WinButton onClick={close} aria-label={t('window.close')} closeStyle>
           <X className="size-3.5" />
         </WinButton>

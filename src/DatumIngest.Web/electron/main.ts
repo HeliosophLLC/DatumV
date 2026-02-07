@@ -160,9 +160,16 @@ function createWindow(opts: { dialog?: boolean; parent?: BrowserWindow; modal?: 
     show: false,
     parent: opts.parent,
     modal: opts.modal,
-    // Chromeless on Windows; OS chrome on Mac/Linux (matches current
-    // TitleBar.tsx which renders null off Windows).
-    frame: process.platform !== 'win32',
+    // Dialogs are modal children: minimize sends them to the taskbar
+    // where the user can't get them back (parent owns focus), and maximize
+    // on a fixed modal isn't useful. Disabling at the BrowserWindow level
+    // covers OS gestures / keyboard shortcuts that bypass our titlebar.
+    minimizable: !opts.dialog,
+    maximizable: !opts.dialog,
+    // Chromeless everywhere. Our custom TitleBar renders on every platform
+    // (Win / Mac / Linux flavors), and CSS app-region + Chromium handle
+    // drag and OS-edge resize uniformly.
+    frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

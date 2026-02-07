@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 //
 // Drag is CSS-only: the header carries `app-drag` (-webkit-app-region:
 // drag) which Chromium honors at the compositor layer.
-export function LinuxTitleBar() {
+export function LinuxTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   const { maximized } = useSnapshot(windowState);
   const { t } = useTranslation();
   const MaxIcon = maximized ? Copy : Square;
@@ -21,15 +21,19 @@ export function LinuxTitleBar() {
         {t('app.name')}
       </div>
       <div className="app-no-drag relative z-10 ml-auto flex">
-        <LinuxButton onClick={minimize} aria-label={t('window.minimize')}>
-          <Minus className="size-3.5" />
-        </LinuxButton>
-        <LinuxButton
-          onClick={toggleMaximize}
-          aria-label={maximized ? t('window.restore') : t('window.maximize')}
-        >
-          <MaxIcon className="size-3" />
-        </LinuxButton>
+        {!dialog && (
+          <>
+            <LinuxButton onClick={minimize} aria-label={t('window.minimize')}>
+              <Minus className="size-3.5" />
+            </LinuxButton>
+            <LinuxButton
+              onClick={toggleMaximize}
+              aria-label={maximized ? t('window.restore') : t('window.maximize')}
+            >
+              <MaxIcon className="size-3" />
+            </LinuxButton>
+          </>
+        )}
         <LinuxButton onClick={close} aria-label={t('window.close')} closeStyle>
           <X className="size-3.5" />
         </LinuxButton>

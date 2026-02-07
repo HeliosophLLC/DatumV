@@ -186,31 +186,41 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-// NSwag emits SwaggerException with `status` + raw `response` body. The
-// 412 license-not-accepted shape is
-//   { error: 'license_not_accepted', licenseId: '<id>', message: '<text>' }
-// — we parse manually because the typed parse goes through ProblemDetails
-// which doesn't carry the licenseId field.
+// NSwag's `throwException` helper throws `result` *directly* when the
+// generated client has a typed response object for the status code.
+// Our `Install` action's 412 is declared with `ProblemDetails` as the
+// result type, so the JSON body — `{ error, licenseId, message }` —
+// becomes the rejected value instead of being wrapped in a
+// SwaggerException. That's why a plain `status`/`response` check
+// silently misses it.
+//
+// We check both shapes:
+//   1. Body thrown directly: `{ error: 'license_not_accepted', licenseId }`
+//      (what NSwag actually does today for declared status codes).
+//   2. SwaggerException-wrapped: `{ status: 412, response: '<raw json>' }`
+//      (fallback for status codes without a declared response type).
 function readLicenseRequired(err: unknown): string | null {
-  const status = readErrorField(err, 'status');
-  const response = readErrorField(err, 'response');
-  if (status !== 412 || typeof response !== 'string') return null;
-  try {
-    const parsed = JSON.parse(response);
-    if (parsed?.error === 'license_not_accepted' && typeof parsed?.licenseId === 'string') {
-      return parsed.licenseId;
-    }
-  } catch {
-    /* fall through */
-  }
-  return null;
-}
+  if (!err || typeof err !== 'object') return null;
+  const o = err as Record<string, unknown>;
 
-function readErrorField(err: unknown, key: string): unknown {
-  if (err && typeof err === 'object' && key in err) {
-    return (err as Record<string, unknown>)[key];
+  // Shape 1: NSwag threw the parsed body directly.
+  if (o.error === 'license_not_accepted' && typeof o.licenseId === 'string') {
+    return o.licenseId;
   }
-  return undefined;
+
+  // Shape 2: SwaggerException with raw response string.
+  if (o.status === 412 && typeof o.response === 'string') {
+    try {
+      const parsed = JSON.parse(o.response);
+      if (parsed?.error === 'license_not_accepted' && typeof parsed?.licenseId === 'string') {
+        return parsed.licenseId;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  return null;
 }
 
 // ───────────────────────── Hub event wiring ─────────────────────────
