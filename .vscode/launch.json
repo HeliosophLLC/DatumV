@@ -122,10 +122,10 @@
 			"preLaunchTask": "Debug: Build DevWeb"
 		},
 		{
-			"name": "Client: Debug",
+			"name": "App: Debug",
 			"type": "coreclr",
 			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
+			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0/datum.dll",
 			"args": [],
 			// cwd is the binary directory rather than the workspace root.
 			// Photino's WebView2 picks its user-data folder relative to the
@@ -133,38 +133,41 @@
 			// node_modules / .git / heavy file-watchers, which intermittently
 			// fatals WebView2 during init. Pinning to bin/ matches what a
 			// double-click on datum.exe gives you.
-			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0",
-			"console": "integratedTerminal",
+			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0",
+			// internalConsole — VSCode's Debug Console captures stdio.
+			// Avoids integratedTerminal, which runs the user's PowerShell
+			// profile (including .venv activation) before our process boots.
+			"console": "internalConsole",
 			"justMyCode": false,
 			"stopAtEntry": false,
 			"env": {
 				"ASPNETCORE_ENVIRONMENT": "Development"
 			},
-			"preLaunchTask": "Debug: Build Client"
+			"preLaunchTask": "Debug: Build Web"
 		},
 		{
-			"name": "Client: Debug (prod-style)",
+			"name": "App: Debug (prod-style)",
 			"type": "coreclr",
 			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0/datum.dll",
+			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0/datum.dll",
 			"args": [],
-			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Debug/net10.0",
-			"console": "integratedTerminal",
+			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Debug/net10.0",
+			"console": "internalConsole",
 			"justMyCode": false,
 			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build Client"
+			"preLaunchTask": "Debug: Build Web"
 		},
 		{
-			"name": "Client: Release",
+			"name": "App: Release",
 			"type": "coreclr",
 			"request": "launch",
-			"program": "${workspaceFolder}/src/DatumIngest.Client/bin/Release/net10.0/datum.dll",
+			"program": "${workspaceFolder}/src/DatumIngest.Web/bin/Release/net10.0/datum.dll",
 			"args": [],
-			"cwd": "${workspaceFolder}/src/DatumIngest.Client/bin/Release/net10.0",
-			"console": "integratedTerminal",
+			"cwd": "${workspaceFolder}/src/DatumIngest.Web/bin/Release/net10.0",
+			"console": "internalConsole",
 			"justMyCode": false,
 			"stopAtEntry": false,
-			"preLaunchTask": "Release: Build Client"
+			"preLaunchTask": "Release: Build Web"
 		},
 		{
 			"name": "DevWeb: Release",

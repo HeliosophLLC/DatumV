@@ -262,12 +262,12 @@
 			"hide": true
 		},
 		{
-			"label": "Debug: Build Client",
+			"label": "Debug: Build Web",
 			"type": "shell",
 			"command": "dotnet",
 			"args": [
 				"build",
-				"src/DatumIngest.Client",
+				"src/DatumIngest.Web",
 				"-c", "Debug"
 			],
 			"problemMatcher": [
@@ -277,12 +277,12 @@
 			"hide": true
 		},
 		{
-			"label": "Release: Build Client",
+			"label": "Release: Build Web",
 			"type": "shell",
 			"command": "dotnet",
 			"args": [
 				"build",
-				"src/DatumIngest.Client",
+				"src/DatumIngest.Web",
 				"-c", "Release"
 			],
 			"problemMatcher": [
