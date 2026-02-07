@@ -4,8 +4,6 @@
 
 **Authoritative full text:** https://huggingface.co/spaces/CompVis/stable-diffusion-license
 
-> ⚠️ This file is a working copy intended for in-app display. **Before redistribution under `Heliosoph/*` repos, replace this file with the verbatim canonical text fetched from the URL above** and verify it has not been amended.
-
 ---
 
 ## Summary

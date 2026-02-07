@@ -524,22 +524,23 @@ A traditional WAL-based system writes intent records to a separate journal and r
 
 The trade is that aborted sessions leave physical bytes on disk that need to be truncated by the next writer (or accepted as a gap). For append-mostly workloads this overhead is negligible; compaction reclaims it eventually.
 
-## Catalog-level mutation API
+## Table mutation API
 
-`TableCatalog` exposes provider-agnostic ALTER TABLE / INSERT / DELETE entry points so SQL DDL/DML lowers the same way regardless of whether the underlying table is a `.datum` file, an in-memory fixture, or a system table:
+ALTER TABLE / INSERT / DELETE entry points live directly on `ITableProvider` so SQL DDL/DML lowers the same way regardless of whether the underlying table is a `.datum` file, an in-memory fixture, or a system table. Callers resolve a provider through the catalog and invoke the mutation directly:
 
 ```csharp
-catalog.AddColumn(tableName, columnInfo);                  // ALTER TABLE … ADD COLUMN …
-catalog.DropColumn(tableName, columnName);                 // ALTER TABLE … DROP COLUMN …
-await catalog.AppendRowsAsync(tableName, batches, ct);     // INSERT INTO …
-catalog.DeleteRows(tableName, rowIndices);                 // DELETE FROM … (linear row indices)
+ITableProvider provider = catalog[tableName];
+provider.AddColumn(columnInfo);                            // ALTER TABLE … ADD COLUMN …
+provider.DropColumn(columnName);                           // ALTER TABLE … DROP COLUMN …
+await provider.AppendRowsAsync(batches, ct);               // INSERT INTO …
+provider.DeleteRows(rowIndices);                           // DELETE FROM … (linear row indices)
 ```
 
 ### Capability flags + default-throw
 
-`ITableProvider` carries three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — defaulting to `false`. Each mutation method has a default interface implementation that throws `NotSupportedException`. Mutable providers (the .datum file provider, the in-memory provider) override the flags and the methods. System tables (information_schema, datum_catalog.*, models, udfs, …) leave the defaults alone, so the catalog rejects mutations against them with a clear `"Table 'X' is read-only"` error.
+`ITableProvider` carries three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — defaulting to `false`. Each mutation method has a default interface implementation that throws `NotSupportedException`. Mutable providers (the .datum file provider, the in-memory provider) override the flags and the methods. System tables (information_schema, datum_catalog.*, models, udfs, …) leave the defaults alone, so the provider's default `NotSupportedException` surfaces a clear `"Table 'X' does not support <op> (Can<op> is false)"` error.
 
-The catalog's `IsReadOnly` semantics are derived: a table is read-only for an operation when its provider's corresponding `Can…` flag is `false`. There is no separate sub-interface — the four mutation methods + three flags all live on `ITableProvider`.
+Read-only semantics are derived: a table is read-only for an operation when its provider's corresponding `Can…` flag is `false`. There is no separate sub-interface — the four mutation methods + three flags all live on `ITableProvider`.
 
 ### Datum file provider — snapshot semantics
 
@@ -552,7 +553,7 @@ The catalog's `IsReadOnly` semantics are derived: a table is read-only for an op
 For streaming writes — `INSERT … SELECT`, programmatic ingest of unbounded sources — `BeginAppend` returns an `IAppendSession` with explicit `WriteAsync` / `CommitAsync` semantics:
 
 ```csharp
-await using IAppendSession session = catalog.BeginAppend(tableName);
+await using IAppendSession session = catalog[tableName].BeginAppend();
 await foreach (RowBatch batch in selectPipeline.WithCancellation(ct))
 {
     await session.WriteAsync(batch, ct);
