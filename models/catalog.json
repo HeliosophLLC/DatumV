@@ -323,8 +323,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/epicrealism-hyper-onnx", "revision": "e3431df3011a8b9a80cfd281e04f158b8ecbd4cc", "include": ["**/*"] },
-      "approxSizeMb": 4096,
-      "placeholder": true
+      "approxSizeMb": 4096
     },
     {
       "id": "mo-di-hyper",
@@ -335,8 +334,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/mo-di-hyper-onnx", "revision": "a67d98c917fcba4a93f99de56bb17986cb60a1d2", "include": ["**/*"] },
-      "approxSizeMb": 4096,
-      "placeholder": true
+      "approxSizeMb": 4096
     },
     {
       "id": "openjourney-hyper",
@@ -347,8 +345,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/openjourney-hyper-onnx", "revision": "8dcbd8fcac0a7c79d2c793b08f07843b394f37a4", "include": ["**/*"] },
-      "approxSizeMb": 4096,
-      "placeholder": true
+      "approxSizeMb": 4096
     },
     {
       "id": "realistic-vision-hyper",
@@ -359,8 +356,7 @@
       "licenseIds": ["creativeml-openrail-m"],
       "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/realistic-vision-hyper-onnx", "revision": "03929f3369a4daa8e0e4c988fb90b39b15cf2274", "include": ["**/*"] },
-      "approxSizeMb": 4096,
-      "placeholder": true
+      "approxSizeMb": 4096
     },
     {
       "id": "juggernaut-xl-lightning",
@@ -370,7 +366,7 @@
       "tags": ["text-to-image", "sdxl", "lightning", "photorealistic", "fantasy"],
       "licenseIds": ["creativeml-openrail-pp-m"],
       "hardware": { "minRamMb": 4096, "minVramMb": 8192, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "main", "include": ["**/*"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7", "include": ["**/*"] },
       "approxSizeMb": 13312,
       "placeholder": true
     },

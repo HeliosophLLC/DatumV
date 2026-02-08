@@ -43,7 +43,7 @@ vae_encoder/
 3. Load `ByteDance/Hyper-SD/Hyper-SD15-4steps-lora.safetensors` via `peft`, `fuse_lora()` into UNet.
 4. `optimum-cli export onnx`.
 
-Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Conversion script: [`scripts/export-realistic-vision-hyper.ps1`](https://github.com/[YOUR_GH_ORG]/DatumIngest/blob/main/scripts/export-realistic-vision-hyper.ps1).
+Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Conversion script: [`scripts/export-realistic-vision-hyper.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-realistic-vision-hyper.ps1).
 
 ## Inference notes
 

@@ -4,10 +4,6 @@
 
 **Authoritative full text:** https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
 
-> ⚠️ This file is a working copy intended for in-app display. **Before redistribution under `Heliosoph/*` repos, replace this file with the verbatim canonical text fetched from the URL above** and verify it has not been amended.
-
----
-
 ## Relationship to OpenRAIL-M
 
 OpenRAIL++-M is a derivative of [CreativeML OpenRAIL-M](./creativeml-openrail-m.md), used for SDXL and SDXL-derived models. The "++" denotes incremental amendments by Stability AI that:
