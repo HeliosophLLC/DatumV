@@ -213,9 +213,8 @@
       "tags": ["captioning", "ocr", "detection", "vlm", "fp16"],
       "licenseIds": ["mit"],
       "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
-      "approxSizeMb": 523,
-      "placeholder": true
+      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-fp16-onnx", "revision": "2e11444f5ad958b10719bdefba8bbaf53bb20ac9", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 523
     },
     {
       "id": "florence-2-base-ft-quantized",
@@ -367,8 +366,7 @@
       "licenseIds": ["creativeml-openrail-pp-m"],
       "hardware": { "minRamMb": 4096, "minVramMb": 8192, "preferred": "gpu" },
       "source": { "type": "huggingface", "repo": "Heliosoph/juggernaut-xl-lightning-onnx", "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7", "include": ["**/*"] },
-      "approxSizeMb": 13312,
-      "placeholder": true
+      "approxSizeMb": 13312
     },
 
     {
