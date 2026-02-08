@@ -248,7 +248,7 @@
       "tags": ["detection", "coco", "apache-2.0"],
       "licenseIds": ["apache-2.0"],
       "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_s.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_s.onnx"] },
       "approxSizeMb": 35,
       "placeholder": true
     },
@@ -260,10 +260,11 @@
       "tags": ["detection", "coco", "edge"],
       "licenseIds": ["apache-2.0"],
       "hardware": { "minRamMb": 128, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_nano.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_nano.onnx"] },
       "approxSizeMb": 4,
       "placeholder": true
     },
+    
     {
       "id": "yolox-x",
       "displayName": "YOLOX-X (Maximum Accuracy)",
@@ -272,8 +273,56 @@
       "tags": ["detection", "coco", "gpu"],
       "licenseIds": ["apache-2.0"],
       "hardware": { "minRamMb": 1024, "minVramMb": 2048, "preferred": "gpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "main", "include": ["yolox_x.onnx"] },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_x.onnx"] },
       "approxSizeMb": 378,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-tiny",
+      "displayName": "YOLOX-Tiny (Mobile Detection)",
+      "description": "5.1M params. Step up from Nano with materially better mAP at minimal extra cost.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "edge"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 256, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_tiny.onnx"] },
+      "approxSizeMb": 20,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-m",
+      "displayName": "YOLOX-M (Balanced Detection)",
+      "description": "25.3M params. Balanced speed/accuracy. CPU-viable, GPU-faster.",
+      "task": "object-detection",
+      "tags": ["detection", "coco"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_m.onnx"] },
+      "approxSizeMb": 97,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-l",
+      "displayName": "YOLOX-L (Quality Detection)",
+      "description": "54.2M params. Higher accuracy than M; GPU recommended.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "gpu"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_l.onnx"] },
+      "approxSizeMb": 207,
+      "placeholder": true
+    },
+    {
+      "id": "yolox-darknet",
+      "displayName": "YOLOX-Darknet53",
+      "description": "63.7M params. Original Darknet backbone variant; included for reproducibility. CSPDarknet variants (M/L) generally supersede this on accuracy/cost.",
+      "task": "object-detection",
+      "tags": ["detection", "coco", "historical"],
+      "licenseIds": ["apache-2.0"],
+      "hardware": { "minRamMb": 1024, "minVramMb": 1024, "preferred": "gpu" },
+      "source": { "type": "huggingface", "repo": "Heliosoph/yolox-onnx", "revision": "cb504ef82bd7528907e9fad2ea429e2b2436bbc0", "include": ["yolox_darknet.onnx"] },
+      "approxSizeMb": 244,
       "placeholder": true
     },
 
