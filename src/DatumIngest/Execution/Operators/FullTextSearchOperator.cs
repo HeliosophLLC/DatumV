@@ -89,7 +89,7 @@ public sealed class FullTextSearchOperator : IQueryOperator
         {
             Properties = new Dictionary<string, string>
             {
-                ["table"] = _provider.Name.ToString(),
+                ["table"] = _provider.QualifiedName.ToString(),
                 ["column"] = _columnName,
                 ["query"] = _queryText,
             },
@@ -109,7 +109,7 @@ public sealed class FullTextSearchOperator : IQueryOperator
         if (!_provider.TryGetTextSearchIndex(_columnName, out ITextSearchIndex? index))
         {
             throw new InvalidOperationException(
-                $"FullTextSearchOperator: table '{_provider.Name}' has no FTS index on column '{_columnName}'.");
+                $"FullTextSearchOperator: table '{_provider.QualifiedName}' has no FTS index on column '{_columnName}'.");
         }
 
         // Collect unique post-analyzer tokens from the query.

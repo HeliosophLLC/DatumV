@@ -200,7 +200,7 @@ app.MapGet("/api/tables", () =>
         long rows;
         try { rows = provider.GetRowCount(); }
         catch { rows = -1; }
-        entries.Add(new { name = provider.Name, rows });
+        entries.Add(new { name = provider.QualifiedName.ToString(), rows });
     }
     return Results.Json(entries, jsonOptions);
 });

@@ -78,7 +78,7 @@ public sealed class IndexScanOperator : IQueryOperator
     {
         Dictionary<string, string> properties = new()
         {
-            ["table"] = TableProvider.Name.ToString(),
+            ["table"] = TableProvider.QualifiedName.ToString(),
             ["column"] = _columnName,
             ["direction"] = _descending ? "DESC" : "ASC",
         };
@@ -104,7 +104,7 @@ public sealed class IndexScanOperator : IQueryOperator
         if (!TableProvider.Seekable)
         {
             throw new InvalidOperationException(
-                $"IndexScanOperator requires a seekable provider, but '{TableProvider.Name}' " +
+                $"IndexScanOperator requires a seekable provider, but '{TableProvider.QualifiedName}' " +
                 $"does not indicate it is seekable.");
         }
 
@@ -127,7 +127,7 @@ public sealed class IndexScanOperator : IQueryOperator
         if (ExecutionTracer.IsEnabled)
         {
             ExecutionTracer.Write(
-                $"IndexScan  start  table={TableProvider.Name}  totalEntries={_columnIndex.EntryCount:N0}");
+                $"IndexScan  start  table={TableProvider.QualifiedName}  totalEntries={_columnIndex.EntryCount:N0}");
         }
 
         foreach (ValueIndexEntry entry in traversal)
@@ -147,7 +147,7 @@ public sealed class IndexScanOperator : IQueryOperator
                         if (indexScanRowsYielded % 1_000_000 == 0)
                         {
                             ExecutionTracer.Write(
-                                $"IndexScan  {TableProvider.Name}  yielded {indexScanRowsYielded:N0} rows");
+                                $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
                         }
                     }
 
@@ -181,7 +181,7 @@ public sealed class IndexScanOperator : IQueryOperator
                     if (indexScanRowsYielded % 1_000_000 == 0)
                     {
                         ExecutionTracer.Write(
-                            $"IndexScan  {TableProvider.Name}  yielded {indexScanRowsYielded:N0} rows");
+                            $"IndexScan  {TableProvider.QualifiedName}  yielded {indexScanRowsYielded:N0} rows");
                     }
                 }
 
@@ -207,7 +207,7 @@ public sealed class IndexScanOperator : IQueryOperator
         if (ExecutionTracer.IsEnabled)
         {
             ExecutionTracer.Write(
-                $"IndexScan  done  table={TableProvider.Name}  totalYielded={indexScanRowsYielded:N0}");
+                $"IndexScan  done  table={TableProvider.QualifiedName}  totalYielded={indexScanRowsYielded:N0}");
         }
     }
 

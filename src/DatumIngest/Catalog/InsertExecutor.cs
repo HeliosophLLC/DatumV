@@ -161,7 +161,7 @@ internal static class InsertExecutor
             if (sourceRow.Count != plan.SourceColumnCount)
             {
                 throw new InvalidOperationException(
-                    $"INSERT INTO '{provider.Name}': VALUES row {rowIndex + 1} has " +
+                    $"INSERT INTO '{provider.QualifiedName}': VALUES row {rowIndex + 1} has " +
                     $"{sourceRow.Count} value(s), but the column list expects {plan.SourceColumnCount}.");
             }
 

@@ -324,7 +324,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                FillStatisticsRow(values, provider.Name.Name, feature, manifest.RowCount, batch.Arena);
+                FillStatisticsRow(values, provider.QualifiedName.Name, feature, manifest.RowCount, batch.Arena);
                 batch.Add(values);
                 if (batch.IsFull) { yield return batch; batch = null; }
             }
@@ -481,7 +481,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 
         foreach (ITableProvider provider in snapshot)
         {
-            string tableName = provider.Name.Name;
+            string tableName = provider.QualifiedName.Name;
             SourceIndex? sourceIndex = provider.GetSourceIndex();
 
             // No live in-memory index. If the on-disk file still
@@ -636,7 +636,7 @@ internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProvide
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                FillInteractionRow(values, provider.Name.Name, interaction, batch.Arena);
+                FillInteractionRow(values, provider.QualifiedName.Name, interaction, batch.Arena);
                 batch.Add(values);
                 if (batch.IsFull) { yield return batch; batch = null; }
             }

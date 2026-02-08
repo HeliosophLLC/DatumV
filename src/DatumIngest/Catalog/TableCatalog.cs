@@ -2467,11 +2467,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <exception cref="ArgumentException">Thrown if a table with the same name is already registered in this catalog or its parent.</exception>
     public ITableProvider Add(ITableProvider tableProvider)
     {
-        string key = tableProvider.Name.ToString();
+        string key = tableProvider.QualifiedName.ToString();
 
         if (Parent is TableCatalog parent && parent.Tables.ContainsKey(key))
         {
-            throw new ArgumentException($"A table with the name '{tableProvider.Name}' is already registered in the parent catalog.");
+            throw new ArgumentException($"A table with the name '{tableProvider.QualifiedName}' is already registered in the parent catalog.");
         }
         else if (Tables.TryAdd(key, tableProvider))
         {
@@ -2480,7 +2480,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
         else
         {
-            throw new ArgumentException($"A table with the name '{tableProvider.Name}' is already registered.");
+            throw new ArgumentException($"A table with the name '{tableProvider.QualifiedName}' is already registered.");
         }
     }
 
@@ -2533,7 +2533,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             foreach (var provider in Parent)
             {
-                if (!Tables.ContainsKey(provider.Name.ToString()))
+                if (!Tables.ContainsKey(provider.QualifiedName.ToString()))
                 {
                     yield return provider;
                 }

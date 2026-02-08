@@ -14,7 +14,7 @@ public interface ITableProvider : IDisposable
     /// form (<c>schema.name</c>) or the unqualified form (resolved
     /// against <c>search_path</c>).
     /// </summary>
-    QualifiedName Name { get;}
+    QualifiedName QualifiedName { get;}
 
     /// <summary>
     /// Returns true if the provider supports seeking to specific row positions via
@@ -215,7 +215,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     void AddColumn(Model.ColumnInfo column) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support AddColumn (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support AddColumn (CanAlterColumns is false).");
 
     /// <summary>
     /// Soft-drops a column from the table by name. The column block is
@@ -228,7 +228,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     void DropColumn(string columnName) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support DropColumn (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support DropColumn (CanAlterColumns is false).");
 
     /// <summary>
     /// Promotes the column at <paramref name="columnIndex"/> to be the
@@ -246,7 +246,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task EnablePrimaryKeyAsync(int columnIndex, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support EnablePrimaryKey (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support EnablePrimaryKey (CanAlterColumns is false).");
 
     /// <summary>
     /// Clears the table's PRIMARY KEY constraint. Removes the on-disk PK
@@ -261,7 +261,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task DisablePrimaryKeyAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support DisablePrimaryKey (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support DisablePrimaryKey (CanAlterColumns is false).");
 
     /// <summary>
     /// Clears the IDENTITY attribute of the column at
@@ -276,7 +276,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task DropColumnIdentityAsync(int columnIndex, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support DropColumnIdentity (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support DropColumnIdentity (CanAlterColumns is false).");
 
     /// <summary>
     /// Clears the DEFAULT expression of the column at
@@ -291,7 +291,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task DropColumnDefaultAsync(int columnIndex, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support DropColumnDefault (CanAlterColumns is false).");
+            $"Table '{QualifiedName}' does not support DropColumnDefault (CanAlterColumns is false).");
 
     /// <summary>
     /// Opens a caller-owned <see cref="IAppendSession"/> for streaming
@@ -306,7 +306,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     IAppendSession BeginAppend() =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support BeginAppend (CanAppendRows is false).");
+            $"Table '{QualifiedName}' does not support BeginAppend (CanAppendRows is false).");
 
     /// <summary>
     /// Appends every <see cref="RowBatch"/> in <paramref name="batches"/>
@@ -342,7 +342,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     void DeleteRows(IReadOnlyList<long> rowIndices) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support DeleteRows (CanDeleteRows is false).");
+            $"Table '{QualifiedName}' does not support DeleteRows (CanDeleteRows is false).");
 
     /// <summary>
     /// Replaces specific cell values in specific rows. Each
@@ -369,7 +369,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task UpdateRowsAsync(IReadOnlyList<RowUpdateRequest> requests, IValueStore? sourceStore = null) =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support UpdateRowsAsync (CanUpdateRows is false).");
+            $"Table '{QualifiedName}' does not support UpdateRowsAsync (CanUpdateRows is false).");
 
     /// <summary>
     /// True when this provider supports rebuilding its <c>.datum-index</c>
@@ -392,7 +392,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task RebuildIndexAsync() =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support RebuildIndexAsync (CanRebuildIndex is false).");
+            $"Table '{QualifiedName}' does not support RebuildIndexAsync (CanRebuildIndex is false).");
 
     /// <summary>
     /// True when this provider supports refreshing the cached half of its
@@ -417,7 +417,7 @@ public interface ITableProvider : IDisposable
     /// </remarks>
     Task RebuildManifestAsync() =>
         throw new NotSupportedException(
-            $"Table '{Name}' does not support RebuildManifestAsync (CanRebuildManifest is false).");
+            $"Table '{QualifiedName}' does not support RebuildManifestAsync (CanRebuildManifest is false).");
 
     /// <summary>
     /// Returns the current validity state of this table's

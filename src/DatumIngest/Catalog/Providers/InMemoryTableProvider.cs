@@ -84,7 +84,7 @@ public sealed class InMemoryTableProvider : ITableProvider
         bool indexEnabled = true)
     {
         _pool = pool;
-        Name = QualifiedName.Parse(name);
+        QualifiedName = QualifiedName.Parse(name);
         _columns = columns;
         _rows = rows;
         _schema = BuildSchema(_columns, _rows);
@@ -111,7 +111,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     {
         ArgumentNullException.ThrowIfNull(schema);
         _pool = pool;
-        Name = QualifiedName.Parse(name);
+        QualifiedName = QualifiedName.Parse(name);
         _columns = schema.Columns.Select(c => c.Name).ToArray();
         _rows = [];
         _schema = schema;
@@ -161,7 +161,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public QualifiedName Name { get; }
+    public QualifiedName QualifiedName { get; }
 
     /// <inheritdoc/>
     public bool Seekable => true;
@@ -333,7 +333,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                 if (string.Equals(_columns[i], column.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException(
-                        $"Column '{column.Name}' is already present in table '{Name}'.");
+                        $"Column '{column.Name}' is already present in table '{QualifiedName}'.");
                 }
             }
 
@@ -344,7 +344,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             if (column.Identity is not null && _identityColumnIndex >= 0)
             {
                 throw new InvalidOperationException(
-                    $"AddColumn: cannot add IDENTITY column '{column.Name}' because table '{Name}' " +
+                    $"AddColumn: cannot add IDENTITY column '{column.Name}' because table '{QualifiedName}' " +
                     $"already has an IDENTITY column at index {_identityColumnIndex}.");
             }
 
@@ -462,7 +462,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             if (dropIndex < 0)
             {
                 throw new InvalidOperationException(
-                    $"Column '{columnName}' is not present in table '{Name}'.");
+                    $"Column '{columnName}' is not present in table '{QualifiedName}'.");
             }
 
             string[] newColumns = new string[_columns.Length - 1];
@@ -555,7 +555,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                     throw new ArgumentOutOfRangeException(
                         nameof(requests), req.LiveRowIndex,
                         $"UpdateRows: row index {req.LiveRowIndex} out of range for table " +
-                        $"'{Name}' (row count {_rows.Length}).");
+                        $"'{QualifiedName}' (row count {_rows.Length}).");
                 }
                 foreach (int columnIndex in req.NewValues.Keys)
                 {
@@ -564,7 +564,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                         throw new ArgumentOutOfRangeException(
                             nameof(requests), columnIndex,
                             $"UpdateRows: column index {columnIndex} out of range for table " +
-                            $"'{Name}' (column count {_columns.Length}).");
+                            $"'{QualifiedName}' (column count {_columns.Length}).");
                     }
                 }
             }
@@ -642,7 +642,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                 {
                     throw new ArgumentOutOfRangeException(
                         nameof(rowIndices), idx,
-                        $"Row index {idx} is out of range for table '{Name}' (row count {_rows.Length}).");
+                        $"Row index {idx} is out of range for table '{QualifiedName}' (row count {_rows.Length}).");
                 }
                 drop.Add(idx);
             }
@@ -1047,7 +1047,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             if (_provider._identityColumnIndex < 0)
             {
                 throw new InvalidOperationException(
-                    $"Table '{_provider.Name}' has no IDENTITY column.");
+                    $"Table '{_provider.QualifiedName}' has no IDENTITY column.");
             }
 
             long reserved = _identityNextValue;
@@ -1068,7 +1068,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             {
                 throw new InvalidOperationException(
                     $"Append batch has {batch.ColumnLookup.Count} columns but table " +
-                    $"'{_provider.Name}' has {columnCount}.");
+                    $"'{_provider.QualifiedName}' has {columnCount}.");
             }
             for (int i = 0; i < columnCount; i++)
             {
@@ -1078,7 +1078,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                 {
                     throw new InvalidOperationException(
                         $"Append batch column {i} is named '{actual}' but table " +
-                        $"'{_provider.Name}' expects '{expected}'.");
+                        $"'{_provider.QualifiedName}' expects '{expected}'.");
                 }
             }
 

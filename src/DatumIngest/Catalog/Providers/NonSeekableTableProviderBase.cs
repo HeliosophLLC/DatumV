@@ -22,11 +22,11 @@ public abstract class NonSeekableTableProviderBase : ITableProvider
     protected NonSeekableTableProviderBase(Pool pool, QualifiedName name)
     {
         Pool = pool;
-        Name = name;
+        QualifiedName = name;
     }
 
     /// <inheritdoc/>
-    public QualifiedName Name { get; }
+    public QualifiedName QualifiedName { get; }
 
     /// <inheritdoc/>
     public bool Seekable => false;

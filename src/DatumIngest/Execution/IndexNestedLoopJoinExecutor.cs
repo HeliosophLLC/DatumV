@@ -105,7 +105,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         if (!_buildTableProvider.Seekable)
         {
             throw new InvalidOperationException(
-                $"IndexNestedLoopJoinExecutor requires a seekable provider, but '{_buildTableProvider.Name}' " +
+                $"IndexNestedLoopJoinExecutor requires a seekable provider, but '{_buildTableProvider.QualifiedName}' " +
                 $"does not indicate it is seekable.");
         }
         // We only support single-key equi-joins for index NLJ.
@@ -136,7 +136,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         long probeRowsProcessed = 0;
         long totalMatches = 0;
 
-        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildTableProvider.Name}  buildAlias={_buildAlias}  joinType={_joinType}");
+        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildTableProvider.QualifiedName}  buildAlias={_buildAlias}  joinType={_joinType}");
 
         // Open a seek session once for the lifetime of this executor — it owns the
         // reader, decode buffers, and projection metadata for every build-side fetch.

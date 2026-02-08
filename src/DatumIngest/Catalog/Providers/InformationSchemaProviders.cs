@@ -67,13 +67,13 @@ internal sealed class InformationSchemaTablesProvider : NonSeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            (string schema, string type) = ClassifyProvider(provider.Name);
+            (string schema, string type) = ClassifyProvider(provider.QualifiedName);
 
             batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
             DataValue[] values = Pool.RentDataValues(4);
             values[0] = DataValue.FromString("datum", batch.Arena);
             values[1] = DataValue.FromString(schema, batch.Arena);
-            values[2] = DataValue.FromString(provider.Name.Name, batch.Arena);
+            values[2] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
             values[3] = DataValue.FromString(type, batch.Arena);
             batch.Add(values);
 
@@ -177,7 +177,7 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
                 continue;
             }
 
-            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.Name);
+            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.QualifiedName);
 
             for (int ordinal = 0; ordinal < tableSchema.Columns.Count; ordinal++)
             {
@@ -189,7 +189,7 @@ internal sealed class InformationSchemaColumnsProvider : NonSeekableTableProvide
                 DataValue[] values = Pool.RentDataValues(7);
                 values[0] = DataValue.FromString("datum", batch.Arena);
                 values[1] = DataValue.FromString(schemaName, batch.Arena);
-                values[2] = DataValue.FromString(provider.Name.Name, batch.Arena);
+                values[2] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                 values[3] = DataValue.FromString(column.Name, batch.Arena);
                 values[4] = DataValue.FromInt32(ordinal + 1);
                 values[5] = DataValue.FromString(column.Kind.ToString(), batch.Arena);
@@ -306,13 +306,13 @@ internal sealed class InformationSchemaTableConstraintsProvider : NonSeekableTab
                 continue;
             }
 
-            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.Name);
+            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.QualifiedName);
 
             // PRIMARY KEY — use the user-supplied name when one is registered
             // in the catalog, otherwise derive the PG default `<table>_pkey`.
             if (tableSchema.PrimaryKeyColumnIndices.Count > 0)
             {
-                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.Name.ToString());
+                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.QualifiedName.ToString());
 
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(7);
@@ -321,7 +321,7 @@ internal sealed class InformationSchemaTableConstraintsProvider : NonSeekableTab
                 values[2] = DataValue.FromString(pkName, batch.Arena);
                 values[3] = DataValue.FromString("datum", batch.Arena);
                 values[4] = DataValue.FromString(schemaName, batch.Arena);
-                values[5] = DataValue.FromString(provider.Name.Name, batch.Arena);
+                values[5] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                 values[6] = DataValue.FromString("PRIMARY KEY", batch.Arena);
                 batch.Add(values);
 
@@ -335,7 +335,7 @@ internal sealed class InformationSchemaTableConstraintsProvider : NonSeekableTab
             // UNIQUE — only persistent tables track named indexes today;
             // GetTableIndexes returns null for temp / virtual tables, which
             // naturally drops them out of the iteration.
-            IReadOnlyList<IndexDescriptor>? indexes = _catalog.GetTableIndexes(provider.Name.ToString());
+            IReadOnlyList<IndexDescriptor>? indexes = _catalog.GetTableIndexes(provider.QualifiedName.ToString());
             if (indexes is null) continue;
 
             foreach (IndexDescriptor index in indexes)
@@ -349,7 +349,7 @@ internal sealed class InformationSchemaTableConstraintsProvider : NonSeekableTab
                 values[2] = DataValue.FromString(index.Name, batch.Arena);
                 values[3] = DataValue.FromString("datum", batch.Arena);
                 values[4] = DataValue.FromString(schemaName, batch.Arena);
-                values[5] = DataValue.FromString(provider.Name.Name, batch.Arena);
+                values[5] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                 values[6] = DataValue.FromString("UNIQUE", batch.Arena);
                 batch.Add(values);
 
@@ -455,14 +455,14 @@ internal sealed class InformationSchemaKeyColumnUsageProvider : NonSeekableTable
                 continue;
             }
 
-            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.Name);
+            (string schemaName, _) = InformationSchemaTablesProvider.ClassifyProvider(provider.QualifiedName);
 
             // PRIMARY KEY columns. Ordinals follow PK declaration order
             // (PrimaryKeyColumnIndices is already in that order, e.g. [1, 0]
             // for `PRIMARY KEY (b, a)` on `(a, b)`).
             if (tableSchema.PrimaryKeyColumnIndices.Count > 0)
             {
-                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.Name.ToString());
+                string pkName = _catalog.GetPrimaryKeyConstraintName(provider.QualifiedName.ToString());
                 for (int p = 0; p < tableSchema.PrimaryKeyColumnIndices.Count; p++)
                 {
                     int colIndex = tableSchema.PrimaryKeyColumnIndices[p];
@@ -476,7 +476,7 @@ internal sealed class InformationSchemaKeyColumnUsageProvider : NonSeekableTable
                     values[2] = DataValue.FromString(pkName, batch.Arena);
                     values[3] = DataValue.FromString("datum", batch.Arena);
                     values[4] = DataValue.FromString(schemaName, batch.Arena);
-                    values[5] = DataValue.FromString(provider.Name.Name, batch.Arena);
+                    values[5] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                     values[6] = DataValue.FromString(columnName, batch.Arena);
                     values[7] = DataValue.FromInt32(p + 1);
                     batch.Add(values);
@@ -492,7 +492,7 @@ internal sealed class InformationSchemaKeyColumnUsageProvider : NonSeekableTable
             // UNIQUE INDEX columns. Same ordinal convention as PK — the
             // index's Columns list is already in the order the user
             // supplied to `CREATE UNIQUE INDEX … (col1, col2, …)`.
-            IReadOnlyList<IndexDescriptor>? indexes = _catalog.GetTableIndexes(provider.Name.ToString());
+            IReadOnlyList<IndexDescriptor>? indexes = _catalog.GetTableIndexes(provider.QualifiedName.ToString());
             if (indexes is null) continue;
 
             foreach (IndexDescriptor index in indexes)
@@ -508,7 +508,7 @@ internal sealed class InformationSchemaKeyColumnUsageProvider : NonSeekableTable
                     values[2] = DataValue.FromString(index.Name, batch.Arena);
                     values[3] = DataValue.FromString("datum", batch.Arena);
                     values[4] = DataValue.FromString(schemaName, batch.Arena);
-                    values[5] = DataValue.FromString(provider.Name.Name, batch.Arena);
+                    values[5] = DataValue.FromString(provider.QualifiedName.Name, batch.Arena);
                     values[6] = DataValue.FromString(index.Columns[p], batch.Arena);
                     values[7] = DataValue.FromInt32(p + 1);
                     batch.Add(values);

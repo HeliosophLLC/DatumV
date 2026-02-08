@@ -42,7 +42,7 @@ public static class CatalogManifestBuilder
             }
             tables.Add(new TableSchemaEntry
             {
-                Name = provider.Name.ToString(),
+                Name = provider.QualifiedName.ToString(),
                 Columns = columns,
             });
         }

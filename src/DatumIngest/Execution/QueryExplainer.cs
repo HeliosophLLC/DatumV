@@ -53,7 +53,7 @@ public static class QueryExplainer
     {
         OperatorPlanDescription description = scan.DescribeForExplain();
 
-        string tableName = scan.TableProvider.Name.ToString();
+        string tableName = scan.TableProvider.QualifiedName.ToString();
         string columns = scan.RequiredColumns is not null
             ? string.Join(", ", scan.RequiredColumns)
             : "*";

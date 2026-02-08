@@ -919,7 +919,7 @@ internal sealed class InteractiveShell
             long rows;
             try { rows = provider.GetRowCount(); }
             catch { rows = -1; }
-            entries.Add((provider.Name.ToString(), rows));
+            entries.Add((provider.QualifiedName.ToString(), rows));
         }
 
         if (entries.Count == 0)

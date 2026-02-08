@@ -1354,7 +1354,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
-    public QualifiedName Name => QualifiedName.Parse(_descriptor.Name);
+    public QualifiedName QualifiedName => Catalog.QualifiedName.Parse(_descriptor.Name);
 
     /// <inheritdoc/>
     public bool Seekable => true;
@@ -2636,7 +2636,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 throw new ArgumentOutOfRangeException(
                     nameof(requests), sortedLive[sortedIndex],
                     $"UpdateRows: live row index {sortedLive[sortedIndex]} is out of range " +
-                    $"for table '{Name}' (table has {liveCounter} live row(s)).");
+                    $"for table '{QualifiedName}' (table has {liveCounter} live row(s)).");
             }
 
             // Group requests by page; translate schema-column indices to
@@ -2654,7 +2654,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                         throw new ArgumentOutOfRangeException(
                             nameof(requests), schemaColIdx,
                             $"UpdateRows: schema column index {schemaColIdx} out of range for " +
-                            $"table '{Name}' (schema has {schemaToFooter.Length} column(s)).");
+                            $"table '{QualifiedName}' (schema has {schemaToFooter.Length} column(s)).");
                     }
                     footerKeyedValues[schemaToFooter[schemaColIdx]] = value;
                 }
@@ -3361,7 +3361,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             if (_initialIdentityState is null)
             {
                 throw new InvalidOperationException(
-                    $"Table '{_provider.Name}' has no IDENTITY column.");
+                    $"Table '{_provider.QualifiedName}' has no IDENTITY column.");
             }
 
             long reserved = _identityNextValue;
@@ -3900,7 +3900,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
             {
                 throw new InvalidOperationException(
                     $"Append batch has {batch.ColumnLookup.Count} columns but table " +
-                    $"'{_provider.Name}' has {schema.Columns.Count}.");
+                    $"'{_provider.QualifiedName}' has {schema.Columns.Count}.");
             }
             for (int i = 0; i < schema.Columns.Count; i++)
             {
@@ -3910,7 +3910,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
                 {
                     throw new InvalidOperationException(
                         $"Append batch column {i} is named '{actual}' but table " +
-                        $"'{_provider.Name}' expects '{expected}'.");
+                        $"'{_provider.QualifiedName}' expects '{expected}'.");
                 }
             }
         }
