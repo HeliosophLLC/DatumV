@@ -35,8 +35,11 @@ namespace DatumIngest.Catalog.Providers;
 /// </remarks>
 public sealed class UdfsTableProvider : NonSeekableTableProviderBase
 {
-    /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "system_udfs";
+    /// <summary>The conventional fully-qualified table name registered in the catalog.</summary>
+    public const string TableName = "system.udfs";
+
+    /// <summary>The canonical <see cref="QualifiedName"/> for this provider.</summary>
+    public static readonly QualifiedName QualifiedTableName = new("system", "udfs");
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -49,7 +52,7 @@ public sealed class UdfsTableProvider : NonSeekableTableProviderBase
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="registry">The registry whose entries become rows.</param>
-    public UdfsTableProvider(Pool pool, UdfRegistry registry) : base(pool, TableName)
+    public UdfsTableProvider(Pool pool, UdfRegistry registry) : base(pool, QualifiedTableName)
     {
         _registry = registry;
     }

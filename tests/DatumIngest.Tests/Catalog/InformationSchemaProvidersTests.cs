@@ -134,8 +134,9 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
             (InformationSchemaTablesProvider)catalog[InformationSchemaTablesProvider.TableName];
         List<TablesRow> rows = await ScanTablesAsync(provider);
 
+        // table_name carries the unqualified name; table_schema carries the schema.
         TablesRow? tablesRow = rows.FirstOrDefault(r =>
-            r.TableName == InformationSchemaTablesProvider.TableName);
+            r.TableName == "tables" && r.TableSchema == "information_schema");
         Assert.NotNull(tablesRow);
         Assert.Equal("information_schema", tablesRow.TableSchema);
         Assert.Equal("VIEW",               tablesRow.TableType);

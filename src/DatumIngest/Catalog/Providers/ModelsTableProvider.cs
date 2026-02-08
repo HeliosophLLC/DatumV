@@ -49,8 +49,11 @@ namespace DatumIngest.Catalog.Providers;
 /// </remarks>
 public sealed class ModelsTableProvider : NonSeekableTableProviderBase
 {
-    /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "system_models";
+    /// <summary>The conventional fully-qualified table name registered in the catalog.</summary>
+    public const string TableName = "system.models";
+
+    /// <summary>The canonical <see cref="QualifiedName"/> for this provider.</summary>
+    public static readonly QualifiedName QualifiedTableName = new("system", "models");
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -63,7 +66,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="modelCatalog">The catalog whose entries become rows.</param>
-    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog) : base(pool, TableName)
+    public ModelsTableProvider(Pool pool, ModelCatalog modelCatalog) : base(pool, QualifiedTableName)
     {
         _modelCatalog = modelCatalog;
     }

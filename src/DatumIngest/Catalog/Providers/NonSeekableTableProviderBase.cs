@@ -18,15 +18,15 @@ public abstract class NonSeekableTableProviderBase : ITableProvider
     /// <summary>Buffer pool for renting row batches and value arrays.</summary>
     protected readonly Pool Pool;
 
-    /// <summary>Initializes the provider with the given pool and logical table name.</summary>
-    protected NonSeekableTableProviderBase(Pool pool, string name)
+    /// <summary>Initializes the provider with the given pool and qualified table name.</summary>
+    protected NonSeekableTableProviderBase(Pool pool, QualifiedName name)
     {
         Pool = pool;
         Name = name;
     }
 
     /// <inheritdoc/>
-    public string Name { get; }
+    public QualifiedName Name { get; }
 
     /// <inheritdoc/>
     public bool Seekable => false;

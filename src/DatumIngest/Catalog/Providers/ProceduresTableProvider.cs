@@ -31,8 +31,11 @@ namespace DatumIngest.Catalog.Providers;
 /// </remarks>
 public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
 {
-    /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "system_procedures";
+    /// <summary>The conventional fully-qualified table name registered in the catalog.</summary>
+    public const string TableName = "system.procedures";
+
+    /// <summary>The canonical <see cref="QualifiedName"/> for this provider.</summary>
+    public static readonly QualifiedName QualifiedTableName = new("system", "procedures");
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -45,7 +48,7 @@ public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
     /// </summary>
     /// <param name="pool">Buffer pool for renting row batches.</param>
     /// <param name="registry">The registry whose entries become rows.</param>
-    public ProceduresTableProvider(Pool pool, ProcedureRegistry registry) : base(pool, TableName)
+    public ProceduresTableProvider(Pool pool, ProcedureRegistry registry) : base(pool, QualifiedTableName)
     {
         _registry = registry;
     }

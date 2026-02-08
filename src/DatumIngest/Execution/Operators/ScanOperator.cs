@@ -167,7 +167,7 @@ public sealed class ScanOperator : IQueryOperator
 
         Dictionary<string, string> properties = new()
         {
-            ["table"] = TableProvider.Name,
+            ["table"] = TableProvider.Name.ToString(),
             ["columns"] = _requiredColumns is not null
                 ? string.Join(", ", _requiredColumns)
                 : "*",

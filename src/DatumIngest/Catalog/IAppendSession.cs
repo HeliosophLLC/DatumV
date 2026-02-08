@@ -4,9 +4,8 @@ namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Caller-owned append session for streaming row inserts into a single
-/// table. Returned by <see cref="ITableProvider.BeginAppend"/> and
-/// <see cref="TableCatalog.BeginAppend"/>; lets the call site control
-/// the commit boundary instead of committing per-batch.
+/// table. Returned by <see cref="ITableProvider.BeginAppend"/>; lets the
+/// call site control the commit boundary instead of committing per-batch.
 /// </summary>
 /// <remarks>
 /// <para>

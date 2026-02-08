@@ -390,7 +390,7 @@ public static class ModelInvocationHoister
                 throw new InvalidOperationException(
                     $"Model '{modelName}' is registered but its file '{entry.RelativePath}' is not present " +
                     $"in the configured models directory.{sourceHint} " +
-                    $"Run `SELECT * FROM system_models` to see status for all registered models.");
+                    $"Run `SELECT * FROM system.models` to see status for all registered models.");
             }
         }
 

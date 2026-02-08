@@ -2188,7 +2188,7 @@ public sealed class QueryPlanner
         while (true)
         {
             if (current is ScanOperator scan)
-                return scan.TableProvider.Name;
+                return scan.TableProvider.Name.ToString();
             if (current is AliasOperator alias)
                 current = alias.Source;
             else if (current is FilterOperator filter)

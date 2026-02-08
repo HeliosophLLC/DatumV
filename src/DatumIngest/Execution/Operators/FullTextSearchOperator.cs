@@ -89,7 +89,7 @@ public sealed class FullTextSearchOperator : IQueryOperator
         {
             Properties = new Dictionary<string, string>
             {
-                ["table"] = _provider.Name,
+                ["table"] = _provider.Name.ToString(),
                 ["column"] = _columnName,
                 ["query"] = _queryText,
             },

@@ -919,7 +919,7 @@ internal sealed class InteractiveShell
             long rows;
             try { rows = provider.GetRowCount(); }
             catch { rows = -1; }
-            entries.Add((provider.Name, rows));
+            entries.Add((provider.Name.ToString(), rows));
         }
 
         if (entries.Count == 0)
@@ -1047,7 +1047,7 @@ internal sealed class InteractiveShell
                 AnsiConsole.MarkupLine(
                     "[grey]  Set DATUM_MODELS or pass --models <path> to point at a directory with model files.[/]");
                 AnsiConsole.MarkupLine(
-                    "[grey]  Run `SELECT * FROM system_models` to see registered names, sources, and licenses.[/]");
+                    "[grey]  Run `SELECT * FROM system.models` to see registered names, sources, and licenses.[/]");
             }
         }
 

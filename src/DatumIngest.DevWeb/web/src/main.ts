@@ -1489,7 +1489,7 @@ import {
 
   async function loadUdfsSection() {
     const rows = await runIntrospectionQuery(
-      'SELECT name, parameters, return_type, body, body_kind FROM system_udfs ORDER BY name');
+      'SELECT name, parameters, return_type, body, body_kind FROM system.udfs ORDER BY name');
     if (rows.length === 0) {
       return htmlNode('<div class="empty-state">No UDFs registered.<br><small>Use CREATE FUNCTION to add one.</small></div>');
     }
@@ -1506,7 +1506,7 @@ import {
 
   async function loadProceduresSection() {
     const rows = await runIntrospectionQuery(
-      'SELECT name, parameters, source_text FROM system_procedures ORDER BY name');
+      'SELECT name, parameters, source_text FROM system.procedures ORDER BY name');
     if (rows.length === 0) {
       return htmlNode('<div class="empty-state">No procedures registered.<br><small>Use CREATE PROCEDURE to add one.</small></div>');
     }
@@ -1546,7 +1546,7 @@ import {
 
   async function loadModelsSection() {
     const rows = await runIntrospectionQuery(
-      'SELECT name, category, backend, status FROM system_models ORDER BY category, name');
+      'SELECT name, category, backend, status FROM system.models ORDER BY category, name');
     if (rows.length === 0) {
       return htmlNode('<div class="empty-state">No models registered.</div>');
     }

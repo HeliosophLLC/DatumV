@@ -28,7 +28,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
     private readonly FunctionRegistry _registry;
 
     /// <summary>Creates a provider backed by the given function registry.</summary>
-    internal DatumCatalogFunctionsProvider(Pool pool, FunctionRegistry registry) : base(pool, TableName)
+    internal DatumCatalogFunctionsProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
     {
         _registry = registry;
     }
@@ -174,7 +174,7 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
     private readonly FunctionRegistry _registry;
 
     /// <summary>Creates a provider backed by the given function registry.</summary>
-    internal DatumCatalogFunctionParametersProvider(Pool pool, FunctionRegistry registry) : base(pool, TableName)
+    internal DatumCatalogFunctionParametersProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
     {
         _registry = registry;
     }
@@ -283,7 +283,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects statistics from all registered tables.</summary>
-    internal DatumCatalogStatisticsProvider(Pool pool, TableCatalog catalog) : base(pool, TableName)
+    internal DatumCatalogStatisticsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }
@@ -324,7 +324,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                FillStatisticsRow(values, provider.Name, feature, manifest.RowCount, batch.Arena);
+                FillStatisticsRow(values, provider.Name.Name, feature, manifest.RowCount, batch.Arena);
                 batch.Add(values);
                 if (batch.IsFull) { yield return batch; batch = null; }
             }
@@ -451,7 +451,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects index metadata from all registered tables.</summary>
-    internal DatumCatalogIndexesProvider(Pool pool, TableCatalog catalog) : base(pool, TableName)
+    internal DatumCatalogIndexesProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }
@@ -481,7 +481,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 
         foreach (ITableProvider provider in snapshot)
         {
-            string tableName = provider.Name;
+            string tableName = provider.Name.Name;
             SourceIndex? sourceIndex = provider.GetSourceIndex();
 
             // No live in-memory index. If the on-disk file still
@@ -595,7 +595,7 @@ internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProvide
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects interaction data from all registered tables.</summary>
-    internal DatumCatalogInteractionsProvider(Pool pool, TableCatalog catalog) : base(pool, TableName)
+    internal DatumCatalogInteractionsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }
@@ -636,7 +636,7 @@ internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProvide
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= Pool.RentRowBatch(lookup, DefaultBatchSize, targetArena);
                 DataValue[] values = Pool.RentDataValues(_schema.Columns.Count);
-                FillInteractionRow(values, provider.Name, interaction, batch.Arena);
+                FillInteractionRow(values, provider.Name.Name, interaction, batch.Arena);
                 batch.Add(values);
                 if (batch.IsFull) { yield return batch; batch = null; }
             }

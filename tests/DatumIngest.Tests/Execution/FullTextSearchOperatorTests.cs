@@ -182,7 +182,7 @@ public sealed class FullTextSearchOperatorTests : ServiceTestBase, IAsyncLifetim
 
         Assert.Equal("FullTextSearch", describe.OperatorName);
         Assert.NotNull(describe.Properties);
-        Assert.Equal("messages", describe.Properties!["table"]);
+        Assert.Equal("public.messages", describe.Properties!["table"]);
         Assert.Equal("body", describe.Properties["column"]);
         Assert.Equal("anything", describe.Properties["query"]);
     }

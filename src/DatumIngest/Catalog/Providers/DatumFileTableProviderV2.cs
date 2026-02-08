@@ -1354,7 +1354,7 @@ public sealed class DatumFileTableProviderV2 : ITableProvider, IDatumFileTablePr
     }
 
     /// <inheritdoc/>
-    public string Name => _descriptor.Name;
+    public QualifiedName Name => QualifiedName.Parse(_descriptor.Name);
 
     /// <inheritdoc/>
     public bool Seekable => true;

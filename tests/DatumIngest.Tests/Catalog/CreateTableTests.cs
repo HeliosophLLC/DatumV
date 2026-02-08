@@ -135,7 +135,7 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
         string json = File.ReadAllText(CatalogPath);
         Assert.Contains("\"version\": 2", json);
         Assert.Contains("\"tables\":", json);
-        Assert.Contains("\"users\"", json);
+        Assert.Contains("\"public.users\"", json);
     }
 
     [Fact]

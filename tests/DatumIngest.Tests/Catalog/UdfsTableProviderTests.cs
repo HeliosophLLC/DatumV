@@ -103,7 +103,7 @@ public class UdfsTableProviderTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
 
         Assert.True(catalog.HasTable(UdfsTableProvider.TableName));
-        Assert.True(catalog.HasTable("system_udfs"));
+        Assert.True(catalog.HasTable("system.udfs"));
     }
 
     [Fact]

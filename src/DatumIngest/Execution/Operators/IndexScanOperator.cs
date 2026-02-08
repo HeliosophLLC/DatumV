@@ -78,7 +78,7 @@ public sealed class IndexScanOperator : IQueryOperator
     {
         Dictionary<string, string> properties = new()
         {
-            ["table"] = TableProvider.Name,
+            ["table"] = TableProvider.Name.ToString(),
             ["column"] = _columnName,
             ["direction"] = _descending ? "DESC" : "ASC",
         };

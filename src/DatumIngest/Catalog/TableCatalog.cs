@@ -162,19 +162,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     }
                 }
 
+                string entryKey = Key(entry.Name);
                 Add(new TableDescriptor(entry.Name, resolved, Indexes: indexes));
-                _persistentTableEntries[entry.Name] = entry.FilePath;
+                _persistentTableEntries[entryKey] = entry.FilePath;
                 if (indexes is { Count: > 0 })
                 {
-                    _persistentTableIndexes[entry.Name] = indexes;
+                    _persistentTableIndexes[entryKey] = indexes;
                     foreach (IndexDescriptor index in indexes)
                     {
-                        _indexNameToTable[index.Name] = entry.Name;
+                        _indexNameToTable[index.Name] = entryKey;
                     }
                 }
                 if (!string.IsNullOrEmpty(entry.PrimaryKeyConstraintName))
                 {
-                    _persistentTablePkNames[entry.Name] = entry.PrimaryKeyConstraintName!;
+                    _persistentTablePkNames[entryKey] = entry.PrimaryKeyConstraintName!;
                 }
             }
         }
@@ -183,6 +184,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
     private TableCatalog? Parent { get; }
     internal Pool Pool { get; }
+
+    /// <summary>
+    /// Canonicalises a user-typed table name into the dictionary-key form
+    /// used by <see cref="Tables"/> and the per-table tracking dicts.
+    /// Unqualified names default to the <c>public</c> schema.
+    /// </summary>
+    private static string Key(string tableName) =>
+        QualifiedName.Parse(tableName).ToString();
 
     /// <summary>
     /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c>
@@ -240,7 +249,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// constraints alongside PRIMARY KEY constraints.
     /// </summary>
     internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
-        => _persistentTableIndexes.TryGetValue(tableName, out List<IndexDescriptor>? list)
+        => _persistentTableIndexes.TryGetValue(Key(tableName), out List<IndexDescriptor>? list)
             ? list
             : null;
 
@@ -263,12 +272,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     internal string GetPrimaryKeyConstraintName(string tableName)
     {
-        if (_persistentTablePkNames.TryGetValue(tableName, out string? custom))
+        if (_persistentTablePkNames.TryGetValue(Key(tableName), out string? custom))
         {
             return custom;
         }
+        // Derive PG-default `<unqualified-table>_pkey`. Strip the schema
+        // so the constraint name reads as users_pkey, not public.users_pkey.
         return Providers.InformationSchemaTableConstraintsProvider
-            .PrimaryKeyConstraintName(tableName);
+            .PrimaryKeyConstraintName(QualifiedName.Parse(tableName).Name);
     }
 
     /// <summary>
@@ -650,8 +661,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Record in catalog json. Store the path relative to the
         // catalog directory when possible so the catalog moves with
         // the data.
+        string createKey = Key(create.TableName);
         string persistedPath = ToPersistedPath(targetPath);
-        _persistentTableEntries[create.TableName] = persistedPath;
+        _persistentTableEntries[createKey] = persistedPath;
 
         // User-supplied PRIMARY KEY constraint name from
         // `CONSTRAINT name PRIMARY KEY [(...)]`. Only meaningful when
@@ -660,7 +672,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         if (!string.IsNullOrEmpty(create.PrimaryKeyConstraintName)
             && schema.PrimaryKeyColumnIndices.Count > 0)
         {
-            _persistentTablePkNames[create.TableName] = create.PrimaryKeyConstraintName!;
+            _persistentTablePkNames[createKey] = create.PrimaryKeyConstraintName!;
         }
 
         _catalogStore!.Save(_udfs, _procedures);
@@ -674,7 +686,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private void ApplyDropTable(DropTableStatement drop)
     {
-        if (!Tables.TryGetValue(drop.TableName, out ITableProvider? provider))
+        string key = Key(drop.TableName);
+        if (!Tables.TryGetValue(key, out ITableProvider? provider))
         {
             if (drop.IfExists) return;
             throw new InvalidOperationException(
@@ -684,9 +697,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Capture path BEFORE disposing the provider so we can delete
         // the file. Persistent tables track their path in
         // _persistentTableEntries.
-        string? persistedPath = _persistentTableEntries.TryGetValue(drop.TableName, out string? p) ? p : null;
+        string? persistedPath = _persistentTableEntries.TryGetValue(key, out string? p) ? p : null;
 
-        Tables.TryRemove(drop.TableName, out _);
+        Tables.TryRemove(key, out _);
         try { provider.Dispose(); } catch { /* best-effort */ }
 
         if (persistedPath is not null)
@@ -718,16 +731,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 }
             }
 
-            _persistentTableEntries.Remove(drop.TableName);
-            if (_persistentTableIndexes.TryGetValue(drop.TableName, out List<IndexDescriptor>? droppedIndexes))
+            _persistentTableEntries.Remove(key);
+            if (_persistentTableIndexes.TryGetValue(key, out List<IndexDescriptor>? droppedIndexes))
             {
                 foreach (IndexDescriptor index in droppedIndexes)
                 {
                     _indexNameToTable.Remove(index.Name);
                 }
-                _persistentTableIndexes.Remove(drop.TableName);
+                _persistentTableIndexes.Remove(key);
             }
-            _persistentTablePkNames.Remove(drop.TableName);
+            _persistentTablePkNames.Remove(key);
             _catalogStore?.Save(_udfs, _procedures);
         }
     }
@@ -741,7 +754,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private async Task ApplyCreateIndexAsync(CreateIndexStatement create)
     {
         // Validate the target table exists and is owned by this catalog.
-        if (!Tables.TryGetValue(create.TableName, out ITableProvider? provider))
+        string key = Key(create.TableName);
+        if (!Tables.TryGetValue(key, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{create.TableName}' is not registered in the catalog.");
@@ -750,13 +764,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Index names are catalog-globally unique (Postgres semantics).
         if (_indexNameToTable.TryGetValue(create.IndexName, out string? existingOwner))
         {
-            if (create.IfNotExists && string.Equals(existingOwner, create.TableName, StringComparison.OrdinalIgnoreCase))
+            if (create.IfNotExists && string.Equals(existingOwner, key, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
             throw new InvalidOperationException(
                 $"Index '{create.IndexName}' already exists" +
-                (string.Equals(existingOwner, create.TableName, StringComparison.OrdinalIgnoreCase)
+                (string.Equals(existingOwner, key, StringComparison.OrdinalIgnoreCase)
                     ? $" on table '{existingOwner}'."
                     : $" on table '{existingOwner}'. Index names must be unique across the catalog."));
         }
@@ -796,13 +810,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         // Update catalog state and persist.
-        if (!_persistentTableIndexes.TryGetValue(create.TableName, out List<IndexDescriptor>? list))
+        if (!_persistentTableIndexes.TryGetValue(key, out List<IndexDescriptor>? list))
         {
             list = new List<IndexDescriptor>();
-            _persistentTableIndexes[create.TableName] = list;
+            _persistentTableIndexes[key] = list;
         }
         list.Add(descriptor);
-        _indexNameToTable[descriptor.Name] = create.TableName;
+        _indexNameToTable[descriptor.Name] = key;
         _catalogStore?.Save(_udfs, _procedures);
     }
 
@@ -1031,7 +1045,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
     {
-        if (!Tables.TryGetValue(reindex.TableName, out ITableProvider? provider))
+        if (!Tables.TryGetValue(Key(reindex.TableName), out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{reindex.TableName}' is not registered in the catalog.");
@@ -1059,7 +1073,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyAnalyzeTableAsync(AnalyzeTableStatement analyze)
     {
-        if (!Tables.TryGetValue(analyze.TableName, out ITableProvider? provider))
+        if (!Tables.TryGetValue(Key(analyze.TableName), out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{analyze.TableName}' is not registered in the catalog.");
@@ -2007,7 +2021,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // way views and triggers are). Reads-only access to the index map
         // here; mutation is gated on provider being the persistent
         // .datum variant.
-        if (_persistentTableIndexes.TryGetValue(alter.TableName, out List<IndexDescriptor>? indexList) &&
+        string alterKey = Key(alter.TableName);
+        if (_persistentTableIndexes.TryGetValue(alterKey, out List<IndexDescriptor>? indexList) &&
             indexList.Count > 0 &&
             provider is Providers.DatumFileTableProviderV2 datumProvider)
         {
@@ -2043,7 +2058,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                 }
                 if (indexList.Count == 0)
                 {
-                    _persistentTableIndexes.Remove(alter.TableName);
+                    _persistentTableIndexes.Remove(alterKey);
                 }
                 // Persist the index removals before DropColumn runs — if
                 // DropColumn fails, we've already lost the index files,
@@ -2092,7 +2107,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // so a subsequent ADD CONSTRAINT (when we ship it) starts from
             // a clean slate, and so the catalog file doesn't carry a stale
             // name for a non-existent constraint.
-            if (_persistentTablePkNames.Remove(alter.TableName))
+            if (_persistentTablePkNames.Remove(Key(alter.TableName)))
             {
                 _catalogStore?.Save(_udfs, _procedures);
             }
@@ -2349,7 +2364,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <returns><see langword="true"/> if the table exists; otherwise <see langword="false"/>.</returns>
     public bool HasTable(string name)
     {
-        if (Tables.ContainsKey(name))
+        if (Tables.ContainsKey(Key(name)))
         {
             return true;
         }
@@ -2371,7 +2386,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <returns><see langword="true"/> if the table provider was found; otherwise, <see langword="false"/>.</returns>
     public bool TryGetTable(string name, [NotNullWhen(true)] out ITableProvider? provider)
     {
-        if (Tables.TryGetValue(name, out provider))
+        if (Tables.TryGetValue(Key(name), out provider))
         {
             return true;
         }
@@ -2398,7 +2413,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         get
         {
-            if (Tables.TryGetValue(name, out ITableProvider? provider))
+            if (Tables.TryGetValue(Key(name), out ITableProvider? provider))
             {
                 return provider;
             }
@@ -2422,7 +2437,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <exception cref="ArgumentException">Thrown if a table with the same name is already registered in this catalog or its parent.</exception>
     public ITableProvider Add(TableDescriptor tableDescriptor)
     {
-        if (Parent is TableCatalog parent && parent.Tables.ContainsKey(tableDescriptor.Name))
+        string key = Key(tableDescriptor.Name);
+        if (Parent is TableCatalog parent && parent.Tables.ContainsKey(key))
         {
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
         }
@@ -2430,10 +2446,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // DatumFileReaderV2.Open. Files written by older format versions
         // throw InvalidDataException at open time.
         DatumFileTableProviderV2 provider = new(tableDescriptor, Pool);
-        if (Tables.TryAdd(tableDescriptor.Name, provider))
+        if (Tables.TryAdd(key, provider))
         {
             RegisterProviderSidecar(provider);
-            return Tables[tableDescriptor.Name];
+            return Tables[key];
         }
         else
         {
@@ -2451,14 +2467,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <exception cref="ArgumentException">Thrown if a table with the same name is already registered in this catalog or its parent.</exception>
     public ITableProvider Add(ITableProvider tableProvider)
     {
-        if (Parent is TableCatalog parent && parent.Tables.ContainsKey(tableProvider.Name))
+        string key = tableProvider.Name.ToString();
+
+        if (Parent is TableCatalog parent && parent.Tables.ContainsKey(key))
         {
             throw new ArgumentException($"A table with the name '{tableProvider.Name}' is already registered in the parent catalog.");
         }
-        else if (Tables.TryAdd(tableProvider.Name, tableProvider))
+        else if (Tables.TryAdd(key, tableProvider))
         {
             RegisterProviderSidecar(tableProvider);
-            return Tables[tableProvider.Name];
+            return Tables[key];
         }
         else
         {
@@ -2491,14 +2509,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     public void Remove(string tableName)
     {
-        if (Tables.TryGetValue(tableName, out ITableProvider? provider))
+        string key = Key(tableName);
+        if (Tables.TryGetValue(key, out ITableProvider? provider))
         {
             // TODO: when we properly support information_schema then we'll need
             // to take steps to prevent dropping it. Leaving this here until that time
             // since this is where we'd want to check.
             // NOTE: you can't drop from the parent catalog
-            Tables.TryRemove(tableName, out _);    
-        }   
+            Tables.TryRemove(key, out _);
+        }
     }
 
 
@@ -2514,7 +2533,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         {
             foreach (var provider in Parent)
             {
-                if (!Tables.ContainsKey(provider.Name))
+                if (!Tables.ContainsKey(provider.Name.ToString()))
                 {
                     yield return provider;
                 }

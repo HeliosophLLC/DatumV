@@ -9,9 +9,12 @@ namespace DatumIngest.Catalog;
 public interface ITableProvider : IDisposable
 {
     /// <summary>
-    /// Gets the logical table name from the descriptor for use in SQL queries.
+    /// Canonical <c>(schema, name)</c> identity for this table in the
+    /// catalog. SQL queries look the table up by either the qualified
+    /// form (<c>schema.name</c>) or the unqualified form (resolved
+    /// against <c>search_path</c>).
     /// </summary>
-    string Name { get;}
+    QualifiedName Name { get;}
 
     /// <summary>
     /// Returns true if the provider supports seeking to specific row positions via

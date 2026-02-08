@@ -84,7 +84,7 @@ public sealed class InMemoryTableProvider : ITableProvider
         bool indexEnabled = true)
     {
         _pool = pool;
-        Name = name;
+        Name = QualifiedName.Parse(name);
         _columns = columns;
         _rows = rows;
         _schema = BuildSchema(_columns, _rows);
@@ -111,7 +111,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     {
         ArgumentNullException.ThrowIfNull(schema);
         _pool = pool;
-        Name = name;
+        Name = QualifiedName.Parse(name);
         _columns = schema.Columns.Select(c => c.Name).ToArray();
         _rows = [];
         _schema = schema;
@@ -161,7 +161,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public string Name { get; }
+    public QualifiedName Name { get; }
 
     /// <inheritdoc/>
     public bool Seekable => true;

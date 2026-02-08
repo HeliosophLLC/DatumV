@@ -60,7 +60,7 @@ public class ProceduresTableProviderTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
 
         Assert.True(catalog.HasTable(ProceduresTableProvider.TableName));
-        Assert.True(catalog.HasTable("system_procedures"));
+        Assert.True(catalog.HasTable("system.procedures"));
     }
 
     [Fact]
