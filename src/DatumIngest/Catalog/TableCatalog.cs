@@ -136,7 +136,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // Wire the tables provider before any save fires so the
             // file-write path always sees the catalog's current table
             // set (PR10a). The backend snapshots its own state.
-            _catalogStore.SetTablesProvider(_flatFile.SnapshotPersistentTablesForSave);
+            _catalogStore.SetFlatFileBackendStateProvider(_flatFile.SnapshotBackendState);
 
             CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
             CatalogLoadReport = report;
@@ -148,41 +148,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // procedural UDF.
             _routines.SyncProceduralAdaptersFromRegistry();
 
-            // Replay persisted tables. The backend handles file resolution,
-            // provider construction, and registry population.
-            foreach (CatalogFileTableEntry entry in _catalogStore.LoadTables())
+            // Replay persisted tables. The FlatFile backend owns its own
+            // state shape; it handles file resolution, provider
+            // construction, and per-table tracking dicts.
+            if (_catalogStore.LoadedFlatFileBackendState is { } flatFileState)
             {
-                if (string.IsNullOrEmpty(entry.Name) || string.IsNullOrEmpty(entry.FilePath)) continue;
-
-                // Materialise the index list from the JSON entry so the
-                // provider can open the corresponding .datum-cindex-* sidecars
-                // at construction. Catalog files written before composite
-                // indexes existed have entry.Indexes == null.
-                List<IndexDescriptor>? indexes = null;
-                if (entry.Indexes is { Count: > 0 } indexEntries)
-                {
-                    indexes = new List<IndexDescriptor>(indexEntries.Count);
-                    foreach (CatalogFileIndexEntry indexEntry in indexEntries)
-                    {
-                        if (string.IsNullOrEmpty(indexEntry.Name) || indexEntry.Columns is null || indexEntry.Columns.Count == 0)
-                        {
-                            continue;
-                        }
-                        IndexKind kind = ParseIndexKindOrDefault(indexEntry.Kind);
-                        indexes.Add(new IndexDescriptor(
-                            indexEntry.Name,
-                            indexEntry.Columns.ToArray(),
-                            indexEntry.IsUnique,
-                            kind,
-                            indexEntry.AnalyzerName));
-                    }
-                }
-
-                _flatFile.Rehydrate(
-                    QualifiedName.Parse(entry.Name),
-                    entry.FilePath,
-                    indexes,
-                    entry.PrimaryKeyConstraintName);
+                _flatFile.LoadBackendState(flatFileState);
             }
         }
     }
@@ -800,20 +771,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         }
 
         return create.Options["analyzer"];
-    }
-
-    private static IndexKind ParseIndexKindOrDefault(string? wireValue)
-    {
-        if (string.IsNullOrEmpty(wireValue))
-        {
-            return IndexKind.Composite;
-        }
-        return wireValue.ToLowerInvariant() switch
-        {
-            "composite" or "btree" => IndexKind.Composite,
-            "fulltext" or "fts" => IndexKind.FullText,
-            _ => IndexKind.Composite, // forward-compat: unknown kinds load as composite + leave the sidecar alone
-        };
     }
 
     /// <summary>

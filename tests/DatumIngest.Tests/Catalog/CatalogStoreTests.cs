@@ -356,7 +356,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 1,
+              "version": 3,
               "udfs": [
                 {"name": "shout", "parameters": [{"name": "s", "type": "STRING"}], "body": "upper(s)"}
               ]
@@ -383,8 +383,11 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void NewerVersion_IsIgnoredWithWarning()
+    public void NewerVersion_ThrowsLoadException()
     {
+        // v3 onwards, mismatched manifest versions are a hard fail so a
+        // newer-version writer can't silently lose state when read by an
+        // older binary. The exception message tells the user to start fresh.
         File.WriteAllText(_catalogPath,
             """
             {
@@ -393,13 +396,60 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
             }
             """);
 
-        TableCatalog catalog = OpenCatalog();
+        CatalogStoreLoadException ex = Assert.Throws<CatalogStoreLoadException>(() => OpenCatalog());
+        Assert.Contains("999", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Delete the catalog directory", ex.Message, StringComparison.Ordinal);
+    }
 
-        Assert.Empty(catalog.Udfs.Entries);
-        Assert.NotNull(catalog.CatalogLoadReport);
-        Assert.NotEmpty(catalog.CatalogLoadReport!.Warnings);
-        Assert.Contains(catalog.CatalogLoadReport.Warnings,
-            w => w.Contains("999", StringComparison.Ordinal));
+    [Fact]
+    public void OlderVersion_ThrowsLoadException()
+    {
+        // No v1/v2 reader — schemas require v3. v1 manifests from before
+        // schema support are explicitly rejected.
+        File.WriteAllText(_catalogPath,
+            """
+            {
+              "version": 1,
+              "udfs": [{"name": "old", "parameters": [], "body": "1"}]
+            }
+            """);
+
+        CatalogStoreLoadException ex = Assert.Throws<CatalogStoreLoadException>(() => OpenCatalog());
+        Assert.Contains("version 1", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FlatFileBackendState_RoundTripsAcrossReopen()
+    {
+        // Exercises the v3 backends.flat_file.tables shape end-to-end:
+        // CREATE TABLE → save → reopen → table is rehydrated with its
+        // schema, indexes, and constraint name intact.
+        string firstSchema;
+        using (TableCatalog first = CreateCatalog(_catalogPath))
+        {
+            first.Plan("CREATE TABLE products (sku Int32 CONSTRAINT pk_products PRIMARY KEY, name String)");
+            first.Plan("CREATE INDEX idx_products_name ON products (name)");
+            firstSchema = string.Join(",",
+                first["products"].GetSchema().Columns.Select(c => c.Name));
+        }
+
+        using TableCatalog reopened = CreateCatalog(_catalogPath);
+
+        // Table came back.
+        Assert.True(reopened.HasTable("products"));
+        Assert.True(reopened.HasTable("public.products"));
+        Assert.Equal(firstSchema,
+            string.Join(",", reopened["products"].GetSchema().Columns.Select(c => c.Name)));
+
+        // Index entry rehydrated under the same schema → same composite-index
+        // sidecar gets reopened.
+        IReadOnlyList<IndexDescriptor>? indexes = reopened.GetTableIndexes("products");
+        Assert.NotNull(indexes);
+        Assert.Single(indexes!);
+        Assert.Equal("idx_products_name", indexes![0].Name);
+
+        // Custom PK constraint name survived the round-trip.
+        Assert.Equal("pk_products", reopened.GetPrimaryKeyConstraintName("products"));
     }
 
     [Fact]
@@ -410,7 +460,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 1,
+              "version": 3,
               "udfs": [
                 {
                   "name": "good",
@@ -442,7 +492,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         File.WriteAllText(_catalogPath,
             """
             {
-              "version": 1,
+              "version": 3,
               "udfs": [
                 {"name": "", "parameters": [], "body": "1"},
                 {"name": "good", "parameters": [], "body": "1"}

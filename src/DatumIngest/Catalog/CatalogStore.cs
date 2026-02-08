@@ -15,56 +15,46 @@ namespace DatumIngest.Catalog;
 /// </summary>
 /// <remarks>
 /// <para>
-/// File format — UTF-8 JSON, written atomically (write-temp + rename) so a
-/// crash mid-write never leaves a partial file:
+/// File format — UTF-8 JSON v3, written atomically (write-temp + rename)
+/// so a crash mid-write never leaves a partial file:
 /// </para>
 /// <code>
 /// {
-///   "version": 1,
-///   "udfs": [
-///     {
-///       "name": "shout",
-///       "parameters": [{"name": "s", "type": "STRING"}],
-///       "return_type": null,
-///       "body_kind": "macro",
-///       "body": "upper(s)"
-///     },
-///     {
-///       "name": "rewrite",
-///       "parameters": [{"name": "x", "type": "STRING"}],
-///       "return_type": "STRING",
-///       "body_kind": "procedural",
-///       "is_pure": true,
-///       "source_text": "CREATE FUNCTION rewrite(@x STRING) RETURNS STRING BEGIN ... END"
+///   "version": 3,
+///   "udfs":       [{ "schema": "udf",  "name": "shout", "parameters": [...], "body_kind": "macro", "body": "upper(s)" }],
+///   "procedures": [{ "schema": "proc", "name": "...", "source_text": "..." }],
+///   "backends": {
+///     "flat_file": {
+///       "tables": [
+///         { "schema": "public", "name": "users", "file_path": "users.datum",
+///           "indexes": [...], "primary_key_constraint_name": null }
+///       ]
 ///     }
-///   ]
+///   }
 /// }
 /// </code>
 /// <para>
-/// <c>body_kind</c> defaults to <c>"macro"</c> when absent so files written by
-/// older binaries keep loading; the procedural form reparses
-/// <c>source_text</c> through the regular SQL parser instead of carrying a
-/// dedicated Statement formatter.
+/// Per-backend state lives under <c>backends.&lt;key&gt;</c>; the file's
+/// top-level structure stays stable across backend additions. Each
+/// <see cref="ITableCatalog"/> implementation owns the shape under its
+/// own key. Today only <c>flat_file</c> persists state; system / virtual
+/// schemas are reconstructed at startup with no per-instance persistence.
+/// </para>
+/// <para>
+/// <strong>No backward compatibility.</strong> A manifest whose version
+/// is not <c>3</c> is rejected with <see cref="CatalogStoreLoadException"/>
+/// — the caller must delete the catalog directory and start fresh.
+/// Schema support requires v3.
 /// </para>
 /// <para>
 /// Failure handling at load:
 /// </para>
 /// <list type="bullet">
-///   <item><description>File not present → empty registry, no error.</description></item>
-///   <item><description>File present but unreadable / malformed JSON →
-///     surfaces as <see cref="CatalogStoreLoadException"/> so the host
-///     can decide whether to abort or continue with a fresh catalog.
-///   </description></item>
-///   <item><description>Individual UDF entry that fails to re-parse, fails
-///     validation, or references an unresolved name → that entry is
-///     skipped with a warning collected on the load report. Other entries
-///     load successfully. A single corrupt UDF doesn't take down a
-///     session.
-///   </description></item>
-///   <item><description>Version higher than this binary supports → the file
-///     is treated as opaque and the registry stays empty, so an older
-///     binary doesn't crash on a newer file.
-///   </description></item>
+///   <item><description>File not present → empty registry, no error (first-time startup).</description></item>
+///   <item><description>File present but unreadable / malformed JSON / wrong version →
+///     <see cref="CatalogStoreLoadException"/>.</description></item>
+///   <item><description>Individual UDF / procedure entry that fails to re-parse →
+///     skipped with a warning on the load report.</description></item>
 /// </list>
 /// </remarks>
 public sealed class CatalogStore
@@ -77,31 +67,38 @@ public sealed class CatalogStore
     public const string DefaultFileName = ".datum-catalog.json";
 
     /// <summary>
-    /// The schema version this binary writes.
+    /// The schema version this binary reads and writes.
     /// <list type="bullet">
-    ///   <item><description><c>1</c>: <c>udfs</c> + <c>procedures</c> only.</description></item>
-    ///   <item><description><c>2</c>: adds <c>tables</c> section for persistent tables created via <c>CREATE TABLE</c> (PR10a).</description></item>
+    ///   <item><description><c>1</c>: udfs + procedures only.</description></item>
+    ///   <item><description><c>2</c>: adds top-level <c>tables</c> section.</description></item>
+    ///   <item><description><c>3</c>: schema-aware. UDF / procedure entries
+    ///     gain <c>schema</c>. Persistent table state moves under
+    ///     <c>backends.flat_file</c> so future backends can plug in
+    ///     without breaking the file shape.</description></item>
     /// </list>
-    /// Forward-compat: a binary that writes v2 reads v1 files cleanly
-    /// (the missing <c>tables</c> section just means no tables are
-    /// rehydrated). Older binaries that don't know v2 will see the
-    /// version mismatch and start with an empty registry, per the
-    /// existing forward-compat policy.
+    /// Only v3 is accepted; older and newer versions both throw at load.
     /// </summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     private readonly string _path;
     private readonly object _writeLock = new();
 
     /// <summary>
-    /// Optional callback that returns the catalog's current persistent
-    /// table set at <see cref="Save"/> time. Wired up by
-    /// <see cref="TableCatalog"/> at construction so existing UDF /
-    /// procedure save call-sites don't need to know about tables;
-    /// tables transparently round-trip through the same file.
-    /// <see langword="null"/> means no tables are persisted (older callers).
+    /// Optional callback that returns <see cref="FlatFileCatalog"/>'s
+    /// current persistent state at <see cref="Save"/> time. Wired up by
+    /// <see cref="TableCatalog"/> at construction; <see langword="null"/>
+    /// means the FlatFile backend has nothing to persist (e.g. no catalog
+    /// path was supplied).
     /// </summary>
-    private Func<IReadOnlyList<CatalogFileTableEntry>>? _tablesProvider;
+    private Func<FlatFileBackendState>? _flatFileStateProvider;
+
+    /// <summary>
+    /// FlatFile backend state captured at the last <see cref="Load"/>
+    /// call. <see cref="TableCatalog"/> reads this at construction to
+    /// rehydrate persistent tables. <see langword="null"/> before
+    /// <see cref="Load"/> runs or when the file had no FlatFile state.
+    /// </summary>
+    private FlatFileBackendState? _loadedFlatFileState;
 
     /// <summary>Creates a store rooted at <paramref name="path"/>.</summary>
     /// <param name="path">Absolute path to the catalog JSON file.</param>
@@ -115,67 +112,28 @@ public sealed class CatalogStore
 
     /// <summary>
     /// Wires <paramref name="provider"/> as the callback that supplies
-    /// the catalog's persistent tables at every <see cref="Save"/>.
-    /// <see cref="TableCatalog"/> calls this once at construction so
-    /// existing UDF / procedure save call-sites don't need to know
-    /// about tables — the saved file always reflects the catalog's
-    /// current state of tables, UDFs, and procedures.
+    /// <see cref="FlatFileCatalog"/>'s persistent state at every
+    /// <see cref="Save"/>. <see cref="TableCatalog"/> calls this once at
+    /// construction so UDF / procedure save call-sites don't need to
+    /// know about tables — they all round-trip through one file.
     /// </summary>
-    public void SetTablesProvider(Func<IReadOnlyList<CatalogFileTableEntry>> provider)
+    public void SetFlatFileBackendStateProvider(Func<FlatFileBackendState> provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        _tablesProvider = provider;
+        _flatFileStateProvider = provider;
     }
 
     /// <summary>
-    /// Reads the persisted <c>tables</c> section. Returns an empty
-    /// list when the file is missing, the version is too new, or the
-    /// section was absent (v1 file). Per-entry parse failures are
-    /// reported via the returned <see cref="CatalogStoreLoadReport"/>
-    /// alongside UDF / procedure warnings.
+    /// Returns the persisted FlatFile backend state captured by the most
+    /// recent <see cref="Load"/> call, or <see langword="null"/> when no
+    /// state is available (file missing or no FlatFile entries).
     /// </summary>
     /// <remarks>
     /// Called by <see cref="TableCatalog"/> right after
     /// <see cref="Load(UdfRegistry, ProcedureRegistry)"/> so the
-    /// catalog can re-register every persisted table via its
-    /// <c>AddFile</c> path.
+    /// FlatFile backend can rehydrate every persistent table.
     /// </remarks>
-    public IReadOnlyList<CatalogFileTableEntry> LoadTables()
-    {
-        if (!File.Exists(_path))
-        {
-            return [];
-        }
-
-        string json;
-        try
-        {
-            json = File.ReadAllText(_path);
-        }
-        catch (Exception)
-        {
-            // Caller will surface the same error via Load(); return
-            // empty here to avoid double-reporting.
-            return [];
-        }
-
-        CatalogFile? parsed;
-        try
-        {
-            parsed = JsonSerializer.Deserialize(json, CatalogJsonContext.Default.CatalogFile);
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-
-        if (parsed is null || parsed.Version > CurrentVersion)
-        {
-            return [];
-        }
-
-        return parsed.Tables ?? (IReadOnlyList<CatalogFileTableEntry>)[];
-    }
+    public FlatFileBackendState? LoadedFlatFileBackendState => _loadedFlatFileState;
 
     /// <summary>
     /// Loads the persisted state into <paramref name="udfs"/> and
@@ -229,22 +187,19 @@ public sealed class CatalogStore
                 Warnings: []);
         }
 
-        // Forward-compat: a higher version means the writer is newer than
-        // this reader. Refusing to crash is the friendlier behaviour — log
-        // and start fresh; any subsequent save will downgrade the file.
-        if (parsed.Version > CurrentVersion)
+        // Strict version enforcement. Schema support requires v3; older
+        // and newer manifests are both rejected so a mismatched binary
+        // can't silently start fresh and lose state.
+        if (parsed.Version != CurrentVersion)
         {
-            return new CatalogStoreLoadReport(
-                LoadedUdfs: 0,
-                SkippedUdfs: 0,
-                LoadedProcedures: 0,
-                SkippedProcedures: 0,
-                Warnings:
-                [
-                    $"Catalog file '{_path}' has version {parsed.Version}; " +
-                    $"this binary supports up to version {CurrentVersion}. The file is ignored.",
-                ]);
+            throw new CatalogStoreLoadException(
+                $"Catalog file '{_path}' has version {parsed.Version}; this " +
+                $"binary requires version {CurrentVersion}. Delete the catalog " +
+                "directory to start fresh.");
         }
+
+        // Capture the FlatFile backend's state so TableCatalog can rehydrate it.
+        _loadedFlatFileState = parsed.Backends?.FlatFile;
 
         int loadedUdfs = 0;
         int skippedUdfs = 0;
@@ -544,6 +499,7 @@ public sealed class CatalogStore
         CatalogFile file;
         lock (_writeLock)
         {
+            FlatFileBackendState? flatFileState = _flatFileStateProvider?.Invoke();
             file = new CatalogFile
             {
                 Version = CurrentVersion,
@@ -551,6 +507,10 @@ public sealed class CatalogStore
                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(e => new CatalogFileUdfEntry
                     {
+                        // v3 placeholder: UDFs aren't schema-scoped today but
+                        // they live in the `udf.X(...)` call namespace. S7
+                        // will lift this to real schema membership.
+                        Schema = "udf",
                         Name = e.Name,
                         Parameters = e.Parameters
                             .Select(p => new CatalogFileUdfParameterEntry
@@ -580,13 +540,16 @@ public sealed class CatalogStore
                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(e => new CatalogFileProcedureEntry
                     {
+                        // v3 placeholder: procedures live in the `proc.X(...)`
+                        // call namespace; real schema membership is S7.
+                        Schema = "proc",
                         Name = e.Name,
                         SourceText = e.SourceText,
                     })
                     .ToList(),
-                Tables = _tablesProvider?.Invoke()
-                    .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList(),
+                Backends = flatFileState is null
+                    ? null
+                    : new CatalogFileBackends { FlatFile = flatFileState },
             };
         }
 
@@ -613,7 +576,7 @@ public sealed class CatalogStore
 }
 
 /// <summary>
-/// Wire-format root for the persisted catalog. Internal so the
+/// Wire-format root for the persisted catalog (v3). Internal so the
 /// <see cref="CatalogJsonContext"/> source generator can reference it.
 /// </summary>
 internal sealed class CatalogFile
@@ -621,17 +584,48 @@ internal sealed class CatalogFile
     public int Version { get; set; }
     public List<CatalogFileUdfEntry>? Udfs { get; set; }
     public List<CatalogFileProcedureEntry>? Procedures { get; set; }
-    public List<CatalogFileTableEntry>? Tables { get; set; }
+
+    /// <summary>
+    /// Per-backend persistent state. Each <see cref="ITableCatalog"/>
+    /// implementation that has anything to persist owns one slot here;
+    /// system / virtual schemas don't write anything (their providers
+    /// are reconstructed on every startup).
+    /// </summary>
+    public CatalogFileBackends? Backends { get; set; }
 }
 
 /// <summary>
-/// One table entry in the persisted catalog (v2). Only persistent
-/// tables (created via <c>CREATE TABLE</c>) are recorded; TEMP tables
-/// die with the catalog session and never make it into the file.
+/// Per-backend persistent state container. Today only <c>flat_file</c>
+/// is populated; a future <c>DatumDbCatalog</c> would add its own slot
+/// alongside without touching the rest of the file shape.
 /// </summary>
-public sealed class CatalogFileTableEntry
+public sealed class CatalogFileBackends
 {
-    /// <summary>The table's logical name as it appears in queries.</summary>
+    /// <summary>State owned by <see cref="FlatFileCatalog"/>.</summary>
+    public FlatFileBackendState? FlatFile { get; set; }
+}
+
+/// <summary>
+/// Persistent state for <see cref="FlatFileCatalog"/>: the set of
+/// persistent <c>.datum</c>-backed tables plus their indexes and PK
+/// constraint names. Only tables created via <c>CREATE TABLE</c> appear;
+/// TEMP / system / virtual tables don't persist.
+/// </summary>
+public sealed class FlatFileBackendState
+{
+    /// <summary>Persistent table entries owned by this backend.</summary>
+    public List<FlatFileTableEntry>? Tables { get; set; }
+}
+
+/// <summary>
+/// One persistent table entry inside <see cref="FlatFileBackendState"/>.
+/// </summary>
+public sealed class FlatFileTableEntry
+{
+    /// <summary>Schema portion of the canonical name. Today always <c>public</c> until CREATE SCHEMA ships.</summary>
+    public string? Schema { get; set; }
+
+    /// <summary>Unqualified table name within the schema.</summary>
     public string? Name { get; set; }
 
     /// <summary>
@@ -644,32 +638,27 @@ public sealed class CatalogFileTableEntry
 
     /// <summary>
     /// User-defined secondary indexes created via <c>CREATE INDEX</c>.
-    /// <see langword="null"/> when the table has no user-defined indexes
-    /// (catalog files written before this field existed load with the same
-    /// semantics they had before).
+    /// <see langword="null"/> when the table has no user-defined indexes.
     /// </summary>
-    public List<CatalogFileIndexEntry>? Indexes { get; set; }
+    public List<FlatFileIndexEntry>? Indexes { get; set; }
 
     /// <summary>
     /// User-supplied PRIMARY KEY constraint name from a
     /// <c>CONSTRAINT name PRIMARY KEY</c> clause. <see langword="null"/>
-    /// when the user didn't supply a name — the catalog derives the
-    /// PG-canonical default <c>&lt;table&gt;_pkey</c> at lookup time
-    /// (see <c>InformationSchemaTableConstraintsProvider.PrimaryKeyConstraintName</c>).
-    /// Catalog files written before this field existed load with this
-    /// field null, which is the right "use default" behavior.
+    /// when the user didn't supply one — the facade derives
+    /// <c>&lt;table&gt;_pkey</c> at lookup time.
     /// </summary>
     public string? PrimaryKeyConstraintName { get; set; }
 }
 
 /// <summary>
 /// One user-defined secondary index entry within a
-/// <see cref="CatalogFileTableEntry"/>. The backing
+/// <see cref="FlatFileTableEntry"/>. The backing
 /// <c>.datum-cindex-{Name}</c> sidecar lives next to the table's
 /// <c>.datum</c> file; the entry is the catalog's record of which
 /// indexes should be opened at provider construction.
 /// </summary>
-public sealed class CatalogFileIndexEntry
+public sealed class FlatFileIndexEntry
 {
     /// <summary>The index's name (unique within the owning table).</summary>
     public string? Name { get; set; }
@@ -679,18 +668,13 @@ public sealed class CatalogFileIndexEntry
 
     /// <summary>
     /// <see langword="true"/> for indexes created via <c>CREATE UNIQUE INDEX</c>.
-    /// Absent on catalog files written before unique indexes existed; loaded
-    /// as <see langword="false"/> in that case, matching the legacy behavior
-    /// (a non-unique secondary index).
     /// </summary>
     public bool IsUnique { get; set; }
 
     /// <summary>
     /// Index method string — lowercase, matches the <c>USING method</c>
     /// clause in DDL. <c>"composite"</c> for the default composite B+Tree,
-    /// <c>"fulltext"</c> for the FTS inverted index. <see langword="null"/>
-    /// on catalog files written before FTS existed; loaded as
-    /// <c>"composite"</c> in that case so back-compat is preserved.
+    /// <c>"fulltext"</c> for the FTS inverted index.
     /// </summary>
     public string? Kind { get; set; }
 
@@ -707,6 +691,12 @@ public sealed class CatalogFileIndexEntry
 /// <summary>One UDF entry in the persisted catalog.</summary>
 internal sealed class CatalogFileUdfEntry
 {
+    /// <summary>
+    /// Schema placeholder. v3 stores <c>"udf"</c> for every entry today;
+    /// real schema membership is an S7 follow-up. Ignored on load.
+    /// </summary>
+    public string? Schema { get; set; }
+
     public string? Name { get; set; }
     public List<CatalogFileUdfParameterEntry>? Parameters { get; set; }
     public string? ReturnType { get; set; }
@@ -720,9 +710,8 @@ internal sealed class CatalogFileUdfEntry
     public string? Body { get; set; }
 
     /// <summary>
-    /// Body shape tag: <c>"macro"</c> for inline-expression UDFs, <c>"procedural"</c>
-    /// for <c>BEGIN…END</c> bodies. Absent on entries written by binaries
-    /// that predate procedural UDFs; those entries are loaded as macros.
+    /// Body shape tag: <c>"macro"</c> for inline-expression UDFs,
+    /// <c>"procedural"</c> for <c>BEGIN…END</c> bodies.
     /// </summary>
     public string? BodyKind { get; set; }
 
@@ -733,11 +722,7 @@ internal sealed class CatalogFileUdfEntry
     /// </summary>
     public string? SourceText { get; set; }
 
-    /// <summary>
-    /// Mirrors <see cref="UdfDescriptor.IsPure"/>. Defaults to <see langword="false"/>
-    /// when missing, so older catalog files load with the same semantics they
-    /// had before procedural UDFs existed.
-    /// </summary>
+    /// <summary>Mirrors <see cref="UdfDescriptor.IsPure"/>.</summary>
     public bool IsPure { get; set; }
 }
 
@@ -765,6 +750,12 @@ internal sealed class CatalogFileUdfParameterEntry
 /// </summary>
 internal sealed class CatalogFileProcedureEntry
 {
+    /// <summary>
+    /// Schema placeholder. v3 stores <c>"proc"</c> for every entry today;
+    /// real schema membership is an S7 follow-up. Ignored on load.
+    /// </summary>
+    public string? Schema { get; set; }
+
     public string? Name { get; set; }
     public string? SourceText { get; set; }
 }
@@ -775,16 +766,18 @@ internal sealed class CatalogFileProcedureEntry
 /// project's IL trim warnings.
 /// </summary>
 [JsonSerializable(typeof(CatalogFile))]
+[JsonSerializable(typeof(CatalogFileBackends))]
+[JsonSerializable(typeof(FlatFileBackendState))]
+[JsonSerializable(typeof(FlatFileTableEntry))]
+[JsonSerializable(typeof(FlatFileIndexEntry))]
 [JsonSerializable(typeof(CatalogFileUdfEntry))]
 [JsonSerializable(typeof(CatalogFileUdfParameterEntry))]
 [JsonSerializable(typeof(CatalogFileProcedureEntry))]
-[JsonSerializable(typeof(CatalogFileTableEntry))]
-[JsonSerializable(typeof(CatalogFileIndexEntry))]
+[JsonSerializable(typeof(List<FlatFileTableEntry>))]
+[JsonSerializable(typeof(List<FlatFileIndexEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfEntry>))]
 [JsonSerializable(typeof(List<CatalogFileUdfParameterEntry>))]
 [JsonSerializable(typeof(List<CatalogFileProcedureEntry>))]
-[JsonSerializable(typeof(List<CatalogFileTableEntry>))]
-[JsonSerializable(typeof(List<CatalogFileIndexEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     WriteIndented = true,
@@ -815,12 +808,19 @@ public sealed record CatalogStoreLoadReport(
 
 /// <summary>
 /// Thrown by <see cref="CatalogStore.Load"/> when the catalog file exists
-/// but cannot be read or is structurally invalid (not parseable as JSON).
-/// Per-UDF errors don't throw — they're collected on the load report.
+/// but cannot be read, is structurally invalid (not parseable as JSON),
+/// or is not the supported manifest version. Per-UDF errors don't throw —
+/// they're collected on the load report.
 /// </summary>
 public sealed class CatalogStoreLoadException : Exception
 {
-    /// <summary>Creates a load exception.</summary>
+    /// <summary>Creates a load exception without an inner cause.</summary>
+    public CatalogStoreLoadException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a load exception wrapping an inner cause.</summary>
     public CatalogStoreLoadException(string message, Exception inner)
         : base(message, inner)
     {

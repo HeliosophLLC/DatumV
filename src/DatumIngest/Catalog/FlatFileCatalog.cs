@@ -373,68 +373,111 @@ public sealed class FlatFileCatalog : ITableCatalog
     }
 
     /// <summary>
-    /// Replays a persistent table entry from a loaded
-    /// <see cref="CatalogStore"/> manifest. Used at construction by the
+    /// Rehydrates every persistent table from a loaded
+    /// <see cref="FlatFileBackendState"/>. Used at construction by the
     /// facade. Does not invoke the persist callback (we're rehydrating,
     /// not mutating).
     /// </summary>
-    internal void Rehydrate(
-        QualifiedName name,
-        string filePathFromManifest,
-        IReadOnlyList<IndexDescriptor>? indexes,
-        string? primaryKeyConstraintName)
+    internal void LoadBackendState(FlatFileBackendState state)
     {
-        string resolved = ResolveTablePath(filePathFromManifest);
-        if (!File.Exists(resolved))
-        {
-            // Stale catalog entry — file has been moved or deleted.
-            // Skip silently (preserves the v1 behaviour from the old
-            // TableCatalog rehydration loop).
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(state);
+        if (state.Tables is null) return;
 
-        DatumFileTableProviderV2 provider = new(
-            new TableDescriptor(name.ToString(), resolved, Indexes: indexes),
-            _pool);
-        if (!_tables.TryAdd(name, provider))
+        foreach (FlatFileTableEntry entry in state.Tables)
         {
-            (provider as IDisposable)?.Dispose();
-            return;
-        }
-        RegisterProviderSidecar(provider);
-
-        _persistentTableEntries[name] = filePathFromManifest;
-        if (indexes is { Count: > 0 })
-        {
-            _persistentTableIndexes[name] = new List<IndexDescriptor>(indexes);
-            foreach (IndexDescriptor index in indexes)
+            if (string.IsNullOrEmpty(entry.Schema)
+                || string.IsNullOrEmpty(entry.Name)
+                || string.IsNullOrEmpty(entry.FilePath))
             {
-                _indexNameToTable[index.Name] = name;
+                continue;
             }
-        }
-        if (!string.IsNullOrEmpty(primaryKeyConstraintName))
-        {
-            _persistentTablePkNames[name] = primaryKeyConstraintName!;
+
+            QualifiedName name = new(entry.Schema, entry.Name);
+            string resolved = ResolveTablePath(entry.FilePath);
+            if (!File.Exists(resolved))
+            {
+                // Stale catalog entry — file has been moved or deleted.
+                // Skip silently for now; a future REPAIR command can
+                // prune dead entries.
+                continue;
+            }
+
+            // Materialise the index list so the provider can open the
+            // corresponding .datum-cindex-* sidecars at construction.
+            List<IndexDescriptor>? indexes = null;
+            if (entry.Indexes is { Count: > 0 } indexEntries)
+            {
+                indexes = new List<IndexDescriptor>(indexEntries.Count);
+                foreach (FlatFileIndexEntry indexEntry in indexEntries)
+                {
+                    if (string.IsNullOrEmpty(indexEntry.Name)
+                        || indexEntry.Columns is null
+                        || indexEntry.Columns.Count == 0)
+                    {
+                        continue;
+                    }
+                    IndexKind kind = ParseIndexKindOrDefault(indexEntry.Kind);
+                    indexes.Add(new IndexDescriptor(
+                        indexEntry.Name,
+                        indexEntry.Columns.ToArray(),
+                        indexEntry.IsUnique,
+                        kind,
+                        indexEntry.AnalyzerName));
+                }
+            }
+
+            DatumFileTableProviderV2 provider = new(
+                new TableDescriptor(name.ToString(), resolved, Indexes: indexes),
+                _pool);
+            if (!_tables.TryAdd(name, provider))
+            {
+                (provider as IDisposable)?.Dispose();
+                continue;
+            }
+            RegisterProviderSidecar(provider);
+
+            _persistentTableEntries[name] = entry.FilePath;
+            if (indexes is { Count: > 0 })
+            {
+                _persistentTableIndexes[name] = new List<IndexDescriptor>(indexes);
+                foreach (IndexDescriptor index in indexes)
+                {
+                    _indexNameToTable[index.Name] = name;
+                }
+            }
+            if (!string.IsNullOrEmpty(entry.PrimaryKeyConstraintName))
+            {
+                _persistentTablePkNames[name] = entry.PrimaryKeyConstraintName!;
+            }
         }
     }
 
     /// <summary>
-    /// Snapshots the persistent-table set for <see cref="CatalogStore.Save"/>.
-    /// Wired by the facade via <see cref="CatalogStore.SetTablesProvider"/>
-    /// at construction.
+    /// Snapshots this backend's persistent state for
+    /// <see cref="CatalogStore.Save"/>. Wired by the facade via
+    /// <see cref="CatalogStore.SetFlatFileBackendStateProvider"/> at
+    /// construction.
     /// </summary>
-    internal IReadOnlyList<CatalogFileTableEntry> SnapshotPersistentTablesForSave()
+    internal FlatFileBackendState SnapshotBackendState()
     {
-        List<CatalogFileTableEntry> result = new(_persistentTableEntries.Count);
-        foreach ((QualifiedName name, string path) in _persistentTableEntries)
+        List<FlatFileTableEntry> tables = new(_persistentTableEntries.Count);
+        // Order by canonical name so save output is deterministic.
+        IEnumerable<KeyValuePair<QualifiedName, string>> ordered = _persistentTableEntries
+            .OrderBy(kv => kv.Key.ToString(), StringComparer.OrdinalIgnoreCase);
+        foreach ((QualifiedName name, string path) in ordered)
         {
-            CatalogFileTableEntry entry = new() { Name = name.ToString(), FilePath = path };
+            FlatFileTableEntry entry = new()
+            {
+                Schema = name.Schema,
+                Name = name.Name,
+                FilePath = path,
+            };
             if (_persistentTableIndexes.TryGetValue(name, out List<IndexDescriptor>? indexes) && indexes.Count > 0)
             {
-                List<CatalogFileIndexEntry> indexEntries = new(indexes.Count);
+                List<FlatFileIndexEntry> indexEntries = new(indexes.Count);
                 foreach (IndexDescriptor index in indexes)
                 {
-                    indexEntries.Add(new CatalogFileIndexEntry
+                    indexEntries.Add(new FlatFileIndexEntry
                     {
                         Name = index.Name,
                         Columns = new List<string>(index.Columns),
@@ -449,9 +492,23 @@ public sealed class FlatFileCatalog : ITableCatalog
             {
                 entry.PrimaryKeyConstraintName = pkName;
             }
-            result.Add(entry);
+            tables.Add(entry);
         }
-        return result;
+        return new FlatFileBackendState { Tables = tables };
+    }
+
+    private static IndexKind ParseIndexKindOrDefault(string? wireValue)
+    {
+        if (string.IsNullOrEmpty(wireValue))
+        {
+            return IndexKind.Composite;
+        }
+        return wireValue.ToLowerInvariant() switch
+        {
+            "composite" or "btree" => IndexKind.Composite,
+            "fulltext" or "fts" => IndexKind.FullText,
+            _ => IndexKind.Composite, // forward-compat: unknown kinds load as composite
+        };
     }
 
     /// <inheritdoc/>

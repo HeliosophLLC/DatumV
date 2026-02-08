@@ -133,9 +133,12 @@ public sealed class CreateTableTests : ServiceTestBase, IAsyncLifetime
 
         Assert.True(File.Exists(CatalogPath));
         string json = File.ReadAllText(CatalogPath);
-        Assert.Contains("\"version\": 2", json);
-        Assert.Contains("\"tables\":", json);
-        Assert.Contains("\"public.users\"", json);
+        // v3 manifest: schema-aware. Persistent table state lives under
+        // backends.flat_file.tables[*], with (schema, name) split.
+        Assert.Contains("\"version\": 3", json);
+        Assert.Contains("\"flat_file\":", json);
+        Assert.Contains("\"schema\": \"public\"", json);
+        Assert.Contains("\"name\": \"users\"", json);
     }
 
     [Fact]
