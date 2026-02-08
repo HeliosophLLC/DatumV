@@ -224,9 +224,8 @@
       "tags": ["captioning", "ocr", "detection", "vlm", "int8", "cpu"],
       "licenseIds": ["mit"],
       "hardware": { "minRamMb": 512, "minVramMb": 0, "preferred": "cpu" },
-      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "main", "include": ["*.onnx", "*.json", "*.txt"] },
-      "approxSizeMb": 266,
-      "placeholder": true
+      "source": { "type": "huggingface", "repo": "Heliosoph/florence-2-base-ft-quantized-onnx", "revision": "319f5a0a4cafca00d363aeecf43bcbe45e79f48e", "include": ["*.onnx", "*.json", "*.txt"] },
+      "approxSizeMb": 266
     },
     {
       "id": "vit-gpt2-image-captioning",
