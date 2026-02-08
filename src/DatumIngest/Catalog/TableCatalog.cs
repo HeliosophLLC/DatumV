@@ -81,34 +81,52 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         this._catalogStore = catalogPath is null ? null : new CatalogStore(catalogPath);
         this._routines = new RoutineRegistrar(_udfs, _procedures, _functions, _catalogStore);
 
-        // Construct the default backend. The persist callback wraps
-        // CatalogStore.Save with the facade's UDF / Procedure registries —
-        // the backend doesn't need to know about those.
+        // Construct the user-data (FlatFile) backend. The persist callback
+        // wraps CatalogStore.Save with the facade's UDF / Procedure
+        // registries — the backend doesn't need to know about those.
         string? catalogDirectory = _catalogStore is null
             ? null
             : System.IO.Path.GetDirectoryName(_catalogStore.Path) ?? Environment.CurrentDirectory;
-        this._backend = new FlatFileCatalog(
+        this._flatFile = new FlatFileCatalog(
             pool,
             _sidecarRegistry,
             catalogDirectory,
             allowExplicitTablePaths,
             persistManifest: () => _catalogStore?.Save(_udfs, _procedures));
 
-        // Auto-register intrinsic system tables. information_schema providers
-        // take `this` because they enumerate the catalog at scan time;
-        // construction is safe because no scan occurs during initialization.
-        Add(new Providers.UdfsTableProvider(pool, _udfs));
-        Add(new Providers.ProceduresTableProvider(pool, _procedures));
-        Add(new Providers.InformationSchemaTablesProvider(pool, this));
-        Add(new Providers.InformationSchemaColumnsProvider(pool, this));
-        Add(new Providers.InformationSchemaSchemataProvider(pool));
-        Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
-        Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
-        Add(new Providers.DatumCatalogFunctionsProvider(pool, _functions));
-        Add(new Providers.DatumCatalogFunctionParametersProvider(pool, _functions));
-        Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
-        Add(new Providers.DatumCatalogIndexesProvider(pool, this));
-        Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
+        // Construct the read-only backends. System holds host-attached
+        // projections; Virtual holds the SQL-standard / engine-introspection
+        // views. They reject CREATE / DROP / CREATE INDEX but accept Add()
+        // so the host can attach providers (e.g. ModelsTableProvider).
+        this._system = new ReadOnlyTableCatalog(new[] { "system" });
+        this._virtual = new ReadOnlyTableCatalog(new[] { "information_schema", "datum_catalog" });
+
+        // Schema → backend map. Lookups, DDL, and Add() route through this.
+        // Public is the home for user data; system/info_schema/datum_catalog
+        // are read-only projections.
+        this._backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["public"] = _flatFile,
+            ["system"] = _system,
+            ["information_schema"] = _virtual,
+            ["datum_catalog"] = _virtual,
+        };
+
+        // Auto-register intrinsic system + virtual tables. information_schema
+        // providers take `this` because they enumerate the catalog at scan
+        // time; construction is safe because no scan occurs here.
+        _system.Add(new Providers.UdfsTableProvider(pool, _udfs));
+        _system.Add(new Providers.ProceduresTableProvider(pool, _procedures));
+        _virtual.Add(new Providers.InformationSchemaTablesProvider(pool, this));
+        _virtual.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
+        _virtual.Add(new Providers.InformationSchemaSchemataProvider(pool));
+        _virtual.Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
+        _virtual.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
+        _virtual.Add(new Providers.DatumCatalogFunctionsProvider(pool, _functions));
+        _virtual.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, _functions));
+        _virtual.Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
+        _virtual.Add(new Providers.DatumCatalogIndexesProvider(pool, this));
+        _virtual.Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
 
         // Replay any persisted UDFs / procedures into the registries.
         // Done after the system table registrations so the rehydrated
@@ -118,7 +136,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // Wire the tables provider before any save fires so the
             // file-write path always sees the catalog's current table
             // set (PR10a). The backend snapshots its own state.
-            _catalogStore.SetTablesProvider(_backend.SnapshotPersistentTablesForSave);
+            _catalogStore.SetTablesProvider(_flatFile.SnapshotPersistentTablesForSave);
 
             CatalogStoreLoadReport report = _catalogStore.Load(_udfs, _procedures);
             CatalogLoadReport = report;
@@ -160,7 +178,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     }
                 }
 
-                _backend.Rehydrate(
+                _flatFile.Rehydrate(
                     QualifiedName.Parse(entry.Name),
                     entry.FilePath,
                     indexes,
@@ -193,13 +211,35 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private readonly SidecarRegistry _sidecarRegistry = new();
 
     /// <summary>
-    /// The default backend that owns the table registry, persistent
-    /// state, and the file-touching half of DDL. The facade routes every
-    /// table lookup and storage-step request through this backend.
-    /// S1b.2 will split system / virtual tables into their own
-    /// read-only backends.
+    /// User-data backend: holds <c>public</c> + any user-created schemas.
+    /// Owns persistent state, path resolution, and the file-touching half
+    /// of CREATE / DROP / CREATE INDEX / DROP INDEX. The only backend
+    /// where <see cref="ITableCatalog.SupportsDdl"/> is true.
     /// </summary>
-    private readonly FlatFileCatalog _backend;
+    private readonly FlatFileCatalog _flatFile;
+
+    /// <summary>
+    /// System-projection backend: owns the <c>system</c> schema
+    /// (<c>system.udfs</c>, <c>system.procedures</c>, and
+    /// <c>system.models</c> when the host attaches it). Read-only for DDL;
+    /// providers are host-attached.
+    /// </summary>
+    private readonly ReadOnlyTableCatalog _system;
+
+    /// <summary>
+    /// Virtual-projection backend: owns the SQL-standard
+    /// <c>information_schema</c> and engine-introspection
+    /// <c>datum_catalog</c> schemas. Read-only for DDL; providers are
+    /// constructed alongside the catalog at startup.
+    /// </summary>
+    private readonly ReadOnlyTableCatalog _virtual;
+
+    /// <summary>
+    /// Schema-to-backend routing table. The facade consults this for
+    /// every <see cref="TryGetTable(string, out ITableProvider?)"/> /
+    /// <see cref="Add(ITableProvider)"/> / DDL apply call.
+    /// </summary>
+    private readonly Dictionary<string, ITableCatalog> _backends;
 
     /// <summary>
     /// Returns the user-created index descriptors for <paramref name="tableName"/>,
@@ -209,7 +249,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// constraints alongside PRIMARY KEY constraints.
     /// </summary>
     internal IReadOnlyList<IndexDescriptor>? GetTableIndexes(string tableName)
-        => _backend.GetTableIndexes(QualifiedName.Parse(tableName));
+    {
+        QualifiedName qn = QualifiedName.Parse(tableName);
+        return TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            ? backend.GetTableIndexes(qn)
+            : null;
+    }
 
     /// <summary>
     /// Returns the user-supplied PRIMARY KEY constraint name for
@@ -221,7 +266,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     internal string GetPrimaryKeyConstraintName(string tableName)
     {
         QualifiedName qn = QualifiedName.Parse(tableName);
-        if (_backend.GetCustomPrimaryKeyConstraintName(qn) is { } custom)
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            && backend.GetCustomPrimaryKeyConstraintName(qn) is { } custom)
         {
             return custom;
         }
@@ -513,12 +559,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             return;
         }
 
-        // Persistent: backend resolves path, materialises the .datum file,
-        // creates the PK sidecar, registers the provider, and persists the
-        // manifest. AT-clause / no-catalog-file / file-already-exists
-        // validation lives in the backend so it stays with the storage
-        // concerns it depends on.
-        _backend.CreatePersistentTable(
+        // Persistent: route to the schema's backend. Read-only backends
+        // (system, information_schema, datum_catalog) throw — only
+        // FlatFileCatalog accepts CREATE TABLE today. AT-clause /
+        // no-catalog-file / file-already-exists validation lives in the
+        // backend so it stays with the storage concerns it depends on.
+        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
+        {
+            throw new InvalidOperationException(
+                $"CREATE TABLE '{create.TableName}': no catalog backend is " +
+                $"mounted for schema '{qn.Schema}'.");
+        }
+        backend.CreatePersistentTable(
             qn,
             schema,
             create.StoragePath,
@@ -534,7 +586,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private void ApplyDropTable(DropTableStatement drop)
     {
         QualifiedName qn = QualifiedName.Parse(drop.TableName);
-        if (!_backend.DropTable(qn))
+        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend) || !backend.DropTable(qn))
         {
             if (drop.IfExists) return;
             throw new InvalidOperationException(
@@ -552,14 +604,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         // Validate the target table exists and is owned by this catalog.
         QualifiedName tableQn = QualifiedName.Parse(create.TableName);
-        if (!_backend.TryGetTable(tableQn, out ITableProvider? provider))
+        if (!TryResolveBackend(tableQn.Schema, out ITableCatalog? backend)
+            || !backend.TryGetTable(tableQn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{create.TableName}' is not registered in the catalog.");
         }
 
         // Index names are catalog-globally unique (Postgres semantics).
-        if (_backend.TryGetIndexOwner(create.IndexName, out QualifiedName existingOwner))
+        // Persistent indexes live only on FlatFile, so checking there is enough.
+        if (_flatFile.TryGetIndexOwner(create.IndexName, out QualifiedName existingOwner))
         {
             if (create.IfNotExists && existingOwner.Equals(tableQn))
             {
@@ -608,7 +662,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
 
         // Persist the index in the backend manifest. The sidecar file
         // creation above lives on the provider; this records the descriptor.
-        _backend.RegisterIndex(QualifiedName.Parse(create.TableName), descriptor);
+        // Routes through the schema's backend; read-only backends would
+        // throw, but we already rejected non-.datum providers above.
+        backend.RegisterIndex(tableQn, descriptor);
     }
 
     private static IndexKind ResolveCreateIndexKind(CreateIndexStatement create)
@@ -768,26 +824,28 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private void ApplyDropIndex(DropIndexStatement drop)
     {
-        if (!_backend.TryGetIndexOwner(drop.IndexName, out QualifiedName tableName))
+        // Persistent indexes only live in FlatFile; only it can resolve
+        // index-name-to-owning-table.
+        if (!_flatFile.TryGetIndexOwner(drop.IndexName, out QualifiedName tableName))
         {
             if (drop.IfExists) return;
             throw new InvalidOperationException(
                 $"Index '{drop.IndexName}' is not registered in the catalog.");
         }
 
-        if (!_backend.TryGetTable(tableName, out ITableProvider? provider))
+        if (!_flatFile.TryGetTable(tableName, out ITableProvider? provider))
         {
             // Catalog state is inconsistent — the table got dropped without
             // cleaning up the index map. Defensively remove the stale entry
             // and persist.
-            _backend.UnregisterIndex(drop.IndexName, out _);
+            _flatFile.UnregisterIndex(drop.IndexName, out _);
             if (drop.IfExists) return;
             throw new InvalidOperationException(
                 $"Index '{drop.IndexName}' references missing table '{tableName}'.");
         }
 
         // Find the descriptor so we can dispatch the per-kind drop.
-        IndexDescriptor? descriptor = _backend.GetTableIndexes(tableName)?.FirstOrDefault(idx =>
+        IndexDescriptor? descriptor = _flatFile.GetTableIndexes(tableName)?.FirstOrDefault(idx =>
             string.Equals(idx.Name, drop.IndexName, StringComparison.OrdinalIgnoreCase));
 
         if (provider is Providers.DatumFileTableProviderV2 datumProvider)
@@ -804,7 +862,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             }
         }
 
-        _backend.UnregisterIndex(drop.IndexName, out _);
+        _flatFile.UnregisterIndex(drop.IndexName, out _);
     }
 
     /// <summary>
@@ -815,7 +873,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
     {
-        if (!_backend.TryGetTable(QualifiedName.Parse(reindex.TableName), out ITableProvider? provider))
+        QualifiedName reindexQn = QualifiedName.Parse(reindex.TableName);
+        if (!TryResolveBackend(reindexQn.Schema, out ITableCatalog? reindexBackend)
+            || !reindexBackend.TryGetTable(reindexQn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{reindex.TableName}' is not registered in the catalog.");
@@ -843,7 +903,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyAnalyzeTableAsync(AnalyzeTableStatement analyze)
     {
-        if (!_backend.TryGetTable(QualifiedName.Parse(analyze.TableName), out ITableProvider? provider))
+        QualifiedName analyzeQn = QualifiedName.Parse(analyze.TableName);
+        if (!TryResolveBackend(analyzeQn.Schema, out ITableCatalog? analyzeBackend)
+            || !analyzeBackend.TryGetTable(analyzeQn, out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"Table '{analyze.TableName}' is not registered in the catalog.");
@@ -1782,8 +1844,12 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // here; mutation is gated on provider being the persistent
         // .datum variant.
         QualifiedName alterQn = QualifiedName.Parse(alter.TableName);
-        IReadOnlyList<IndexDescriptor>? indexList = _backend.GetTableIndexes(alterQn);
+        IReadOnlyList<IndexDescriptor>? indexList =
+            TryResolveBackend(alterQn.Schema, out ITableCatalog? alterBackend)
+                ? alterBackend.GetTableIndexes(alterQn)
+                : null;
         if (indexList is { Count: > 0 }
+            && alterBackend is not null
             && provider is Providers.DatumFileTableProviderV2 datumProvider)
         {
             List<IndexDescriptor>? indexesToDrop = null;
@@ -1816,7 +1882,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
                     // Persist the index removals before DropColumn runs — if
                     // DropColumn fails, we've already lost the index files,
                     // and the catalog json should reflect that.
-                    _backend.UnregisterIndex(index.Name, out _);
+                    alterBackend.UnregisterIndex(index.Name, out _);
                 }
             }
         }
@@ -1861,7 +1927,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             // so a subsequent ADD CONSTRAINT (when we ship it) starts from
             // a clean slate, and so the catalog file doesn't carry a stale
             // name for a non-existent constraint.
-            _backend.RemoveCustomPrimaryKeyConstraintName(QualifiedName.Parse(alter.TableName));
+            // Only FlatFile tracks custom PK constraint names today.
+            _flatFile.RemoveCustomPrimaryKeyConstraintName(QualifiedName.Parse(alter.TableName));
             return;
         }
 
@@ -2018,7 +2085,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Gets the total number of tables registered in this catalog, including
     /// those inherited from the parent catalog if present.
     /// </summary>
-    public int Count => _backend.Count + (Parent?.Count ?? 0);
+    public int Count => _flatFile.Count + _system.Count + _virtual.Count + (Parent?.Count ?? 0);
+
+    /// <summary>
+    /// Routes <paramref name="schema"/> to its owning backend, or returns
+    /// <see langword="false"/> when no backend is mounted for that schema.
+    /// Used by lookup / Add / DDL paths so the facade can dispatch
+    /// uniformly.
+    /// </summary>
+    private bool TryResolveBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
+        => _backends.TryGetValue(schema, out backend);
 
     /// <summary>
     /// Returns <see langword="true"/> if a table with the given name is registered
@@ -2028,7 +2104,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <returns><see langword="true"/> if the table exists; otherwise <see langword="false"/>.</returns>
     public bool HasTable(string name)
     {
-        if (_backend.TryGetTable(QualifiedName.Parse(name), out _))
+        QualifiedName qn = QualifiedName.Parse(name);
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            && backend.TryGetTable(qn, out _))
         {
             return true;
         }
@@ -2050,7 +2128,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <returns><see langword="true"/> if the table provider was found; otherwise, <see langword="false"/>.</returns>
     public bool TryGetTable(string name, [NotNullWhen(true)] out ITableProvider? provider)
     {
-        if (_backend.TryGetTable(QualifiedName.Parse(name), out provider))
+        QualifiedName qn = QualifiedName.Parse(name);
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+            && backend.TryGetTable(qn, out provider))
         {
             return true;
         }
@@ -2077,7 +2157,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     {
         get
         {
-            if (_backend.TryGetTable(QualifiedName.Parse(name), out ITableProvider? provider))
+            QualifiedName qn = QualifiedName.Parse(name);
+            if (TryResolveBackend(qn.Schema, out ITableCatalog? backend)
+                && backend.TryGetTable(qn, out ITableProvider? provider))
             {
                 return provider;
             }
@@ -2102,9 +2184,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public ITableProvider Add(TableDescriptor tableDescriptor)
     {
         QualifiedName qn = QualifiedName.Parse(tableDescriptor.Name);
-        if (Parent is TableCatalog parent && parent._backend.TryGetTable(qn, out _))
+        if (Parent is TableCatalog parent && parent.HasTable(tableDescriptor.Name))
         {
             throw new ArgumentException($"A table with the name '{tableDescriptor.Name}' is already registered in the parent catalog.");
+        }
+        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
+        {
+            throw new ArgumentException(
+                $"No catalog backend is mounted for schema '{qn.Schema}' " +
+                $"(table '{tableDescriptor.Name}').");
         }
         // v2 reader validates magic + version inside its constructor via
         // DatumFileReaderV2.Open. Files written by older format versions
@@ -2112,7 +2200,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         DatumFileTableProviderV2 provider = new(tableDescriptor, Pool);
         try
         {
-            return _backend.Add(provider);
+            return backend.Add(provider);
         }
         catch
         {
@@ -2130,11 +2218,21 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <exception cref="ArgumentException">Thrown if a table with the same name is already registered in this catalog or its parent.</exception>
     public ITableProvider Add(ITableProvider tableProvider)
     {
-        if (Parent is TableCatalog parent && parent._backend.TryGetTable(tableProvider.QualifiedName, out _))
+        ArgumentNullException.ThrowIfNull(tableProvider);
+        QualifiedName qn = tableProvider.QualifiedName;
+        if (Parent is TableCatalog parent
+            && parent.TryResolveBackend(qn.Schema, out ITableCatalog? parentBackend)
+            && parentBackend.TryGetTable(qn, out _))
         {
-            throw new ArgumentException($"A table with the name '{tableProvider.QualifiedName}' is already registered in the parent catalog.");
+            throw new ArgumentException($"A table with the name '{qn}' is already registered in the parent catalog.");
         }
-        return _backend.Add(tableProvider);
+        if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
+        {
+            throw new ArgumentException(
+                $"No catalog backend is mounted for schema '{qn.Schema}' " +
+                $"(provider '{qn}').");
+        }
+        return backend.Add(tableProvider);
     }
 
     /// <summary>
@@ -2147,7 +2245,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public void Remove(string tableName)
     {
         // NOTE: you can't drop from the parent catalog.
-        _backend.DropTable(QualifiedName.Parse(tableName));
+        QualifiedName qn = QualifiedName.Parse(tableName);
+        if (TryResolveBackend(qn.Schema, out ITableCatalog? backend) && backend.SupportsDdl)
+        {
+            backend.DropTable(qn);
+        }
+        // Read-only backends silently ignore Remove — matches the old
+        // permissive behaviour of the public API.
     }
 
 
@@ -2155,7 +2259,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     public IEnumerator<ITableProvider> GetEnumerator()
     {
         HashSet<QualifiedName> seen = new();
-        foreach (ITableProvider provider in _backend.ListTables())
+        foreach (ITableProvider provider in _flatFile.ListTables())
+        {
+            seen.Add(provider.QualifiedName);
+            yield return provider;
+        }
+        foreach (ITableProvider provider in _system.ListTables())
+        {
+            seen.Add(provider.QualifiedName);
+            yield return provider;
+        }
+        foreach (ITableProvider provider in _virtual.ListTables())
         {
             seen.Add(provider.QualifiedName);
             yield return provider;
@@ -2181,9 +2295,11 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <inheritdoc />
     public void Dispose()
     {
-        // Disposes all locally-registered providers via the backend.
+        // Disposes all locally-registered providers via each backend.
         // Parent-catalog providers remain owned by the parent.
-        _backend.Dispose();
+        _flatFile.Dispose();
+        _system.Dispose();
+        _virtual.Dispose();
     }
 
 
