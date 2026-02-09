@@ -544,7 +544,9 @@ internal static class UpdateExecutor
     /// </remarks>
     private static ITableProvider Validate(TableCatalog catalog, UpdateStatement update)
     {
-        if (!catalog.TryGetTable(update.TableName, out ITableProvider? provider))
+        SchemaResolver resolver = new(catalog, catalog.SearchPath);
+        if (!resolver.TryResolve(explicitSchema: null, update.TableName, out QualifiedName qn)
+            || !catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))
         {
             throw new QueryPlanException(
                 $"UPDATE '{update.TableName}': table is not registered in the catalog.");

@@ -77,8 +77,12 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        // S4 routes through SchemaResolver.ResolveForCreate; missing
+        // schema surfaces as SchemaResolutionException (which derives
+        // from InvalidOperationException).
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("CREATE TABLE nosuch.t (id Int32)"));
+        Assert.Contains("nosuch", ex.Message);
     }
 
     [Fact]
@@ -87,9 +91,12 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
         // system / information_schema / datum_catalog are all read-only;
-        // CREATE TABLE there must reject.
-        Assert.Throws<NotSupportedException>(() =>
+        // CREATE TABLE there must reject. S4 routes the rejection through
+        // SchemaResolver.ResolveForCreate (which derives from
+        // InvalidOperationException).
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("CREATE TABLE system.foo (id Int32)"));
+        Assert.Contains("read-only", ex.Message);
     }
 
     // ───────────────────── DROP SCHEMA RESTRICT / CASCADE ─────────────────────
@@ -102,7 +109,9 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
 
         catalog.Plan("DROP SCHEMA myapp");
 
-        Assert.Throws<InvalidOperationException>(() =>
+        // After the drop, the schema is no longer mounted — CREATE TABLE
+        // there fails through SchemaResolutionException.
+        Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("CREATE TABLE myapp.t (id Int32)"));
     }
 
@@ -128,8 +137,9 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
         catalog.Plan("DROP SCHEMA myapp CASCADE");
 
         Assert.False(catalog.HasTable("myapp.t"));
-        // Schema is gone too — new tables in that schema fail.
-        Assert.Throws<InvalidOperationException>(() =>
+        // Schema is gone too — new tables in that schema fail through
+        // the resolver.
+        Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("CREATE TABLE myapp.t (id Int32)"));
     }
 
@@ -185,16 +195,31 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
         Assert.False(catalog.HasTable("myapp.t"));
     }
 
-    // ───────────────────── SET search_path (parse-only stub for S3) ─────────────────────
+    // ───────────────────── SET search_path (S4) ─────────────────────
 
     [Fact]
-    public void SetSearchPath_Throws_NotImplemented_Yet()
+    public void SetSearchPath_UpdatesCatalogState()
     {
-        // Parser accepts it; applier deliberately throws so tests can't
-        // false-pass before the S4 resolver lands.
+        // S4 wires SET search_path through to TableCatalog.SetSearchPath.
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
-        Assert.Throws<NotImplementedException>(() =>
-            catalog.Plan("SET search_path = myapp, public"));
+        Assert.Equal(new[] { "public", "system" }, catalog.SearchPath);
+
+        catalog.Plan("CREATE SCHEMA myapp");
+        catalog.Plan("SET search_path = myapp, public");
+
+        Assert.Equal(new[] { "myapp", "public" }, catalog.SearchPath);
+    }
+
+    [Fact]
+    public void SetSearchPath_UnknownSchema_Throws()
+    {
+        // We diverge from PG (which warns) — typos shouldn't silently
+        // change resolution behavior. Error upfront.
+        using TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("SET search_path = nonexistent"));
+        Assert.Contains("nonexistent", ex.Message);
     }
 }

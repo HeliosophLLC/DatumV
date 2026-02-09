@@ -4784,10 +4784,13 @@ public sealed class QueryPlanner
             return cteSource;
         }
 
-        string tableLookupKey = tableRef.SchemaName is not null
-            ? $"{tableRef.SchemaName}.{tableRef.Name}"
-            : tableRef.Name;
-        ITableProvider provider = _catalog[tableLookupKey];
+        // Resolve the table reference: explicit schema lands in exactly
+        // that schema; unqualified walks the session search_path and
+        // throws SchemaResolutionException with a helpful message when
+        // no schema on the path contains the table.
+        Catalog.SchemaResolver resolver = new(_catalog, _catalog.SearchPath);
+        Catalog.QualifiedName qn = resolver.Resolve(tableRef.SchemaName, tableRef.Name);
+        ITableProvider provider = _catalog[qn.ToString()];
 
         // Projection pushdown: compute required columns for this table's alias.
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;

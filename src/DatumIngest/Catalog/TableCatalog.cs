@@ -170,14 +170,38 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// Builds a <see cref="QualifiedName"/> from a DDL statement that
     /// carries both an explicit <c>SchemaName</c> (the parsed
     /// <c>schema.table</c> qualifier) and a <c>TableName</c>. When the
-    /// schema is supplied explicitly it wins; otherwise the unqualified
-    /// name falls through to <c>public</c> (search-path-based resolution
-    /// lands in S4).
+    /// schema is supplied explicitly it wins; otherwise the
+    /// <see cref="SchemaResolver"/> walks the current
+    /// <see cref="SearchPath"/> for an existing table. If no match is
+    /// found, the first search_path entry is returned as a best-guess
+    /// so the subsequent backend lookup fails consistently (callers'
+    /// IF EXISTS branches handle that uniformly).
     /// </summary>
-    private static QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
-        => explicitSchema is null
-            ? QualifiedName.Parse(tableName)
-            : new QualifiedName(explicitSchema, tableName);
+    private QualifiedName ResolveDdlName(string? explicitSchema, string tableName)
+    {
+        SchemaResolver resolver = new(this, _searchPath);
+        resolver.TryResolve(explicitSchema, tableName, out QualifiedName resolved);
+        return resolved;
+    }
+
+    /// <summary>
+    /// Picks the first DDL-capable schema on the current search_path,
+    /// or <see langword="null"/> when none qualifies. Used for the
+    /// existence pre-check inside <see cref="ApplyCreateTableAsync"/> —
+    /// it has to know the prospective target schema before
+    /// <c>ResolveForCreate</c> is invoked.
+    /// </summary>
+    private string? PickFirstWritableSchema()
+    {
+        foreach (string schema in _searchPath)
+        {
+            if (_backends.TryGetValue(schema, out ITableCatalog? backend) && backend.SupportsDdl)
+            {
+                return schema;
+            }
+        }
+        return null;
+    }
 
     /// <summary>
     /// When <see langword="true"/>, <c>CREATE TABLE … AT 'path'</c>
@@ -224,6 +248,25 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// <see cref="Add(ITableProvider)"/> / DDL apply call.
     /// </summary>
     private readonly Dictionary<string, ITableCatalog> _backends;
+
+    /// <summary>
+    /// Session-scoped <c>search_path</c> for resolving unqualified table
+    /// references. Defaults to <c>["public", "system"]</c> — so
+    /// <c>SELECT * FROM udfs</c> walks to <c>system.udfs</c>. Mutated
+    /// atomically by <c>SET search_path = …</c>; reads return the
+    /// immutable list captured at the point of read so in-flight queries
+    /// that captured an earlier snapshot aren't affected by a concurrent
+    /// SET. PG semantics.
+    /// </summary>
+    private volatile IReadOnlyList<string> _searchPath = new[] { "public", "system" };
+
+    /// <summary>
+    /// The current session <c>search_path</c>. Reads atomically; the
+    /// returned list is immutable, so callers can capture a stable
+    /// snapshot for the rest of their query. Mutated only by
+    /// <see cref="ApplySetSearchPath"/>.
+    /// </summary>
+    public IReadOnlyList<string> SearchPath => _searchPath;
 
     /// <summary>
     /// Returns the user-created index descriptors for <paramref name="tableName"/>,
@@ -535,8 +578,20 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </remarks>
     private async Task ApplyCreateTableAsync(CreateTableStatement create)
     {
-        // Existence check.
-        if (HasTable(create.TableName))
+        // Existence check is against the explicit target location (after
+        // ResolveForCreate picks the schema for unqualified names below)
+        // — checking via the search-path walker would let a same-named
+        // table on a later path entry mask the new-table location.
+        // For TEMP, the target is always public.{name}.
+        string existenceCheckName = create.SchemaName is not null
+            ? new QualifiedName(create.SchemaName, create.TableName).ToString()
+            : create.IsTemp
+                ? new QualifiedName("public", create.TableName).ToString()
+                : new QualifiedName(
+                    PickFirstWritableSchema() ?? "public",
+                    create.TableName).ToString();
+
+        if (HasTable(existenceCheckName))
         {
             if (create.IfNotExists) return;
             throw new InvalidOperationException(
@@ -546,8 +601,6 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
         // Build ColumnInfo[] from the AST's ColumnDefinition list.
         Schema schema = await BuildSchemaFromColumnDefinitionsAsync(create.Columns, create.PrimaryKeyColumns)
             .ConfigureAwait(false);
-
-        QualifiedName qn = ResolveDdlName(create.SchemaName, create.TableName);
 
         if (create.IsTemp)
         {
@@ -564,11 +617,16 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
             return;
         }
 
-        // Persistent: route to the schema's backend. Read-only backends
-        // (system, information_schema, datum_catalog) throw — only
-        // FlatFileCatalog accepts CREATE TABLE today. AT-clause /
-        // no-catalog-file / file-already-exists validation lives in the
-        // backend so it stays with the storage concerns it depends on.
+        // Persistent: ResolveForCreate picks the first DDL-capable schema
+        // on the search_path when the user didn't supply an explicit
+        // qualifier; explicit qualifiers are validated DDL-capable
+        // (system / information_schema / datum_catalog throw cleanly).
+        SchemaResolver resolver = new(this, _searchPath);
+        QualifiedName qn = resolver.ResolveForCreate(create.SchemaName, create.TableName);
+
+        // Route to the schema's backend. AT-clause / no-catalog-file /
+        // file-already-exists validation lives in the backend so it stays
+        // with the storage concerns it depends on.
         if (!TryResolveBackend(qn.Schema, out ITableCatalog? backend))
         {
             throw new InvalidOperationException(
@@ -666,16 +724,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     }
 
     /// <summary>
-    /// Applies <c>SET search_path = a, b, c</c>. <strong>S4 stub.</strong>
-    /// Search-path resolution lives on a future <c>ExecutionContext</c>
-    /// — until that lands, this statement parses but has no effect.
+    /// Applies <c>SET search_path = a, b, c</c>. Replaces the session
+    /// <see cref="SearchPath"/> after validating that every named schema
+    /// is mounted. In-flight queries that captured the prior path are
+    /// unaffected — they keep their snapshot.
     /// </summary>
     private void ApplySetSearchPath(SetSearchPathStatement setSearchPath)
     {
-        throw new NotImplementedException(
-            "SET search_path is parsed but not yet honored. The session-scoped " +
-            "resolver lands in S4. Until then, unqualified table names always " +
-            "resolve against the public schema.");
+        SetSearchPath(setSearchPath.Schemas);
     }
 
     private static bool IsBuiltinSchema(string schema)
@@ -2180,6 +2236,60 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private bool TryResolveBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
         => _backends.TryGetValue(schema, out backend);
+
+    /// <summary>
+    /// Schema-aware lookup using a pre-built <see cref="QualifiedName"/>.
+    /// Bypasses the string indexer's parse step. Used by
+    /// <see cref="SchemaResolver"/> in the hot path.
+    /// </summary>
+    internal bool TryGetTable(QualifiedName name, [NotNullWhen(true)] out ITableProvider? provider)
+    {
+        if (TryResolveBackend(name.Schema, out ITableCatalog? backend)
+            && backend.TryGetTable(name, out provider))
+        {
+            return true;
+        }
+        if (Parent is not null)
+        {
+            return Parent.TryGetTable(name, out provider);
+        }
+        provider = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the backend that owns <paramref name="schema"/>, or
+    /// <see langword="false"/> when no backend is mounted there. Exposed
+    /// to <see cref="SchemaResolver"/> so it can pick DDL-capable
+    /// schemas during <c>CREATE TABLE</c> resolution.
+    /// </summary>
+    internal bool TryFindBackend(string schema, [NotNullWhen(true)] out ITableCatalog? backend)
+        => _backends.TryGetValue(schema, out backend);
+
+    /// <summary>
+    /// Replaces the session <c>search_path</c>. Used by
+    /// <c>SET search_path = …</c>. Validates that every schema in the
+    /// new path is mounted; throws on the first unknown schema.
+    /// </summary>
+    /// <remarks>
+    /// PG accepts unknown schemas silently with a warning; we error
+    /// upfront so typos can't quietly hide tables from resolution.
+    /// </remarks>
+    internal void SetSearchPath(IReadOnlyList<string> schemas)
+    {
+        ArgumentNullException.ThrowIfNull(schemas);
+        foreach (string schema in schemas)
+        {
+            if (!_backends.ContainsKey(schema))
+            {
+                throw new InvalidOperationException(
+                    $"SET search_path: schema '{schema}' does not exist.");
+            }
+        }
+        // Snapshot to a fresh immutable list so callers that captured the
+        // old reference keep their view.
+        _searchPath = schemas.ToArray();
+    }
 
     /// <summary>
     /// Returns <see langword="true"/> if a table with the given name is registered

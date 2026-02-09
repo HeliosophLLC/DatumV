@@ -35,7 +35,14 @@ internal static class InsertExecutor
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(insert);
 
-        if (!catalog.TryGetTable(insert.TableName, out ITableProvider? provider))
+        // Resolve via the session search_path. INSERT today still parses
+        // its target as an unqualified single identifier; search_path
+        // resolution lets unqualified targets fall through to e.g. the
+        // system schema if needed (today's surface only routes new
+        // user data to public, but the resolver is the right abstraction).
+        SchemaResolver resolver = new(catalog, catalog.SearchPath);
+        if (!resolver.TryResolve(explicitSchema: null, insert.TableName, out QualifiedName qn)
+            || !catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"INSERT INTO '{insert.TableName}': table is not registered in the catalog.");

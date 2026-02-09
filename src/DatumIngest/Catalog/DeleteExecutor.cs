@@ -28,7 +28,9 @@ internal static class DeleteExecutor
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(delete);
 
-        if (!catalog.TryGetTable(delete.TableName, out ITableProvider? provider))
+        SchemaResolver resolver = new(catalog, catalog.SearchPath);
+        if (!resolver.TryResolve(explicitSchema: null, delete.TableName, out QualifiedName qn)
+            || !catalog.TryGetTable(qn.ToString(), out ITableProvider? provider))
         {
             throw new InvalidOperationException(
                 $"DELETE FROM '{delete.TableName}': table is not registered in the catalog.");
