@@ -2914,6 +2914,28 @@ public static class SqlParser
         .Try();
 
     /// <summary>
+    /// Parses a possibly-qualified table identifier — <c>name</c> or
+    /// <c>schema.name</c> — into a <c>(schemaName, tableName)</c> tuple
+    /// where <c>schemaName</c> is <see langword="null"/> for unqualified
+    /// references. The caller decides what unqualified means (today:
+    /// <c>public</c> for DDL; eventually <c>search_path</c>-driven for DML).
+    /// Shared by CREATE / DROP / ALTER TABLE; the <c>FROM</c>-clause
+    /// table-reference parser still has its own inline copy because it
+    /// also handles alias / TABLESAMPLE trailers.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (string? SchemaName, string TableName)>
+        QualifiedTableNameParser =
+            from first in IdentifierOrKeywordAsName
+            from rest in (
+                from dot in Token.EqualTo(SqlToken.Dot)
+                from second in IdentifierOrKeywordAsName
+                select second
+            ).OptionalOrDefault()
+            select rest is null
+                ? ((string?)null, first)
+                : ((string?)first, rest!);
+
+    /// <summary>
     /// Optional <c>AT 'path'</c> trailing clause on a CREATE TABLE
     /// statement. The catalog gates whether to honor it via the
     /// <c>AllowExplicitTablePaths</c> option; production hosts disable
@@ -2929,14 +2951,14 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> CreateTableParser =
         from isTemp in CreateTablePrefix
         from ifNotExists in IfNotExistsParser
-        from tableName in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from asOrParen in Token.EqualTo(SqlToken.As).Try()
             .Or(Token.EqualTo(SqlToken.LeftParen))
         from statement in asOrParen.Kind == SqlToken.As
             ? (from query in SP.Ref(() => QueryExpressionParser!)
                from path in AtPathParser
                select (Statement)new CreateTableAsSelectStatement(
-                   tableName, query, IsTemp: isTemp, IfNotExists: ifNotExists, StoragePath: path))
+                   qualifiedName.TableName, query, IsTemp: isTemp, IfNotExists: ifNotExists, StoragePath: path))
             : ColumnListWithOptionalPrimaryKeyParser
                 .Then(result => Token.EqualTo(SqlToken.RightParen)
                     .IgnoreThen(AtPathParser)
@@ -2973,11 +2995,12 @@ public static class SqlParser
                             primaryKeyColumns = inlineKeys;
                         }
                         return (Statement)new CreateTableStatement(
-                            tableName, result.Columns,
+                            qualifiedName.TableName, result.Columns,
                             IsTemp: isTemp, IfNotExists: ifNotExists,
                             PrimaryKeyColumns: primaryKeyColumns,
                             StoragePath: path,
-                            PrimaryKeyConstraintName: pkConstraintName);
+                            PrimaryKeyConstraintName: pkConstraintName,
+                            SchemaName: qualifiedName.SchemaName);
                     }))
         select statement;
 
@@ -2988,8 +3011,79 @@ public static class SqlParser
         from dropKw in Token.EqualTo(SqlToken.Drop)
         from tableKw in Token.EqualTo(SqlToken.Table)
         from ifExists in IfExistsParser
-        from tableName in IdentifierOrKeywordAsName
-        select (Statement)new DropTableStatement(tableName, ifExists);
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new DropTableStatement(qualifiedName.TableName, ifExists, qualifiedName.SchemaName);
+
+    /// <summary>
+    /// Matches a contextual <c>SCHEMA</c> identifier. <c>SCHEMA</c> isn't
+    /// a reserved token in the tokenizer; we accept it as an identifier
+    /// in name-position so it stays usable as a column / table name
+    /// elsewhere.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Unit> SchemaKeyword =
+        Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("SCHEMA", StringComparison.OrdinalIgnoreCase), "SCHEMA")
+            .Select(_ => Unit.Value);
+
+    /// <summary>
+    /// Parses <c>CREATE SCHEMA [IF NOT EXISTS] name</c>. The
+    /// <c>CREATE SCHEMA</c> prefix is Try-protected so it backtracks
+    /// cleanly against sibling <c>CREATE TABLE</c> / <c>CREATE FUNCTION</c>
+    /// / <c>CREATE PROCEDURE</c>; the body (name + IF NOT EXISTS) runs
+    /// without Try so internal errors surface at their real positions.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateSchemaParser =
+        from prefix in (
+            from createKw in Token.EqualTo(SqlToken.Create)
+            from schemaKw in SchemaKeyword
+            select Unit.Value
+        ).Try()
+        from ifNotExists in IfNotExistsParser
+        from name in IdentifierOrKeywordAsName
+        select (Statement)new CreateSchemaStatement(name, ifNotExists);
+
+    /// <summary>
+    /// Parses <c>DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]</c>.
+    /// The trailing CASCADE/RESTRICT is optional; absence means RESTRICT
+    /// (the PG default — error if non-empty).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropSchemaParser =
+        from prefix in (
+            from dropKw in Token.EqualTo(SqlToken.Drop)
+            from schemaKw in SchemaKeyword
+            select Unit.Value
+        ).Try()
+        from ifExists in IfExistsParser
+        from name in IdentifierOrKeywordAsName
+        from cascade in (
+            Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("CASCADE", StringComparison.OrdinalIgnoreCase), "CASCADE")
+                .Select(_ => true)
+            .Or(Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("RESTRICT", StringComparison.OrdinalIgnoreCase), "RESTRICT")
+                .Select(_ => false))
+        ).OptionalOrDefault()
+        select (Statement)new DropSchemaStatement(name, ifExists, cascade);
+
+    /// <summary>
+    /// Parses <c>SET search_path = schema1, schema2, ...</c> (or
+    /// <c>TO</c> in place of <c>=</c>, mirroring Postgres). At least one
+    /// schema is required.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> SetSearchPathParser =
+        (from setKw in Token.EqualTo(SqlToken.Set)
+         from searchPathKw in Token.EqualTo(SqlToken.Identifier)
+             .Where(t => GetTokenText(t).Equals("search_path", StringComparison.OrdinalIgnoreCase), "search_path")
+         from assign in Token.EqualTo(SqlToken.Equals).Or(Token.EqualTo(SqlToken.To))
+         from first in IdentifierOrKeywordAsName
+         from rest in (
+             from comma in Token.EqualTo(SqlToken.Comma)
+             from next in IdentifierOrKeywordAsName
+             select next
+         ).Many()
+         select (Statement)new SetSearchPathStatement(
+             new[] { first }.Concat(rest).ToList()))
+        .Try();
 
     /// <summary>
     /// Optional <c>USING method</c> clause after the column list. The
@@ -3836,14 +3930,14 @@ public static class SqlParser
     /// <see cref="IfExists"/> is the PG-canonical table-level guard that
     /// turns "no such table" into a no-op for every ALTER body.
     /// </summary>
-    private readonly record struct AlterTablePrefixResult(bool IfExists, string TableName);
+    private readonly record struct AlterTablePrefixResult(bool IfExists, string TableName, string? SchemaName);
 
     private static readonly TokenListParser<SqlToken, AlterTablePrefixResult> AlterTablePrefix =
         (from alterKw in Token.EqualTo(SqlToken.Alter)
          from tableKw in Token.EqualTo(SqlToken.Table)
          from ifExists in IfExistsParser
-         from tableName in IdentifierOrKeywordAsName
-         select new AlterTablePrefixResult(ifExists, tableName))
+         from qualifiedName in QualifiedTableNameParser
+         select new AlterTablePrefixResult(ifExists, qualifiedName.TableName, qualifiedName.SchemaName))
         .Try();
 
     // Same order-independent alternation as CREATE TABLE columns.
@@ -3950,7 +4044,8 @@ public static class SqlParser
             ComputedExpression: generatedSlot?.ComputedExpression,
             Identity: generatedSlot?.Identity,
             PrimaryKey: primaryKey,
-            TableIfExists: prefix.IfExists);
+            TableIfExists: prefix.IfExists,
+            SchemaName: prefix.SchemaName);
     }
 
     /// <summary>
@@ -3962,7 +4057,7 @@ public static class SqlParser
         from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
         from ifExists in IfExistsParser
         from colName in IdentifierOrKeywordAsName
-        select (Statement)new AlterTableDropColumnStatement(prefix.TableName, colName, ifExists, prefix.IfExists);
+        select (Statement)new AlterTableDropColumnStatement(prefix.TableName, colName, ifExists, prefix.IfExists, prefix.SchemaName);
 
     /// <summary>
     /// Parses the <c>CONSTRAINT [IF EXISTS] constraint_name</c> body of an
@@ -3976,7 +4071,7 @@ public static class SqlParser
         from constraintKw in Token.EqualTo(SqlToken.Constraint)
         from ifExists in IfExistsParser
         from constraintName in IdentifierOrKeywordAsName
-        select (Statement)new AlterTableDropConstraintStatement(prefix.TableName, constraintName, ifExists, prefix.IfExists);
+        select (Statement)new AlterTableDropConstraintStatement(prefix.TableName, constraintName, ifExists, prefix.IfExists, prefix.SchemaName);
 
     /// <summary>
     /// Parses the <c>COLUMN col DROP { IDENTITY | DEFAULT } [IF EXISTS]</c>
@@ -3996,7 +4091,8 @@ public static class SqlParser
                 ? AlterColumnDropTarget.Identity
                 : AlterColumnDropTarget.Default,
             ifExists,
-            prefix.IfExists);
+            prefix.IfExists,
+            prefix.SchemaName);
 
     /// <summary>
     /// Parses <c>ALTER TABLE name (ADD ... | DROP ... | ALTER COLUMN ...)</c>.
@@ -4078,8 +4174,11 @@ public static class SqlParser
             .Or(RaiseStatementParser.Try())
             .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
+            .Or(SetSearchPathParser)
             .Or(SetStatementParser.Try())
+            .Or(CreateSchemaParser)
             .Or(CreateTableParser)
+            .Or(DropSchemaParser)
             .Or(DropTableParser.Try())
             .Or(CreateIndexParser.Try())
             .Or(DropIndexParser.Try())

@@ -1040,6 +1040,7 @@ public sealed record QueryStatement(QueryExpression Query) : Statement;
 /// <c>.datum-catalog.json</c> for persistent tables; not stored on
 /// disk for temp tables.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record CreateTableStatement(
     string TableName,
     IReadOnlyList<ColumnDefinition> Columns,
@@ -1047,7 +1048,8 @@ public sealed record CreateTableStatement(
     bool IfNotExists = false,
     IReadOnlyList<string>? PrimaryKeyColumns = null,
     string? StoragePath = null,
-    string? PrimaryKeyConstraintName = null) : Statement;
+    string? PrimaryKeyConstraintName = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// A single column definition within a <c>CREATE TABLE</c> statement.
@@ -1137,9 +1139,48 @@ public sealed record CreateTableAsSelectStatement(
 /// </summary>
 /// <param name="TableName">The name of the table to drop.</param>
 /// <param name="IfExists">When <see langword="true"/>, suppresses errors if the table does not exist.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> resolves against the default schema.</param>
 public sealed record DropTableStatement(
     string TableName,
-    bool IfExists = false) : Statement;
+    bool IfExists = false,
+    string? SchemaName = null) : Statement;
+
+/// <summary>
+/// <c>CREATE SCHEMA [IF NOT EXISTS] name</c> — registers a new user
+/// schema in the catalog. Tables created with <c>CREATE TABLE
+/// name.table</c> land under that schema. Built-in schemas
+/// (<c>public</c>, <c>system</c>, <c>information_schema</c>,
+/// <c>datum_catalog</c>) are pre-mounted and can't be re-created.
+/// </summary>
+/// <param name="SchemaName">The schema name to register.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the schema already exists.</param>
+public sealed record CreateSchemaStatement(
+    string SchemaName,
+    bool IfNotExists = false) : Statement;
+
+/// <summary>
+/// <c>DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]</c> — removes a
+/// user schema. <c>RESTRICT</c> (default) errors if the schema still
+/// contains tables; <c>CASCADE</c> drops every table in the schema
+/// first.
+/// </summary>
+/// <param name="SchemaName">The schema name to remove.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the schema does not exist.</param>
+/// <param name="Cascade">When <see langword="true"/>, drops every table in the schema before removing it.</param>
+public sealed record DropSchemaStatement(
+    string SchemaName,
+    bool IfExists = false,
+    bool Cascade = false) : Statement;
+
+/// <summary>
+/// <c>SET search_path = schema1, schema2, ...</c> — updates the session's
+/// schema-resolution order for unqualified table references. PG-style:
+/// the leftmost schema is consulted first, falling through until a
+/// match is found.
+/// </summary>
+/// <param name="Schemas">The ordered list of schemas to search.</param>
+public sealed record SetSearchPathStatement(
+    IReadOnlyList<string> Schemas) : Statement;
 
 /// <summary>
 /// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)
@@ -1316,6 +1357,7 @@ public sealed record ColumnAssignment(string ColumnName, Expression Value);
 /// short-circuits the statement to a no-op when the named table doesn't
 /// exist (set by the <c>ALTER TABLE IF EXISTS name …</c> prefix).
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record AlterTableAddColumnStatement(
     string TableName,
     string ColumnName,
@@ -1325,7 +1367,8 @@ public sealed record AlterTableAddColumnStatement(
     Expression? ComputedExpression = null,
     IdentitySpec? Identity = null,
     bool PrimaryKey = false,
-    bool TableIfExists = false) : Statement;
+    bool TableIfExists = false,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>ALTER TABLE name DROP [COLUMN] col [IF EXISTS]</c> — soft-drops a
@@ -1340,11 +1383,13 @@ public sealed record AlterTableAddColumnStatement(
 /// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
 /// the catalog short-circuits to a no-op when the named table doesn't exist.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record AlterTableDropColumnStatement(
     string TableName,
     string ColumnName,
     bool IfExists = false,
-    bool TableIfExists = false) : Statement;
+    bool TableIfExists = false,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>ALTER TABLE name DROP CONSTRAINT constraint_name [IF EXISTS]</c> —
@@ -1360,11 +1405,13 @@ public sealed record AlterTableDropColumnStatement(
 /// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
 /// the catalog short-circuits to a no-op when the named table doesn't exist.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record AlterTableDropConstraintStatement(
     string TableName,
     string ConstraintName,
     bool IfExists = false,
-    bool TableIfExists = false) : Statement;
+    bool TableIfExists = false,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// Which column attribute an <see cref="AlterTableAlterColumnDropStatement"/>
@@ -1399,12 +1446,14 @@ public enum AlterColumnDropTarget
 /// PG-canonical table-level guard from <c>ALTER TABLE IF EXISTS name …</c>;
 /// the catalog short-circuits to a no-op when the named table doesn't exist.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record AlterTableAlterColumnDropStatement(
     string TableName,
     string ColumnName,
     AlterColumnDropTarget Target,
     bool IfExists = false,
-    bool TableIfExists = false) : Statement;
+    bool TableIfExists = false,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
