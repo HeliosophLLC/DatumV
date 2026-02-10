@@ -1229,6 +1229,7 @@ public sealed record SetSearchPathStatement(
 /// or empty when the clause is omitted. The catalog validates which keys
 /// are recognised per <see cref="Method"/>.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record CreateIndexStatement(
     string IndexName,
     string TableName,
@@ -1236,7 +1237,8 @@ public sealed record CreateIndexStatement(
     bool IfNotExists = false,
     bool IsUnique = false,
     string? Method = null,
-    IReadOnlyDictionary<string, string>? Options = null) : Statement;
+    IReadOnlyDictionary<string, string>? Options = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>DROP INDEX [IF EXISTS] name</c> — removes a maintained secondary index.
@@ -1266,11 +1268,13 @@ public sealed record DropIndexStatement(
 /// Expressions resolve against each inserted row, the same scope SELECT projections
 /// have. <see langword="null"/> when the INSERT is a side-effect-only statement.
 /// </param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record InsertStatement(
     string TableName,
     IReadOnlyList<string>? ColumnNames,
     InsertSource Source,
-    IReadOnlyList<SelectColumn>? Returning = null) : Statement;
+    IReadOnlyList<SelectColumn>? Returning = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// Base type for the source of rows in an INSERT statement.
@@ -1315,22 +1319,26 @@ public sealed record InsertDefaultValuesSource : InsertSource;
 /// </param>
 /// <param name="Joins">Optional JOIN clauses between source tables listed in the FROM clause.</param>
 /// <param name="Where">Optional filter and join-condition predicate.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record UpdateStatement(
     string TableName,
     string? Alias,
     IReadOnlyList<ColumnAssignment> Assignments,
     FromClause? From = null,
     IReadOnlyList<JoinClause>? Joins = null,
-    Expression? Where = null) : Statement;
+    Expression? Where = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>DELETE FROM name [WHERE ...]</c> — deletes rows from a table using tombstone bitmaps.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 /// <param name="Where">Optional filter predicate restricting which rows are deleted. When omitted, all rows are deleted.</param>
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
 public sealed record DeleteStatement(
     string TableName,
-    Expression? Where = null) : Statement;
+    Expression? Where = null,
+    string? SchemaName = null) : Statement;
 
 /// <summary>
 /// A single <c>column = expression</c> assignment in an UPDATE SET clause.
@@ -1469,7 +1477,8 @@ public sealed record AlterTableAlterColumnDropStatement(
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
-public sealed record AnalyzeTableStatement(string TableName) : Statement;
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
+public sealed record AnalyzeTableStatement(string TableName, string? SchemaName = null) : Statement;
 
 /// <summary>
 /// <c>REINDEX table</c> — rebuilds the <c>.datum-index</c> sidecar for
@@ -1480,7 +1489,8 @@ public sealed record AnalyzeTableStatement(string TableName) : Statement;
 /// the sidecar and restores acceleration.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
-public sealed record ReindexTableStatement(string TableName) : Statement;
+/// <param name="SchemaName">Optional schema qualifier from <c>schema.table</c>; <see langword="null"/> means the default schema.</param>
+public sealed record ReindexTableStatement(string TableName, string? SchemaName = null) : Statement;
 
 /// <summary>
 /// A single declared parameter of a user-defined function:

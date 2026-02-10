@@ -499,8 +499,12 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog();
 
-        Assert.Throws<InvalidOperationException>(() =>
+        // S8 routes INSERT through SchemaResolver.Resolve (same as SELECT),
+        // so a missing unqualified target surfaces as the rich
+        // SchemaResolutionException with the search_path listed.
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("INSERT INTO nope VALUES (1)"));
+        Assert.Contains("nope", ex.Message);
     }
 
     // ──────────────────── Helpers ────────────────────

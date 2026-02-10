@@ -3170,17 +3170,18 @@ public static class SqlParser
         from ifNotExists in IfNotExistsParser
         from indexName in IdentifierOrKeywordAsName
         from onKw in Token.EqualTo(SqlToken.On)
-        from tableName in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from openParen in Token.EqualTo(SqlToken.LeftParen)
         from columns in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from closeParen in Token.EqualTo(SqlToken.RightParen)
         from method in CreateIndexUsingParser
         from options in CreateIndexWithOptionsParser
         select (Statement)new CreateIndexStatement(
-            indexName, tableName, columns, ifNotExists,
+            indexName, qualifiedName.TableName, columns, ifNotExists,
             IsUnique: uniqueKw,
             Method: method,
-            Options: options);
+            Options: options,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses <c>DROP INDEX [IF EXISTS] name</c>.
@@ -3844,7 +3845,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> InsertParser =
         from insertKw in Token.EqualTo(SqlToken.Insert)
         from intoKw in Token.EqualTo(SqlToken.Into)
-        from tableName in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from columnNames in (
             from open in Token.EqualTo(SqlToken.LeftParen)
             from names in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
@@ -3856,10 +3857,11 @@ public static class SqlParser
             .Or(SP.Ref(() => QueryExpressionParser!).Select(q => (InsertSource)new InsertQuerySource(q)))
         from returning in ReturningClauseParser.AsNullable().OptionalOrDefault()
         select (Statement)new InsertStatement(
-            tableName,
+            qualifiedName.TableName,
             columnNames is { Length: > 0 } ? columnNames : null,
             source,
-            returning);
+            returning,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses the <c>DEFAULT VALUES</c> source form of an INSERT statement —
@@ -3909,7 +3911,7 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> UpdateParser =
         from updateKw in Token.EqualTo(SqlToken.Update)
-        from tableName in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from alias in (
             from _as in Token.EqualTo(SqlToken.As).OptionalOrDefault()
             from aliasName in IdentifierLike.Select(GetTokenText)
@@ -3926,12 +3928,13 @@ public static class SqlParser
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         select (Statement)new UpdateStatement(
-            tableName,
+            qualifiedName.TableName,
             alias,
             assignments,
             fromClause,
             joinClauses.Length > 0 ? joinClauses : null,
-            whereClause);
+            whereClause,
+            SchemaName: qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses <c>DELETE FROM name [WHERE ...]</c>.
@@ -3939,9 +3942,9 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> DeleteParser =
         from deleteKw in Token.EqualTo(SqlToken.Delete)
         from fromKw in Token.EqualTo(SqlToken.From)
-        from tableName in IdentifierOrKeywordAsName
+        from qualifiedName in QualifiedTableNameParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
-        select (Statement)new DeleteStatement(tableName, whereClause);
+        select (Statement)new DeleteStatement(qualifiedName.TableName, whereClause, qualifiedName.SchemaName);
 
     /// <summary>
     /// Disambiguating prefix for <c>ALTER TABLE name</c>. <c>ALTER</c> is
@@ -4150,8 +4153,8 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AnalyzeTableParser =
         from analyzeKw in Token.EqualTo(SqlToken.Analyze)
-        from tableName in IdentifierOrKeywordAsName
-        select (Statement)new AnalyzeTableStatement(tableName);
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new AnalyzeTableStatement(qualifiedName.TableName, qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses <c>REINDEX [TABLE] name</c>. The optional <c>TABLE</c>
@@ -4162,8 +4165,8 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Statement> ReindexTableParser =
         from reindexKw in Token.EqualTo(SqlToken.Reindex)
         from tableKw in Token.EqualTo(SqlToken.Table).Optional()
-        from tableName in IdentifierOrKeywordAsName
-        select (Statement)new ReindexTableStatement(tableName);
+        from qualifiedName in QualifiedTableNameParser
+        select (Statement)new ReindexTableStatement(qualifiedName.TableName, qualifiedName.SchemaName);
 
     /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.

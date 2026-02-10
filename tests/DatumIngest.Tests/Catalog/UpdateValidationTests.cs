@@ -18,9 +18,13 @@ public sealed class UpdateValidationTests : ServiceTestBase
     {
         using TableCatalog catalog = CreateCatalog();
 
-        QueryPlanException ex = Assert.Throws<QueryPlanException>(
+        // S8 routes UPDATE through SchemaResolver.Resolve, so a missing
+        // unqualified target surfaces as SchemaResolutionException — the
+        // same diagnostic SELECT/INSERT/DELETE produce. Other UPDATE
+        // validation failures still surface as QueryPlanException.
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(
             () => catalog.Plan("UPDATE missing SET x = 1"));
-        Assert.Contains("not registered", ex.Message);
+        Assert.Contains("missing", ex.Message);
     }
 
     [Fact]

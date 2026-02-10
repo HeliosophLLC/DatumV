@@ -191,8 +191,11 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog();
 
-        Assert.Throws<InvalidOperationException>(() =>
+        // S8 routes DELETE through SchemaResolver.Resolve, so a missing
+        // unqualified target surfaces the rich SchemaResolutionException.
+        SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
             catalog.Plan("DELETE FROM nope"));
+        Assert.Contains("nope", ex.Message);
     }
 
     [Fact]
@@ -202,13 +205,12 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         // CanDeleteRows = false; the executor should refuse.
         using TableCatalog catalog = CreateCatalog();
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+        InvalidOperationException ex = Assert.ThrowsAny<InvalidOperationException>(() =>
             catalog.Plan("DELETE FROM system_schemas"));
-        // Either "not registered" or "read-only" depending on whether
-        // the catalog auto-registers system_schemas under that name —
-        // either way, the user gets a clear refusal.
+        // SchemaResolutionException ("not found") or the
+        // read-only-provider rejection — either way, a clear refusal.
         Assert.True(
-            ex.Message.Contains("read-only") || ex.Message.Contains("not registered"),
+            ex.Message.Contains("read-only") || ex.Message.Contains("not found"),
             $"unexpected message: {ex.Message}");
     }
 

@@ -682,83 +682,76 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     // ─────────────────── Virtual schema references ───────────────────
+    //
+    // S5 retired the hardcoded virtual-schema list — these tests now
+    // pass-by-providing rather than pass-by-accident: the manifest
+    // explicitly carries the standard virtual tables and the assertions
+    // demand zero warnings (not just zero "Unknown table" substrings,
+    // which the post-S5 messages bypassed anyway).
+
+    private static LanguageServerManifest VirtualSchemaManifest() => CreateManifest(tables: new[]
+    {
+        Table("information_schema.tables", "table_catalog", "table_schema", "table_name", "table_type"),
+        Table("information_schema.columns", "table_schema", "table_name", "column_name", "ordinal_position", "data_type"),
+        Table("information_schema.schemata", "schema_name"),
+        Table("datum_catalog.functions", "function_name", "category"),
+        Table("datum_catalog.function_parameters", "function_name", "parameter_name", "ordinal_position"),
+        Table("datum_catalog.indexes", "table_name", "column_name", "index_type", "entry_count"),
+        Table("datum_catalog.interactions", "left_column", "right_column", "pearson"),
+    });
 
     [Fact]
     public void Analyze_InformationSchemaTables_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT * FROM information_schema.tables", manifest);
+            "SELECT * FROM information_schema.tables", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]
     public void Analyze_InformationSchemaColumns_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT column_name FROM information_schema.columns", manifest);
+            "SELECT column_name FROM information_schema.columns", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]
     public void Analyze_DatumCatalogFunctions_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT function_name FROM datum_catalog.functions", manifest);
+            "SELECT function_name FROM datum_catalog.functions", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]
     public void Analyze_DatumCatalogFunctionParameters_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT parameter_name FROM datum_catalog.function_parameters", manifest);
+            "SELECT parameter_name FROM datum_catalog.function_parameters", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]
     public void Analyze_DatumCatalogIndexes_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT index_type FROM datum_catalog.indexes", manifest);
+            "SELECT index_type FROM datum_catalog.indexes", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]
     public void Analyze_DatumCatalogInteractions_NoWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
-
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT pearson FROM datum_catalog.interactions", manifest);
+            "SELECT pearson FROM datum_catalog.interactions", VirtualSchemaManifest());
 
-        Assert.DoesNotContain(diagnostics, diagnostic =>
-            diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("Unknown table"));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
 
     [Fact]

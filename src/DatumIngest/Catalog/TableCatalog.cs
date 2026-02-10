@@ -749,7 +749,9 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     private async Task ApplyCreateIndexAsync(CreateIndexStatement create)
     {
         // Validate the target table exists and is owned by this catalog.
-        QualifiedName tableQn = QualifiedName.Parse(create.TableName);
+        // Resolution honours the new SchemaName (S8): explicit schema →
+        // exact lookup; unqualified → walks search_path.
+        QualifiedName tableQn = ResolveDdlName(create.SchemaName, create.TableName);
         if (!TryResolveBackend(tableQn.Schema, out ITableCatalog? backend)
             || !backend.TryGetTable(tableQn, out ITableProvider? provider))
         {
@@ -1005,7 +1007,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyReindexTableAsync(ReindexTableStatement reindex)
     {
-        QualifiedName reindexQn = QualifiedName.Parse(reindex.TableName);
+        QualifiedName reindexQn = ResolveDdlName(reindex.SchemaName, reindex.TableName);
         if (!TryResolveBackend(reindexQn.Schema, out ITableCatalog? reindexBackend)
             || !reindexBackend.TryGetTable(reindexQn, out ITableProvider? provider))
         {
@@ -1035,7 +1037,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>
     /// </summary>
     private async Task ApplyAnalyzeTableAsync(AnalyzeTableStatement analyze)
     {
-        QualifiedName analyzeQn = QualifiedName.Parse(analyze.TableName);
+        QualifiedName analyzeQn = ResolveDdlName(analyze.SchemaName, analyze.TableName);
         if (!TryResolveBackend(analyzeQn.Schema, out ITableCatalog? analyzeBackend)
             || !analyzeBackend.TryGetTable(analyzeQn, out ITableProvider? provider))
         {
