@@ -272,36 +272,27 @@ internal sealed class SemanticAnalyzer
         switch (source)
         {
             case TableReference tableReference:
-                string tableLookupName = tableReference.SchemaName is not null
-                    ? $"{tableReference.SchemaName}.{tableReference.Name}"
-                    : tableReference.Name;
-                if (!_tableColumnTypes.ContainsKey(tableLookupName) &&
-                    !opaqueAliases.Contains(tableLookupName) &&
-                    !IsKnownVirtualSchemaTable(tableReference.SchemaName, tableReference.Name))
+                // Resolve against the manifest's table list. Explicit
+                // schema → exact lookup; unqualified → walk search_path
+                // (first hit wins, matching the engine's runtime
+                // SchemaResolver). The alias map gets the resolved
+                // qualified name so downstream column references against
+                // either alias or raw name find the right columns.
+                if (!TryResolveTableReference(
+                        tableReference.SchemaName,
+                        tableReference.Name,
+                        opaqueAliases,
+                        out string resolvedQualifiedName,
+                        out string? resolutionError))
                 {
-                    EmitWarning(diagnostics, tableReference.Span,
-                        $"Unknown table '{tableLookupName}'.");
+                    EmitWarning(diagnostics, tableReference.Span, resolutionError!);
                 }
 
-                // Register both alias and raw name so column references
-                // qualified by either succeed.
                 string effectiveName = tableReference.Alias ?? tableReference.Name;
-                if (tableReference.SchemaName is not null)
+                aliasToTable[effectiveName] = resolvedQualifiedName;
+                if (tableReference.Alias is not null)
                 {
-                    string qualifiedName = $"{tableReference.SchemaName}.{tableReference.Name}";
-                    aliasToTable[effectiveName] = qualifiedName;
-                    if (tableReference.Alias is not null)
-                    {
-                        aliasToTable[tableReference.Alias] = qualifiedName;
-                    }
-                }
-                else
-                {
-                    aliasToTable[effectiveName] = tableReference.Name;
-                    if (tableReference.Alias is not null)
-                    {
-                        aliasToTable[tableReference.Alias] = tableReference.Name;
-                    }
+                    aliasToTable[tableReference.Alias] = resolvedQualifiedName;
                 }
 
                 break;
@@ -914,21 +905,88 @@ internal sealed class SemanticAnalyzer
         }
     }
 
-    // Virtual schema names and their valid table names. Kept in sync with
-    // CompletionProvider.VirtualSchemaTables and the registered providers.
-    private static readonly Dictionary<string, HashSet<string>> KnownVirtualSchemas =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["information_schema"] = new(StringComparer.OrdinalIgnoreCase)
-                { "tables", "columns", "schemata" },
-            ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
-                { "functions", "function_parameters", "statistics", "indexes", "interactions" },
-        };
+    // Virtual-schema knowledge moved into the manifest in S5 — every
+    // registered provider (system / information_schema / datum_catalog)
+    // surfaces in `_manifest.Tables` with its full qualified name, so
+    // the analyzer's lookup against the manifest replaces what was once
+    // a hardcoded list here.
 
-    private static bool IsKnownVirtualSchemaTable(string? schemaName, string tableName)
-        => schemaName is not null
-            && KnownVirtualSchemas.TryGetValue(schemaName, out HashSet<string>? tables)
-            && tables.Contains(tableName);
+    /// <summary>
+    /// Mirrors the runtime <c>SchemaResolver</c> against the manifest:
+    /// explicit schemas land at <c>schema.table</c>; unqualified names
+    /// walk the manifest's <c>search_path</c> and accept the first
+    /// schema with a matching table.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the reference resolves (or is treated
+    /// as opaque). <see langword="false"/> with <paramref name="error"/>
+    /// populated when no schema satisfies the reference.
+    /// </returns>
+    private bool TryResolveTableReference(
+        string? explicitSchema,
+        string tableName,
+        HashSet<string> opaqueAliases,
+        out string resolvedQualifiedName,
+        out string? error)
+    {
+        if (explicitSchema is not null)
+        {
+            string qualified = $"{explicitSchema}.{tableName}";
+            resolvedQualifiedName = qualified;
+
+            if (_tableColumnTypes.ContainsKey(qualified) || opaqueAliases.Contains(qualified))
+            {
+                error = null;
+                return true;
+            }
+
+            // Distinguish "schema doesn't exist" from "table not in schema".
+            bool schemaExists = false;
+            foreach (string existing in _tableColumnTypes.Keys)
+            {
+                int dot = existing.IndexOf('.');
+                if (dot > 0 && string.Equals(existing[..dot], explicitSchema, StringComparison.OrdinalIgnoreCase))
+                {
+                    schemaExists = true;
+                    break;
+                }
+            }
+            error = schemaExists
+                ? $"Table '{tableName}' does not exist in schema '{explicitSchema}'."
+                : $"Schema '{explicitSchema}' does not exist.";
+            return false;
+        }
+
+        // Unqualified: walk search_path.
+        foreach (string schema in _manifest.SearchPath)
+        {
+            string candidate = $"{schema}.{tableName}";
+            if (_tableColumnTypes.ContainsKey(candidate))
+            {
+                resolvedQualifiedName = candidate;
+                error = null;
+                return true;
+            }
+        }
+
+        // Bare lookups (no schema prefix in the manifest, e.g. from
+        // older offline manifests that predate S1a's `system.X` rename
+        // or test fixtures that register tables without a schema) also
+        // count as a hit.
+        if (_tableColumnTypes.ContainsKey(tableName) || opaqueAliases.Contains(tableName))
+        {
+            resolvedQualifiedName = tableName;
+            error = null;
+            return true;
+        }
+
+        resolvedQualifiedName = tableName;
+        string pathDisplay = _manifest.SearchPath.Count == 0
+            ? "(empty search_path)"
+            : "[" + string.Join(", ", _manifest.SearchPath) + "]";
+        error = $"Unknown table '{tableName}' (not found in any schema on search_path {pathDisplay}).";
+        return false;
+    }
 
     /// <summary>
     /// Creates a <see cref="DiagnosticSeverity.Warning"/> diagnostic from

@@ -272,6 +272,14 @@ public sealed class CompletionProvider
 
     private void AddTables(List<CompletionItem> items)
     {
+        // The manifest's Tables list now carries every schema-qualified
+        // table from the live catalog (S1a renamed system_udfs →
+        // system.udfs, the virtual providers always carried dotted
+        // names, and CatalogManifestBuilder iterates every backend).
+        // For each entry we offer two completions: the fully-qualified
+        // form (system.udfs) and — when the table lives on a
+        // search_path schema — the unqualified shortcut (udfs).
+        HashSet<string> seenUnqualified = new(StringComparer.OrdinalIgnoreCase);
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
             string columnSummary = string.Join(", ", table.Columns.Select(
@@ -287,31 +295,31 @@ public sealed class CompletionProvider
                 Documentation = columnSummary,
                 SortOrder = 0,
             });
-        }
 
-        // Offer built-in virtual schema tables (e.g. information_schema.tables).
-        foreach ((string schemaName, string[] tableNames) in VirtualSchemaTables)
-        {
-            foreach (string tableName in tableNames)
+            // Offer the bare table name as a separate completion when
+            // the table's schema is on search_path. First-on-path wins
+            // — collisions on later schemas don't add a duplicate
+            // shortcut, mirroring the engine's resolution.
+            int dot = table.Name.IndexOf('.');
+            if (dot <= 0) continue;
+            string schema = table.Name[..dot];
+            string unqualified = table.Name[(dot + 1)..];
+            if (!ContainsIgnoreCase(_manifest.SearchPath, schema)) continue;
+            if (!seenUnqualified.Add(unqualified)) continue;
+
+            items.Add(new CompletionItem
             {
-                string qualifiedName = $"{schemaName}.{tableName}";
-                items.Add(new CompletionItem
-                {
-                    Label = qualifiedName,
-                    Kind = CompletionItemKind.Table,
-                    Detail = $"Virtual table ({schemaName})",
-                    InsertText = qualifiedName,
-                    SortOrder = 2,
-                });
-            }
+                Label = unqualified,
+                Kind = CompletionItemKind.Table,
+                Detail = $"Table — resolves to {table.Name} via search_path",
+                InsertText = SqlIdentifier.QuoteIfNeeded(unqualified) is { } quoted && quoted != unqualified
+                    ? quoted
+                    : null,
+                Documentation = columnSummary,
+                SortOrder = 1,
+            });
         }
     }
-
-    private static readonly (string SchemaName, string[] TableNames)[] VirtualSchemaTables =
-    [
-        ("information_schema", ["tables", "columns", "schemata"]),
-        ("datum_catalog", ["providers", "functions", "function_parameters", "statistics", "indexes", "interactions"]),
-    ];
 
     /// <summary>
     /// Adds column completions, filtered to <paramref name="tablesInScope"/>

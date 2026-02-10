@@ -100,18 +100,30 @@ public sealed class HoverProvider
         }
 
         // If preceded by a dot, it could be a qualified column (table.column)
-        // or a virtual schema table (schema.table).
+        // or a schema-qualified table reference (schema.table). Resolve
+        // against the live manifest first so any schema that holds a
+        // matching table — public, system, information_schema,
+        // datum_catalog, or a user-created schema — produces hover; fall
+        // back to the column-on-aliased-table path when no table matches.
         if (currentIndex >= 2 &&
             tokens[currentIndex - 1].Kind == SqlToken.Dot &&
             (tokens[currentIndex - 2].Kind == SqlToken.Identifier || IsKeywordToken(tokens[currentIndex - 2].Kind)))
         {
             string qualifier = tokens[currentIndex - 2].Text;
 
-            // Check if this is a virtual schema table reference (e.g. information_schema.tables).
-            string? virtualHover = GetVirtualTableHover(qualifier, name);
-            if (virtualHover is not null)
+            string qualifiedTable = $"{qualifier}.{name}";
+            string? qualifiedTableHover = GetTableHover(qualifiedTable);
+            if (qualifiedTableHover is not null)
             {
-                return virtualHover;
+                // Enrich with a curated one-line description when we have
+                // one for the schema.table combination. Falls back to
+                // just the schema-level note when the table is unfamiliar.
+                if (VirtualTableDescriptions.TryGetValue(qualifier, out Dictionary<string, string>? tableDescriptions)
+                    && tableDescriptions.TryGetValue(name, out string? description))
+                {
+                    return qualifiedTableHover + "\n\n" + description;
+                }
+                return qualifiedTableHover;
             }
 
             return GetQualifiedColumnHover(qualifier, name);
@@ -516,22 +528,6 @@ public sealed class HoverProvider
                 ["interactions"] = "Lists pairwise column interaction statistics (Pearson, Spearman, Cramér's V, mutual information, etc.).",
             },
         };
-
-    /// <summary>
-    /// Returns hover content for a schema-qualified virtual table reference
-    /// (e.g. <c>information_schema.tables</c>), or <see langword="null"/> if
-    /// the schema/table combination is not a known virtual table.
-    /// </summary>
-    private static string? GetVirtualTableHover(string schemaName, string tableName)
-    {
-        if (VirtualTableDescriptions.TryGetValue(schemaName, out Dictionary<string, string>? tables) &&
-            tables.TryGetValue(tableName, out string? description))
-        {
-            return $"**{schemaName}.{tableName}**\n\n{description}";
-        }
-
-        return null;
-    }
 }
 
 /// <summary>

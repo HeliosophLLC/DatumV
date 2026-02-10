@@ -764,19 +764,27 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     [Fact]
     public void Analyze_UnknownVirtualSchemaTable_ReturnsWarning()
     {
-        LanguageServerManifest manifest = CreateManifest();
+        // S5: when the manifest carries known tables in information_schema,
+        // requesting a missing one produces a precise "table not in schema"
+        // diagnostic distinct from "schema doesn't exist".
+        LanguageServerManifest manifest = CreateManifest(tables: new[]
+        {
+            Table("information_schema.tables", "table_schema", "table_name"),
+        });
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
             "SELECT * FROM information_schema.nonexistent", manifest);
 
         Assert.Contains(diagnostics, diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("information_schema.nonexistent"));
+            diagnostic.Message.Contains("Table 'nonexistent' does not exist in schema 'information_schema'"));
     }
 
     [Fact]
     public void Analyze_UnknownSchema_ReturnsWarning()
     {
+        // S5: when the schema itself isn't represented in the manifest,
+        // the diagnostic names the missing schema specifically.
         LanguageServerManifest manifest = CreateManifest();
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
@@ -784,7 +792,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
 
         Assert.Contains(diagnostics, diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Warning &&
-            diagnostic.Message.Contains("fake_schema.tables"));
+            diagnostic.Message.Contains("Schema 'fake_schema' does not exist"));
     }
 
     [Fact]

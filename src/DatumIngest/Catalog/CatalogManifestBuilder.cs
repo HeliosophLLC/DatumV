@@ -139,6 +139,12 @@ public static class CatalogManifestBuilder
             Keywords = keywords,
             Models = models,
             Udfs = udfEntries,
+            // Capture the catalog's current search_path so the LSP can
+            // resolve unqualified names against the same precedence the
+            // engine uses at execution time. Snapshot — subsequent
+            // `SET search_path` calls won't bleed into this manifest;
+            // re-build for an updated view.
+            SearchPath = catalog.SearchPath,
         };
     }
 

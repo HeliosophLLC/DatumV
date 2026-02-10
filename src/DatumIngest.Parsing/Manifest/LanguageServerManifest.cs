@@ -19,6 +19,17 @@ public sealed class LanguageServerManifest
     public required IReadOnlyList<string> Keywords { get; init; }
 
     /// <summary>
+    /// Session <c>search_path</c> at manifest-build time. Drives
+    /// unqualified-name resolution in the language server: the
+    /// semantic analyzer walks this list when validating
+    /// <c>SELECT * FROM foo</c>, and the completion provider uses it
+    /// to rank suggestions. Defaults to <c>["public", "system"]</c> so
+    /// offline manifests (built without a live catalog) still resolve
+    /// the built-in system tables.
+    /// </summary>
+    public IReadOnlyList<string> SearchPath { get; init; } = new[] { "public", "system" };
+
+    /// <summary>
     /// Models registered in the catalog's <c>ModelCatalog</c>, surfaced for
     /// the <c>models.&lt;name&gt;(...)</c> completion namespace. May be
     /// <see langword="null"/> when no model catalog is attached (the offline
