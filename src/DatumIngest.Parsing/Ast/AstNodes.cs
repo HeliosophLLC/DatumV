@@ -467,9 +467,19 @@ public abstract record Expression
 }
 
 /// <summary>
-/// A reference to a column, optionally qualified with a table name.
+/// A reference to a column, optionally qualified with a table name and
+/// optionally further qualified with a schema name (PG-style
+/// <c>schema.table.column</c>).
 /// </summary>
-public sealed record ColumnReference(string? TableName, string ColumnName, SourceSpan? Span = null) : Expression
+/// <param name="TableName">Optional table qualifier (the table portion of <c>table.col</c> or <c>schema.table.col</c>).</param>
+/// <param name="ColumnName">The column name (or <c>*</c> in <c>SELECT t.*</c>).</param>
+/// <param name="Span">Source span for diagnostics.</param>
+/// <param name="SchemaName">
+/// Optional schema qualifier from <c>schema.table.column</c>. <see langword="null"/>
+/// for unqualified or two-part references. Only meaningful when
+/// <paramref name="TableName"/> is also non-null.
+/// </param>
+public sealed record ColumnReference(string? TableName, string ColumnName, SourceSpan? Span = null, string? SchemaName = null) : Expression
 {
     /// <summary>Pre-computed "TableName.ColumnName" string, built once and cached to avoid per-row interpolation.</summary>
     private string? _qualifiedName;

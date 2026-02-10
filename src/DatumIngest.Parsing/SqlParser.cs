@@ -120,20 +120,47 @@ public static class SqlParser
 
     // ───────────────────── Atomic expressions ─────────────────────
 
-    /// <summary>Column reference: optional table qualifier + column name.</summary>
+    /// <summary>
+    /// Column reference: bare <c>col</c>, <c>table.col</c> (or <c>table.*</c>),
+    /// or <c>schema.table.col</c> (or <c>schema.table.*</c>). The third
+    /// segment is the only one that may be <c>*</c> — <c>schema.*.col</c>
+    /// has no meaningful shape.
+    /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> QualifiedColumn =
         from first in Token.EqualTo(SqlToken.Identifier)
-        from rest in (
+        from second in (
             from dot in Token.EqualTo(SqlToken.Dot)
-            from second in Token.EqualTo(SqlToken.Identifier)
+            from name in Token.EqualTo(SqlToken.Identifier)
                 .Or(Token.EqualTo(SqlToken.Star))
-            select second
+            select name
         ).OptionalOrDefault()
-        select rest.HasValue
-            ? (rest.Kind == SqlToken.Star
-                ? (Expression)new ColumnReference(GetTokenText(first), "*", ToSpan(first, rest))
-                : new ColumnReference(GetTokenText(first), GetTokenText(rest), ToSpan(first, rest)))
-            : new ColumnReference(null, GetTokenText(first), ToSpan(first));
+        from third in (
+            // Only attempt a third segment if the second was a regular
+            // identifier; `schema.*.col` is parser-invalid. `.Try()` so a
+            // two-part reference followed by a dot in a different context
+            // (e.g. concatenation chain) backtracks cleanly.
+            second.HasValue && second.Kind != SqlToken.Star
+                ? (from dot in Token.EqualTo(SqlToken.Dot)
+                   from name in Token.EqualTo(SqlToken.Identifier)
+                       .Or(Token.EqualTo(SqlToken.Star))
+                   select name).Try().OptionalOrDefault()
+                : Superpower.Parse.Return<SqlToken, Token<SqlToken>>(default)
+        )
+        select third.HasValue
+            ? (Expression)new ColumnReference(
+                TableName: GetTokenText(second),
+                ColumnName: third.Kind == SqlToken.Star ? "*" : GetTokenText(third),
+                Span: ToSpan(first, third),
+                SchemaName: GetTokenText(first))
+            : second.HasValue
+                ? new ColumnReference(
+                    TableName: GetTokenText(first),
+                    ColumnName: second.Kind == SqlToken.Star ? "*" : GetTokenText(second),
+                    Span: ToSpan(first, second))
+                : new ColumnReference(
+                    TableName: null,
+                    ColumnName: GetTokenText(first),
+                    Span: ToSpan(first));
 
     /// <summary>
     /// Number literal parsed as the narrowest type that fits the value.

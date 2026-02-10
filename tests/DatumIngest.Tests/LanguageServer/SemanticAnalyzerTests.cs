@@ -764,7 +764,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     [Fact]
     public void Analyze_UnknownVirtualSchemaTable_ReturnsWarning()
     {
-        // S5: when the manifest carries known tables in information_schema,
+        // When the manifest carries known tables in information_schema,
         // requesting a missing one produces a precise "table not in schema"
         // diagnostic distinct from "schema doesn't exist".
         LanguageServerManifest manifest = CreateManifest(tables: new[]
@@ -783,7 +783,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     [Fact]
     public void Analyze_UnknownSchema_ReturnsWarning()
     {
-        // S5: when the schema itself isn't represented in the manifest,
+        // When the schema itself isn't represented in the manifest,
         // the diagnostic names the missing schema specifically.
         LanguageServerManifest manifest = CreateManifest();
 

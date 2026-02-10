@@ -294,6 +294,15 @@ internal sealed class SemanticAnalyzer
                 {
                     aliasToTable[tableReference.Alias] = resolvedQualifiedName;
                 }
+                else
+                {
+                    // No user alias — also register the fully-qualified key so
+                    // a three-part column ref `schema.table.col` finds the
+                    // table when written without an alias. (PG hides the
+                    // qualified name behind an alias, so we only add this
+                    // when one wasn't supplied.)
+                    aliasToTable[resolvedQualifiedName] = resolvedQualifiedName;
+                }
 
                 break;
 
@@ -635,12 +644,16 @@ internal sealed class SemanticAnalyzer
     {
         if (column.TableName is not null)
         {
-            if (opaqueAliases.Contains(column.TableName))
+            string qualifier = column.SchemaName is not null
+                ? $"{column.SchemaName}.{column.TableName}"
+                : column.TableName;
+
+            if (opaqueAliases.Contains(qualifier))
             {
                 return null;
             }
 
-            if (aliasToTable.TryGetValue(column.TableName, out string? resolvedTable) &&
+            if (aliasToTable.TryGetValue(qualifier, out string? resolvedTable) &&
                 _tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds) &&
                 columnKinds.TryGetValue(column.ColumnName, out string? kind))
             {
@@ -720,15 +733,22 @@ internal sealed class SemanticAnalyzer
 
         if (column.TableName is not null)
         {
-            ValidateTableQualifier(column.TableName, column.Span, aliasToTable, opaqueAliases, diagnostics);
+            // Three-part `schema.table.column` uses the fully-qualified
+            // form as its alias-map key (registered by CollectTableSources
+            // when the table reference had no alias).
+            string qualifier = column.SchemaName is not null
+                ? $"{column.SchemaName}.{column.TableName}"
+                : column.TableName;
+
+            ValidateTableQualifier(qualifier, column.Span, aliasToTable, opaqueAliases, diagnostics);
 
             // If the table is opaque, skip column validation.
-            if (opaqueAliases.Contains(column.TableName))
+            if (opaqueAliases.Contains(qualifier))
             {
                 return;
             }
 
-            if (aliasToTable.TryGetValue(column.TableName, out string? resolvedTable) &&
+            if (aliasToTable.TryGetValue(qualifier, out string? resolvedTable) &&
                 _tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds))
             {
                 if (!columnKinds.ContainsKey(column.ColumnName))
